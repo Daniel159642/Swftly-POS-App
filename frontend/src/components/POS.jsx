@@ -9,6 +9,8 @@ function POS({ employeeId, employeeName }) {
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [processing, setProcessing] = useState(false)
   const [message, setMessage] = useState(null)
+  const [showPaymentForm, setShowPaymentForm] = useState(false)
+  const [amountPaid, setAmountPaid] = useState('')
 
   // Search products
   useEffect(() => {
@@ -93,10 +95,37 @@ function POS({ employeeId, employeeName }) {
     return calculateSubtotal() + calculateTax()
   }
 
+  const calculateChange = () => {
+    const paid = parseFloat(amountPaid) || 0
+    const total = calculateTotal()
+    return paid - total
+  }
+
+  const handleCalculatorInput = (value) => {
+    if (value === 'clear') {
+      setAmountPaid('')
+    } else if (value === 'backspace') {
+      setAmountPaid(prev => prev.slice(0, -1))
+    } else if (value === 'exact') {
+      setAmountPaid(calculateTotal().toFixed(2))
+    } else {
+      setAmountPaid(prev => prev + value)
+    }
+  }
+
   const processOrder = async () => {
     if (cart.length === 0) {
       setMessage({ type: 'error', text: 'Cart is empty' })
       return
+    }
+
+    if (paymentMethod === 'cash') {
+      const paid = parseFloat(amountPaid) || 0
+      const total = calculateTotal()
+      if (paid < total) {
+        setMessage({ type: 'error', text: 'Amount paid is insufficient' })
+        return
+      }
     }
 
     setProcessing(true)
@@ -127,6 +156,8 @@ function POS({ employeeId, employeeName }) {
         setMessage({ type: 'success', text: `Order ${result.order_number} processed successfully!` })
         setCart([])
         setSearchTerm('')
+        setShowPaymentForm(false)
+        setAmountPaid('')
       } else {
         setMessage({ type: 'error', text: result.message || 'Failed to process order' })
       }
@@ -282,87 +313,28 @@ function POS({ employeeId, employeeName }) {
             </span>
           </div>
 
-          {/* Payment Method */}
-          <div style={{ marginTop: '20px', marginBottom: '12px' }}>
-            <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 500 }}>
-              Payment Method:
-            </label>
-            <select
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '16px'
-              }}
-            >
-              <option value="cash">Cash</option>
-              <option value="credit_card">Credit Card</option>
-              <option value="debit_card">Debit Card</option>
-              <option value="mobile_payment">Mobile Payment</option>
-            </select>
-          </div>
-
-          {/* Tax Rate */}
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 500 }}>
-              Tax Rate (%):
-            </label>
-            <input
-              type="number"
-              value={taxRate * 100}
-              onChange={(e) => setTaxRate(parseFloat(e.target.value) / 100 || 0)}
-              min="0"
-              max="100"
-              step="0.1"
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '16px'
-              }}
-            />
-          </div>
-
-          {/* Message */}
-          {message && (
-            <div style={{
-              padding: '12px',
-              marginBottom: '12px',
-              borderRadius: '4px',
-              backgroundColor: message.type === 'success' ? '#e8f5e9' : '#ffebee',
-              color: message.type === 'success' ? '#2e7d32' : '#d32f2f',
-              fontSize: '14px'
-            }}>
-              {message.text}
-            </div>
-          )}
-
-          {/* Process Order Button */}
+          {/* Pay Button */}
           <button
-            onClick={processOrder}
-            disabled={processing || cart.length === 0}
+            onClick={() => setShowPaymentForm(true)}
+            disabled={cart.length === 0}
             style={{
               width: '100%',
               padding: '16px',
-              backgroundColor: processing || cart.length === 0 ? '#ccc' : '#000',
+              backgroundColor: cart.length === 0 ? '#ccc' : '#000',
               color: '#fff',
               border: 'none',
               borderRadius: '4px',
               fontSize: '18px',
               fontWeight: 600,
-              cursor: processing || cart.length === 0 ? 'not-allowed' : 'pointer'
+              cursor: cart.length === 0 ? 'not-allowed' : 'pointer'
             }}
           >
-            {processing ? 'Processing...' : 'Process Order'}
+            Pay
           </button>
         </div>
       </div>
 
-      {/* Right Column - Product Search */}
+      {/* Right Column - Product Search or Payment Form */}
       <div style={{
         flex: '1',
         backgroundColor: '#fff',
@@ -370,83 +342,322 @@ function POS({ employeeId, employeeName }) {
         padding: '20px',
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
       }}>
-        <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Search Products</h2>
-        
-        {/* Search Bar */}
-        <input
-          type="text"
-          placeholder="Search by name or SKU..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '12px',
-            border: '2px solid #ddd',
-            borderRadius: '4px',
-            fontSize: '16px',
-            marginBottom: '20px',
-            boxSizing: 'border-box'
-          }}
-          autoFocus
-        />
+        {showPaymentForm ? (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ marginTop: 0, marginBottom: 0 }}>Payment</h2>
+              <button
+                onClick={() => {
+                  setShowPaymentForm(false)
+                  setAmountPaid('')
+                }}
+                style={{
+                  border: 'none',
+                  backgroundColor: 'transparent',
+                  color: '#666',
+                  cursor: 'pointer',
+                  fontSize: '24px',
+                  padding: '0',
+                  width: '30px',
+                  height: '30px',
+                  lineHeight: '1'
+                }}
+              >
+                ×
+              </button>
+            </div>
 
-        {/* Search Results */}
-        <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-              Searching...
-            </div>
-          ) : searchResults.length === 0 && searchTerm.length >= 2 ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-              No products found
-            </div>
-          ) : searchTerm.length < 2 ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-              Type at least 2 characters to search
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {searchResults.map(product => (
-                <div
-                  key={product.product_id}
-                  onClick={() => addToCart(product)}
-                  style={{
-                    padding: '16px',
-                    border: '1px solid #eee',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    backgroundColor: (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'
+            {/* Payment Method */}
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  onClick={() => {
+                    setPaymentMethod('cash')
+                    setAmountPaid('')
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'}
+                  style={{
+                    flex: 1,
+                    padding: '16px',
+                    border: paymentMethod === 'cash' ? '3px solid #000' : '2px solid #ddd',
+                    borderRadius: '4px',
+                    fontSize: '16px',
+                    fontWeight: 600,
+                    backgroundColor: paymentMethod === 'cash' ? '#000' : '#fff',
+                    color: paymentMethod === 'cash' ? '#fff' : '#000',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 500, fontSize: '16px', marginBottom: '4px' }}>
-                        {product.product_name}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#999', marginBottom: '8px' }}>
-                        SKU: {product.sku}
-                      </div>
-                      <div style={{ fontSize: '12px', color: (product.current_quantity || 0) > 0 ? '#2e7d32' : '#d32f2f' }}>
-                        Stock: {product.current_quantity || 0}
-                      </div>
-                    </div>
+                  Cash
+                </button>
+                <button
+                  onClick={() => {
+                    setPaymentMethod('credit_card')
+                    setAmountPaid('')
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '16px',
+                    border: paymentMethod === 'credit_card' ? '3px solid #000' : '2px solid #ddd',
+                    borderRadius: '4px',
+                    fontSize: '16px',
+                    fontWeight: 600,
+                    backgroundColor: paymentMethod === 'credit_card' ? '#000' : '#fff',
+                    color: paymentMethod === 'credit_card' ? '#fff' : '#000',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  Card
+                </button>
+              </div>
+            </div>
+
+            {/* Calculator */}
+            <div style={{ marginBottom: '20px' }}>
+                {/* Amount Display */}
+                <div style={{
+                  width: '100%',
+                  padding: '16px',
+                  border: amountPaid && parseFloat(amountPaid) > 0 && paymentMethod === 'cash'
+                    ? `2px solid ${calculateChange() >= 0 ? '#4caf50' : '#f44336'}` 
+                    : '2px solid #ddd',
+                  borderRadius: '4px',
+                  fontSize: '24px',
+                  fontFamily: 'monospace',
+                  fontWeight: 600,
+                  marginBottom: '12px',
+                  backgroundColor: amountPaid && parseFloat(amountPaid) > 0 && paymentMethod === 'cash'
+                    ? (calculateChange() >= 0 ? '#e8f5e9' : '#ffebee')
+                    : '#f9f9f9',
+                  minHeight: '60px',
+                  display: 'flex',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  boxSizing: 'border-box'
+                }}>
+                  {amountPaid && parseFloat(amountPaid) > 0 && paymentMethod === 'cash' && (
                     <div style={{
-                      fontSize: '18px',
+                      fontSize: '16px',
                       fontWeight: 600,
-                      fontFamily: 'monospace',
-                      color: '#000'
+                      color: calculateChange() >= 0 ? '#2e7d32' : '#d32f2f'
                     }}>
-                      ${(product.product_price || 0).toFixed(2)}
+                      {calculateChange() >= 0 ? `Change: $${calculateChange().toFixed(2)}` : 'Insufficient'}
                     </div>
+                  )}
+                  <div style={{ fontSize: '24px', color: '#000' }}>
+                    {amountPaid ? `$${parseFloat(amountPaid || 0).toFixed(2)}` : '$0.00'}
                   </div>
                 </div>
-              ))}
+
+                {/* Calculator Keypad */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: '8px'
+                }}>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, '.', 0, '00'].map((num) => (
+                    <button
+                      key={num}
+                      onClick={() => handleCalculatorInput(num.toString())}
+                      style={{
+                        padding: '16px',
+                        border: '2px solid #ddd',
+                        borderRadius: '4px',
+                        fontSize: '18px',
+                        fontWeight: 600,
+                        backgroundColor: '#fff',
+                        color: '#000',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Calculator Action Buttons */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: '8px',
+                  marginTop: '8px'
+                }}>
+                  <button
+                    onClick={() => handleCalculatorInput('exact')}
+                    style={{
+                      padding: '12px',
+                      border: '2px solid #4caf50',
+                      borderRadius: '4px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      backgroundColor: '#fff',
+                      color: '#4caf50',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#e8f5e9'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}
+                  >
+                    Exact
+                  </button>
+                  <button
+                    onClick={() => handleCalculatorInput('backspace')}
+                    style={{
+                      padding: '12px',
+                      border: '2px solid #ff9800',
+                      borderRadius: '4px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      backgroundColor: '#fff',
+                      color: '#ff9800',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fff3e0'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}
+                  >
+                    ⌫
+                  </button>
+                  <button
+                    onClick={() => handleCalculatorInput('clear')}
+                    style={{
+                      padding: '12px',
+                      border: '2px solid #f44336',
+                      borderRadius: '4px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      backgroundColor: '#fff',
+                      color: '#f44336',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#ffebee'}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+            {/* Message */}
+            {message && (
+              <div style={{
+                padding: '12px',
+                marginBottom: '12px',
+                borderRadius: '4px',
+                backgroundColor: message.type === 'success' ? '#e8f5e9' : '#ffebee',
+                color: message.type === 'success' ? '#2e7d32' : '#d32f2f',
+                fontSize: '14px'
+              }}>
+                {message.text}
+              </div>
+            )}
+
+            {/* Process Order Button */}
+            <button
+              onClick={processOrder}
+              disabled={processing || cart.length === 0}
+              style={{
+                width: '100%',
+                padding: '16px',
+                backgroundColor: processing || cart.length === 0 ? '#ccc' : '#000',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '4px',
+                fontSize: '18px',
+                fontWeight: 600,
+                cursor: processing || cart.length === 0 ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {processing ? 'Processing...' : 'Complete Payment'}
+            </button>
+          </>
+        ) : (
+          <>
+            <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Search Products</h2>
+            
+            {/* Search Bar */}
+            <input
+              type="text"
+              placeholder="Search by name or SKU..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '12px',
+                border: '2px solid #ddd',
+                borderRadius: '4px',
+                fontSize: '16px',
+                marginBottom: '20px',
+                boxSizing: 'border-box'
+              }}
+              autoFocus
+            />
+
+            {/* Search Results */}
+            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
+              {loading ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                  Searching...
+                </div>
+              ) : searchResults.length === 0 && searchTerm.length >= 2 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                  No products found
+                </div>
+              ) : searchTerm.length < 2 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                  Type at least 2 characters to search
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {searchResults.map(product => (
+                    <div
+                      key={product.product_id}
+                      onClick={() => addToCart(product)}
+                      style={{
+                        padding: '16px',
+                        border: '1px solid #eee',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        backgroundColor: (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 500, fontSize: '16px', marginBottom: '4px' }}>
+                            {product.product_name}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#999', marginBottom: '8px' }}>
+                            SKU: {product.sku}
+                          </div>
+                          <div style={{ fontSize: '12px', color: (product.current_quantity || 0) > 0 ? '#2e7d32' : '#d32f2f' }}>
+                            Stock: {product.current_quantity || 0}
+                          </div>
+                        </div>
+                        <div style={{
+                          fontSize: '18px',
+                          fontWeight: 600,
+                          fontFamily: 'monospace',
+                          color: '#000'
+                        }}>
+                          ${(product.product_price || 0).toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   )
