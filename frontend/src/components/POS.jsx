@@ -7,6 +7,10 @@ function POS({ employeeId, employeeName }) {
   const [cart, setCart] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState([])
+  const [allProducts, setAllProducts] = useState([])
+  const [categories, setCategories] = useState([])
+  const [selectedCategory, setSelectedCategory] = useState(null)
+  const [categoryProducts, setCategoryProducts] = useState([])
   const [loading, setLoading] = useState(false)
   const [taxRate, setTaxRate] = useState(0.08) // Default 8% tax
   const [paymentMethod, setPaymentMethod] = useState('cash')
@@ -21,28 +25,69 @@ function POS({ employeeId, employeeName }) {
   const canApplyDiscount = hasPermission('apply_discount')
   const canVoidTransaction = hasPermission('void_transaction')
 
+  // Fetch all products and categories on mount
+  useEffect(() => {
+    fetchAllProducts()
+  }, [])
+
   // Search products
   useEffect(() => {
     if (searchTerm.length >= 2) {
       searchProducts(searchTerm)
+      setSelectedCategory(null) // Clear category selection when searching
     } else {
       setSearchResults([])
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm])
 
-  const searchProducts = async (term) => {
+  // Update category products when category is selected
+  useEffect(() => {
+    if (selectedCategory && searchTerm.length < 2) {
+      const filtered = allProducts.filter(product => 
+        product.category === selectedCategory
+      )
+      setCategoryProducts(filtered)
+    } else {
+      setCategoryProducts([])
+    }
+  }, [selectedCategory, allProducts, searchTerm])
+
+  const fetchAllProducts = async () => {
     setLoading(true)
     try {
       const response = await fetch(`/api/inventory`)
       const data = await response.json()
       
       if (data.data) {
-        const filtered = data.data.filter(product => 
-          product.product_name?.toLowerCase().includes(term.toLowerCase()) ||
-          product.sku?.toLowerCase().includes(term.toLowerCase())
-        )
-        setSearchResults(filtered.slice(0, 10)) // Limit to 10 results
+        setAllProducts(data.data)
+        // Extract unique categories (filter out null/empty)
+        const uniqueCategories = [...new Set(
+          data.data
+            .map(product => product.category)
+            .filter(cat => cat && cat.trim() !== '')
+        )].sort()
+        setCategories(uniqueCategories)
       }
+    } catch (err) {
+      console.error('Error fetching products:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const searchProducts = async (term) => {
+    setLoading(true)
+    try {
+      // Use cached products if available, otherwise fetch
+      const productsToSearch = allProducts.length > 0 ? allProducts : 
+        (await fetch(`/api/inventory`).then(r => r.json())).data || []
+      
+      const filtered = productsToSearch.filter(product => 
+        product.product_name?.toLowerCase().includes(term.toLowerCase()) ||
+        product.sku?.toLowerCase().includes(term.toLowerCase())
+      )
+      setSearchResults(filtered.slice(0, 50)) // Show more results (was 10)
     } catch (err) {
       console.error('Search error:', err)
     } finally {
@@ -73,6 +118,17 @@ function POS({ employeeId, employeeName }) {
     }
     setSearchTerm('')
     setSearchResults([])
+  }
+
+  const handleCategorySelect = (category) => {
+    if (selectedCategory === category) {
+      // Deselect if clicking the same category
+      setSelectedCategory(null)
+      setCategoryProducts([])
+    } else {
+      setSelectedCategory(category)
+      setSearchTerm('') // Clear search when selecting category
+    }
   }
 
   const handleBarcodeScan = async (barcode) => {
@@ -755,60 +811,161 @@ function POS({ employeeId, employeeName }) {
               autoFocus
             />
 
-            {/* Search Results */}
-            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
+            {/* Category Navigation - Show when not searching */}
+            {searchTerm.length < 2 && (
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ 
+                  fontSize: '14px', 
+                  fontWeight: 600, 
+                  color: '#666', 
+                  marginBottom: '12px' 
+                }}>
+                  Browse by Category
+                </div>
+                <div style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '8px'
+                }}>
+                  {categories.map(category => (
+                    <button
+                      key={category}
+                      onClick={() => handleCategorySelect(category)}
+                      style={{
+                        padding: '10px 16px',
+                        border: selectedCategory === category ? '2px solid #000' : '2px solid #ddd',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        fontWeight: selectedCategory === category ? 600 : 500,
+                        backgroundColor: selectedCategory === category ? '#000' : '#fff',
+                        color: selectedCategory === category ? '#fff' : '#000',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (selectedCategory !== category) {
+                          e.currentTarget.style.backgroundColor = '#f5f5f5'
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (selectedCategory !== category) {
+                          e.currentTarget.style.backgroundColor = '#fff'
+                        }
+                      }}
+                    >
+                      {category}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Product List / Search Results */}
+            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 400px)' }}>
               {loading ? (
                 <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-                  Searching...
+                  Loading...
                 </div>
-              ) : searchResults.length === 0 && searchTerm.length >= 2 ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-                  No products found
-                </div>
-              ) : searchTerm.length < 2 ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-                  Type at least 2 characters to search
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {searchResults.map(product => (
-                    <div
-                      key={product.product_id}
-                      onClick={() => addToCart(product)}
-                      style={{
-                        padding: '16px',
-                        border: '1px solid #eee',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                        backgroundColor: (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 500, fontSize: '16px', marginBottom: '4px' }}>
-                            {product.product_name}
+              ) : searchTerm.length >= 2 ? (
+                // Show search results
+                searchResults.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                    No products found
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {searchResults.map(product => (
+                      <div
+                        key={product.product_id}
+                        onClick={() => addToCart(product)}
+                        style={{
+                          padding: '16px',
+                          border: '1px solid #eee',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          backgroundColor: (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 500, fontSize: '16px', marginBottom: '4px' }}>
+                              {product.product_name}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#999', marginBottom: '8px' }}>
+                              SKU: {product.sku}
+                            </div>
+                            <div style={{ fontSize: '12px', color: (product.current_quantity || 0) > 0 ? '#2e7d32' : '#d32f2f' }}>
+                              Stock: {product.current_quantity || 0}
+                            </div>
                           </div>
-                          <div style={{ fontSize: '12px', color: '#999', marginBottom: '8px' }}>
-                            SKU: {product.sku}
+                          <div style={{
+                            fontSize: '18px',
+                            fontWeight: 600,
+                            fontFamily: 'monospace',
+                            color: '#000'
+                          }}>
+                            ${(product.product_price || 0).toFixed(2)}
                           </div>
-                          <div style={{ fontSize: '12px', color: (product.current_quantity || 0) > 0 ? '#2e7d32' : '#d32f2f' }}>
-                            Stock: {product.current_quantity || 0}
-                          </div>
-                        </div>
-                        <div style={{
-                          fontSize: '18px',
-                          fontWeight: 600,
-                          fontFamily: 'monospace',
-                          color: '#000'
-                        }}>
-                          ${(product.product_price || 0).toFixed(2)}
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                )
+              ) : selectedCategory ? (
+                // Show category products
+                categoryProducts.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                    No products in this category
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {categoryProducts.map(product => (
+                      <div
+                        key={product.product_id}
+                        onClick={() => addToCart(product)}
+                        style={{
+                          padding: '16px',
+                          border: '1px solid #eee',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          backgroundColor: (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 500, fontSize: '16px', marginBottom: '4px' }}>
+                              {product.product_name}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#999', marginBottom: '8px' }}>
+                              SKU: {product.sku}
+                            </div>
+                            <div style={{ fontSize: '12px', color: (product.current_quantity || 0) > 0 ? '#2e7d32' : '#d32f2f' }}>
+                              Stock: {product.current_quantity || 0}
+                            </div>
+                          </div>
+                          <div style={{
+                            fontSize: '18px',
+                            fontWeight: 600,
+                            fontFamily: 'monospace',
+                            color: '#000'
+                          }}>
+                            ${(product.product_price || 0).toFixed(2)}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : (
+                // Show message when no category selected and no search
+                <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                  Select a category above or search for products
                 </div>
               )}
             </div>
