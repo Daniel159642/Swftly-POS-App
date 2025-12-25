@@ -42,3 +42,4 @@ CREATE INDEX IF NOT EXISTS idx_pending_returns_date ON pending_returns(return_da
 CREATE INDEX IF NOT EXISTS idx_pending_return_items_return ON pending_return_items(return_id);
 CREATE INDEX IF NOT EXISTS idx_pending_return_items_product ON pending_return_items(product_id);
 
+

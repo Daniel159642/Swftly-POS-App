@@ -3,7 +3,7 @@
 Web viewer for inventory database - Google Sheets style interface
 """
 
-from flask import Flask, render_template, jsonify, send_from_directory, request
+from flask import Flask, render_template, jsonify, send_from_directory, request, Response
 from werkzeug.utils import secure_filename
 from database import (
     list_products, list_vendors, list_shipments, get_sales,
@@ -1956,6 +1956,259 @@ def api_master_calendar():
             'success': True,
             'data': events
         })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# Calendar Integration Endpoints
+@app.route('/calendar/subscribe/<token>.ics')
+def calendar_feed(token):
+    """iCal feed endpoint - accessible by calendar apps"""
+    try:
+        from calendar_integration import CalendarIntegrationSystem
+        
+        calendar_system = CalendarIntegrationSystem(base_url=request.url_root.rstrip('/'))
+        ical_data = calendar_system.generate_ical_feed(token)
+        
+        if not ical_data:
+            return "Invalid or expired subscription", 404
+        
+        response = Response(ical_data, mimetype='text/calendar')
+        response.headers['Content-Disposition'] = 'attachment; filename=calendar.ics'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        
+        return response
+    except Exception as e:
+        traceback.print_exc()
+        return f"Error generating calendar feed: {str(e)}", 500
+
+@app.route('/api/calendar/subscription/create', methods=['POST'])
+def create_subscription():
+    """Create calendar subscription for employee"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not session_token:
+            session_token = request.json.get('session_token')
+        
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_data['employee_id']
+        preferences = request.json.get('preferences') or request.json
+        
+        from calendar_integration import CalendarIntegrationSystem
+        calendar_system = CalendarIntegrationSystem(base_url=request.url_root.rstrip('/'))
+        
+        subscription = calendar_system.create_subscription(employee_id, preferences)
+        
+        return jsonify({'success': True, 'data': subscription})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/calendar/subscription/urls', methods=['GET'])
+def get_subscription_urls():
+    """Get calendar subscription URLs"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not session_token:
+            session_token = request.args.get('session_token')
+        
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_data['employee_id']
+        
+        from calendar_integration import CalendarIntegrationSystem
+        calendar_system = CalendarIntegrationSystem(base_url=request.url_root.rstrip('/'))
+        
+        urls = calendar_system.get_employee_calendar_url(employee_id)
+        
+        if urls:
+            return jsonify({'success': True, 'data': urls})
+        else:
+            # Create new subscription if none exists
+            subscription = calendar_system.create_subscription(employee_id)
+            return jsonify({'success': True, 'data': subscription})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/calendar/events/<int:event_id>/export', methods=['GET'])
+def export_event(event_id):
+    """Export single event as .ics file"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not session_token:
+            session_token = request.args.get('session_token')
+        
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_data.get('employee_id')
+        
+        from calendar_integration import CalendarIntegrationSystem
+        calendar_system = CalendarIntegrationSystem()
+        
+        ical_data = calendar_system.export_single_event_ics(event_id, employee_id)
+        
+        if not ical_data:
+            return jsonify({'success': False, 'message': 'Event not found'}), 404
+        
+        return Response(
+            ical_data,
+            mimetype='text/calendar',
+            headers={
+                'Content-Disposition': f'attachment; filename=event_{event_id}.ics'
+            }
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/shifts/create', methods=['POST'])
+def create_shift():
+    """Create employee shift"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not session_token:
+            session_token = request.json.get('session_token')
+        
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        created_by = session_data['employee_id']
+        data = request.json
+        
+        from calendar_integration import CalendarIntegrationSystem
+        from datetime import datetime
+        
+        calendar_system = CalendarIntegrationSystem()
+        
+        start_time = datetime.fromisoformat(data['start_time'].replace('Z', '+00:00'))
+        end_time = datetime.fromisoformat(data['end_time'].replace('Z', '+00:00'))
+        
+        result = calendar_system.create_shift_event(
+            data['employee_id'],
+            start_time,
+            end_time,
+            data['shift_type'],
+            data.get('notes'),
+            created_by
+        )
+        
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/shipments/schedule', methods=['POST'])
+def schedule_shipment():
+    """Schedule shipment delivery"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not session_token:
+            session_token = request.json.get('session_token')
+        
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        created_by = session_data['employee_id']
+        data = request.json
+        
+        from calendar_integration import CalendarIntegrationSystem
+        from datetime import datetime
+        
+        calendar_system = CalendarIntegrationSystem()
+        
+        expected_date = datetime.fromisoformat(data['expected_date'].replace('Z', '+00:00'))
+        
+        result = calendar_system.create_shipment_event(
+            data['vendor_id'],
+            expected_date,
+            data['delivery_window'],
+            data['assigned_receiver'],
+            data.get('notes'),
+            created_by
+        )
+        
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/calendar/events', methods=['GET'])
+def get_events():
+    """Get calendar events for employee"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not session_token:
+            session_token = request.args.get('session_token')
+        
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_data['employee_id']
+        start_date = request.args.get('start', '')
+        end_date = request.args.get('end', '')
+        
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Get all events for employee
+        query = """
+            SELECT DISTINCT ce.*
+            FROM Calendar_Events ce
+            LEFT JOIN Employee_Shifts es ON ce.event_id = es.event_id
+            LEFT JOIN Shipment_Schedule ss ON ce.event_id = ss.event_id
+            LEFT JOIN Event_Attendees ea ON ce.event_id = ea.event_id
+            WHERE (es.employee_id = ? 
+                   OR ss.assigned_receiver = ? 
+                   OR ea.employee_id = ?
+                   OR ce.event_type IN ('holiday', 'deadline'))
+        """
+        params = [employee_id, employee_id, employee_id]
+        
+        if start_date and end_date:
+            query += " AND ce.start_datetime BETWEEN ? AND ?"
+            params.extend([start_date, end_date])
+        
+        query += " ORDER BY ce.start_datetime"
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        events = [dict(row) for row in rows]
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({'success': True, 'data': events})
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500

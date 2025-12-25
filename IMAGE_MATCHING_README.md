@@ -339,3 +339,4 @@ For issues or questions, check:
 3. Build product database: `matcher.build_product_database()`
 4. Check that product images exist and are accessible
 
+

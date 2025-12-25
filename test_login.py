@@ -52,3 +52,4 @@ print("If both logins work here but not in the web app,")
 print("check the Flask server console for error messages.")
 print("=" * 70)
 
+

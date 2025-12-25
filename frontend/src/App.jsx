@@ -9,6 +9,7 @@ import Returns from './pages/Returns'
 import RecentOrders from './pages/RecentOrders'
 import Inventory from './pages/Inventory'
 import Calendar from './components/Calendar'
+import CalendarSubscription from './components/CalendarSubscription'
 import AdminDashboard from './components/AdminDashboard'
 import EmployeeManagement from './components/EmployeeManagement'
 import Profile from './pages/Profile'
@@ -93,6 +94,13 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
         <ProtectedRoute sessionToken={sessionToken} employee={employee} onLogout={onLogout}>
           <Layout employee={employee} onLogout={onLogout}>
             <Calendar />
+          </Layout>
+        </ProtectedRoute>
+      } />
+      <Route path="/calendar-subscription" element={
+        <ProtectedRoute sessionToken={sessionToken} employee={employee} onLogout={onLogout}>
+          <Layout employee={employee} onLogout={onLogout}>
+            <CalendarSubscription />
           </Layout>
         </ProtectedRoute>
       } />

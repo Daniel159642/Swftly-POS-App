@@ -162,3 +162,4 @@ To add a new scanning method:
 - No images are stored permanently (processed and discarded)
 - HTTPS required for camera access in production
 
+

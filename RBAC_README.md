@@ -341,3 +341,4 @@ import PermissionManager from './components/PermissionManager'
 4. Test permission checks in your code
 5. Add permission checks to frontend components
 
+

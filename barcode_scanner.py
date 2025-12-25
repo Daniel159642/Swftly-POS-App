@@ -329,3 +329,4 @@ def smart_product_identification(
     result['message'] = 'No product identified'
     return result
 
+

@@ -1,5 +1,119 @@
 import { useState, useEffect } from 'react'
 
+function EventCard({ event, formatTime, getEventColor }) {
+  const getSessionToken = () => {
+    return localStorage.getItem('sessionToken')
+  }
+
+  const downloadEvent = async () => {
+    // Only download if this is a Calendar_Events event (has event_id)
+    if (!event.event_id) {
+      alert('This event cannot be exported. Please use the calendar subscription feature.')
+      return
+    }
+    
+    try {
+      const token = getSessionToken()
+      const response = await fetch(`/api/calendar/events/${event.event_id}/export`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      
+      if (response.ok) {
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${event.title || 'event'}.ics`
+        a.click()
+        window.URL.revokeObjectURL(url)
+      } else {
+        alert('Failed to download event')
+      }
+    } catch (err) {
+      console.error('Error downloading event:', err)
+      alert('Error downloading event')
+    }
+  }
+
+  const addToCalendar = () => {
+    // Generate add to calendar URLs
+    const eventDate = event.event_date || event.start_datetime
+    const startTime = event.start_time || '09:00:00'
+    
+    try {
+      const start = new Date(`${eventDate}T${startTime}`)
+      const end = new Date(start.getTime() + (event.end_time ? 
+        (new Date(`${eventDate}T${event.end_time}`).getTime() - start.getTime()) : 
+        3600000)) // Default 1 hour
+      
+      const formatDate = (date) => {
+        return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
+      }
+      
+      const title = encodeURIComponent(event.title || 'Event')
+      const description = encodeURIComponent(event.description || '')
+      const location = encodeURIComponent(event.location || '')
+      
+      const googleUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${formatDate(start)}/${formatDate(end)}&details=${description}&location=${location}`
+      
+      window.open(googleUrl, '_blank')
+    } catch (err) {
+      console.error('Error adding to calendar:', err)
+      alert('Error adding to calendar')
+    }
+  }
+
+  return (
+    <div
+      style={{
+        padding: '12px',
+        border: '1px solid #eee',
+        borderRadius: '4px',
+        borderLeft: `4px solid ${getEventColor(event.event_type)}`
+      }}
+    >
+      <div style={{ fontWeight: 500, marginBottom: '4px' }}>{event.title}</div>
+      <div style={{ fontSize: '12px', color: '#666' }}>
+        {new Date(event.event_date || event.start_datetime).toLocaleDateString()}
+        {event.start_time && ` • ${formatTime(event.start_time)}`}
+      </div>
+      {event.description && (
+        <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+          {event.description}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+        <button
+          onClick={downloadEvent}
+          style={{
+            padding: '4px 8px',
+            backgroundColor: '#f0f0f0',
+            border: '1px solid #ddd',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '11px'
+          }}
+        >
+          📥 Download .ics
+        </button>
+        <button
+          onClick={addToCalendar}
+          style={{
+            padding: '4px 8px',
+            backgroundColor: '#f0f0f0',
+            border: '1px solid #ddd',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '11px'
+          }}
+        >
+          📅 Add to Google Calendar
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [events, setEvents] = useState([])
@@ -370,29 +484,30 @@ function Calendar() {
         marginTop: '20px',
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
       }}>
-        <h3 style={{ marginTop: 0, marginBottom: '16px', fontSize: '16px' }}>Upcoming Events</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 style={{ margin: 0, fontSize: '16px' }}>Upcoming Events</h3>
+          <button
+            onClick={() => window.location.href = '/calendar-subscription'}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: '#f0f0f0',
+              border: '1px solid #ddd',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+          >
+            📅 Subscribe to Calendar
+          </button>
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {events.slice(0, 5).map((event, idx) => (
-            <div
+            <EventCard
               key={idx}
-              style={{
-                padding: '12px',
-                border: '1px solid #eee',
-                borderRadius: '4px',
-                borderLeft: `4px solid ${getEventColor(event.event_type)}`
-              }}
-            >
-              <div style={{ fontWeight: 500, marginBottom: '4px' }}>{event.title}</div>
-              <div style={{ fontSize: '12px', color: '#666' }}>
-                {new Date(event.event_date).toLocaleDateString()}
-                {event.start_time && ` • ${formatTime(event.start_time)}`}
-              </div>
-              {event.description && (
-                <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-                  {event.description}
-                </div>
-              )}
-            </div>
+              event={event}
+              formatTime={formatTime}
+              getEventColor={getEventColor}
+            />
           ))}
           {events.length === 0 && (
             <div style={{ color: '#999', fontSize: '14px', textAlign: 'center', padding: '20px' }}>
@@ -406,5 +521,6 @@ function Calendar() {
 }
 
 export default Calendar
+
 
 

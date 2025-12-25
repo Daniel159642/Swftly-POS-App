@@ -21,3 +21,7 @@ scikit-learn>=1.0.0 # For cosine similarity (optional, we implement our own)
 pyzbar>=0.1.9       # Barcode and QR code scanning
 opencv-python>=4.5.0 # Image processing for barcode detection
 
+# Calendar integration dependencies:
+icalendar>=5.0.0    # iCal/Google Calendar support
+pytz>=2023.3        # Timezone support
+

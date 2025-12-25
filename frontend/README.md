@@ -24,3 +24,4 @@ npm run build
 2. The built files will be in `dist/` and will be served by the Flask backend.
 
 
+

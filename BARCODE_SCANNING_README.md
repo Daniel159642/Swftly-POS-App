@@ -347,3 +347,4 @@ For issues:
 3. Add barcodes to products in database
 4. Check image quality and lighting
 
+
