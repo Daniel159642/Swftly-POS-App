@@ -1237,32 +1237,99 @@ def add_employee(
         raise ValueError(f"Employee identifier '{login_identifier}' already exists") from e
 
 def get_employee(employee_id: int) -> Optional[Dict[str, Any]]:
-    """Get employee by ID"""
+    """Get employee by ID with tip summary"""
     conn = get_connection()
     cursor = conn.cursor()
     
     cursor.execute("SELECT * FROM employees WHERE employee_id = ?", (employee_id,))
     row = cursor.fetchone()
+    
+    if not row:
+        conn.close()
+        return None
+    
+    employee = dict(row)
+    
+    # Get tip summary if employee_tips table exists
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='employee_tips'
+    """)
+    if cursor.fetchone():
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_tip_transactions,
+                COALESCE(SUM(tip_amount), 0) as total_tips_all_time,
+                COALESCE(SUM(CASE WHEN DATE(tip_date) = DATE('now') THEN tip_amount ELSE 0 END), 0) as tips_today,
+                COALESCE(SUM(CASE WHEN DATE(tip_date) >= DATE('now', 'start of month') THEN tip_amount ELSE 0 END), 0) as tips_this_month,
+                COALESCE(AVG(tip_amount), 0) as avg_tip_amount
+            FROM employee_tips
+            WHERE employee_id = ?
+        """, (employee_id,))
+        tip_summary = cursor.fetchone()
+        if tip_summary:
+            employee['tip_summary'] = dict(tip_summary)
+        else:
+            employee['tip_summary'] = {
+                'total_tip_transactions': 0,
+                'total_tips_all_time': 0.0,
+                'tips_today': 0.0,
+                'tips_this_month': 0.0,
+                'avg_tip_amount': 0.0
+            }
+    
     conn.close()
     
-    return dict(row) if row else None
+    return employee
 
 def list_employees(active_only: bool = True) -> List[Dict[str, Any]]:
-    """List all employees"""
+    """List all employees with tip summaries"""
     conn = get_connection()
     cursor = conn.cursor()
     
+    # Check if employee_tips table exists
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='employee_tips'
+    """)
+    has_tips_table = cursor.fetchone() is not None
+    
     if active_only:
-        cursor.execute("""
-            SELECT * FROM employees 
-            WHERE active = 1 
-            ORDER BY last_name, first_name
-        """)
+        if has_tips_table:
+            cursor.execute("""
+                SELECT 
+                    e.*,
+                    COALESCE(SUM(et.tip_amount), 0) as total_tips_all_time,
+                    COUNT(et.tip_id) as total_tip_transactions
+                FROM employees e
+                LEFT JOIN employee_tips et ON e.employee_id = et.employee_id
+                WHERE e.active = 1 
+                GROUP BY e.employee_id
+                ORDER BY e.last_name, e.first_name
+            """)
+        else:
+            cursor.execute("""
+                SELECT * FROM employees 
+                WHERE active = 1 
+                ORDER BY last_name, first_name
+            """)
     else:
-        cursor.execute("""
-            SELECT * FROM employees 
-            ORDER BY last_name, first_name
-        """)
+        if has_tips_table:
+            cursor.execute("""
+                SELECT 
+                    e.*,
+                    COALESCE(SUM(et.tip_amount), 0) as total_tips_all_time,
+                    COUNT(et.tip_id) as total_tip_transactions
+                FROM employees e
+                LEFT JOIN employee_tips et ON e.employee_id = et.employee_id
+                GROUP BY e.employee_id
+                ORDER BY e.last_name, e.first_name
+            """)
+        else:
+            cursor.execute("""
+                SELECT * FROM employees 
+                ORDER BY last_name, first_name
+            """)
     
     rows = cursor.fetchall()
     conn.close()
@@ -1440,7 +1507,8 @@ def create_order(
     tax_rate: float = 0.0,
     discount: float = 0.0,
     transaction_fee_rates: Optional[Dict[str, float]] = None,
-    notes: Optional[str] = None
+    notes: Optional[str] = None,
+    tip: float = 0.0
 ) -> Dict[str, Any]:
     """
     Create a new order and process payment
@@ -1499,22 +1567,36 @@ def create_order(
             subtotal += item_subtotal
             total_tax += item_tax
         
-        # Calculate transaction fee
+        # Calculate transaction fee (on subtotal + tax - discount, before tip)
         pre_fee_total = subtotal + total_tax - discount
         fee_calc = calculate_transaction_fee(payment_method, pre_fee_total, transaction_fee_rates)
         transaction_fee = fee_calc['transaction_fee']
         
-        # Calculate final total (including transaction fee)
-        total = pre_fee_total + transaction_fee
+        # Calculate final total (including transaction fee and tip)
+        total = pre_fee_total + transaction_fee + tip
         
-        # Create order
-        cursor.execute("""
-            INSERT INTO orders (
-                order_number, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
-                discount, transaction_fee, total, payment_method, payment_status, order_status, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'completed', ?)
-        """, (order_number, employee_id, customer_id, subtotal, tax_rate, total_tax,
-              discount, transaction_fee, total, payment_method, notes))
+        # Create order - check if tip column exists
+        cursor.execute("PRAGMA table_info(orders)")
+        columns = [col[1] for col in cursor.fetchall()]
+        has_tip = 'tip' in columns
+        
+        if has_tip:
+            cursor.execute("""
+                INSERT INTO orders (
+                    order_number, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
+                    discount, transaction_fee, tip, total, payment_method, payment_status, order_status, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'completed', ?)
+            """, (order_number, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                  discount, transaction_fee, tip, total, payment_method, notes))
+        else:
+            # Fallback for older schema
+            cursor.execute("""
+                INSERT INTO orders (
+                    order_number, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
+                    discount, transaction_fee, total, payment_method, payment_status, order_status, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'completed', ?)
+            """, (order_number, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                  discount, transaction_fee, total, payment_method, notes))
         
         order_id = cursor.lastrowid
         
@@ -1536,14 +1618,45 @@ def create_order(
             """, (order_id, product_id, quantity, unit_price, item_discount, item_subtotal,
                   item_tax_rate, item_tax))
         
-        # Record payment transaction with fee details
-        cursor.execute("""
-            INSERT INTO payment_transactions (
-                order_id, payment_method, amount, transaction_fee, transaction_fee_rate,
-                net_amount, status
-            ) VALUES (?, ?, ?, ?, ?, ?, 'approved')
-        """, (order_id, payment_method, pre_fee_total, transaction_fee, 
-              fee_calc['fee_rate'], fee_calc['net_amount']))
+        # Record payment transaction with fee details and tip
+        # Check if tip and employee_id columns exist
+        cursor.execute("PRAGMA table_info(payment_transactions)")
+        columns = [col[1] for col in cursor.fetchall()]
+        has_tip = 'tip' in columns
+        has_employee_id = 'employee_id' in columns
+        
+        if has_tip and has_employee_id:
+            cursor.execute("""
+                INSERT INTO payment_transactions (
+                    order_id, payment_method, amount, transaction_fee, transaction_fee_rate,
+                    net_amount, status, tip, employee_id
+                ) VALUES (?, ?, ?, ?, ?, ?, 'approved', ?, ?)
+            """, (order_id, payment_method, pre_fee_total, transaction_fee, 
+                  fee_calc['fee_rate'], fee_calc['net_amount'], tip, employee_id))
+        else:
+            # Fallback for older schema
+            cursor.execute("""
+                INSERT INTO payment_transactions (
+                    order_id, payment_method, amount, transaction_fee, transaction_fee_rate,
+                    net_amount, status
+                ) VALUES (?, ?, ?, ?, ?, ?, 'approved')
+            """, (order_id, payment_method, pre_fee_total, transaction_fee, 
+                  fee_calc['fee_rate'], fee_calc['net_amount']))
+        
+        transaction_id = cursor.lastrowid
+        
+        # Record tip in employee_tips table if tip exists
+        if tip > 0:
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='employee_tips'
+            """)
+            if cursor.fetchone():
+                cursor.execute("""
+                    INSERT INTO employee_tips (
+                        employee_id, order_id, transaction_id, tip_amount, payment_method
+                    ) VALUES (?, ?, ?, ?, ?)
+                """, (employee_id, order_id, transaction_id, tip, payment_method))
         
         conn.commit()
         conn.close()
@@ -2341,6 +2454,238 @@ def list_orders(
         params.append(order_status)
     
     query += " ORDER BY o.order_date DESC"
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+def get_tips_by_employee(
+    employee_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Get tips received by employees"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Check if employee_tips table exists
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='employee_tips'
+    """)
+    has_tips_table = cursor.fetchone() is not None
+    
+    if has_tips_table:
+        # Use employee_tips table
+        query = """
+            SELECT 
+                et.employee_id,
+                e.first_name || ' ' || e.last_name as employee_name,
+                COUNT(et.tip_id) as num_transactions,
+                SUM(et.tip_amount) as total_tips,
+                AVG(et.tip_amount) as avg_tip,
+                DATE(et.tip_date) as tip_date
+            FROM employee_tips et
+            JOIN employees e ON et.employee_id = e.employee_id
+            WHERE et.tip_amount > 0
+        """
+        params = []
+        
+        if employee_id:
+            query += " AND et.employee_id = ?"
+            params.append(employee_id)
+        
+        if start_date:
+            query += " AND DATE(et.tip_date) >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND DATE(et.tip_date) <= ?"
+            params.append(end_date)
+        
+        query += " GROUP BY et.employee_id, DATE(et.tip_date) ORDER BY tip_date DESC, total_tips DESC"
+    else:
+        # Fallback to payment_transactions
+        query = """
+            SELECT 
+                pt.employee_id,
+                e.first_name || ' ' || e.last_name as employee_name,
+                COUNT(pt.transaction_id) as num_transactions,
+                SUM(COALESCE(pt.tip, 0)) as total_tips,
+                AVG(COALESCE(pt.tip, 0)) as avg_tip,
+                DATE(pt.transaction_date) as tip_date
+            FROM payment_transactions pt
+            JOIN orders o ON pt.order_id = o.order_id
+            JOIN employees e ON COALESCE(pt.employee_id, o.employee_id) = e.employee_id
+            WHERE COALESCE(pt.tip, 0) > 0
+        """
+        params = []
+        
+        if employee_id:
+            query += " AND COALESCE(pt.employee_id, o.employee_id) = ?"
+            params.append(employee_id)
+        
+        if start_date:
+            query += " AND DATE(pt.transaction_date) >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND DATE(pt.transaction_date) <= ?"
+            params.append(end_date)
+        
+        query += " GROUP BY pt.employee_id, DATE(pt.transaction_date) ORDER BY tip_date DESC, total_tips DESC"
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+def get_employee_tip_summary(
+    employee_id: int,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> Dict[str, Any]:
+    """Get tip summary for a specific employee"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Check if employee_tips table exists
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='employee_tips'
+    """)
+    has_tips_table = cursor.fetchone() is not None
+    
+    if has_tips_table:
+        query = """
+            SELECT 
+                COUNT(et.tip_id) as num_transactions,
+                SUM(et.tip_amount) as total_tips,
+                AVG(et.tip_amount) as avg_tip,
+                MIN(et.tip_amount) as min_tip,
+                MAX(et.tip_amount) as max_tip
+            FROM employee_tips et
+            WHERE et.employee_id = ?
+              AND et.tip_amount > 0
+        """
+        params = [employee_id]
+        
+        if start_date:
+            query += " AND DATE(et.tip_date) >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND DATE(et.tip_date) <= ?"
+            params.append(end_date)
+    else:
+        # Fallback to payment_transactions
+        query = """
+            SELECT 
+                COUNT(pt.transaction_id) as num_transactions,
+                SUM(COALESCE(pt.tip, 0)) as total_tips,
+                AVG(COALESCE(pt.tip, 0)) as avg_tip,
+                MIN(COALESCE(pt.tip, 0)) as min_tip,
+                MAX(COALESCE(pt.tip, 0)) as max_tip
+            FROM payment_transactions pt
+            JOIN orders o ON pt.order_id = o.order_id
+            WHERE COALESCE(pt.employee_id, o.employee_id) = ?
+              AND COALESCE(pt.tip, 0) > 0
+        """
+        params = [employee_id]
+        
+        if start_date:
+            query += " AND DATE(pt.transaction_date) >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND DATE(pt.transaction_date) <= ?"
+            params.append(end_date)
+    
+    cursor.execute(query, params)
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return dict(row)
+    return {
+        'num_transactions': 0,
+        'total_tips': 0.0,
+        'avg_tip': 0.0,
+        'min_tip': 0.0,
+        'max_tip': 0.0
+    }
+
+def get_employee_tips(
+    employee_id: int,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Get all tips for a specific employee"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Check if employee_tips table exists
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='employee_tips'
+    """)
+    has_tips_table = cursor.fetchone() is not None
+    
+    if has_tips_table:
+        query = """
+            SELECT 
+                et.*,
+                o.order_number,
+                o.order_date,
+                o.total as order_total
+            FROM employee_tips et
+            JOIN orders o ON et.order_id = o.order_id
+            WHERE et.employee_id = ?
+        """
+        params = [employee_id]
+        
+        if start_date:
+            query += " AND DATE(et.tip_date) >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND DATE(et.tip_date) <= ?"
+            params.append(end_date)
+        
+        query += " ORDER BY et.tip_date DESC"
+    else:
+        # Fallback to payment_transactions
+        query = """
+            SELECT 
+                pt.transaction_id as tip_id,
+                pt.employee_id,
+                pt.order_id,
+                pt.transaction_id,
+                COALESCE(pt.tip, 0) as tip_amount,
+                pt.transaction_date as tip_date,
+                pt.payment_method,
+                o.order_number,
+                o.order_date,
+                o.total as order_total
+            FROM payment_transactions pt
+            JOIN orders o ON pt.order_id = o.order_id
+            WHERE COALESCE(pt.employee_id, o.employee_id) = ?
+              AND COALESCE(pt.tip, 0) > 0
+        """
+        params = [employee_id]
+        
+        if start_date:
+            query += " AND DATE(pt.transaction_date) >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND DATE(pt.transaction_date) <= ?"
+            params.append(end_date)
+        
+        query += " ORDER BY pt.transaction_date DESC"
     
     cursor.execute(query, params)
     rows = cursor.fetchall()
@@ -3479,17 +3824,35 @@ def journalize_sale(order_id: int, employee_id: int) -> Dict[str, Any]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Get order details
-    cursor.execute("""
-        SELECT 
-            o.total,
-            o.tax_amount,
-            o.subtotal,
-            o.transaction_fee,
-            o.payment_method
-        FROM orders o
-        WHERE o.order_id = ?
-    """, (order_id,))
+    # Get order details - check if tip column exists
+    cursor.execute("PRAGMA table_info(orders)")
+    columns = [col[1] for col in cursor.fetchall()]
+    has_tip = 'tip' in columns
+    
+    if has_tip:
+        cursor.execute("""
+            SELECT 
+                o.total,
+                o.tax_amount,
+                o.subtotal,
+                o.transaction_fee,
+                o.tip,
+                o.payment_method
+            FROM orders o
+            WHERE o.order_id = ?
+        """, (order_id,))
+    else:
+        cursor.execute("""
+            SELECT 
+                o.total,
+                o.tax_amount,
+                o.subtotal,
+                o.transaction_fee,
+                0.0 as tip,
+                o.payment_method
+            FROM orders o
+            WHERE o.order_id = ?
+        """, (order_id,))
     
     order = cursor.fetchone()
     if not order:
@@ -3527,13 +3890,16 @@ def journalize_sale(order_id: int, employee_id: int) -> Dict[str, Any]:
     if order['payment_method'] in ['credit_card', 'debit_card', 'mobile_payment']:
         cash_account = '1100'  # Accounts Receivable (will be settled when payment processor deposits)
     
+    # Get tip amount
+    tip_amount = float(order.get('tip', 0.0))
+    
     # Build journal entry line items
     line_items = [
         {
             'account_number': cash_account,
-            'debit_amount': float(payment['net_amount']),  # Net amount after fees
+            'debit_amount': float(payment['net_amount']) + tip_amount,  # Net amount after fees + tip
             'credit_amount': 0,
-            'description': f'Payment received (net after fees)'
+            'description': f'Payment received (net after fees + tip)'
         },
         {
             'account_number': '4000',  # Sales Revenue
@@ -3561,6 +3927,15 @@ def journalize_sale(order_id: int, employee_id: int) -> Dict[str, Any]:
         }
     ]
     
+    # Add tip revenue if tip exists
+    if tip_amount > 0:
+        line_items.append({
+            'account_number': '4500',  # Other Income (tips)
+            'debit_amount': 0,
+            'credit_amount': tip_amount,
+            'description': f'Tip received'
+        })
+    
     # Add transaction fee expense if applicable
     if payment['transaction_fee'] > 0:
         line_items.append({
@@ -3575,11 +3950,11 @@ def journalize_sale(order_id: int, employee_id: int) -> Dict[str, Any]:
         net_amount = float(payment['net_amount'])
         fee_amount = float(payment['transaction_fee'])
         
-        # Adjust cash account to reflect gross amount collected
+        # Adjust cash account to reflect gross amount collected (including tip)
         # The difference (fee) is already accounted for in the fee expense
         # We need to debit the full gross amount and credit the fee separately
-        # Update cash account to gross amount
-        line_items[0]['debit_amount'] = gross_amount
+        # Update cash account to gross amount (which includes tip)
+        line_items[0]['debit_amount'] = gross_amount + tip_amount
     
     return create_journal_entry(
         entry_date=datetime.now().date().isoformat(),

@@ -1,0 +1,553 @@
+.customer-display-container {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  height: 100vh;
+  overflow: hidden;
+  color: white;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Popup Overlay Styles */
+.customer-display-popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  z-index: 3000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+.customer-display-popup-container {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 20px;
+  padding: 40px;
+  max-width: 800px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  color: #333;
+  position: relative;
+}
+
+.transaction-screen-popup,
+.payment-screen-popup,
+.card-processing-screen-popup,
+.receipt-screen-popup,
+.success-screen-popup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 400px;
+  justify-content: center;
+  padding: 20px;
+}
+
+.transaction-screen-popup .items-list {
+  background: rgba(102, 126, 234, 0.1);
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 20px;
+  max-height: 300px;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.transaction-screen-popup .item-row {
+  color: #333;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.transaction-screen-popup .totals-section {
+  background: rgba(102, 126, 234, 0.15);
+  border-radius: 15px;
+  padding: 20px;
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.transaction-screen-popup .total-row {
+  color: #333;
+}
+
+.transaction-screen-popup .total-row.final {
+  border-top: 2px solid #333;
+  color: #333;
+}
+
+.payment-screen-popup .screen-header h2 {
+  color: #333;
+  font-size: 28px;
+}
+
+.payment-screen-popup .amount-due {
+  color: #667eea;
+  font-size: 48px;
+  margin-top: 15px;
+}
+
+.payment-screen-popup .payment-methods {
+  width: 100%;
+  max-width: 600px;
+}
+
+.payment-screen-popup .payment-method {
+  background: rgba(102, 126, 234, 0.1);
+  border: 2px solid rgba(102, 126, 234, 0.3);
+}
+
+.payment-screen-popup .payment-method:hover {
+  background: rgba(102, 126, 234, 0.2);
+  border-color: rgba(102, 126, 234, 0.5);
+}
+
+.payment-screen-popup .payment-method.selected {
+  background: rgba(102, 126, 234, 0.3);
+  border-color: #667eea;
+}
+
+.payment-screen-popup .payment-method-name {
+  color: #333;
+}
+
+.tip-options {
+  width: 100%;
+  max-width: 500px;
+}
+
+.tip-option {
+  background: rgba(102, 126, 234, 0.1);
+  border: 2px solid rgba(102, 126, 234, 0.3);
+  color: #333;
+}
+
+.tip-option:hover {
+  background: rgba(102, 126, 234, 0.2);
+}
+
+.tip-option.selected {
+  background: rgba(102, 126, 234, 0.3);
+  border-color: #667eea;
+}
+
+.tip-percentage,
+.tip-amount {
+  color: #333;
+}
+
+.card-processing-screen-popup {
+  text-align: center;
+}
+
+.card-processing-screen-popup .card-instruction {
+  color: #333;
+  font-size: 24px;
+}
+
+.card-processing-screen-popup .card-status {
+  color: #666;
+}
+
+.receipt-screen-popup .screen-header h2 {
+  color: #333;
+}
+
+.receipt-options {
+  width: 100%;
+  max-width: 600px;
+}
+
+.receipt-option {
+  background: rgba(102, 126, 234, 0.1);
+  border: 2px solid rgba(102, 126, 234, 0.3);
+}
+
+.receipt-option:hover {
+  background: rgba(102, 126, 234, 0.2);
+}
+
+.receipt-label {
+  color: #333;
+}
+
+.receipt-input input {
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid rgba(102, 126, 234, 0.3);
+  color: #333;
+}
+
+.receipt-input input::placeholder {
+  color: #999;
+}
+
+.success-screen-popup .success-message {
+  color: #333;
+}
+
+.success-screen-popup .success-details {
+  color: #666;
+}
+
+/* Idle Screen */
+.idle-screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  text-align: center;
+  padding: 40px;
+}
+
+.idle-content h1 {
+  font-size: 48px;
+  margin-bottom: 20px;
+  font-weight: 300;
+}
+
+.idle-content p {
+  font-size: 24px;
+  opacity: 0.9;
+}
+
+/* Transaction Screen */
+.transaction-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 30px;
+}
+
+.screen-header {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.screen-header h2 {
+  font-size: 36px;
+  font-weight: 300;
+  margin-bottom: 20px;
+}
+
+.amount-due {
+  font-size: 72px;
+  font-weight: bold;
+  margin-top: 20px;
+}
+
+.items-list {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  padding: 30px;
+  margin-bottom: 30px;
+  overflow-y: auto;
+  backdrop-filter: blur(10px);
+}
+
+.item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 24px;
+}
+
+.item-row:last-child {
+  border-bottom: none;
+}
+
+.item-name {
+  flex: 1;
+}
+
+.item-quantity {
+  margin: 0 30px;
+  opacity: 0.8;
+}
+
+.item-price {
+  font-weight: bold;
+  min-width: 120px;
+  text-align: right;
+}
+
+.totals-section {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  padding: 30px;
+  backdrop-filter: blur(10px);
+  margin-bottom: 20px;
+}
+
+.total-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 15px 0;
+  font-size: 28px;
+}
+
+.total-row.final {
+  border-top: 3px solid white;
+  margin-top: 15px;
+  padding-top: 25px;
+  font-size: 42px;
+  font-weight: bold;
+}
+
+/* Payment Screen */
+.payment-screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  padding: 40px;
+}
+
+.payment-methods {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 30px;
+  width: 100%;
+  max-width: 900px;
+  margin-bottom: 50px;
+}
+
+.payment-method {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
+  padding: 40px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  backdrop-filter: blur(10px);
+}
+
+.payment-method:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.05);
+}
+
+.payment-method.selected {
+  background: rgba(255, 255, 255, 0.4);
+  border: 3px solid white;
+}
+
+.payment-method-icon {
+  font-size: 64px;
+  margin-bottom: 15px;
+}
+
+.payment-method-name {
+  font-size: 24px;
+  font-weight: 500;
+}
+
+/* Tip Screen */
+.tip-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  margin-bottom: 30px;
+  width: 100%;
+  max-width: 600px;
+}
+
+.tip-option {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 15px;
+  padding: 30px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.tip-option:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.tip-option.selected {
+  background: rgba(255, 255, 255, 0.4);
+  border: 3px solid white;
+}
+
+.tip-percentage {
+  font-size: 48px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.tip-amount {
+  font-size: 32px;
+}
+
+/* Card Processing Screen */
+.card-processing-screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  height: 100%;
+  padding: 40px;
+}
+
+.card-animation {
+  font-size: 120px;
+  margin-bottom: 30px;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { 
+    transform: scale(1); 
+    opacity: 1; 
+  }
+  50% { 
+    transform: scale(1.1); 
+    opacity: 0.8; 
+  }
+}
+
+.card-instruction {
+  font-size: 36px;
+  margin-bottom: 20px;
+}
+
+.card-status {
+  font-size: 24px;
+  opacity: 0.9;
+}
+
+/* Receipt Screen */
+.receipt-screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  padding: 40px;
+}
+
+.receipt-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 30px;
+  margin-top: 40px;
+  width: 100%;
+  max-width: 800px;
+}
+
+.receipt-option {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
+  padding: 50px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.receipt-option:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.05);
+}
+
+.receipt-icon {
+  font-size: 72px;
+  margin-bottom: 20px;
+}
+
+.receipt-label {
+  font-size: 28px;
+  font-weight: 500;
+}
+
+.receipt-input {
+  margin-top: 30px;
+  text-align: center;
+  width: 100%;
+  max-width: 500px;
+}
+
+.receipt-input input {
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  color: white;
+  padding: 20px;
+  font-size: 24px;
+  border-radius: 15px;
+  width: 100%;
+  margin-bottom: 20px;
+  backdrop-filter: blur(10px);
+}
+
+.receipt-input input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Success Screen */
+.success-screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  height: 100%;
+  padding: 40px;
+}
+
+.success-icon {
+  font-size: 150px;
+  color: #4CAF50;
+  margin-bottom: 30px;
+  animation: scaleIn 0.5s ease-out;
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.success-message {
+  font-size: 48px;
+  margin-bottom: 20px;
+}
+
+.success-details {
+  font-size: 28px;
+  opacity: 0.9;
+}
+
+/* Buttons */
+.btn-primary {
+  background: white;
+  color: #667eea;
+  padding: 20px 50px;
+  font-size: 24px;
+  border-radius: 50px;
+  cursor: pointer;
+  transition: all 0.3s;
+  border: none;
+  font-weight: 600;
+  margin-top: 20px;
+}
+
+.btn-primary:hover {
+  background: #f0f0f0;
+  transform: scale(1.05);
+}
+

@@ -13,6 +13,8 @@ import CalendarSubscription from './components/CalendarSubscription'
 import EmployeeManagement from './components/EmployeeManagement'
 import Profile from './pages/Profile'
 import ShipmentVerification from './pages/ShipmentVerification'
+import CustomerDisplay from './components/CustomerDisplay'
+import CustomerDisplayPopup from './pages/CustomerDisplayPopup'
 import './index.css'
 
 function ProtectedRoute({ children, sessionToken, employee, onLogout }) {
@@ -136,6 +138,8 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
           </Layout>
         </ProtectedRoute>
       } />
+      <Route path="/customer-display" element={<CustomerDisplay />} />
+      <Route path="/customer-display-popup" element={<CustomerDisplayPopup />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   )

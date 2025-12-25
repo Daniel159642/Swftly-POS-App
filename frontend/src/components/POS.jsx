@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { usePermissions, ProtectedComponent } from '../contexts/PermissionContext'
 import BarcodeScanner from './BarcodeScanner'
+import CustomerDisplayPopup from './CustomerDisplayPopup'
 
 function POS({ employeeId, employeeName }) {
   const { hasPermission } = usePermissions()
@@ -19,6 +20,13 @@ function POS({ employeeId, employeeName }) {
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [amountPaid, setAmountPaid] = useState('')
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
+  const [showChangeScreen, setShowChangeScreen] = useState(false)
+  const [changeAmount, setChangeAmount] = useState(0)
+  const [paymentCompleted, setPaymentCompleted] = useState(false)
+  const [currentTransactionId, setCurrentTransactionId] = useState(null)
+  const [showCustomerDisplay, setShowCustomerDisplay] = useState(false)
+  const [showSummary, setShowSummary] = useState(false) // Show transaction summary before payment
+  const [selectedTip, setSelectedTip] = useState(0) // Tip amount selected by customer
   
   // Check if user can process sales
   const canProcessSale = hasPermission('process_sale')
@@ -261,10 +269,48 @@ function POS({ employeeId, employeeName }) {
     return calculateSubtotal() + calculateTax()
   }
 
+  const calculateTotalWithTip = () => {
+    return calculateTotal() + selectedTip
+  }
+
   const calculateChange = () => {
     const paid = parseFloat(amountPaid) || 0
-    const total = calculateTotal()
-    return paid - total
+    const totalWithTip = calculateTotalWithTip()
+    return paid - totalWithTip
+  }
+
+  const handleDismissChange = () => {
+    setShowChangeScreen(false)
+    // Show customer display for receipt selection
+    if (paymentCompleted) {
+      setShowCustomerDisplay(true)
+    } else {
+      // If payment wasn't completed, reset everything
+      setCart([])
+      setSearchTerm('')
+      setShowPaymentForm(false)
+      setAmountPaid('')
+      setChangeAmount(0)
+      setSelectedTip(0)
+      setShowCustomerDisplay(false)
+    }
+  }
+
+  const handleTipSelect = (tip) => {
+    setSelectedTip(tip)
+  }
+
+  const handleReceiptSelect = () => {
+    // Clear cart if payment was completed
+    if (paymentCompleted) {
+      setCart([])
+      setSearchTerm('')
+      setAmountPaid('')
+      setPaymentCompleted(false)
+      setSelectedTip(0) // Reset tip
+      setShowCustomerDisplay(false)
+      setShowPaymentForm(false)
+    }
   }
 
   const handleCalculatorInput = (value) => {
@@ -311,27 +357,170 @@ function POS({ employeeId, employeeName }) {
         discount: 0
       }))
 
-      const response = await fetch('/api/create_order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          employee_id: employeeId,
-          items: items,
-          payment_method: paymentMethod,
-          tax_rate: taxRate
+      // Start transaction for customer display
+      let transactionId = null
+      let transactionNumber = null
+      try {
+        const sessionToken = localStorage.getItem('sessionToken')
+        const transactionResponse = await fetch('/api/transaction/start', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionToken}`
+          },
+          body: JSON.stringify({ items: items })
         })
-      })
+        
+        const transactionResult = await transactionResponse.json()
+        if (transactionResult.success) {
+          transactionId = transactionResult.data.transaction_id
+          transactionNumber = transactionResult.data.transaction_number
+          setCurrentTransactionId(transactionId)
+          // Notify customer display
+          sessionStorage.setItem('activeTransaction', JSON.stringify(transactionResult.data))
+          // Store transaction ID for customer display
+          sessionStorage.setItem('currentTransactionId', transactionId)
+        }
+      } catch (err) {
+        console.error('Error starting transaction:', err)
+      }
 
-      const result = await response.json()
-
-      if (result.success) {
-        setMessage({ type: 'success', text: `Order ${result.order_number} processed successfully!` })
-        setCart([])
-        setSearchTerm('')
-        setShowPaymentForm(false)
-        setAmountPaid('')
+      // Process payment using new transaction system if available, otherwise fall back to old system
+      let response, result
+      if (transactionId) {
+        // Get payment method ID
+        const paymentMethodsResponse = await fetch('/api/payment-methods')
+        const paymentMethodsResult = await paymentMethodsResponse.json()
+        // Find payment method by matching method_type or method_name
+        const paymentMethodObj = paymentMethodsResult.data?.find(
+          pm => {
+            if (paymentMethod === 'cash') {
+              return pm.method_type === 'cash' || pm.method_name.toLowerCase().includes('cash')
+            } else {
+              // For card payments, match any card type (card, mobile_wallet)
+              return pm.method_type === 'card' || pm.method_name.toLowerCase() === 'card'
+            }
+          }
+        )
+        
+        if (paymentMethodObj) {
+          const paid = paymentMethod === 'cash' ? parseFloat(amountPaid) || 0 : (calculateTotal() + selectedTip)
+          const tipAmount = selectedTip || 0
+          
+          response = await fetch('/api/payment/process', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('sessionToken')}`
+            },
+            body: JSON.stringify({
+              transaction_id: transactionId,
+              payment_method_id: paymentMethodObj.payment_method_id,
+              amount: paid,
+              tip: tipAmount
+            })
+          })
+          
+          result = await response.json()
+          
+          if (result.success && result.data.success) {
+            const successMessage = transactionNumber 
+              ? `Transaction ${transactionNumber} processed successfully!`
+              : 'Transaction processed successfully!'
+            setMessage({ type: 'success', text: successMessage })
+            
+            // Trigger customer display to show receipt screen
+            setPaymentCompleted(true)
+            
+            // For cash payments, show change screen instead of immediately clearing
+            if (paymentMethod === 'cash') {
+              const change = result.data.data?.change || calculateChange()
+              setChangeAmount(change)
+              setShowChangeScreen(true)
+              setShowPaymentForm(false)
+              // Don't close customer display yet - let them see receipt options
+            } else {
+              // For non-cash payments, keep customer display open for receipt selection
+              // Will close after receipt selection
+            }
+            // Clear active transaction
+            sessionStorage.removeItem('activeTransaction')
+            // Payment completed - show customer display for receipt selection
+            // For cash payments, show customer display again for receipt
+            if (paymentMethod === 'cash') {
+              setShowCustomerDisplay(true)
+            }
+          } else {
+            setMessage({ type: 'error', text: result.data?.error || 'Failed to process payment' })
+          }
+        } else {
+          // Fall back to old system
+          response = await fetch('/api/create_order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              employee_id: employeeId,
+              items: items,
+              payment_method: paymentMethod,
+              tax_rate: taxRate
+            })
+          })
+          result = await response.json()
+          
+          if (result.success) {
+            setMessage({ type: 'success', text: `Order ${result.order_number} processed successfully!` })
+            setPaymentCompleted(true)
+            
+            // Payment completed - show customer display for receipt selection
+            // For cash payments, show customer display again for receipt
+            if (paymentMethod === 'cash') {
+              const change = calculateChange()
+              setChangeAmount(change)
+              setShowChangeScreen(true)
+              setShowPaymentForm(false)
+              // Show customer display for receipt selection after showing change
+              setTimeout(() => {
+                setShowChangeScreen(false)
+                setShowCustomerDisplay(true)
+              }, 3000)
+            } else {
+              // Keep customer display open for receipt selection
+            }
+          } else {
+            setMessage({ type: 'error', text: result.message || 'Failed to process order' })
+          }
+        }
       } else {
-        setMessage({ type: 'error', text: result.message || 'Failed to process order' })
+        // Fall back to old system
+        response = await fetch('/api/create_order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            employee_id: employeeId,
+            items: items,
+            payment_method: paymentMethod,
+            tax_rate: taxRate
+          })
+        })
+        result = await response.json()
+        
+        if (result.success) {
+          setMessage({ type: 'success', text: `Order ${result.order_number} processed successfully!` })
+          
+          if (paymentMethod === 'cash') {
+            const change = calculateChange()
+            setChangeAmount(change)
+            setShowChangeScreen(true)
+            setShowPaymentForm(false)
+          } else {
+            setCart([])
+            setSearchTerm('')
+            setShowPaymentForm(false)
+            setAmountPaid('')
+          }
+        } else {
+          setMessage({ type: 'error', text: result.message || 'Failed to process order' })
+        }
       }
     } catch (err) {
       setMessage({ type: 'error', text: 'Error processing order. Please try again.' })
@@ -344,21 +533,317 @@ function POS({ employeeId, employeeName }) {
   return (
     <div style={{ 
       display: 'flex', 
+      flexDirection: 'column',
       height: 'calc(100vh - 100px)',
       gap: '20px',
       padding: '20px',
-      backgroundColor: '#f5f5f5'
+      backgroundColor: '#f5f5f5',
+      position: 'relative'
     }}>
-      {/* Left Column - Cart */}
+      {/* Customer Display Full Screen Overlay */}
+      {showCustomerDisplay && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 1000,
+          backgroundColor: '#f5f5f5'
+        }}>
+          <div style={{
+            height: '100%',
+            width: '100%',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            {/* Cashier Controls Bar - Small overlay at top right */}
+            <div style={{
+              position: 'absolute',
+              top: '10px',
+              right: '10px',
+              zIndex: 1001,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              alignItems: 'flex-end'
+            }}>
+              {/* Payment Form Controls - Only show when payment form is active and payment method is cash */}
+              {showPaymentForm && paymentMethod === 'cash' && (
+                <div style={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                  borderRadius: '8px',
+                  padding: '20px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                  minWidth: '300px',
+                  maxWidth: '400px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                    <h3 style={{ margin: 0, fontSize: '18px' }}>Cashier Controls</h3>
+                    <button
+                      onClick={() => {
+                        setShowCustomerDisplay(false)
+                        setShowPaymentForm(false)
+                        setAmountPaid('')
+                      }}
+                      style={{
+                        border: 'none',
+                        backgroundColor: 'transparent',
+                        color: '#666',
+                        cursor: 'pointer',
+                        fontSize: '20px',
+                        padding: '0',
+                        width: '24px',
+                        height: '24px',
+                        lineHeight: '1'
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  {/* Payment Method */}
+                  <div style={{ marginBottom: '15px' }}>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={() => {
+                          setPaymentMethod('cash')
+                          setAmountPaid('')
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: '12px',
+                          border: paymentMethod === 'cash' ? '2px solid #000' : '1px solid #ddd',
+                          borderRadius: '4px',
+                          fontSize: '14px',
+                          fontWeight: 600,
+                          backgroundColor: paymentMethod === 'cash' ? '#000' : '#fff',
+                          color: paymentMethod === 'cash' ? '#fff' : '#000',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Cash
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPaymentMethod('credit_card')
+                          setAmountPaid('')
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: '12px',
+                          border: paymentMethod === 'credit_card' ? '2px solid #000' : '1px solid #ddd',
+                          borderRadius: '4px',
+                          fontSize: '14px',
+                          fontWeight: 600,
+                          backgroundColor: paymentMethod === 'credit_card' ? '#000' : '#fff',
+                          color: paymentMethod === 'credit_card' ? '#fff' : '#000',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Card
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Amount Display for Cash */}
+                  {paymentMethod === 'cash' && (
+                    <div style={{ marginBottom: '15px' }}>
+                      <div style={{
+                        padding: '12px',
+                        border: '2px solid #ddd',
+                        borderRadius: '4px',
+                        fontSize: '20px',
+                        fontFamily: 'monospace',
+                        fontWeight: 600,
+                        marginBottom: '10px',
+                        backgroundColor: '#f9f9f9',
+                        textAlign: 'right'
+                      }}>
+                        {amountPaid ? `$${parseFloat(amountPaid || 0).toFixed(2)}` : '$0.00'}
+                        {amountPaid && parseFloat(amountPaid) > 0 && (
+                          <div style={{ fontSize: '14px', color: calculateChange() >= 0 ? '#2e7d32' : '#d32f2f', marginTop: '5px' }}>
+                            Change: ${calculateChange().toFixed(2)}
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Quick Amount Buttons */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginBottom: '10px' }}>
+                        {[10, 20, 50, 100].map(amt => (
+                          <button
+                            key={amt}
+                            onClick={() => setAmountPaid(amt.toString())}
+                            style={{
+                              padding: '8px',
+                              border: '1px solid #ddd',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              backgroundColor: '#fff',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            ${amt}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Calculator Input */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, '.', 0, 'C'].map((val) => (
+                          <button
+                            key={val}
+                            onClick={() => {
+                              if (val === 'C') {
+                                setAmountPaid('')
+                              } else {
+                                handleCalculatorInput(val.toString())
+                              }
+                            }}
+                            style={{
+                              padding: '10px',
+                              border: '1px solid #ddd',
+                              borderRadius: '4px',
+                              fontSize: '14px',
+                              backgroundColor: '#fff',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {val}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Process Payment Button */}
+                  <button
+                    onClick={processOrder}
+                    disabled={processing || cart.length === 0 || (paymentMethod === 'cash' && (!amountPaid || parseFloat(amountPaid) < calculateTotal()))}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      backgroundColor: processing || cart.length === 0 || (paymentMethod === 'cash' && (!amountPaid || parseFloat(amountPaid) < calculateTotal())) ? '#ccc' : '#000',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      fontSize: '16px',
+                      fontWeight: 600,
+                      cursor: processing || cart.length === 0 || (paymentMethod === 'cash' && (!amountPaid || parseFloat(amountPaid) < calculateTotal())) ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {processing ? 'Processing...' : 'Complete Payment'}
+                  </button>
+
+                  {/* Message */}
+                  {message && (
+                    <div style={{
+                      marginTop: '10px',
+                      padding: '10px',
+                      borderRadius: '4px',
+                      backgroundColor: message.type === 'success' ? '#e8f5e9' : '#ffebee',
+                      color: message.type === 'success' ? '#2e7d32' : '#d32f2f',
+                      fontSize: '12px'
+                    }}>
+                      {message.text}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Close Button - Show when on summary screen */}
+              {showSummary && !showPaymentForm && (
+                <button
+                  onClick={() => {
+                    setShowCustomerDisplay(false)
+                    setShowSummary(false)
+                  }}
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    backdropFilter: 'blur(10px)'
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            
+            {/* Full Screen Customer Display */}
+            <div style={{
+              flex: 1,
+              width: '100%',
+              height: '100%',
+              overflow: 'hidden'
+            }}>
+              <CustomerDisplayPopup
+                cart={cart}
+                subtotal={calculateSubtotal()}
+                tax={calculateTax()}
+                total={calculateTotal()}
+                tip={selectedTip}
+                paymentMethod={showPaymentForm && paymentMethod === 'credit_card' ? paymentMethod : null}
+                amountPaid={amountPaid}
+                onClose={() => {
+                  setShowCustomerDisplay(false)
+                  setShowPaymentForm(false)
+                  setShowSummary(false)
+                  setAmountPaid('')
+                }}
+                onTipSelect={handleTipSelect}
+                onReceiptSelect={handleReceiptSelect}
+                onProceedToPayment={() => {
+                  // User clicked "Proceed to Payment" from summary - set showSummary to false
+                  setShowSummary(false)
+                  // Don't show payment form yet - wait for payment method selection
+                  // Payment form will be shown when payment method is selected
+                }}
+                onPaymentMethodSelect={(method) => {
+                  // Set payment method based on customer's selection
+                  if (method.method_type === 'cash') {
+                    setPaymentMethod('cash')
+                    setShowPaymentForm(true) // Show payment form for cashier
+                    setShowCustomerDisplay(false) // Hide customer display for cash - cashier handles it
+                  } else if (method.method_type === 'card') {
+                    setPaymentMethod('credit_card')
+                    setShowPaymentForm(true) // Show payment form
+                    // Keep customer display open for card payments
+                  }
+                }}
+                showSummary={showSummary && !showPaymentForm}
+                employeeId={employeeId}
+                paymentCompleted={paymentCompleted}
+                transactionId={currentTransactionId}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content Row - Hidden when customer display is showing */}
       <div style={{
+        display: showCustomerDisplay ? 'none' : 'flex',
+        gap: '20px',
         flex: '1',
-        backgroundColor: '#fff',
-        borderRadius: '8px',
-        padding: '20px',
-        display: 'flex',
-        flexDirection: 'column',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        minHeight: 0
       }}>
+        {/* Left Column - Cart */}
+        <div style={{
+          flex: '1',
+          backgroundColor: '#fff',
+          borderRadius: '8px',
+          padding: '20px',
+          display: 'flex',
+          flexDirection: 'column',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          minWidth: 0
+        }}>
         <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Current Order</h2>
         
         {/* Cart Items */}
@@ -470,6 +955,14 @@ function POS({ employeeId, employeeName }) {
               ${calculateTax().toFixed(2)}
             </span>
           </div>
+          {selectedTip > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ color: '#2e7d32' }}>Tip:</span>
+              <span style={{ fontFamily: 'monospace', fontWeight: 500, color: '#2e7d32' }}>
+                ${selectedTip.toFixed(2)}
+              </span>
+            </div>
+          )}
           <div style={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -481,7 +974,7 @@ function POS({ employeeId, employeeName }) {
           }}>
             <span>Total:</span>
             <span style={{ fontFamily: 'monospace' }}>
-              ${calculateTotal().toFixed(2)}
+              ${calculateTotalWithTip().toFixed(2)}
             </span>
           </div>
 
@@ -505,7 +998,10 @@ function POS({ employeeId, employeeName }) {
             </button>
           }>
             <button
-              onClick={() => setShowPaymentForm(true)}
+              onClick={() => {
+                setShowSummary(true)
+                setShowCustomerDisplay(true)
+              }}
               disabled={cart.length === 0}
               style={{
                 width: '100%',
@@ -525,21 +1021,93 @@ function POS({ employeeId, employeeName }) {
         </div>
       </div>
 
-      {/* Right Column - Product Search or Payment Form */}
-      <div style={{
-        flex: '1',
-        backgroundColor: '#fff',
-        borderRadius: '8px',
-        padding: '20px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-      }}>
-        {showPaymentForm ? (
+        {/* Right Column - Product Search or Payment Form or Change Screen */}
+        <div style={{
+          flex: '1',
+          backgroundColor: '#fff',
+          borderRadius: '8px',
+          padding: '20px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden'
+        }}>
+        {showChangeScreen ? (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ marginTop: 0, marginBottom: 0 }}>Change Due</h2>
+              <button
+                onClick={handleDismissChange}
+                style={{
+                  border: 'none',
+                  backgroundColor: 'transparent',
+                  color: '#666',
+                  cursor: 'pointer',
+                  fontSize: '24px',
+                  padding: '0',
+                  width: '30px',
+                  height: '30px',
+                  lineHeight: '1'
+                }}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '60px 20px',
+              minHeight: '400px'
+            }}>
+              <div style={{
+                fontSize: '48px',
+                fontWeight: 700,
+                color: '#2e7d32',
+                marginBottom: '20px',
+                fontFamily: 'monospace'
+              }}>
+                ${changeAmount.toFixed(2)}
+              </div>
+              <div style={{
+                fontSize: '24px',
+                color: '#666',
+                marginBottom: '40px',
+                textAlign: 'center'
+              }}>
+                Change to return to customer
+              </div>
+              <button
+                onClick={handleDismissChange}
+                style={{
+                  padding: '16px 32px',
+                  backgroundColor: '#000',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '18px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#333'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#000'}
+              >
+                Return to POS
+              </button>
+            </div>
+          </>
+        ) : showPaymentForm ? (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h2 style={{ marginTop: 0, marginBottom: 0 }}>Payment</h2>
               <button
                 onClick={() => {
                   setShowPaymentForm(false)
+                  setShowCustomerDisplay(false)
                   setAmountPaid('')
                 }}
                 style={{
@@ -971,6 +1539,7 @@ function POS({ employeeId, employeeName }) {
             </div>
           </>
         )}
+        </div>
       </div>
 
       {/* Barcode Scanner Modal */}

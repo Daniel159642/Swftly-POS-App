@@ -14,11 +14,63 @@ function AdminDashboard() {
   const [permissionEmployeeId, setPermissionEmployeeId] = useState(null);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [showDisplaySettings, setShowDisplaySettings] = useState(false);
+  const [displaySettings, setDisplaySettings] = useState({
+    tip_enabled: false,
+    tip_after_payment: false,
+    tip_suggestions: [15, 18, 20, 25]
+  });
 
   useEffect(() => {
     loadEmployees();
     loadRoles();
+    loadDisplaySettings();
   }, []);
+
+  const loadDisplaySettings = async () => {
+    try {
+      const response = await fetch('/api/customer-display/settings');
+      const data = await response.json();
+      if (data.success) {
+        setDisplaySettings({
+          tip_enabled: data.data.tip_enabled === 1 || data.data.tip_enabled === true,
+          tip_after_payment: data.data.tip_after_payment === 1 || data.data.tip_after_payment === true,
+          tip_suggestions: data.data.tip_suggestions || [15, 18, 20, 25]
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load display settings:', err);
+    }
+  };
+
+  const saveDisplaySettings = async () => {
+    try {
+      const sessionToken = localStorage.getItem('sessionToken');
+      const response = await fetch('/api/customer-display/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({
+          tip_enabled: displaySettings.tip_enabled ? 1 : 0,
+          tip_after_payment: displaySettings.tip_after_payment ? 1 : 0,
+          tip_suggestions: displaySettings.tip_suggestions
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setSuccess('Display settings saved successfully');
+        setShowDisplaySettings(false);
+        setTimeout(() => setSuccess(null), 3000);
+      } else {
+        setError(data.message || 'Failed to save display settings');
+      }
+    } catch (err) {
+      setError('Failed to save display settings');
+    }
+  };
 
   const loadEmployees = async () => {
     try {
@@ -112,11 +164,19 @@ function AdminDashboard() {
     <div className="admin-dashboard" style={{ padding: '0', maxWidth: '100%' }}>
       <div className="admin-header" style={{ marginBottom: '20px' }}>
         <h1 style={{ fontSize: '24px', margin: 0 }}>Admin Dashboard</h1>
-        {hasPermission('add_employee') && (
-          <button className="btn btn-primary" onClick={handleAddEmployee}>
-            Add Employee
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => setShowDisplaySettings(!showDisplaySettings)}
+          >
+            {showDisplaySettings ? 'Hide' : 'Show'} Display Settings
           </button>
-        )}
+          {hasPermission('add_employee') && (
+            <button className="btn btn-primary" onClick={handleAddEmployee}>
+              Add Employee
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -214,6 +274,51 @@ function AdminDashboard() {
             setPermissionEmployeeId(null);
           }}
         />
+      )}
+
+      {showDisplaySettings && (
+        <div style={{ 
+          marginTop: '20px', 
+          padding: '20px', 
+          backgroundColor: '#fff', 
+          borderRadius: '8px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <h2>Customer Display Settings</h2>
+          
+          <div style={{ marginTop: '20px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
+              <input
+                type="checkbox"
+                checked={displaySettings.tip_enabled}
+                onChange={(e) => setDisplaySettings({ ...displaySettings, tip_enabled: e.target.checked })}
+              />
+              <span>Enable tip prompts before payment</span>
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
+              <input
+                type="checkbox"
+                checked={displaySettings.tip_after_payment}
+                onChange={(e) => setDisplaySettings({ ...displaySettings, tip_after_payment: e.target.checked })}
+              />
+              <span>Enable tip option after payment completion</span>
+            </label>
+
+            <div style={{ marginTop: '20px' }}>
+              <button className="btn btn-primary" onClick={saveDisplaySettings}>
+                Save Settings
+              </button>
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => setShowDisplaySettings(false)}
+                style={{ marginLeft: '10px' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -5,6 +5,15 @@ Web viewer for inventory database - Google Sheets style interface
 
 from flask import Flask, render_template, jsonify, send_from_directory, request, Response
 from werkzeug.utils import secure_filename
+
+# Socket.IO support
+try:
+    from flask_socketio import SocketIO, emit
+    socketio = None
+    SOCKETIO_AVAILABLE = True
+except ImportError:
+    SOCKETIO_AVAILABLE = False
+    print("Warning: flask-socketio not installed. Real-time features will be disabled.")
 from database import (
     list_products, list_vendors, list_shipments, get_sales,
     get_shipment_items, get_shipment_details,
@@ -68,6 +77,13 @@ def get_barcode_scanner():
 
 app = Flask(__name__)
 DB_NAME = 'inventory.db'
+
+# Initialize Socket.IO
+if SOCKETIO_AVAILABLE:
+    # Use threading mode instead of eventlet to avoid blocking issues
+    socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+else:
+    socketio = None
 
 # Optional CORS support
 try:
@@ -482,6 +498,7 @@ def api_upload_shipment():
 def api_login():
     """Employee login"""
     try:
+        print("Login request received")
         # Check if request has JSON data
         if not request.is_json:
             return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
@@ -490,6 +507,7 @@ def api_login():
             return jsonify({'success': False, 'message': 'Invalid request data'}), 400
         
         data = request.json
+        print(f"Login attempt for: {data.get('username') or data.get('employee_code')}")
         
         # Validate required fields
         username = data.get('username')
@@ -503,6 +521,7 @@ def api_login():
             return jsonify({'success': False, 'message': 'Username or employee code is required'}), 400
         
         # Call login function
+        print("Calling employee_login...")
         result = employee_login(
             username=username,
             employee_code=employee_code,
@@ -510,6 +529,7 @@ def api_login():
             ip_address=request.remote_addr or '127.0.0.1',
             device_info=request.headers.get('User-Agent', 'Unknown')
         )
+        print(f"Login result: success={result.get('success')}")
         
         return jsonify(result)
     except Exception as e:
@@ -566,7 +586,8 @@ def api_create_order():
             payment_method=data.get('payment_method', 'cash'),
             tax_rate=data.get('tax_rate', 0.0),
             discount=data.get('discount', 0.0),
-            customer_id=data.get('customer_id')
+            customer_id=data.get('customer_id'),
+            tip=data.get('tip', 0.0)
         )
         
         return jsonify(result)
@@ -2213,8 +2234,209 @@ def get_events():
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
+# ============================================================================
+# SOCKET.IO EVENT HANDLERS
+# ============================================================================
+
+if SOCKETIO_AVAILABLE and socketio:
+    from flask_socketio import join_room
+    
+    @socketio.on('connect')
+    def handle_connect():
+        print('Client connected to Socket.IO')
+        emit('connected', {'status': 'ok'})
+    
+    @socketio.on('disconnect')
+    def handle_disconnect():
+        print('Client disconnected from Socket.IO')
+    
+    @socketio.on('join')
+    def handle_join(data):
+        room = data.get('room', 'customer_display')
+        join_room(room)
+        print(f'Client joined room: {room}')
+        emit('joined', {'room': room})
+
+# ============================================================================
+# CUSTOMER DISPLAY SYSTEM API ENDPOINTS
+# ============================================================================
+
+@app.route('/api/transaction/start', methods=['POST'])
+def start_transaction():
+    """Start new transaction"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not session_token:
+            session_token = request.json.get('session_token')
+        
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_data['employee_id']
+        data = request.json
+        
+        from customer_display_system import CustomerDisplaySystem
+        cds = CustomerDisplaySystem(DB_NAME)
+        
+        result = cds.start_transaction(employee_id, data['items'])
+        
+        # Emit Socket.IO event for customer display
+        if SOCKETIO_AVAILABLE and socketio:
+            socketio.emit('transaction_started', result, room='customer_display')
+        
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/transaction/<int:transaction_id>', methods=['GET'])
+def get_transaction(transaction_id):
+    """Get transaction details"""
+    try:
+        from customer_display_system import CustomerDisplaySystem
+        cds = CustomerDisplaySystem(DB_NAME)
+        
+        details = cds.get_transaction_details(transaction_id)
+        if not details:
+            return jsonify({'success': False, 'message': 'Transaction not found'}), 404
+        
+        return jsonify({'success': True, 'data': details})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/payment-methods', methods=['GET'])
+def get_payment_methods():
+    """Get available payment methods"""
+    try:
+        from customer_display_system import CustomerDisplaySystem
+        cds = CustomerDisplaySystem(DB_NAME)
+        
+        methods = cds.get_payment_methods()
+        return jsonify({'success': True, 'data': methods})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/payment/process', methods=['POST'])
+def process_payment():
+    """Process payment"""
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not session_token:
+            session_token = request.json.get('session_token')
+        
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        data = request.json
+        
+        from customer_display_system import CustomerDisplaySystem
+        cds = CustomerDisplaySystem(DB_NAME)
+        
+        result = cds.process_payment(
+            data['transaction_id'],
+            data['payment_method_id'],
+            data['amount'],
+            data.get('card_info'),
+            data.get('tip', 0)
+        )
+        
+        # Emit Socket.IO events for customer display
+        if SOCKETIO_AVAILABLE and socketio:
+            if result.get('success'):
+                socketio.emit('payment_processed', result, room='customer_display')
+                socketio.emit('payment_success', result, room='customer_display')
+            else:
+                socketio.emit('payment_error', result, room='customer_display')
+        
+        return jsonify({'success': result.get('success', False), 'data': result})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/receipt/preference', methods=['POST'])
+def save_receipt_preference():
+    """Save receipt preference"""
+    try:
+        data = request.json
+        
+        from customer_display_system import CustomerDisplaySystem
+        cds = CustomerDisplaySystem(DB_NAME)
+        
+        preference_id = cds.save_receipt_preference(
+            data['transaction_id'],
+            data['receipt_type'],
+            data.get('email'),
+            data.get('phone')
+        )
+        
+        return jsonify({'success': True, 'preference_id': preference_id})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/customer-display/settings', methods=['GET', 'POST', 'PUT'])
+def get_display_settings():
+    """Get or update customer display settings"""
+    try:
+        from customer_display_system import CustomerDisplaySystem
+        cds = CustomerDisplaySystem(DB_NAME)
+        
+        if request.method == 'GET':
+            settings = cds.get_display_settings()
+            return jsonify({'success': True, 'data': settings})
+        else:
+            # POST or PUT - update settings
+            data = request.get_json() or {}
+            
+            # Validate session
+            session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not session_token:
+                session_token = request.cookies.get('session_token')
+            
+            if not session_token:
+                return jsonify({'success': False, 'message': 'Authentication required'}), 401
+            
+            employee = verify_session(session_token)
+            if not employee:
+                return jsonify({'success': False, 'message': 'Invalid session'}), 401
+            
+            # Check admin permission
+            pm = get_permission_manager()
+            if not pm.has_permission(employee['employee_id'], 'manage_settings'):
+                # Fallback: check if user is admin/owner
+                if employee.get('position', '').lower() not in ['admin', 'owner', 'manager']:
+                    return jsonify({'success': False, 'message': 'Permission denied'}), 403
+            
+            # Update settings
+            cds.update_display_settings(**data)
+            updated_settings = cds.get_display_settings()
+            return jsonify({'success': True, 'data': updated_settings})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/customer-display')
+def customer_display():
+    """Render customer display page"""
+    return render_template('customer_display.html')
+
 if __name__ == '__main__':
     print("Starting web viewer...")
     print("Open your browser to: http://localhost:5001")
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    if SOCKETIO_AVAILABLE and socketio:
+        print("Socket.IO enabled - real-time features available")
+        socketio.run(app, debug=True, host='0.0.0.0', port=5001)
+    else:
+        print("Socket.IO disabled - using standard Flask server")
+        app.run(debug=True, host='0.0.0.0', port=5001)
 
