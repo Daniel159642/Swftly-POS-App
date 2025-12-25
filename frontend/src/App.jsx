@@ -15,6 +15,8 @@ import Profile from './pages/Profile'
 import ShipmentVerification from './pages/ShipmentVerification'
 import CustomerDisplay from './components/CustomerDisplay'
 import CustomerDisplayPopup from './pages/CustomerDisplayPopup'
+import ScheduleManager from './components/ScheduleManager'
+import AvailabilitySubmission from './components/AvailabilitySubmission'
 import './index.css'
 
 function ProtectedRoute({ children, sessionToken, employee, onLogout }) {
@@ -140,6 +142,20 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
       } />
       <Route path="/customer-display" element={<CustomerDisplay />} />
       <Route path="/customer-display-popup" element={<CustomerDisplayPopup />} />
+      <Route path="/schedule" element={
+        <ProtectedRoute sessionToken={sessionToken} employee={employee} onLogout={onLogout}>
+          <Layout employee={employee} onLogout={onLogout}>
+            <ScheduleManager />
+          </Layout>
+        </ProtectedRoute>
+      } />
+      <Route path="/availability" element={
+        <ProtectedRoute sessionToken={sessionToken} employee={employee} onLogout={onLogout}>
+          <Layout employee={employee} onLogout={onLogout}>
+            <AvailabilitySubmission employeeId={employee?.employee_id} />
+          </Layout>
+        </ProtectedRoute>
+      } />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   )
@@ -181,6 +197,36 @@ function Layout({ children, employee, onLogout }) {
           <span style={{ color: '#666' }}>Welcome, {employee?.employee_name}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <button
+            onClick={() => navigate('/schedule')}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '16px',
+              fontWeight: 500,
+              color: '#666',
+              borderRadius: '8px'
+            }}
+          >
+            Schedule
+          </button>
+          <button
+            onClick={() => navigate('/availability')}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '16px',
+              fontWeight: 500,
+              color: '#666',
+              borderRadius: '8px'
+            }}
+          >
+            Availability
+          </button>
           <button
             onClick={() => navigate('/profile')}
             style={{

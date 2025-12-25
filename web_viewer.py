@@ -1957,6 +1957,363 @@ def api_employee_availability():
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
+# Schedule Management Endpoints
+def get_employee_from_token():
+    """Helper to get employee_id from session token"""
+    session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not session_token:
+        session_token = request.json.get('session_token') if request.json else None
+    if not session_token:
+        return None
+    session_data = verify_session(session_token)
+    if session_data and session_data.get('valid'):
+        return session_data.get('employee_id')
+    return None
+
+@app.route('/api/schedule/generate', methods=['POST'])
+def api_generate_schedule():
+    """Generate automated schedule"""
+    try:
+        from schedule_generator import AutomatedScheduleGenerator
+        
+        employee_id = get_employee_from_token()
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        data = request.json
+        week_start = data.get('week_start_date')
+        if not week_start:
+            return jsonify({'success': False, 'message': 'week_start_date is required'}), 400
+        
+        settings = data.get('settings', {})
+        
+        # Extract end date from settings if provided
+        week_end = settings.get('week_end_date')
+        if not week_end:
+            # Default to 6 days after start if not provided
+            from datetime import datetime, timedelta
+            start_dt = datetime.strptime(week_start, '%Y-%m-%d')
+            week_end = (start_dt + timedelta(days=6)).strftime('%Y-%m-%d')
+        
+        scheduler = AutomatedScheduleGenerator()
+        result = scheduler.generate_schedule(week_start, settings, employee_id)
+        
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/schedule/<int:period_id>', methods=['GET'])
+def api_get_schedule(period_id):
+    """Get schedule details"""
+    try:
+        from schedule_generator import AutomatedScheduleGenerator
+        
+        scheduler = AutomatedScheduleGenerator()
+        summary = scheduler.get_schedule_summary(period_id)
+        
+        if not summary:
+            return jsonify({'success': False, 'message': 'Schedule not found'}), 404
+        
+        return jsonify(summary)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/schedule/<int:period_id>/publish', methods=['POST'])
+def api_publish_schedule(period_id):
+    """Publish schedule to employees and add to master calendar"""
+    try:
+        from schedule_generator import AutomatedScheduleGenerator
+        from database import add_calendar_event
+        
+        employee_id = get_employee_from_token()
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        scheduler = AutomatedScheduleGenerator()
+        result = scheduler.publish_schedule(period_id, employee_id)
+        
+        if result:
+            # Get all shifts from the published schedule
+            conn = sqlite3.connect(DB_NAME)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT ss.*, e.first_name || ' ' || e.last_name as employee_name
+                FROM Scheduled_Shifts ss
+                JOIN employees e ON ss.employee_id = e.employee_id
+                WHERE ss.period_id = ? AND ss.is_draft = 0
+            """, (period_id,))
+            
+            shifts = cursor.fetchall()
+            
+            # Add each shift to master calendar
+            for shift in shifts:
+                shift_dict = dict(shift)
+                event_title = f"{shift_dict['employee_name']} - {shift_dict.get('position', 'Shift')}"
+                event_description = f"Shift: {shift_dict['start_time']} - {shift_dict['end_time']}"
+                if shift_dict.get('notes'):
+                    event_description += f"\n{shift_dict['notes']}"
+                
+                add_calendar_event(
+                    event_date=shift_dict['shift_date'],
+                    event_type='schedule',
+                    title=event_title,
+                    description=event_description,
+                    start_time=shift_dict['start_time'],
+                    end_time=shift_dict['end_time'],
+                    related_id=shift_dict['scheduled_shift_id'],
+                    related_table='Scheduled_Shifts',
+                    created_by=employee_id
+                )
+            
+            cursor.close()
+            conn.close()
+        
+        return jsonify({'success': result})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/schedule/<int:period_id>/save-template', methods=['POST'])
+def api_save_template(period_id):
+    """Save schedule as template"""
+    try:
+        from schedule_generator import AutomatedScheduleGenerator
+        
+        employee_id = get_employee_from_token()
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        data = request.json
+        template_name = data.get('template_name')
+        if not template_name:
+            return jsonify({'success': False, 'message': 'template_name is required'}), 400
+        
+        scheduler = AutomatedScheduleGenerator()
+        template_id = scheduler.save_as_template(
+            period_id,
+            template_name,
+            data.get('description', ''),
+            employee_id
+        )
+        
+        return jsonify({'success': True, 'template_id': template_id})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/schedule/copy-template', methods=['POST'])
+def api_copy_from_template():
+    """Copy schedule from template"""
+    try:
+        from schedule_generator import AutomatedScheduleGenerator
+        
+        employee_id = get_employee_from_token()
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        data = request.json
+        template_id = data.get('template_id')
+        week_start = data.get('week_start_date')
+        
+        if not template_id or not week_start:
+            return jsonify({'success': False, 'message': 'template_id and week_start_date are required'}), 400
+        
+        scheduler = AutomatedScheduleGenerator()
+        period_id = scheduler.copy_schedule_from_template(
+            template_id,
+            week_start,
+            employee_id
+        )
+        
+        if not period_id:
+            return jsonify({'success': False, 'message': 'Template not found'}), 404
+        
+        return jsonify({'success': True, 'period_id': period_id})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/schedule/templates', methods=['GET'])
+def api_get_templates():
+    """Get all schedule templates"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT st.*, 
+                   e.first_name || ' ' || e.last_name as created_by_name
+            FROM Schedule_Templates st
+            LEFT JOIN employees e ON st.created_by = e.employee_id
+            ORDER BY st.last_used DESC, st.created_at DESC
+        """)
+        
+        templates = [dict(row) for row in cursor.fetchall()]
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify(templates)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/schedule/<int:period_id>/shift', methods=['POST', 'PUT', 'DELETE'])
+def api_manage_shift(period_id):
+    """Create, update, or delete shift in draft schedule"""
+    try:
+        employee_id = get_employee_from_token()
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        if request.method == 'POST':
+            # Create new shift
+            data = request.json
+            
+            cursor.execute("""
+                INSERT INTO Scheduled_Shifts
+                (period_id, employee_id, shift_date, start_time, end_time,
+                 break_duration, position, notes, is_draft)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """, (period_id, data['employee_id'], data['shift_date'],
+                  data['start_time'], data['end_time'], data.get('break_duration', 30),
+                  data.get('position'), data.get('notes')))
+            
+            shift_id = cursor.lastrowid
+            
+            # Log change
+            cursor.execute("""
+                INSERT INTO Schedule_Changes
+                (period_id, scheduled_shift_id, change_type, changed_by, new_values)
+                VALUES (?, ?, 'created', ?, ?)
+            """, (period_id, shift_id, employee_id, json.dumps(data)))
+            
+        elif request.method == 'PUT':
+            # Update shift
+            data = request.json
+            shift_id = data['scheduled_shift_id']
+            
+            # Get old values
+            cursor.execute("""
+                SELECT * FROM Scheduled_Shifts WHERE scheduled_shift_id = ?
+            """, (shift_id,))
+            old_row = cursor.fetchone()
+            if not old_row:
+                conn.close()
+                return jsonify({'success': False, 'message': 'Shift not found'}), 404
+            old_values = dict(old_row)
+            
+            # Update
+            cursor.execute("""
+                UPDATE Scheduled_Shifts
+                SET employee_id = ?,
+                    shift_date = ?,
+                    start_time = ?,
+                    end_time = ?,
+                    break_duration = ?,
+                    position = ?,
+                    notes = ?
+                WHERE scheduled_shift_id = ?
+            """, (data['employee_id'], data['shift_date'], data['start_time'],
+                  data['end_time'], data.get('break_duration', 30),
+                  data.get('position'), data.get('notes'), shift_id))
+            
+            # Log change
+            cursor.execute("""
+                INSERT INTO Schedule_Changes
+                (period_id, scheduled_shift_id, change_type, changed_by, 
+                 old_values, new_values)
+                VALUES (?, ?, 'modified', ?, ?, ?)
+            """, (period_id, shift_id, employee_id, 
+                  json.dumps(old_values), json.dumps(data)))
+            
+        elif request.method == 'DELETE':
+            # Delete shift
+            shift_id = request.args.get('shift_id')
+            if not shift_id:
+                conn.close()
+                return jsonify({'success': False, 'message': 'shift_id is required'}), 400
+            
+            # Get old values
+            cursor.execute("""
+                SELECT * FROM Scheduled_Shifts WHERE scheduled_shift_id = ?
+            """, (shift_id,))
+            old_row = cursor.fetchone()
+            if not old_row:
+                conn.close()
+                return jsonify({'success': False, 'message': 'Shift not found'}), 404
+            old_values = dict(old_row)
+            
+            # Delete
+            cursor.execute("""
+                DELETE FROM Scheduled_Shifts WHERE scheduled_shift_id = ?
+            """, (shift_id,))
+            
+            # Log change
+            cursor.execute("""
+                INSERT INTO Schedule_Changes
+                (period_id, scheduled_shift_id, change_type, changed_by, old_values)
+                VALUES (?, ?, 'deleted', ?, ?)
+            """, (period_id, shift_id, employee_id, json.dumps(old_values)))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/availability/submit', methods=['POST'])
+def api_submit_availability():
+    """Employee submits their availability"""
+    try:
+        employee_id = get_employee_from_token()
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        
+        data = request.json
+        if not data or 'availability' not in data:
+            return jsonify({'success': False, 'message': 'availability array is required'}), 400
+        
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Delete old recurring availability
+        cursor.execute("""
+            DELETE FROM Employee_Availability
+            WHERE employee_id = ? AND is_recurring = 1
+        """, (employee_id,))
+        
+        # Insert new availability
+        for avail in data['availability']:
+            cursor.execute("""
+                INSERT INTO Employee_Availability
+                (employee_id, day_of_week, start_time, end_time, 
+                 availability_type, is_recurring)
+                VALUES (?, ?, ?, ?, ?, 1)
+            """, (employee_id, avail['day'], avail['start_time'],
+                  avail['end_time'], avail.get('type', 'available')))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/master_calendar')
 def api_master_calendar():
     """Get master calendar events"""

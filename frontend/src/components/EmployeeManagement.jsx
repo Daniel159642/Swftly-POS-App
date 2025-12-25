@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { usePermissions } from '../contexts/PermissionContext';
+import ScheduleManager from './ScheduleManager';
 
 function EmployeeManagement() {
   const { hasPermission } = usePermissions();
@@ -110,7 +111,7 @@ function EmployeeManagement() {
           />
         )}
         {activeTab === 'schedule' && (
-          <ScheduleBuilder employees={employees} />
+          <ScheduleManager />
         )}
       </div>
     </div>

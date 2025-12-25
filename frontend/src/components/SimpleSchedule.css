@@ -1,0 +1,727 @@
+/* SimpleSchedule.css - Clean, professional styling */
+
+.simple-schedule {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.simple-schedule-loading,
+.simple-schedule-error {
+  text-align: center;
+  padding: 40px;
+  font-size: 18px;
+}
+
+/* Header */
+.schedule-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #ddd;
+}
+
+.week-info h1 {
+  font-size: 24px;
+  margin: 0 0 5px 0;
+  color: #333;
+  font-weight: 500;
+}
+
+.week-info h2 {
+  font-size: 16px;
+  margin: 0;
+  color: #666;
+  font-weight: normal;
+}
+
+.view-toggle {
+  display: flex;
+  gap: 10px;
+}
+
+.view-toggle button {
+  padding: 8px 16px;
+  border: 1px solid #ddd;
+  background: white;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.view-toggle button:hover {
+  background: #f5f5f5;
+}
+
+.view-toggle button.active {
+  background: #333;
+  color: white;
+  border-color: #333;
+}
+
+.print-btn {
+  padding: 8px 16px;
+  background: white;
+  color: #333;
+  border: 1px solid #ddd;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.print-btn:hover {
+  background: #f5f5f5;
+}
+
+/* ============================================
+   GRID VIEW - Clean column layout
+   ============================================ */
+
+.schedule-grid-view {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 15px;
+  margin-bottom: 40px;
+}
+
+.day-column {
+  background: white;
+  border: 1px solid #ddd;
+  overflow: hidden;
+}
+
+.day-header {
+  background: #f5f5f5;
+  border-bottom: 1px solid #ddd;
+  padding: 12px;
+  text-align: center;
+}
+
+.day-name {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #333;
+}
+
+.day-date {
+  font-size: 12px;
+  color: #666;
+}
+
+.shifts-container {
+  padding: 15px;
+  min-height: 200px;
+}
+
+.no-shifts {
+  text-align: center;
+  color: #999;
+  padding: 40px 10px;
+  font-style: italic;
+}
+
+.shift-box {
+  background: white;
+  border: 1px solid #ddd;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.shift-box:hover {
+  background: #f9f9f9;
+}
+
+.employee-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.shift-time {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.shift-position {
+  font-size: 11px;
+  color: #999;
+  margin-top: 4px;
+}
+
+/* ============================================
+   LIST VIEW - Easy to read line by line
+   ============================================ */
+
+.schedule-list-view {
+  background: white;
+  border: 1px solid #ddd;
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.day-section {
+  margin-bottom: 35px;
+  padding-bottom: 25px;
+  border-bottom: 2px solid #eee;
+}
+
+.day-section:last-child {
+  border-bottom: none;
+}
+
+.day-title {
+  font-size: 16px;
+  color: #333;
+  margin: 0 0 15px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ddd;
+  font-weight: 500;
+}
+
+.shifts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.shift-row {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  background: white;
+  border: 1px solid #ddd;
+  margin-bottom: 8px;
+}
+
+.shift-row:hover {
+  background: #f9f9f9;
+}
+
+.shift-time-large {
+  font-size: 14px;
+  font-weight: 500;
+  min-width: 150px;
+  color: #333;
+}
+
+.shift-details {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.employee-name-large {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.position-badge {
+  font-size: 12px;
+  color: #666;
+}
+
+/* ============================================
+   TIMELINE VIEW - Visual hour blocks
+   ============================================ */
+
+.schedule-timeline-view {
+  background: white;
+  border: 1px solid #ddd;
+  padding: 20px;
+  margin-bottom: 30px;
+  overflow-x: auto;
+}
+
+.timeline-grid {
+  display: grid;
+  grid-template-columns: 120px repeat(7, 1fr);
+  min-width: 1200px;
+}
+
+.timeline-corner-cell {
+  border-right: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+  background: #f5f5f5;
+}
+
+.timeline-hour-header-row {
+  display: contents;
+}
+
+.timeline-day-header-cell {
+  border-right: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+  padding: 8px;
+  text-align: center;
+  background: #f5f5f5;
+}
+
+.timeline-day-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 2px;
+}
+
+.timeline-day-date {
+  font-size: 11px;
+  color: #666;
+}
+
+.timeline-hour-labels-row {
+  display: contents;
+}
+
+.timeline-hour-label-cell {
+  border-right: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+  padding: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #333;
+  background: #f5f5f5;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  text-align: center;
+}
+
+.timeline-hour-markers-cell {
+  border-right: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  background: #fafafa;
+}
+
+.timeline-hour-label {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #666;
+  border-bottom: 1px solid #eee;
+}
+
+.timeline-hour-label:last-child {
+  border-bottom: none;
+}
+
+.timeline-employee-section {
+  display: contents;
+}
+
+.timeline-employee-name-cell {
+  border-right: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+  padding: 10px;
+  font-size: 12px;
+  color: #333;
+  background: #f9f9f9;
+  display: flex;
+  align-items: center;
+}
+
+.timeline-employee-days {
+  display: contents;
+}
+
+.timeline-day-shift-cell {
+  border-right: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+  position: relative;
+  height: 640px; /* 16 hours * 40px */
+  background: white;
+}
+
+.timeline-shift-bar {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  background: #333;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.timeline-shift-bar:hover {
+  background: #555;
+}
+
+.shift-bar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================
+   GANTT VIEW - Single day view with navigation
+   ============================================ */
+
+.schedule-gantt-view-single {
+  background: white;
+  border: 1px solid #ddd;
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.gantt-navigation-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background: #f5f5f5;
+  border-bottom: 2px solid #ddd;
+  margin-bottom: 20px;
+  border-radius: 8px;
+}
+
+.gantt-nav-button {
+  padding: 10px 20px;
+  background: white;
+  border: 2px solid #007bff;
+  color: #007bff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.gantt-nav-button:hover:not(:disabled) {
+  background: #007bff;
+  color: white;
+}
+
+.gantt-nav-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: #ccc;
+  color: #999;
+}
+
+.gantt-current-day-info {
+  text-align: center;
+}
+
+.gantt-current-day-name {
+  font-size: 24px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.gantt-current-day-date {
+  font-size: 16px;
+  color: #666;
+}
+
+.gantt-container-single {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.gantt-header-single {
+  display: flex;
+  border-bottom: 2px solid #ddd;
+  background: white;
+}
+
+.gantt-employee-header-cell {
+  width: 200px;
+  min-width: 200px;
+  border-right: 2px solid #ddd;
+  background: #f5f5f5;
+  padding: 15px;
+  font-weight: 600;
+  color: #333;
+}
+
+.gantt-day-column-single {
+  flex: 1;
+  min-width: 1280px; /* 16 hours * 80px - minimum width for consistent hour spacing */
+  display: flex;
+  flex-direction: column;
+}
+
+.gantt-hours-row-single {
+  display: flex;
+  background: white;
+}
+
+.gantt-hour-label-expanded {
+  border-right: 1px solid #ddd;
+  padding: 15px 8px;
+  font-size: 14px;
+  color: #333;
+  text-align: center;
+  background: #fafafa;
+  font-weight: 600;
+  width: 80px; /* Fixed width per hour for consistent spacing */
+  flex-shrink: 0;
+}
+
+.gantt-body-single {
+  display: flex;
+  flex-direction: column;
+}
+
+.gantt-employee-row-single {
+  display: flex;
+  border-bottom: 1px solid #eee;
+  min-height: 70px;
+}
+
+.gantt-employee-row-single:hover {
+  background: #f9f9f9;
+}
+
+.gantt-employee-name-cell {
+  width: 200px;
+  min-width: 200px;
+  border-right: 2px solid #ddd;
+  padding: 15px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  background: #f9f9f9;
+  display: flex;
+  align-items: center;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+}
+
+.gantt-day-shift-column-single {
+  position: relative;
+  height: 70px;
+  background: white;
+  flex: 1;
+  min-width: 1280px; /* 16 hours * 80px - minimum width */
+}
+
+.gantt-shift-bar {
+  position: absolute;
+  top: 10px;
+  height: 50px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 6px 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.gantt-shift-bar:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  transform: translateY(-2px);
+  z-index: 10;
+}
+
+.gantt-shift-bar-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+
+.gantt-shift-bar-time {
+  font-size: 11px;
+  opacity: 0.95;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================
+   SUMMARY SECTION
+   ============================================ */
+
+.schedule-summary {
+  background: white;
+  border: 1px solid #ddd;
+  padding: 20px;
+}
+
+.schedule-summary h3 {
+  font-size: 16px;
+  margin: 0 0 15px 0;
+  color: #333;
+  font-weight: 500;
+}
+
+.summary-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
+  margin-bottom: 30px;
+}
+
+.stat-box {
+  text-align: center;
+  padding: 15px;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+}
+
+.stat-number {
+  font-size: 32px;
+  font-weight: 500;
+  margin-bottom: 5px;
+  color: #333;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #666;
+}
+
+.employee-hours-table {
+  margin-top: 30px;
+}
+
+.employee-hours-table h4 {
+  font-size: 14px;
+  margin: 0 0 12px 0;
+  color: #333;
+  font-weight: 500;
+}
+
+.employee-hours-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.employee-hours-table th {
+  background: #f5f5f5;
+  padding: 10px;
+  text-align: left;
+  font-weight: 500;
+  color: #333;
+  border-bottom: 1px solid #ddd;
+  font-size: 12px;
+}
+
+.employee-hours-table td {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  font-size: 13px;
+}
+
+.employee-hours-table tbody tr:hover {
+  background: #f8f9fa;
+}
+
+.employee-name-cell {
+  font-weight: 500;
+  font-size: 16px;
+}
+
+.center {
+  text-align: center;
+}
+
+.hours-cell {
+  font-weight: 500;
+  color: #333;
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+
+@media print {
+  .schedule-header .view-toggle,
+  .print-btn {
+    display: none;
+  }
+
+  .simple-schedule {
+    max-width: 100%;
+  }
+
+  .schedule-grid-view {
+    grid-template-columns: repeat(7, 1fr);
+    gap: 10px;
+  }
+
+  .shift-box,
+  .shift-row {
+    page-break-inside: avoid;
+  }
+
+  .day-section {
+    page-break-inside: avoid;
+  }
+
+  body {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
+
+/* ============================================
+   RESPONSIVE - Mobile friendly
+   ============================================ */
+
+@media (max-width: 1200px) {
+  .schedule-grid-view {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .schedule-header {
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .schedule-grid-view {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .shift-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .shift-time-large {
+    min-width: auto;
+    margin-bottom: 10px;
+  }
+
+  .timeline-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .timeline-day-label {
+    width: 100%;
+    text-align: left;
+    padding: 10px 0;
+  }
+}
+
