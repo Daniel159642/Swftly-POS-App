@@ -2421,20 +2421,49 @@ def list_orders(
     employee_id: Optional[int] = None,
     order_status: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """List orders with optional filters"""
+    """List orders with optional filters, including receipt preferences"""
     conn = get_connection()
     cursor = conn.cursor()
     
-    query = """
-        SELECT 
-            o.*,
-            e.first_name || ' ' || e.last_name as employee_name,
-            c.customer_name
-        FROM orders o
-        LEFT JOIN employees e ON o.employee_id = e.employee_id
-        LEFT JOIN customers c ON o.customer_id = c.customer_id
-        WHERE 1=1
-    """
+    # Check if receipt_preferences table exists
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='receipt_preferences'
+    """)
+    has_receipt_prefs = cursor.fetchone() is not None
+    
+    if has_receipt_prefs:
+        # Join with receipt preferences through payment_transactions
+        # Note: If multiple transactions exist, this will get the first matching receipt preference
+        query = """
+            SELECT DISTINCT
+                o.*,
+                e.first_name || ' ' || e.last_name as employee_name,
+                c.customer_name,
+                rp.receipt_type,
+                rp.email_address as receipt_email,
+                rp.phone_number as receipt_phone,
+                rp.sent as receipt_sent,
+                rp.sent_at as receipt_sent_at
+            FROM orders o
+            LEFT JOIN employees e ON o.employee_id = e.employee_id
+            LEFT JOIN customers c ON o.customer_id = c.customer_id
+            LEFT JOIN payment_transactions pt ON o.order_id = pt.order_id
+            LEFT JOIN receipt_preferences rp ON pt.transaction_id = rp.transaction_id
+            WHERE 1=1
+        """
+    else:
+        query = """
+            SELECT 
+                o.*,
+                e.first_name || ' ' || e.last_name as employee_name,
+                c.customer_name
+            FROM orders o
+            LEFT JOIN employees e ON o.employee_id = e.employee_id
+            LEFT JOIN customers c ON o.customer_id = c.customer_id
+            WHERE 1=1
+        """
+    
     params = []
     
     if start_date:

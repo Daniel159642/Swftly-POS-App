@@ -5,32 +5,81 @@ import Tabs from '../components/Tabs'
 // Define table categories
 const TABLE_CATEGORIES = {
   'Inventory & Products': ['inventory', 'vendors'],
-  'Orders & Sales': ['orders', 'order_items', 'payment_transactions', 'sales', 'customers'],
-  'Shipments': ['shipments', 'shipment_items', 'pending_shipments', 'pending_shipment_items', 'shipment_discrepancies'],
+  'Orders & Sales': [
+    'orders', 
+    'order_items', 
+    'payment_transactions', 
+    'payment_methods',
+    'employee_tips',
+    'sales', 
+    'customers'
+  ],
+  'Shipments': [
+    'shipments', 
+    'shipment_items', 
+    'pending_shipments', 
+    'pending_shipment_items', 
+    'shipment_discrepancies',
+    'shipment_issues',
+    'shipment_scan_log',
+    'verification_sessions'
+  ],
   'Returns': ['pending_returns', 'pending_return_items'],
   'Employees & Scheduling': [
-    'employees', 
-    'employee_schedule', 
-    'employee_availability', 
-    'employee_sessions', 
+    'employees',
+    'employee_availability_unified',
+    'scheduled_shifts_unified',
     'time_clock',
+    'employee_sessions'
+  ],
+  'Calendar & Events': [
+    'calendar_events_unified',
+    'Calendar_Subscriptions',
+    'Event_Attendees',
+    'Event_Reminders'
+  ],
+  'Schedule Management': [
     'Schedule_Periods',
     'Schedule_Requirements',
     'Schedule_Templates',
+    'Time_Off_Requests',
+    'Schedule_Changes',
+    'Schedule_Notifications',
+    'Employee_Positions'
+  ],
+  'Legacy Scheduling Tables': [
+    'employee_schedule',
+    'employee_availability',
     'Scheduled_Shifts',
     'Employee_Shifts',
-    'Shipment_Schedule',
-    'Time_Off_Requests',
-    'Event_Attendees',
-    'Event_Reminders',
-    'Schedule_Changes',
-    'Schedule_Notifications'
+    'master_calendar',
+    'Calendar_Events',
+    'Shipment_Schedule'
   ],
-  'Calendar & Schedule': ['master_calendar'],
-  'Accounting': ['chart_of_accounts', 'journal_entries', 'journal_entry_lines', 'fiscal_periods', 'retained_earnings'],
-  'Audit & Logs': ['audit_log', 'activity_log'],
+  'Accounting': [
+    'chart_of_accounts', 
+    'journal_entries', 
+    'journal_entry_lines', 
+    'fiscal_periods', 
+    'retained_earnings'
+  ],
+  'Audit & Logs': ['audit_log'],
+  'Legacy Audit Tables': ['activity_log'],
   'Image Matching': ['image_identifications'],
-  'Security & Permissions': ['roles', 'permissions', 'role_permissions', 'employee_permission_overrides']
+  'Security & Permissions': [
+    'roles', 
+    'permissions', 
+    'role_permissions', 
+    'employee_permission_overrides'
+  ],
+  'Customer Display': [
+    'transactions',
+    'transaction_items',
+    'payments',
+    'receipt_preferences',
+    'customer_display_settings',
+    'customer_display_sessions'
+  ]
 }
 
 function Tables() {
@@ -127,10 +176,39 @@ function Tables() {
   }
 
   const formatTableName = (tableName) => {
-    return tableName
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ')
+    // Handle special formatting for unified tables
+    const specialNames = {
+      'employee_availability_unified': 'Employee Availability',
+      'scheduled_shifts_unified': 'Scheduled Shifts',
+      'calendar_events_unified': 'Calendar Events',
+      'payment_methods': 'Payment Methods',
+      'employee_tips': 'Employee Tips',
+      'shipment_issues': 'Shipment Issues',
+      'shipment_scan_log': 'Shipment Scan Log',
+      'verification_sessions': 'Verification Sessions',
+      'customer_display_settings': 'Customer Display Settings',
+      'customer_display_sessions': 'Customer Display Sessions',
+      'receipt_preferences': 'Receipt Preferences'
+    }
+    
+    if (specialNames[tableName]) {
+      return specialNames[tableName]
+    }
+    
+    // Handle CamelCase tables
+    if (tableName.includes('_') || tableName === tableName.toLowerCase()) {
+      return tableName
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ')
+    } else {
+      // Handle CamelCase (e.g., Schedule_Periods)
+      return tableName
+        .split(/(?=[A-Z])|_/)
+        .filter(Boolean)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ')
+    }
   }
 
   const loadData = async () => {
@@ -197,28 +275,33 @@ function Tables() {
       {activeCategory && currentCategoryTables.length > 0 && (
         <div style={{ marginBottom: '20px', borderBottom: '1px solid #ddd', paddingBottom: '10px' }}>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {currentCategoryTables.map(table => (
-              <button
-                key={table.id}
-                onClick={() => setActiveTab(table.id)}
-                style={{
-                  padding: '10px 16px',
-                  backgroundColor: activeTab === table.id ? 'rgba(128, 0, 128, 0.7)' : 'rgba(128, 0, 128, 0.2)',
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  border: activeTab === table.id ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(128, 0, 128, 0.3)',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: activeTab === table.id ? 600 : 500,
-                  color: '#fff',
-                  cursor: 'pointer',
-                  transition: 'all 0.3s ease',
-                  boxShadow: activeTab === table.id ? '0 4px 15px rgba(128, 0, 128, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)' : '0 2px 8px rgba(128, 0, 128, 0.1)'
-                }}
-              >
-                {table.label}
-              </button>
-            ))}
+            {currentCategoryTables.map(table => {
+              const isLegacy = activeCategory && activeCategory.includes('Legacy')
+              
+              return (
+                <button
+                  key={table.id}
+                  onClick={() => setActiveTab(table.id)}
+                  style={{
+                    padding: '10px 16px',
+                    backgroundColor: activeTab === table.id ? 'rgba(128, 0, 128, 0.7)' : (isLegacy ? 'rgba(128, 128, 128, 0.2)' : 'rgba(128, 0, 128, 0.2)'),
+                    backdropFilter: 'blur(10px)',
+                    WebkitBackdropFilter: 'blur(10px)',
+                    border: activeTab === table.id ? '1px solid rgba(255, 255, 255, 0.3)' : (isLegacy ? '1px solid rgba(128, 128, 128, 0.3)' : '1px solid rgba(128, 0, 128, 0.3)'),
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: activeTab === table.id ? 600 : 500,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    boxShadow: activeTab === table.id ? '0 4px 15px rgba(128, 0, 128, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)' : '0 2px 8px rgba(128, 0, 128, 0.1)',
+                    opacity: isLegacy ? 0.7 : 1
+                  }}
+                >
+                  {table.label}
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

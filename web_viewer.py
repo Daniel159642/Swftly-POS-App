@@ -600,12 +600,14 @@ def api_create_order():
 # Get all tables endpoint
 @app.route('/api/tables/list')
 def api_list_tables():
-    """Get list of all tables in the database"""
+    """Get list of all tables in the database (excluding receipt_preferences)"""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
         tables = [row[0] for row in cursor.fetchall()]
+        # Exclude receipt_preferences table since it's now part of the orders table
+        tables = [t for t in tables if t != 'receipt_preferences']
         conn.close()
         return jsonify({'tables': tables})
     except Exception as e:
