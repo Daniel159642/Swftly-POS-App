@@ -368,7 +368,9 @@ function Statistics() {
             padding: '6px 12px',
             border: 'none',
             backgroundColor: 'transparent',
-            color: activeView === 0 ? 'var(--text-primary, #333)' : 'var(--text-tertiary, #999)',
+            color: activeView === 0 
+              ? (isDarkMode ? '#fff' : '#333') 
+              : (isDarkMode ? '#999' : '#999'),
             cursor: 'pointer',
             fontSize: '12px',
             fontWeight: activeView === 0 ? 600 : 400,
@@ -385,7 +387,9 @@ function Statistics() {
             padding: '6px 12px',
             border: 'none',
             backgroundColor: 'transparent',
-            color: activeView === 1 ? 'var(--text-primary, #333)' : 'var(--text-tertiary, #999)',
+            color: activeView === 1 
+              ? (isDarkMode ? '#fff' : '#333') 
+              : (isDarkMode ? '#999' : '#999'),
             cursor: 'pointer',
             fontSize: '12px',
             fontWeight: activeView === 1 ? 600 : 400,
