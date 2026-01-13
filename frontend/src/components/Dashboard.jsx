@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import { usePermissions } from '../contexts/PermissionContext'
 import { useTheme } from '../contexts/ThemeContext'
 import Statistics from './Statistics'
@@ -9,6 +10,22 @@ function Dashboard() {
   const navigate = useNavigate()
   const { hasPermission } = usePermissions()
   const { themeColor } = useTheme()
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    return document.documentElement.classList.contains('dark-theme')
+  })
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains('dark-theme'))
+    })
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class']
+    })
+
+    return () => observer.disconnect()
+  }, [])
   
   // Convert hex to RGB
   const hexToRgb = (hex) => {
@@ -100,7 +117,7 @@ function Dashboard() {
     
     const boxContent = (
       <div
-        className={`magic-bento-card magic-bento-card--border-glow ${!isComponentBox ? 'magic-bento-card--text-autohide' : ''}`}
+        className={`magic-bento-card magic-bento-card--border-glow ${!isComponentBox ? 'magic-bento-card--text-autohide' : ''} ${isPOS || isStatistics ? 'magic-bento-card--lighter' : ''} ${isPOS ? 'magic-bento-card--pos' : ''} ${isStatistics && !isDarkMode ? 'magic-bento-card--white' : ''}`}
         style={{
           cursor: 'pointer',
           minHeight: 0,
@@ -108,7 +125,15 @@ function Dashboard() {
           gridColumn: isLeftColumn && isStatistics ? 'span 2' : 'span 1',
           gridRow: isLeftColumn && isStatistics ? 'span 2' : 'span 1',
           '--glow-color': themeColorRgb,
-          backgroundColor: isPOS ? `rgba(${themeColorRgb}, 0.1)` : undefined
+          '--theme-color-rgb': themeColorRgb,
+          ...(isPOS ? {
+            background: `rgba(${themeColorRgb}, 1.0)`
+          } : isStatistics && !isDarkMode ? {
+            background: '#ffffff',
+            color: '#333'
+          } : isStatistics ? {
+            background: `rgba(${themeColorRgb}, 0.95)`
+          } : {})
         }}
       >
         {isComponentBox && Component ? (

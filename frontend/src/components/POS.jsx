@@ -43,9 +43,17 @@ function POS({ employeeId, employeeName }) {
   const canApplyDiscount = hasPermission('apply_discount')
   const canVoidTransaction = hasPermission('void_transaction')
 
-  // Fetch all products and categories on mount
+  // Fetch all products and categories on mount and when window gains focus
   useEffect(() => {
     fetchAllProducts()
+    
+    // Refresh products when window gains focus (user switches back to POS tab)
+    const handleFocus = () => {
+      fetchAllProducts()
+    }
+    
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
   }, [])
 
   // Search products
@@ -97,9 +105,23 @@ function POS({ employeeId, employeeName }) {
   const searchProducts = async (term) => {
     setLoading(true)
     try {
-      // Use cached products if available, otherwise fetch
-      const productsToSearch = allProducts.length > 0 ? allProducts : 
-        (await fetch(`/api/inventory`).then(r => r.json())).data || []
+      // Always fetch fresh data from API to include newly created products
+      const response = await fetch(`/api/inventory`)
+      const data = await response.json()
+      
+      const productsToSearch = data.data || []
+      
+      // Update the cached products list
+      if (productsToSearch.length > 0) {
+        setAllProducts(productsToSearch)
+        // Extract unique categories (filter out null/empty)
+        const uniqueCategories = [...new Set(
+          productsToSearch
+            .map(product => product.category)
+            .filter(cat => cat && cat.trim() !== '')
+        )].sort()
+        setCategories(uniqueCategories)
+      }
       
       const filtered = productsToSearch.filter(product => 
         product.product_name?.toLowerCase().includes(term.toLowerCase()) ||
@@ -114,26 +136,29 @@ function POS({ employeeId, employeeName }) {
   }
 
   const addToCart = (product) => {
-    const existingItem = cart.find(item => item.product_id === product.product_id)
-    
-    if (existingItem) {
-      // Increase quantity
-      setCart(cart.map(item =>
-        item.product_id === product.product_id
-          ? { ...item, quantity: item.quantity + 1 }
-          : item
-      ))
-    } else {
-      // Add new item
-      setCart([...cart, {
-        product_id: product.product_id,
-        product_name: product.product_name,
-        sku: product.sku,
-        unit_price: product.product_price,
-        quantity: 1,
-        available_quantity: product.current_quantity || 0
-      }])
-    }
+    // Use functional update to ensure we're working with latest cart state
+    setCart(prevCart => {
+      const existingItem = prevCart.find(item => item.product_id === product.product_id)
+      
+      if (existingItem) {
+        // Increase quantity
+        return prevCart.map(item =>
+          item.product_id === product.product_id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        )
+      } else {
+        // Add new item
+        return [...prevCart, {
+          product_id: product.product_id,
+          product_name: product.product_name,
+          sku: product.sku,
+          unit_price: product.product_price,
+          quantity: 1,
+          available_quantity: product.current_quantity || 0
+        }]
+      }
+    })
     setSearchTerm('')
     setSearchResults([])
   }
@@ -154,23 +179,61 @@ function POS({ employeeId, employeeName }) {
     setMessage(null)
     
     try {
-      // First try to find product by barcode in local inventory
+      // Always fetch fresh data from API to include newly created products
       const response = await fetch(`/api/inventory`)
       const data = await response.json()
       
+      // Update cached products list
       if (data.data) {
-        // Try to find by barcode first
-        let product = data.data.find(p => p.barcode === barcode)
+        setAllProducts(data.data)
+        // Extract unique categories (filter out null/empty)
+        const uniqueCategories = [...new Set(
+          data.data
+            .map(product => product.category)
+            .filter(cat => cat && cat.trim() !== '')
+        )].sort()
+        setCategories(uniqueCategories)
+        
+        // Debug logging
+        console.log('Scanned barcode:', barcode, 'Length:', barcode.length)
+        
+        // Debug: log all products with barcodes
+        const productsWithBarcodes = data.data.filter(p => p.barcode)
+        console.log('Products with barcodes:', productsWithBarcodes.map(p => ({
+          name: p.product_name,
+          barcode: p.barcode,
+          barcodeLength: p.barcode?.length
+        })))
+        
+        // Try to find by barcode first (exact match)
+        let product = data.data.find(p => p.barcode && p.barcode.toString().trim() === barcode.toString().trim())
+        
+        // If not found and barcode is 13 digits (EAN13), try without leading 0 (12 digits)
+        if (!product && barcode.length === 13 && barcode.startsWith('0')) {
+          const barcode12 = barcode.substring(1)
+          console.log('Trying 12-digit version:', barcode12)
+          product = data.data.find(p => p.barcode && p.barcode.toString().trim() === barcode12)
+        }
+        
+        // If not found and barcode is 12 digits, try with leading 0 (13 digits)
+        if (!product && barcode.length === 12) {
+          const barcode13 = '0' + barcode
+          console.log('Trying 13-digit version:', barcode13)
+          product = data.data.find(p => p.barcode && (p.barcode.toString().trim() === barcode13 || p.barcode.toString().trim() === barcode))
+        }
         
         // If not found by barcode, try by SKU
         if (!product) {
-          product = data.data.find(p => p.sku === barcode)
+          product = data.data.find(p => p.sku && p.sku.toString().trim() === barcode.toString().trim())
         }
         
         if (product) {
+          console.log('Product found:', product.product_name)
+          // Add to cart
           addToCart(product)
+          console.log('Cart updated with product:', product.product_name)
+          // Keep scanner open for continuous scanning
           setMessage({ type: 'success', text: `Added ${product.product_name} to cart` })
-          setShowBarcodeScanner(false)
           // Auto-dismiss message after 2 seconds
           setTimeout(() => setMessage(null), 2000)
           return
@@ -178,6 +241,7 @@ function POS({ employeeId, employeeName }) {
       }
       
       // If not found locally, show error
+      console.log('Product not found for barcode:', barcode)
       setMessage({ 
         type: 'error', 
         text: `Product with barcode "${barcode}" not found. Try taking a photo for image-based identification.` 
@@ -906,7 +970,7 @@ function POS({ employeeId, employeeName }) {
                             cursor: 'pointer',
                             fontSize: '18px',
                             lineHeight: '1',
-                            color: '#800080'
+                            color: themeColor
                           }}
                         >-</button>
                         <span style={{ minWidth: '30px', textAlign: 'center', fontWeight: 500 }}>
@@ -924,7 +988,7 @@ function POS({ employeeId, employeeName }) {
                             cursor: item.quantity >= item.available_quantity ? 'not-allowed' : 'pointer',
                             fontSize: '18px',
                             lineHeight: '1',
-                            color: '#800080',
+                            color: themeColor,
                             opacity: item.quantity >= item.available_quantity ? 0.5 : 1
                           }}
                         >+</button>
@@ -939,7 +1003,7 @@ function POS({ employeeId, employeeName }) {
                         style={{
                           border: 'none',
                           backgroundColor: 'transparent',
-                          color: '#800080',
+                          color: themeColor,
                           cursor: 'pointer',
                           fontSize: '18px',
                           padding: '0',
@@ -1519,7 +1583,7 @@ function POS({ employeeId, employeeName }) {
                             <div style={{ fontSize: '11px', color: '#999', display: 'inline-block', marginRight: '8px' }}>
                               SKU: {product.sku}
                             </div>
-                            <div style={{ fontSize: '11px', color: (product.current_quantity || 0) > 0 ? '#800080' : '#d32f2f', display: 'inline-block' }}>
+                            <div style={{ fontSize: '11px', color: (product.current_quantity || 0) > 0 ? themeColor : '#d32f2f', display: 'inline-block' }}>
                               Stock: {product.current_quantity || 0}
                             </div>
                           </div>
@@ -1567,7 +1631,7 @@ function POS({ employeeId, employeeName }) {
                             <div style={{ fontSize: '11px', color: '#999', display: 'inline-block', marginRight: '8px' }}>
                               SKU: {product.sku}
                             </div>
-                            <div style={{ fontSize: '11px', color: (product.current_quantity || 0) > 0 ? '#800080' : '#d32f2f', display: 'inline-block' }}>
+                            <div style={{ fontSize: '11px', color: (product.current_quantity || 0) > 0 ? themeColor : '#d32f2f', display: 'inline-block' }}>
                               Stock: {product.current_quantity || 0}
                             </div>
                           </div>
@@ -1602,6 +1666,7 @@ function POS({ employeeId, employeeName }) {
           onScan={handleBarcodeScan}
           onImageScan={handleImageScan}
           onClose={() => setShowBarcodeScanner(false)}
+          themeColor={themeColor}
         />
       )}
 

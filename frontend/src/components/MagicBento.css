@@ -21,29 +21,37 @@
   width: 100%;
   height: 100%;
   padding: 1.25em;
-  border-radius: 12px;
-  border: 1px solid black;
-  background: var(--background-light);
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(var(--theme-color-rgb, 132, 0, 255), 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #fff;
   font-weight: 300;
   overflow: hidden;
   transition: all 0.3s ease;
   box-sizing: border-box;
+  isolation: isolate;
 
   --glow-x: 50%;
   --glow-y: 50%;
   --glow-intensity: 0;
   --glow-radius: 200px;
   
-  /* Inner glow effect */
+  /* Enhanced 3D border effect with multiple shadows */
   box-shadow: 
-    inset 0 0 20px rgba(var(--theme-color-rgb, 132, 0, 255), 0.20),
-    inset 0 0 40px rgba(var(--theme-color-rgb, 132, 0, 255), 0.12),
-    inset 0 0 60px rgba(var(--theme-color-rgb, 132, 0, 255), 0.06);
+    0 6px 20px rgba(var(--theme-color-rgb, 132, 0, 255), 0.5),
+    0 2px 8px rgba(var(--theme-color-rgb, 132, 0, 255), 0.3),
+    inset 0 2px 4px rgba(255, 255, 255, 0.4),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
 .dark-theme .magic-bento-card {
-  background: rgba(var(--theme-color-rgb, 132, 0, 255), 0.15);
-  border-color: rgba(var(--theme-color-rgb, 132, 0, 255), 0.5);
+  background: rgba(var(--theme-color-rgb, 132, 0, 255), 0.85);
+  border-color: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .dark-theme .magic-bento-card__header,
@@ -62,19 +70,14 @@
 }
 
 .magic-bento-card:hover {
-  box-shadow: 
-    0 8px 25px rgba(0, 0, 0, 0.15),
-    inset 0 0 30px rgba(var(--theme-color-rgb, 132, 0, 255), 0.30),
-    inset 0 0 60px rgba(var(--theme-color-rgb, 132, 0, 255), 0.18),
-    inset 0 0 90px rgba(var(--theme-color-rgb, 132, 0, 255), 0.10);
-  border-color: black;
+  /* Hover effect removed */
 }
 
 .magic-bento-card__header,
 .magic-bento-card__content {
   display: flex;
   position: relative;
-  color: var(--text-dark);
+  color: #fff;
 }
 
 .magic-bento-card__header {
@@ -88,7 +91,7 @@
 
 .magic-bento-card__label {
   font-size: 16px;
-  color: var(--text-dark);
+  color: #fff;
 }
 
 .magic-bento-card__title,
@@ -101,14 +104,14 @@
   font-weight: 400;
   font-size: 16px;
   margin: 0 0 0.25em;
-  color: var(--text-dark);
+  color: #fff;
 }
 
 .magic-bento-card__description {
   font-size: 12px;
   line-height: 1.2;
-  opacity: 0.7;
-  color: #666666;
+  opacity: 0.9;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .magic-bento-card--text-autohide .magic-bento-card__title,
@@ -140,21 +143,46 @@
 
 .magic-bento-card--border-glow {
   box-shadow: 
-    inset 0 0 20px rgba(var(--theme-color-rgb, 132, 0, 255), 0.20),
-    inset 0 0 40px rgba(var(--theme-color-rgb, 132, 0, 255), 0.12),
-    inset 0 0 60px rgba(var(--theme-color-rgb, 132, 0, 255), 0.06);
+    0 6px 20px rgba(var(--theme-color-rgb, 132, 0, 255), 0.5),
+    0 2px 8px rgba(var(--theme-color-rgb, 132, 0, 255), 0.3),
+    inset 0 2px 4px rgba(255, 255, 255, 0.4),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
 .magic-bento-card--border-glow:hover {
-  box-shadow: 
-    inset 0 0 30px rgba(var(--theme-color-rgb, 132, 0, 255), 0.30),
-    inset 0 0 60px rgba(var(--theme-color-rgb, 132, 0, 255), 0.18),
-    inset 0 0 90px rgba(var(--theme-color-rgb, 132, 0, 255), 0.10);
+  /* Hover effect removed */
+}
+
+.magic-bento-card--lighter {
+  background: rgba(var(--theme-color-rgb, 132, 0, 255), 0.95) !important;
+}
+
+.magic-bento-card--lighter.magic-bento-card--pos {
+  background: rgba(var(--theme-color-rgb, 132, 0, 255), 1.0) !important;
+}
+
+.magic-bento-card--white {
+  background: #ffffff !important;
+  color: #333 !important;
+  border-color: rgba(0, 0, 0, 0.2) !important;
+}
+
+.magic-bento-card--white .magic-bento-card__header,
+.magic-bento-card--white .magic-bento-card__content,
+.magic-bento-card--white .magic-bento-card__label,
+.magic-bento-card--white .magic-bento-card__title {
+  color: #333 !important;
+}
+
+.magic-bento-card--white .magic-bento-card__description {
+  color: #666 !important;
 }
 
 .particle-container {
   position: relative;
   overflow: hidden;
+  border-radius: 8px;
 }
 
 .particle-container:hover {

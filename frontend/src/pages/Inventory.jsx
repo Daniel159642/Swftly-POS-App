@@ -14,6 +14,7 @@ function Inventory() {
   const themeColorRgb = hexToRgb(themeColor)
   
   const [inventory, setInventory] = useState([])
+  const [allVendors, setAllVendors] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -54,6 +55,7 @@ function Inventory() {
 
   useEffect(() => {
     loadInventory()
+    loadVendors()
   }, [])
 
   const loadInventory = async () => {
@@ -72,6 +74,18 @@ function Inventory() {
       console.error(err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadVendors = async () => {
+    try {
+      const response = await fetch('/api/vendors')
+      const result = await response.json()
+      if (result.data) {
+        setAllVendors(result.data)
+      }
+    } catch (err) {
+      console.error('Error loading vendors:', err)
     }
   }
 
@@ -151,12 +165,8 @@ function Inventory() {
   // Get unique categories
   const categories = [...new Set(inventory.map(item => item.category).filter(Boolean))].sort()
   
-  // Get unique vendors (from vendor_id or vendor field)
-  const vendors = [...new Set(
-    inventory
-      .map(item => item.vendor_name || item.vendor || (item.vendor_id ? `Vendor ${item.vendor_id}` : null))
-      .filter(Boolean)
-  )].sort()
+  // Get all vendors from vendors table (not just vendors with products)
+  const vendors = allVendors.map(vendor => vendor.vendor_name).sort()
 
   // Filter inventory based on search
   const filteredInventory = inventory.filter(item => {
@@ -178,6 +188,14 @@ function Inventory() {
 
   // Get items by vendor
   const getItemsByVendor = (vendorName) => {
+    // Find vendor by name to get vendor_id
+    const vendor = allVendors.find(v => v.vendor_name === vendorName)
+    if (vendor) {
+      return filteredInventory.filter(item => 
+        item.vendor_id === vendor.vendor_id || 
+        (item.vendor_name || item.vendor) === vendorName
+      )
+    }
     return filteredInventory.filter(item => 
       (item.vendor_name || item.vendor) === vendorName
     )

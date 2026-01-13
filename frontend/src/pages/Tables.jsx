@@ -5,7 +5,14 @@ import Tabs from '../components/Tabs'
 
 // Define table categories
 const TABLE_CATEGORIES = {
-  'Inventory & Products': ['inventory', 'vendors'],
+  'Inventory & Products': [
+    'inventory', 
+    'vendors',
+    'categories',
+    'product_metadata',
+    'metadata_extraction_log',
+    'search_history'
+  ],
   'Orders & Sales': [
     'orders', 
     'order_items', 
@@ -13,7 +20,15 @@ const TABLE_CATEGORIES = {
     'payment_methods',
     'employee_tips',
     'sales', 
-    'customers'
+    'customers',
+    'pending_returns',
+    'pending_return_items',
+    'transactions',
+    'transaction_items',
+    'payments',
+    'receipt_preferences',
+    'customer_display_settings',
+    'customer_display_sessions'
   ],
   'Shipments': [
     'shipments', 
@@ -23,32 +38,27 @@ const TABLE_CATEGORIES = {
     'shipment_discrepancies',
     'shipment_issues',
     'shipment_scan_log',
-    'verification_sessions'
+    'verification_sessions',
+    'approved_shipments',
+    'approved_shipment_items'
   ],
-  'Returns': ['pending_returns', 'pending_return_items'],
   'Employees & Scheduling': [
     'employees',
     'employee_availability_unified',
     'scheduled_shifts_unified',
     'time_clock',
-    'employee_sessions'
-  ],
-  'Calendar & Events': [
+    'employee_sessions',
     'calendar_events_unified',
     'Calendar_Subscriptions',
     'Event_Attendees',
-    'Event_Reminders'
-  ],
-  'Schedule Management': [
+    'Event_Reminders',
     'Schedule_Periods',
     'Schedule_Requirements',
     'Schedule_Templates',
     'Time_Off_Requests',
     'Schedule_Changes',
     'Schedule_Notifications',
-    'Employee_Positions'
-  ],
-  'Legacy Scheduling Tables': [
+    'Employee_Positions',
     'employee_schedule',
     'employee_availability',
     'Scheduled_Shifts',
@@ -64,22 +74,14 @@ const TABLE_CATEGORIES = {
     'fiscal_periods', 
     'retained_earnings'
   ],
-  'Audit & Logs': ['audit_log'],
-  'Legacy Audit Tables': ['activity_log'],
   'Image Matching': ['image_identifications'],
   'Security & Permissions': [
     'roles', 
     'permissions', 
     'role_permissions', 
-    'employee_permission_overrides'
-  ],
-  'Customer Display': [
-    'transactions',
-    'transaction_items',
-    'payments',
-    'receipt_preferences',
-    'customer_display_settings',
-    'customer_display_sessions'
+    'employee_permission_overrides',
+    'audit_log',
+    'activity_log'
   ]
 }
 
@@ -102,6 +104,7 @@ function Tables() {
   const [loading, setLoading] = useState(true)
   const [loadingTables, setLoadingTables] = useState(true)
   const [error, setError] = useState(null)
+  const [selectedRowIds, setSelectedRowIds] = useState(() => new Set())
   
   // Determine if dark mode is active
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -248,9 +251,10 @@ function Tables() {
     
     setLoading(true)
     setError(null)
+    setSelectedRowIds(new Set())
     
     try {
-      const response = await fetch(`/api/${activeTab}`)
+      const response = await fetch(`/api/tables/${activeTab}`)
       const result = await response.json()
       if (result.error) {
         setError(result.error)
@@ -264,6 +268,71 @@ function Tables() {
       setData(null)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const getRowId = (row, idx) => {
+    const pk = data?.primary_key || []
+    if (pk.length === 1) {
+      return row[pk[0]]
+    }
+    if (data?.rowid_column) {
+      return row[data.rowid_column]
+    }
+    if (pk.length > 1) {
+      return pk.map(col => `${col}:${String(row[col])}`).join('|')
+    }
+    return idx
+  }
+
+  const handleDeleteSelected = async () => {
+    if (!activeTab || !data) return
+    const count = selectedRowIds.size
+    if (count === 0) return
+
+    const ok = window.confirm(`Delete ${count} selected row${count === 1 ? '' : 's'} from "${activeTab}"? This cannot be undone.`)
+    if (!ok) return
+
+    try {
+      const pk = data.primary_key || []
+      const idList = Array.from(selectedRowIds)
+
+      let payload = {}
+
+      if (pk.length === 1) {
+        payload = { ids: idList }
+      } else if (data.rowid_column) {
+        payload = { rowids: idList }
+      } else if (pk.length > 1) {
+        const rowMap = new Map((data.data || []).map((row, idx) => [getRowId(row, idx), row]))
+        const keys = idList
+          .map(id => rowMap.get(id))
+          .filter(Boolean)
+          .map(row => {
+            const keyObj = {}
+            pk.forEach(col => { keyObj[col] = row[col] })
+            return keyObj
+          })
+        payload = { keys }
+      } else {
+        throw new Error('This table does not have a primary key or rowid to delete by.')
+      }
+
+      const response = await fetch(`/api/tables/${activeTab}/rows`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      const result = await response.json()
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'Failed to delete rows')
+      }
+
+      await loadData()
+    } catch (err) {
+      console.error(err)
+      window.alert(err.message || 'Error deleting selected rows')
     }
   }
 
@@ -343,7 +412,44 @@ function Tables() {
         {error && <div style={{ padding: '40px', textAlign: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999' }}>{error}</div>}
         {!loading && !error && data && (
           data.data && data.data.length > 0 ? (
-            <Table columns={data.columns} data={data.data} />
+            <div>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                marginBottom: '12px'
+              }}>
+                <div style={{ color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontSize: '13px' }}>
+                  {selectedRowIds.size > 0 ? `${selectedRowIds.size} selected` : 'Select rows to delete'}
+                </div>
+                <button
+                  onClick={handleDeleteSelected}
+                  disabled={selectedRowIds.size === 0}
+                  style={{
+                    padding: '8px 12px',
+                    backgroundColor: selectedRowIds.size === 0 ? (isDarkMode ? 'rgba(255,255,255,0.12)' : '#eee') : '#e53935',
+                    color: selectedRowIds.size === 0 ? (isDarkMode ? 'rgba(255,255,255,0.5)' : '#999') : '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: selectedRowIds.size === 0 ? 'not-allowed' : 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 600
+                  }}
+                >
+                  Delete selected
+                </button>
+              </div>
+
+              <Table
+                columns={data.columns}
+                data={data.data}
+                enableRowSelection
+                getRowId={getRowId}
+                selectedRowIds={selectedRowIds}
+                onSelectedRowIdsChange={setSelectedRowIds}
+              />
+            </div>
           ) : (
             <div style={{ padding: '40px', textAlign: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999' }}>No data in this table</div>
           )

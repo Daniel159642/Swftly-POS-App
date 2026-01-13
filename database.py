@@ -7,24 +7,155 @@ import sqlite3
 import hashlib
 import secrets
 import json
+import re
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 DB_NAME = 'inventory.db'
 
+def generate_unique_barcode(pending_shipment_id: int, line_number: int, product_sku: str = '') -> str:
+    """
+    Generate a unique 12-digit barcode for a shipment item
+    Format: 200 (shipment prefix) + shipment_id (4 digits) + line_number (4 digits) + checksum (1 digit)
+    
+    Args:
+        pending_shipment_id: The pending shipment ID
+        line_number: The line number in the shipment
+        product_sku: Optional SKU for uniqueness
+    
+    Returns:
+        A 12-digit barcode string
+    """
+    # Use prefix 200 for shipment items
+    prefix = "200"
+    
+    # Pad shipment_id to 4 digits (supports up to 9999 shipments)
+    shipment_id_str = str(pending_shipment_id % 10000).zfill(4)
+    
+    # Pad line_number to 4 digits (supports up to 9999 items per shipment)
+    line_str = str(line_number % 10000).zfill(4)
+    
+    # Combine prefix + shipment_id + line_number (11 digits total)
+    barcode_base = prefix + shipment_id_str + line_str
+    
+    # Calculate checksum (sum of digits mod 10)
+    checksum = sum(int(d) for d in barcode_base) % 10
+    
+    # Return 12-digit barcode
+    barcode = barcode_base + str(checksum)
+    
+    # Check for uniqueness and adjust if needed
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Check in pending_shipment_items
+    cursor.execute("SELECT COUNT(*) as count FROM pending_shipment_items WHERE barcode = ?", (barcode,))
+    pending_count = cursor.fetchone()['count']
+    
+    # Check in inventory
+    cursor.execute("SELECT COUNT(*) as count FROM inventory WHERE barcode = ?", (barcode,))
+    inventory_count = cursor.fetchone()['count']
+    
+    conn.close()
+    
+    # If barcode already exists, add a hash-based suffix
+    if pending_count > 0 or inventory_count > 0:
+        # Use a hash of SKU + shipment_id + line_number to create unique suffix
+        hash_input = f"{product_sku}{pending_shipment_id}{line_number}"
+        hash_value = int(hashlib.md5(hash_input.encode()).hexdigest()[:2], 16) % 100
+        # Replace last 2 digits with hash value
+        barcode = barcode[:-2] + str(hash_value).zfill(2)
+    
+    return barcode
+
 def get_connection():
     """Get database connection with timeout to handle locks"""
     try:
-        conn = sqlite3.connect(DB_NAME, timeout=10.0)
+        conn = sqlite3.connect(DB_NAME, timeout=20.0)  # Increased timeout for better lock handling
         conn.row_factory = sqlite3.Row  # Enable column access by name
         # Enable WAL mode for better concurrency (if not already enabled)
         try:
             conn.execute("PRAGMA journal_mode=WAL")
+            # Also set busy timeout at connection level
+            conn.execute("PRAGMA busy_timeout = 20000")
         except:
             pass
         return conn
     except sqlite3.Error as e:
         raise ConnectionError(f"Database connection failed: {str(e)}") from e
+
+def create_or_get_category_with_hierarchy(category_path: str, conn=None) -> Optional[int]:
+    """
+    Create or get category with parent-child hierarchy
+    Example: "Electronics > Phones > Smartphones" creates:
+    - Electronics (parent)
+    - Phones (child of Electronics)
+    - Smartphones (child of Phones)
+    
+    Args:
+        category_path: Category path like "Electronics > Phones" or "Electronics"
+        conn: Optional database connection (creates new if None)
+    
+    Returns:
+        The category_id of the most specific category, or None if invalid
+    """
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    else:
+        should_close = False
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Split category path by > or →
+        parts = [p.strip() for p in re.split(r'[>→]', category_path) if p.strip()]
+        
+        if not parts:
+            if should_close:
+                conn.close()
+            return None
+        
+        parent_id = None
+        
+        for i, category_name in enumerate(parts):
+            # Check if category exists
+            if parent_id:
+                cursor.execute("""
+                    SELECT category_id FROM categories
+                    WHERE category_name = ? AND parent_category_id = ?
+                """, (category_name, parent_id))
+            else:
+                cursor.execute("""
+                    SELECT category_id FROM categories
+                    WHERE category_name = ? AND parent_category_id IS NULL
+                """, (category_name,))
+            
+            result = cursor.fetchone()
+            
+            if result:
+                category_id = result[0]
+            else:
+                # Create new category
+                cursor.execute("""
+                    INSERT INTO categories (category_name, parent_category_id, is_auto_generated)
+                    VALUES (?, ?, 1)
+                """, (category_name, parent_id))
+                category_id = cursor.lastrowid
+            
+            parent_id = category_id
+        
+        conn.commit()
+        return parent_id  # Return most specific category
+        
+    except Exception as e:
+        print(f"Error creating category hierarchy: {e}")
+        if should_close:
+            conn.close()
+        return None
+    finally:
+        if should_close:
+            conn.close()
 
 def extract_metadata_for_product(product_id: int, auto_sync_category: bool = True):
     """
@@ -66,18 +197,30 @@ def extract_metadata_for_product(product_id: int, auto_sync_category: bool = Tru
                 if category_suggestions and len(category_suggestions) > 0:
                     suggested_category = category_suggestions[0].get('category_name')
                     if suggested_category:
-                        # Update inventory.category if it's None or different
-                        if product.get('category') != suggested_category:
-                            conn = get_connection()
-                            cursor = conn.cursor()
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        
+                        # Create or get category with hierarchy (e.g., "Electronics > Phones")
+                        category_id = create_or_get_category_with_hierarchy(
+                            suggested_category, conn
+                        )
+                        
+                        # Update inventory.category with most specific category name
+                        # Extract just the last part (most specific)
+                        category_parts = [p.strip() for p in re.split(r'[>→]', suggested_category)]
+                        most_specific = category_parts[-1] if category_parts else suggested_category
+                        
+                        if product.get('category') != most_specific:
                             cursor.execute("""
                                 UPDATE inventory 
                                 SET category = ?, updated_at = CURRENT_TIMESTAMP
                                 WHERE product_id = ?
-                            """, (suggested_category, product_id))
-                            conn.commit()
-                            conn.close()
-            except Exception:
+                            """, (most_specific, product_id))
+                        
+                        conn.commit()
+                        conn.close()
+            except Exception as e:
+                print(f"Warning: Category sync failed for product {product_id}: {e}")
                 pass  # Don't fail if category sync fails
         
         return True
@@ -1038,60 +1181,98 @@ def update_pending_item_verification(
     employee_id: Optional[int] = None
 ) -> bool:
     """Update verified quantity and product match for a pending item"""
-    conn = get_connection()
-    cursor = conn.cursor()
+    import time
+    max_retries = 5
+    retry_delay = 0.1  # Start with 100ms
     
-    # Get current item to determine new status
-    expected = None
-    if quantity_verified is not None:
-        cursor.execute("""
-            SELECT quantity_expected, quantity_verified
-            FROM pending_shipment_items
-            WHERE pending_item_id = ?
-        """, (pending_item_id,))
-        item = cursor.fetchone()
-        if item:
-            expected = item['quantity_expected']
+    for attempt in range(max_retries):
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            
+            # Get current item to determine new status
+            expected = None
+            current_verified = None
+            if quantity_verified is not None:
+                cursor.execute("""
+                    SELECT quantity_expected, COALESCE(quantity_verified, 0) as quantity_verified
+                    FROM pending_shipment_items
+                    WHERE pending_item_id = ?
+                """, (pending_item_id,))
+                item = cursor.fetchone()
+                if item:
+                    expected = item['quantity_expected']
+                    current_verified = item['quantity_verified']
+            
+            updates = []
+            values = []
+            
+            if quantity_verified is not None:
+                updates.append("quantity_verified = ?")
+                values.append(quantity_verified)
+                # Update verified_by and verified_at when quantity changes
+                if employee_id is not None:
+                    updates.append("verified_by = ?")
+                    values.append(employee_id)
+                    updates.append("verified_at = CURRENT_TIMESTAMP")
+                # Update status
+                if expected is not None:
+                    if quantity_verified >= expected:
+                        updates.append("status = 'verified'")
+                    elif quantity_verified > 0:
+                        updates.append("status = 'pending'")
+                    else:
+                        updates.append("status = 'pending'")
+            
+            if product_id is not None:
+                updates.append("product_id = ?")
+                values.append(product_id)
+            
+            if discrepancy_notes is not None:
+                updates.append("discrepancy_notes = ?")
+                values.append(discrepancy_notes)
+            
+            if not updates:
+                conn.close()
+                return False
+            
+            values.append(pending_item_id)
+            query = f"UPDATE pending_shipment_items SET {', '.join(updates)} WHERE pending_item_id = ?"
+            
+            cursor.execute(query, values)
+            conn.commit()
+            success = cursor.rowcount > 0
+            conn.close()
+            
+            return success
+            
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                # Exponential backoff with jitter
+                delay = retry_delay * (2 ** attempt) + (time.time() % 0.1)
+                time.sleep(delay)
+                continue
+            else:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                raise
+        except Exception as e:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
+            raise
     
-    updates = []
-    values = []
-    
-    if quantity_verified is not None:
-        updates.append("quantity_verified = ?")
-        values.append(quantity_verified)
-        # Update verified_by and verified_at when quantity changes
-        if employee_id is not None:
-            updates.append("verified_by = ?")
-            values.append(employee_id)
-            updates.append("verified_at = CURRENT_TIMESTAMP")
-        # Update status
-        if expected is not None:
-            if quantity_verified >= expected:
-                updates.append("status = 'verified'")
-            elif quantity_verified > 0:
-                updates.append("status = 'pending'")
-    
-    if product_id is not None:
-        updates.append("product_id = ?")
-        values.append(product_id)
-    
-    if discrepancy_notes is not None:
-        updates.append("discrepancy_notes = ?")
-        values.append(discrepancy_notes)
-    
-    if not updates:
-        conn.close()
-        return False
-    
-    values.append(pending_item_id)
-    query = f"UPDATE pending_shipment_items SET {', '.join(updates)} WHERE pending_item_id = ?"
-    
-    cursor.execute(query, values)
-    conn.commit()
-    success = cursor.rowcount > 0
-    conn.close()
-    
-    return success
+    return False
 
 def approve_pending_shipment(
     pending_shipment_id: int,
@@ -1289,6 +1470,31 @@ def hash_password(password: str) -> str:
     """Hash password using SHA-256"""
     return hashlib.sha256(password.encode()).hexdigest()
 
+def is_admin_user(employee_id: int, cursor) -> bool:
+    """Check if employee is an admin user"""
+    # Check by role_id (Admin role)
+    cursor.execute("""
+        SELECT r.role_name 
+        FROM employees e
+        LEFT JOIN roles r ON e.role_id = r.role_id
+        WHERE e.employee_id = ?
+    """, (employee_id,))
+    role = cursor.fetchone()
+    if role and role[0] and 'admin' in role[0].lower():
+        return True
+    
+    # Check by position
+    cursor.execute("SELECT position FROM employees WHERE employee_id = ?", (employee_id,))
+    position = cursor.fetchone()
+    if position and position[0] and 'admin' in position[0].lower():
+        return True
+    
+    return False
+
+def validate_admin_password(password: str) -> bool:
+    """Validate that admin password contains only numbers"""
+    return password.isdigit()
+
 def add_employee(
     employee_code: Optional[str] = None,
     username: Optional[str] = None,
@@ -1313,6 +1519,23 @@ def add_employee(
     """Add a new employee"""
     conn = get_connection()
     cursor = conn.cursor()
+    
+    # Validate admin password (must be numeric only)
+    if password:
+        is_admin = False
+        # Check if role is admin
+        if role_id:
+            cursor.execute("SELECT role_name FROM roles WHERE role_id = ?", (role_id,))
+            role = cursor.fetchone()
+            if role and role[0] and 'admin' in role[0].lower():
+                is_admin = True
+        # Check if position is admin
+        if position and 'admin' in position.lower():
+            is_admin = True
+        
+        if is_admin and not validate_admin_password(password):
+            conn.close()
+            raise ValueError("Admin passwords must contain only numbers")
     
     password_hash = hash_password(password) if password else None
     
@@ -3444,6 +3667,11 @@ def change_employee_password(employee_id: int, old_password: str, new_password: 
         conn.close()
         return {'success': False, 'message': 'Incorrect old password'}
     
+    # Validate admin password (must be numeric only)
+    if is_admin_user(employee_id, cursor) and not validate_admin_password(new_password):
+        conn.close()
+        return {'success': False, 'message': 'Admin passwords must contain only numbers'}
+    
     # Update password
     new_password_hash = hash_password(new_password)
     cursor.execute("""
@@ -4726,45 +4954,64 @@ def calculate_retained_earnings(
 
 def start_verification_session(pending_shipment_id: int, employee_id: int, device_id: Optional[str] = None) -> Dict[str, Any]:
     """Start a new verification session"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    # Update shipment status
-    cursor.execute("""
-        UPDATE pending_shipments 
-        SET status = 'in_progress',
-            started_by = ?,
-            started_at = CURRENT_TIMESTAMP
-        WHERE pending_shipment_id = ? AND status = 'pending_review'
-    """, (employee_id, pending_shipment_id))
-    
-    # Create session
-    cursor.execute("""
-        INSERT INTO verification_sessions 
-        (pending_shipment_id, employee_id, device_id)
-        VALUES (?, ?, ?)
-    """, (pending_shipment_id, employee_id, device_id))
-    
-    session_id = cursor.lastrowid
-    
-    # Get shipment details
-    cursor.execute("""
-        SELECT ps.*, v.vendor_name,
-               (SELECT COUNT(*) FROM pending_shipment_items WHERE pending_shipment_id = ps.pending_shipment_id) as total_items
-        FROM pending_shipments ps
-        JOIN vendors v ON ps.vendor_id = v.vendor_id
-        WHERE ps.pending_shipment_id = ?
-    """, (pending_shipment_id,))
-    
-    shipment = cursor.fetchone()
-    
-    conn.commit()
-    conn.close()
-    
-    return {
-        'session_id': session_id,
-        'shipment': dict(shipment) if shipment else None
-    }
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Update shipment status (try with started_by/started_at if columns exist, otherwise just status)
+        try:
+            cursor.execute("""
+                UPDATE pending_shipments 
+                SET status = 'in_progress',
+                    started_by = ?,
+                    started_at = CURRENT_TIMESTAMP
+                WHERE pending_shipment_id = ?
+            """, (employee_id, pending_shipment_id))
+        except sqlite3.OperationalError as e:
+            # Columns might not exist, try without them
+            if 'no such column' in str(e).lower():
+                cursor.execute("""
+                    UPDATE pending_shipments 
+                    SET status = 'in_progress'
+                    WHERE pending_shipment_id = ?
+                """, (pending_shipment_id,))
+            else:
+                raise
+        
+        # Create session
+        cursor.execute("""
+            INSERT INTO verification_sessions 
+            (pending_shipment_id, employee_id, device_id)
+            VALUES (?, ?, ?)
+        """, (pending_shipment_id, employee_id, device_id))
+        
+        session_id = cursor.lastrowid
+        
+        # Get shipment details
+        cursor.execute("""
+            SELECT ps.*, v.vendor_name,
+                   (SELECT COUNT(*) FROM pending_shipment_items WHERE pending_shipment_id = ps.pending_shipment_id) as total_items
+            FROM pending_shipments ps
+            LEFT JOIN vendors v ON ps.vendor_id = v.vendor_id
+            WHERE ps.pending_shipment_id = ?
+        """, (pending_shipment_id,))
+        
+        shipment = cursor.fetchone()
+        
+        conn.commit()
+        
+        return {
+            'session_id': session_id,
+            'shipment': dict(shipment) if shipment else None
+        }
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise ValueError(f"Failed to start verification session: {str(e)}") from e
+    finally:
+        if conn:
+            conn.close()
 
 def scan_item(pending_shipment_id: int, barcode: str, employee_id: int, 
               device_id: Optional[str] = None, session_id: Optional[int] = None, 
@@ -4925,9 +5172,10 @@ def get_verification_progress(pending_shipment_id: int) -> Dict[str, Any]:
     cursor.execute("""
         SELECT pending_item_id, product_sku, product_name, 
                quantity_expected, COALESCE(quantity_verified, 0) as quantity_verified,
+               unit_cost, product_id, barcode, lot_number, expiration_date,
                (quantity_expected - COALESCE(quantity_verified, 0)) as remaining
         FROM pending_shipment_items
-        WHERE pending_shipment_id = ? AND status = 'pending'
+        WHERE pending_shipment_id = ?
         ORDER BY COALESCE(line_number, pending_item_id)
     """, (pending_shipment_id,))
     
@@ -4946,6 +5194,15 @@ def get_verification_progress(pending_shipment_id: int) -> Dict[str, Any]:
     
     issues = [dict(row) for row in cursor.fetchall()]
     
+    # Get shipment info including workflow_step
+    cursor.execute("""
+        SELECT pending_shipment_id, status, workflow_step, added_to_inventory, vendor_id
+        FROM pending_shipments
+        WHERE pending_shipment_id = ?
+    """, (pending_shipment_id,))
+    shipment_row = cursor.fetchone()
+    shipment = dict(shipment_row) if shipment_row else {}
+    
     conn.close()
     
     # Calculate completion percentage
@@ -4961,7 +5218,8 @@ def get_verification_progress(pending_shipment_id: int) -> Dict[str, Any]:
         'pending_items': pending_items,
         'issues': issues,
         'is_complete': (progress['total_verified_quantity'] >= 
-                      progress['total_expected_quantity'])
+                      progress['total_expected_quantity']),
+        'shipment': shipment
     }
 
 def complete_verification(pending_shipment_id: int, employee_id: int, notes: Optional[str] = None) -> Dict[str, Any]:
@@ -5023,6 +5281,7 @@ def complete_verification(pending_shipment_id: int, employee_id: int, notes: Opt
     vendor_name = vendor_row['vendor_name'] if vendor_row else None
     
     # First, ensure product_id is set for all items by matching with inventory
+    # Also update barcodes for existing products that don't have one
     cursor.execute("""
         UPDATE pending_shipment_items
         SET product_id = (
@@ -5033,40 +5292,110 @@ def complete_verification(pending_shipment_id: int, employee_id: int, notes: Opt
         AND product_sku IS NOT NULL
     """, (pending_shipment_id,))
     
-    # Create products for items that don't exist in inventory yet
+    # Update barcodes for existing products that don't have one
     cursor.execute("""
-        SELECT DISTINCT product_sku, product_name, unit_cost
-        FROM pending_shipment_items
-        WHERE pending_shipment_id = ?
-        AND product_id IS NULL
-        AND product_sku IS NOT NULL
-        AND quantity_verified > 0
+        UPDATE inventory
+        SET barcode = (
+            SELECT barcode FROM pending_shipment_items psi
+            WHERE psi.product_id = inventory.product_id
+            AND psi.pending_shipment_id = ?
+            AND psi.barcode IS NOT NULL AND psi.barcode != ''
+            LIMIT 1
+        )
+        WHERE product_id IN (
+            SELECT DISTINCT product_id FROM pending_shipment_items
+            WHERE pending_shipment_id = ? AND product_id IS NOT NULL
+        )
+        AND (barcode IS NULL OR barcode = '')
+    """, (pending_shipment_id, pending_shipment_id))
+    
+    # Create products for items that don't exist in inventory yet
+    # Get the first barcode for each SKU (in case there are multiple items with same SKU)
+    cursor.execute("""
+        SELECT DISTINCT 
+            product_sku, 
+            product_name, 
+            unit_cost,
+            (SELECT barcode FROM pending_shipment_items psi2 
+             WHERE psi2.product_sku = psi.product_sku 
+             AND psi2.pending_shipment_id = psi.pending_shipment_id
+             AND psi2.barcode IS NOT NULL AND psi2.barcode != ''
+             LIMIT 1) as barcode
+        FROM pending_shipment_items psi
+        WHERE psi.pending_shipment_id = ?
+        AND psi.product_id IS NULL
+        AND psi.product_sku IS NOT NULL
+        AND psi.product_sku != ''
+        AND COALESCE(psi.quantity_verified, 0) > 0
     """, (pending_shipment_id,))
     
     items_to_create = cursor.fetchall()
     
     for item in items_to_create:
         sku = item['product_sku']
+        if not sku or not sku.strip():
+            continue  # Skip items with empty SKU
+        
+        sku = sku.strip()
         product_name = item['product_name'] or f'Product {sku}'
         unit_cost = item['unit_cost'] or 0.0
+        barcode = item.get('barcode') or None
         
-        # Create new product in inventory
-        cursor.execute("""
-            INSERT INTO inventory 
-            (product_name, sku, product_price, product_cost, vendor, vendor_id, current_quantity, category)
-            VALUES (?, ?, ?, ?, ?, ?, 0, NULL)
-        """, (product_name, sku, unit_cost, unit_cost, vendor_name, vendor_id))
-        
-        new_product_id = cursor.lastrowid
-        
-        # Update pending_shipment_items with the new product_id
-        cursor.execute("""
-            UPDATE pending_shipment_items
-            SET product_id = ?
-            WHERE pending_shipment_id = ?
-            AND product_sku = ?
-            AND product_id IS NULL
-        """, (new_product_id, pending_shipment_id, sku))
+        try:
+            # Check if product already exists (in case it was just created)
+            cursor.execute("SELECT product_id, barcode FROM inventory WHERE sku = ?", (sku,))
+            existing = cursor.fetchone()
+            if existing:
+                new_product_id = existing['product_id']
+                # Update barcode if product doesn't have one and we have one from shipment
+                if (not existing['barcode'] or existing['barcode'].strip() == '') and barcode:
+                    cursor.execute("""
+                        UPDATE inventory 
+                        SET barcode = ?
+                        WHERE product_id = ?
+                    """, (barcode, new_product_id))
+                
+                # Extract metadata if product doesn't have it yet
+                try:
+                    cursor.execute("SELECT metadata_id FROM product_metadata WHERE product_id = ?", (new_product_id,))
+                    has_metadata = cursor.fetchone()
+                    if not has_metadata:
+                        # Product exists but has no metadata - extract it
+                        extract_metadata_for_product(new_product_id, auto_sync_category=True)
+                except Exception as e:
+                    print(f"Warning: Metadata check/extraction failed for existing product {new_product_id}: {e}")
+            else:
+                # Create new product in inventory with barcode
+                cursor.execute("""
+                    INSERT INTO inventory 
+                    (product_name, sku, barcode, product_price, product_cost, vendor, vendor_id, current_quantity, category)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)
+                """, (product_name, sku, barcode, unit_cost, unit_cost, vendor_name, vendor_id))
+                
+                new_product_id = cursor.lastrowid
+                
+                # Automatically extract metadata and assign category with hierarchy
+                try:
+                    extract_metadata_for_product(new_product_id, auto_sync_category=True)
+                except Exception as e:
+                    print(f"Warning: Metadata extraction failed for product {new_product_id} (SKU: {sku}): {e}")
+                    # Continue even if metadata extraction fails
+            
+            # Update pending_shipment_items with the new product_id
+            cursor.execute("""
+                UPDATE pending_shipment_items
+                SET product_id = ?
+                WHERE pending_shipment_id = ?
+                AND product_sku = ?
+                AND product_id IS NULL
+            """, (new_product_id, pending_shipment_id, sku))
+        except Exception as e:
+            # Log error but continue with other items
+            print(f"Error creating product for SKU {sku}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't rollback here, just continue - other items might succeed
+            continue
     
     # Transfer verified items to approved shipment items
     cursor.execute("""
@@ -5076,14 +5405,14 @@ def complete_verification(pending_shipment_id: int, employee_id: int, notes: Opt
         SELECT 
             ?,
             psi.product_id,
-            psi.quantity_verified,
+            COALESCE(psi.quantity_verified, 0),
             psi.unit_cost,
             psi.lot_number,
             psi.expiration_date,
             ?
         FROM pending_shipment_items psi
         WHERE psi.pending_shipment_id = ?
-        AND psi.quantity_verified > 0
+        AND COALESCE(psi.quantity_verified, 0) > 0
         AND psi.product_id IS NOT NULL
     """, (approved_shipment_id, employee_id, pending_shipment_id))
     
@@ -5094,7 +5423,7 @@ def complete_verification(pending_shipment_id: int, employee_id: int, notes: Opt
         FROM pending_shipment_items
         WHERE pending_shipment_id = ?
         AND product_id IS NOT NULL
-        AND quantity_verified > 0
+        AND COALESCE(quantity_verified, 0) > 0
         GROUP BY product_id
     """, (pending_shipment_id,))
     
@@ -5270,6 +5599,15 @@ def create_shipment_from_document(
     
     for idx, item in enumerate(items):
         try:
+            # Auto-generate barcode if not provided
+            barcode = item.get('barcode')
+            if not barcode or barcode.strip() == '':
+                barcode = generate_unique_barcode(
+                    pending_shipment_id=pending_shipment_id,
+                    line_number=idx + 1,
+                    product_sku=item.get('product_sku', '')
+                )
+            
             add_pending_shipment_item(
                 pending_shipment_id=pending_shipment_id,
                 product_sku=item.get('product_sku', ''),
@@ -5278,7 +5616,7 @@ def create_shipment_from_document(
                 unit_cost=item.get('unit_cost', 0.0),
                 lot_number=item.get('lot_number'),
                 expiration_date=item.get('expiration_date'),
-                barcode=item.get('barcode'),
+                barcode=barcode,
                 line_number=idx + 1
             )
             items_added += 1

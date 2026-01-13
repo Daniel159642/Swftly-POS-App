@@ -166,6 +166,14 @@ def scrape_vendor_excel(file_path: str, sheet_name: Optional[str] = None,
         'Price': 'unit_cost',
         'Unit Price': 'unit_cost',
         'Cost': 'unit_cost',
+        'Unit Cost': 'unit_cost',
+        'Cost Per Unit': 'unit_cost',
+        'Price Per Unit': 'unit_cost',
+        'Cost Price': 'unit_cost',
+        'Purchase Price': 'unit_cost',
+        'Purchase Cost': 'unit_cost',
+        'Wholesale Price': 'unit_cost',
+        'Wholesale Cost': 'unit_cost',
         'Lot Number': 'lot_number',
         'Lot #': 'lot_number',
         'Lot': 'lot_number',
@@ -185,8 +193,28 @@ def scrape_vendor_excel(file_path: str, sheet_name: Optional[str] = None,
     except Exception as e:
         raise ValueError(f"Error reading Excel file: {e}")
     
-    # Rename columns based on mapping
-    df = df.rename(columns=default_mapping)
+    # Rename columns based on mapping (case-insensitive matching)
+    column_map = {}
+    for old_col in df.columns:
+        if old_col in default_mapping:
+            column_map[old_col] = default_mapping[old_col]
+        else:
+            # Try case-insensitive match
+            old_col_lower = old_col.lower().strip()
+            for mapped_key in default_mapping:
+                if mapped_key.lower().strip() == old_col_lower:
+                    column_map[old_col] = default_mapping[mapped_key]
+                    break
+    
+    df = df.rename(columns=column_map)
+    
+    # If unit_cost column still not found, try to find cost/price columns manually
+    if 'unit_cost' not in df.columns:
+        cost_columns = [col for col in df.columns if any(keyword in col.lower() for keyword in ['cost', 'price', 'amount'])]
+        if cost_columns:
+            # Use the first cost-like column as unit_cost
+            df = df.rename(columns={cost_columns[0]: 'unit_cost'})
+            print(f"Auto-mapped '{cost_columns[0]}' to 'unit_cost' for Excel file")
     
     items = []
     
@@ -217,9 +245,20 @@ def scrape_vendor_excel(file_path: str, sheet_name: Optional[str] = None,
             cost = row.get('unit_cost')
             if pd.notna(cost):
                 try:
-                    item['unit_cost'] = float(cost)
+                    # Handle string values with currency symbols
+                    cost_str = str(cost).strip()
+                    # Remove currency symbols and commas
+                    cost_str = re.sub(r'[^\d.]', '', cost_str)
+                    if cost_str:
+                        item['unit_cost'] = float(cost_str)
+                    else:
+                        item['unit_cost'] = 0.0
                 except (ValueError, TypeError):
                     item['unit_cost'] = 0.0
+            else:
+                item['unit_cost'] = 0.0
+        else:
+            item['unit_cost'] = 0.0
         
         if 'lot_number' in df.columns:
             lot = row.get('lot_number')

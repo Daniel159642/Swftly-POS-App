@@ -118,6 +118,49 @@ def get_table_data(table_name):
     
     return columns, data
 
+def get_table_primary_key_columns(table_name):
+    """Return a list of primary key column names for a table (can be empty)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    cols = cursor.fetchall()
+    conn.close()
+    # PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+    pk_cols = [c[1] for c in cols if c[5]]
+    # If composite PK, pk is >0 indicating ordering; preserve ordering
+    if len(pk_cols) > 1:
+        pk_cols = [c[1] for c in sorted(cols, key=lambda x: x[5]) if x[5]]
+    return pk_cols
+
+def get_table_data_for_admin(table_name):
+    """
+    Get table data plus metadata needed for safe row identification/deletion.
+    If table has no primary key, include SQLite rowid as '__rowid__'.
+    """
+    pk_cols = get_table_primary_key_columns(table_name)
+
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    if pk_cols:
+        cursor.execute(f"SELECT * FROM {table_name}")
+    else:
+        cursor.execute(f"SELECT rowid as __rowid__, * FROM {table_name}")
+
+    rows = cursor.fetchall()
+    columns = [description[0] for description in cursor.description]
+    conn.close()
+
+    data = [{col: row[col] for col in columns} for row in rows]
+
+    return {
+        'columns': columns,
+        'data': data,
+        'primary_key': pk_cols,
+        'rowid_column': None if pk_cols else '__rowid__'
+    }
+
 @app.route('/')
 def index():
     """Serve React app or redirect to dev server"""
@@ -305,12 +348,13 @@ def api_pending_shipments():
 def api_start_verification(shipment_id):
     """Start verification session"""
     try:
-        employee_id = request.json.get('employee_id')
+        data = request.json if request.is_json else {}
+        employee_id = data.get('employee_id')
         if not employee_id:
             # Try to get from session
             session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
             if not session_token:
-                session_token = request.json.get('session_token')
+                session_token = data.get('session_token')
             if session_token:
                 session_data = verify_session(session_token)
                 if session_data and session_data.get('valid'):
@@ -319,12 +363,17 @@ def api_start_verification(shipment_id):
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID required'}), 401
         
-        device_id = request.json.get('device_id')
+        device_id = data.get('device_id')
         result = start_verification_session(shipment_id, employee_id, device_id)
-        return jsonify(result)
+        if result and 'session_id' in result:
+            return jsonify({'success': True, **result})
+        else:
+            return jsonify({'success': False, 'message': 'Failed to start session', 'details': result}), 500
     except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error in api_start_verification: {error_trace}")
+        return jsonify({'success': False, 'message': str(e), 'error': error_trace}), 500
 
 @app.route('/api/shipments/<int:shipment_id>/scan', methods=['POST'])
 def api_scan_item(shipment_id):
@@ -373,9 +422,10 @@ def api_update_item_verification(item_id):
     try:
         # Get employee ID from session
         employee_id = None
+        data = request.json if request.is_json else {}
         session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
         if not session_token:
-            session_token = request.json.get('session_token') if request.is_json else None
+            session_token = data.get('session_token')
         if session_token:
             session_data = verify_session(session_token)
             if session_data and session_data.get('valid'):
@@ -384,7 +434,6 @@ def api_update_item_verification(item_id):
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID required'}), 401
         
-        data = request.json if request.is_json else {}
         quantity_verified = data.get('quantity_verified')
         
         if quantity_verified is None:
@@ -406,8 +455,10 @@ def api_update_item_verification(item_id):
             return jsonify({'success': False, 'message': 'Failed to update item'}), 400
             
     except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error in api_update_item_verification: {error_trace}")
+        return jsonify({'success': False, 'message': str(e), 'error': error_trace}), 500
 
 @app.route('/api/shipments/<int:shipment_id>/issues', methods=['POST'])
 def api_report_issue(shipment_id):
@@ -457,13 +508,14 @@ def api_report_issue(shipment_id):
 
 @app.route('/api/shipments/<int:shipment_id>/complete', methods=['POST'])
 def api_complete_verification(shipment_id):
-    """Complete verification and approve shipment"""
+    """Complete verification step - behavior depends on workflow mode"""
     try:
-        employee_id = request.json.get('employee_id')
+        data = request.json if request.is_json else {}
+        employee_id = data.get('employee_id')
         if not employee_id:
             session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
             if not session_token:
-                session_token = request.json.get('session_token')
+                session_token = data.get('session_token')
             if session_token:
                 session_data = verify_session(session_token)
                 if session_data and session_data.get('valid'):
@@ -472,13 +524,90 @@ def api_complete_verification(shipment_id):
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID required'}), 401
         
-        data = request.json
-        result = complete_verification(
-            shipment_id,
-            employee_id,
-            data.get('notes')
-        )
+        # Get workflow settings
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT setting_value FROM shipment_verification_settings 
+            WHERE setting_key = 'workflow_mode'
+        """)
+        setting = cursor.fetchone()
+        workflow_mode = setting['setting_value'] if setting else 'simple'
+        
+        cursor.execute("""
+            SELECT setting_value FROM shipment_verification_settings 
+            WHERE setting_key = 'auto_add_to_inventory'
+        """)
+        setting = cursor.fetchone()
+        auto_add = setting['setting_value'] == 'true' if setting else True
+        
+        # Check current workflow step
+        cursor.execute("SELECT workflow_step, status FROM pending_shipments WHERE pending_shipment_id = ?", (shipment_id,))
+        shipment = cursor.fetchone()
+        current_step = shipment['workflow_step'] if shipment else None
+        
+        conn.close()
+        
+        # For simple workflow: complete and add to inventory immediately
+        if workflow_mode == 'simple' and auto_add:
+            result = complete_verification(shipment_id, employee_id, data.get('notes'))
+            if result.get('success'):
+                # Mark as completed and added to inventory
+                conn = sqlite3.connect(DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE pending_shipments 
+                    SET status = 'completed',
+                        workflow_step = 'completed',
+                        added_to_inventory = 1
+                    WHERE pending_shipment_id = ?
+                """, (shipment_id,))
+                conn.commit()
+                conn.close()
+            return jsonify(result)
+        
+        # For three-step workflow: move to next step
+        elif workflow_mode == 'three_step':
+            # Step 1 (verify): Move to step 2 (confirm pricing)
+            if current_step is None or current_step == 'verify':
+                conn = sqlite3.connect(DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE pending_shipments 
+                    SET workflow_step = 'confirm_pricing',
+                        status = 'in_progress'
+                    WHERE pending_shipment_id = ?
+                """, (shipment_id,))
+                conn.commit()
+                conn.close()
+                return jsonify({
+                    'success': True,
+                    'step': 'confirm_pricing',
+                    'message': 'Move to step 2: Confirm pricing'
+                })
+            
+            # Step 2 (confirm_pricing): Ready for step 3 (add to inventory)
+            elif current_step == 'confirm_pricing':
+                conn = sqlite3.connect(DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE pending_shipments 
+                    SET workflow_step = 'ready_for_inventory'
+                    WHERE pending_shipment_id = ?
+                """, (shipment_id,))
+                conn.commit()
+                conn.close()
+                return jsonify({
+                    'success': True,
+                    'step': 'ready_for_inventory',
+                    'message': 'Ready for step 3: Add to inventory'
+                })
+        
+        # Default: complete normally
+        result = complete_verification(shipment_id, employee_id, data.get('notes'))
         return jsonify(result)
+        
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -684,10 +813,37 @@ def api_list_tables():
         traceback.print_exc()
         return jsonify({'tables': [], 'error': str(e)}), 500
 
+# Raw table endpoints for admin table viewer (always direct table access + metadata)
+@app.route('/api/tables/<table_name>', methods=['GET'])
+def api_tables_table(table_name):
+    """Raw table access for the Tables UI (includes PK/rowid metadata)."""
+    # Get all tables dynamically for security check
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        allowed_tables = [row[0] for row in cursor.fetchall()]
+        conn.close()
+    except Exception as e:
+        print(f"Error getting table list: {e}")
+        return jsonify({'columns': [], 'data': [], 'error': 'Database error'}), 500
+
+    if table_name not in allowed_tables:
+        return jsonify({'columns': [], 'data': [], 'error': 'Table not found'}), 404
+
+    try:
+        result = get_table_data_for_admin(table_name)
+        return jsonify(result)
+    except Exception as e:
+        print(f"Error loading table {table_name}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'columns': [], 'data': [], 'error': str(e)}), 500
+
 # Generic table endpoints
-@app.route('/api/<table_name>')
+@app.route('/api/<table_name>', methods=['GET'])
 def api_table(table_name):
-    """Generic endpoint for any table"""
+    """Generic endpoint for any table (read-only)"""
     # Get all tables dynamically for security check
     try:
         conn = sqlite3.connect(DB_NAME)
@@ -703,13 +859,109 @@ def api_table(table_name):
         return jsonify({'columns': [], 'data': [], 'error': 'Table not found'}), 404
     
     try:
-        columns, data = get_table_data(table_name)
-        return jsonify({'columns': columns, 'data': data})
+        result = get_table_data_for_admin(table_name)
+        return jsonify(result)
     except Exception as e:
         print(f"Error loading table {table_name}: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'columns': [], 'data': [], 'error': str(e)}), 500
+
+@app.route('/api/tables/<table_name>/rows', methods=['DELETE'])
+@app.route('/api/<table_name>/rows', methods=['DELETE'])
+def api_delete_table_rows(table_name):
+    """
+    Delete one or more rows from a table.
+
+    Request JSON:
+    - If table has single-column PK: { "ids": [1,2,3] }
+    - If table has composite PK: { "keys": [ {"pk1":..., "pk2":...}, ... ] }
+    - If table has no PK: { "rowids": [123,124] }  (uses SQLite rowid)
+    """
+    # Get all tables dynamically for security check
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        allowed_tables = [row[0] for row in cursor.fetchall()]
+        conn.close()
+    except Exception as e:
+        print(f"Error getting table list: {e}")
+        return jsonify({'success': False, 'message': 'Database error'}), 500
+
+    if table_name not in allowed_tables:
+        return jsonify({'success': False, 'message': 'Table not found'}), 404
+
+    if not request.is_json:
+        return jsonify({'success': False, 'message': 'Invalid request data'}), 400
+
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        pk_cols = get_table_primary_key_columns(table_name)
+
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+
+        deleted = 0
+
+        if pk_cols:
+            if len(pk_cols) == 1:
+                pk = pk_cols[0]
+                ids = payload.get('ids', [])
+                if not isinstance(ids, list) or len(ids) == 0:
+                    conn.close()
+                    return jsonify({'success': False, 'message': 'No ids provided'}), 400
+
+                placeholders = ','.join(['?'] * len(ids))
+                cursor.execute(f"DELETE FROM {table_name} WHERE {pk} IN ({placeholders})", ids)
+                deleted = cursor.rowcount
+            else:
+                keys = payload.get('keys', [])
+                if not isinstance(keys, list) or len(keys) == 0:
+                    conn.close()
+                    return jsonify({'success': False, 'message': 'No keys provided'}), 400
+
+                clauses = []
+                params = []
+                for k in keys:
+                    if not isinstance(k, dict):
+                        continue
+                    if any(col not in k for col in pk_cols):
+                        continue
+                    clauses.append('(' + ' AND '.join([f"{col} = ?" for col in pk_cols]) + ')')
+                    params.extend([k[col] for col in pk_cols])
+
+                if not clauses:
+                    conn.close()
+                    return jsonify({'success': False, 'message': 'Invalid keys provided'}), 400
+
+                cursor.execute(f"DELETE FROM {table_name} WHERE " + " OR ".join(clauses), params)
+                deleted = cursor.rowcount
+        else:
+            rowids = payload.get('rowids', [])
+            if not isinstance(rowids, list) or len(rowids) == 0:
+                conn.close()
+                return jsonify({'success': False, 'message': 'No rowids provided'}), 400
+
+            placeholders = ','.join(['?'] * len(rowids))
+            cursor.execute(f"DELETE FROM {table_name} WHERE rowid IN ({placeholders})", rowids)
+            deleted = cursor.rowcount
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({'success': True, 'deleted': deleted})
+    except Exception as e:
+        print(f"Error deleting rows from {table_name}: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            if 'conn' in locals():
+                conn.close()
+        except Exception:
+            pass
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 # Specialized endpoints with joins
 @app.route('/api/orders')
@@ -1041,9 +1293,13 @@ def api_dashboard_statistics():
         cursor.execute("SELECT COUNT(*) as total FROM orders")
         total_orders = cursor.fetchone()['total']
         
-        # Get total returns count
-        cursor.execute("SELECT COUNT(*) as total FROM pending_returns")
-        total_returns = cursor.fetchone()['total']
+        # Get total returns count (check if table exists first)
+        try:
+            cursor.execute("SELECT COUNT(*) as total FROM pending_returns")
+            total_returns = cursor.fetchone()['total']
+        except sqlite3.OperationalError:
+            # Table doesn't exist, set to 0
+            total_returns = 0
         
         # Get weekly revenue (last 7 days)
         cursor.execute("""
@@ -2867,6 +3123,116 @@ def get_display_settings():
             return jsonify({'success': True, 'data': updated_settings})
     except Exception as e:
         traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# Shipment Verification Workflow Settings
+@app.route('/api/shipment-verification/settings', methods=['GET', 'POST'])
+def api_verification_settings():
+    """Get or update shipment verification workflow settings"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        if request.method == 'POST':
+            data = request.json if request.is_json else {}
+            workflow_mode = data.get('workflow_mode', 'simple')
+            auto_add = data.get('auto_add_to_inventory', 'true')
+            
+            # Update settings
+            cursor.execute("""
+                UPDATE shipment_verification_settings 
+                SET setting_value = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE setting_key = ?
+            """, (workflow_mode, 'workflow_mode'))
+            
+            cursor.execute("""
+                UPDATE shipment_verification_settings 
+                SET setting_value = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE setting_key = ?
+            """, (auto_add, 'auto_add_to_inventory'))
+            
+            conn.commit()
+        
+        # Get all settings
+        cursor.execute("SELECT setting_key, setting_value, description FROM shipment_verification_settings")
+        rows = cursor.fetchall()
+        settings = {row['setting_key']: row['setting_value'] for row in rows}
+        
+        conn.close()
+        return jsonify({'success': True, 'settings': settings})
+    except Exception as e:
+        traceback.print_exc()
+        if 'conn' in locals():
+            conn.close()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/shipments/<int:shipment_id>/workflow-step', methods=['POST'])
+def api_update_workflow_step(shipment_id):
+    """Update workflow step for a shipment"""
+    try:
+        data = request.json if request.is_json else {}
+        step = data.get('step')  # 'verify', 'confirm_pricing', 'add_to_inventory'
+        
+        if not step:
+            return jsonify({'success': False, 'message': 'Step is required'}), 400
+        
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE pending_shipments 
+            SET workflow_step = ?
+            WHERE pending_shipment_id = ?
+        """, (step, shipment_id))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'step': step})
+    except Exception as e:
+        traceback.print_exc()
+        if 'conn' in locals():
+            conn.close()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/shipments/<int:shipment_id>/add-to-inventory', methods=['POST'])
+def api_add_to_inventory(shipment_id):
+    """Add verified items to inventory (Step 3 of three-step workflow)"""
+    try:
+        employee_id = None
+        data = request.json if request.is_json else {}
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not session_token:
+            session_token = data.get('session_token')
+        if session_token:
+            session_data = verify_session(session_token)
+            if session_data and session_data.get('valid'):
+                employee_id = session_data.get('employee_id')
+        
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID required'}), 401
+        
+        # Complete verification (adds to inventory via complete_verification function)
+        result = complete_verification(shipment_id, employee_id, data.get('notes'))
+        
+        if result.get('success'):
+            # Mark as added to inventory
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE pending_shipments 
+                SET added_to_inventory = 1,
+                    workflow_step = 'completed',
+                    status = 'completed'
+                WHERE pending_shipment_id = ?
+            """, (shipment_id,))
+            conn.commit()
+            conn.close()
+        
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        if 'conn' in locals():
+            conn.close()
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/customer-display')

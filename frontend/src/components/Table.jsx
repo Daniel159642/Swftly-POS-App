@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-function Table({ columns, data, onEdit }) {
+function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, selectedRowIds, onSelectedRowIdsChange }) {
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return document.documentElement.classList.contains('dark-theme')
   })
@@ -94,6 +94,34 @@ function Table({ columns, data, onEdit }) {
     return baseStyle
   }
 
+  const resolvedGetRowId = getRowId || ((row, idx) => idx)
+  const selectedSet = selectedRowIds instanceof Set ? selectedRowIds : new Set(selectedRowIds || [])
+
+  const visibleRowIds = data.map((row, idx) => resolvedGetRowId(row, idx))
+  const allVisibleSelected = visibleRowIds.length > 0 && visibleRowIds.every(id => selectedSet.has(id))
+  const someVisibleSelected = visibleRowIds.some(id => selectedSet.has(id)) && !allVisibleSelected
+
+  const updateSelected = (nextSet) => {
+    if (onSelectedRowIdsChange) onSelectedRowIdsChange(nextSet)
+  }
+
+  const toggleSelectAllVisible = () => {
+    const next = new Set(selectedSet)
+    if (allVisibleSelected) {
+      visibleRowIds.forEach(id => next.delete(id))
+    } else {
+      visibleRowIds.forEach(id => next.add(id))
+    }
+    updateSelected(next)
+  }
+
+  const toggleRow = (rowId) => {
+    const next = new Set(selectedSet)
+    if (next.has(rowId)) next.delete(rowId)
+    else next.add(rowId)
+    updateSelected(next)
+  }
+
   return (
     <div style={{ 
       backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff', 
@@ -106,6 +134,32 @@ function Table({ columns, data, onEdit }) {
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 'max-content' }}>
         <thead>
           <tr style={{ backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa' }}>
+            {enableRowSelection && (
+              <th
+                style={{
+                  padding: '12px',
+                  textAlign: 'center',
+                  fontWeight: 600,
+                  borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #dee2e6',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#495057',
+                  fontSize: '13px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  width: '48px'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someVisibleSelected
+                  }}
+                  onChange={toggleSelectAllVisible}
+                  aria-label="Select all rows"
+                  style={{ cursor: 'pointer' }}
+                />
+              </th>
+            )}
             {columns.map(col => (
               <th
                 key={col}
@@ -144,7 +198,22 @@ function Table({ columns, data, onEdit }) {
         </thead>
       <tbody>
         {data.map((row, idx) => (
-          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? (isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff') : (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#fafafa') }}>
+          <tr key={resolvedGetRowId(row, idx)} style={{ backgroundColor: idx % 2 === 0 ? (isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff') : (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#fafafa') }}>
+            {enableRowSelection && (
+              <td style={{
+                padding: '8px 12px',
+                borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee',
+                textAlign: 'center'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={selectedSet.has(resolvedGetRowId(row, idx))}
+                  onChange={() => toggleRow(resolvedGetRowId(row, idx))}
+                  aria-label="Select row"
+                  style={{ cursor: 'pointer' }}
+                />
+              </td>
+            )}
             {columns.map(col => (
               <td key={col} style={getCellStyle(col, row[col])}>
                 {formatValue(row[col], col)}

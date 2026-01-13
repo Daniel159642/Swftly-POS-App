@@ -369,7 +369,7 @@ function Returns() {
   }
 
   // Fields to hide from main table (shown in dropdown)
-  const hiddenFields = ['order_id', 'orderId', 'employee_id', 'employeeId', 'customer_id', 'customerId', 'subtotal', 'tax_rate', 'tax_amount', 'tax', 'discount', 'transaction_fee', 'notes', 'tip']
+  const hiddenFields = ['order_id', 'orderId', 'employee_id', 'employeeId', 'customer_id', 'customerId', 'subtotal', 'tax_rate', 'tax_amount', 'tax', 'discount', 'transaction_fee', 'notes', 'tip', 'payment_method_id', 'paymentMethodId', 'customer_name', 'customerName', 'receipt_type', 'receiptType', 'receipt_email', 'receiptEmail', 'receipt_phone', 'receiptPhone', 'receipt_sent', 'receiptSent', 'receipt_sent_at', 'receiptSentAt']
   
   // Filter out hidden fields from columns
   const visibleColumns = ordersData && ordersData.columns ? ordersData.columns.filter(col => !hiddenFields.includes(col)) : []
@@ -430,6 +430,13 @@ function Returns() {
         transaction_fee: row.transaction_fee || 0,
         notes: row.notes || '',
         tip: row.tip || 0,
+        payment_method_id: row.payment_method_id || row.paymentMethodId || null,
+        customer_name: row.customer_name || row.customerName || null,
+        receipt_type: row.receipt_type || row.receiptType || null,
+        receipt_email: row.receipt_email || row.receiptEmail || null,
+        receipt_phone: row.receipt_phone || row.receiptPhone || null,
+        receipt_sent: row.receipt_sent || row.receiptSent || false,
+        receipt_sent_at: row.receipt_sent_at || row.receiptSentAt || null,
         items: orderItems
       }
 
@@ -712,6 +719,39 @@ function Returns() {
                                     <div>
                                       <strong>Tip:</strong> ${details.tip.toFixed(2)}
                                     </div>
+                                    {details.payment_method_id && (
+                                      <div>
+                                        <strong>Payment Method ID:</strong> {details.payment_method_id}
+                                      </div>
+                                    )}
+                                    {details.customer_name && (
+                                      <div>
+                                        <strong>Customer Name:</strong> {details.customer_name}
+                                      </div>
+                                    )}
+                                    {details.receipt_type && (
+                                      <div>
+                                        <strong>Receipt Type:</strong> {details.receipt_type}
+                                      </div>
+                                    )}
+                                    {details.receipt_email && (
+                                      <div>
+                                        <strong>Receipt Email:</strong> {details.receipt_email}
+                                      </div>
+                                    )}
+                                    {details.receipt_phone && (
+                                      <div>
+                                        <strong>Receipt Phone:</strong> {details.receipt_phone}
+                                      </div>
+                                    )}
+                                    <div>
+                                      <strong>Receipt Sent:</strong> {details.receipt_sent ? 'Yes' : 'No'}
+                                    </div>
+                                    {details.receipt_sent_at && (
+                                      <div>
+                                        <strong>Receipt Sent At:</strong> {new Date(details.receipt_sent_at).toLocaleString()}
+                                      </div>
+                                    )}
                                     {details.notes && (
                                       <div style={{ gridColumn: '1 / -1' }}>
                                         <strong>Notes:</strong> {details.notes}

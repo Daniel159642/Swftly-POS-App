@@ -42,9 +42,9 @@ except ImportError:
 try:
     import spacy
     SPACY_AVAILABLE = True
-except ImportError:
+except (ImportError, Exception):
     SPACY_AVAILABLE = False
-    print("Warning: spaCy not installed. Install with: pip install spacy && python -m spacy download en_core_web_sm")
+    # Don't print warning - spaCy is optional and may have compatibility issues
 
 # Optional: Ollama for LLM-based category naming (will fail gracefully if not installed)
 try:
@@ -378,10 +378,150 @@ class FreeMetadataSystem:
         
         return attributes
     
+    def _match_category_with_hierarchy(self, metadata):
+        """
+        Match category with intelligent parent-child hierarchy
+        Returns category path like "Electronics > Phones > Smartphones"
+        """
+        product_name_lower = metadata.get('product_name', '').lower()
+        keywords = [k.lower() for k in metadata.get('keywords', [])]
+        tags = [t.lower() for t in metadata.get('tags', [])]
+        all_text = product_name_lower + ' ' + ' '.join(keywords) + ' ' + ' '.join(tags)
+        
+        # Define category hierarchy with specific subcategories
+        category_hierarchy = {
+            'Electronics': {
+                'Phones': ['phone', 'smartphone', 'iphone', 'android', 'mobile', 'cell'],
+                'Computers': ['computer', 'laptop', 'pc', 'desktop', 'macbook', 'notebook'],
+                'Audio': ['headphone', 'speaker', 'earbud', 'audio', 'sound', 'earphone'],
+                'Cameras': ['camera', 'dslr', 'mirrorless', 'photography', 'lens'],
+                'TV & Video': ['tv', 'television', 'monitor', 'display', 'screen', 'projector'],
+                'Accessories': ['charger', 'cable', 'adapter', 'case', 'cover', 'stand']
+            },
+            'Clothing': {
+                'Tops': ['shirt', 't-shirt', 'blouse', 'sweater', 'hoodie', 'tank', 'polo'],
+                'Bottoms': ['pants', 'jeans', 'shorts', 'skirt', 'trousers', 'leggings'],
+                'Footwear': ['shoes', 'sneakers', 'boots', 'sandals', 'slippers', 'heels'],
+                'Outerwear': ['jacket', 'coat', 'parka', 'windbreaker', 'blazer'],
+                'Accessories': ['hat', 'cap', 'gloves', 'scarf', 'belt', 'tie']
+            },
+            'Food & Beverage': {
+                'Snacks': ['snack', 'chip', 'cracker', 'cookie', 'candy', 'nuts'],
+                'Beverages': ['drink', 'soda', 'juice', 'water', 'beverage', 'tea', 'coffee'],
+                'Dairy': ['milk', 'cheese', 'yogurt', 'butter', 'cream'],
+                'Produce': ['fruit', 'vegetable', 'apple', 'banana', 'lettuce', 'tomato'],
+                'Pantry': ['pasta', 'rice', 'cereal', 'flour', 'sugar', 'spice']
+            },
+            'Home & Kitchen': {
+                'Cookware': ['pan', 'pot', 'skillet', 'cookware', 'baking', 'bakeware'],
+                'Appliances': ['blender', 'toaster', 'microwave', 'oven', 'mixer', 'coffee maker'],
+                'Dining': ['plate', 'bowl', 'cup', 'mug', 'utensil', 'silverware'],
+                'Furniture': ['chair', 'table', 'sofa', 'desk', 'shelf', 'cabinet'],
+                'Decor': ['lamp', 'curtain', 'picture', 'frame', 'vase', 'candle']
+            },
+            'Beauty & Personal Care': {
+                'Skincare': ['lotion', 'cream', 'moisturizer', 'serum', 'cleanser', 'toner'],
+                'Haircare': ['shampoo', 'conditioner', 'hair', 'styling', 'gel', 'spray'],
+                'Makeup': ['makeup', 'lipstick', 'foundation', 'mascara', 'eyeshadow'],
+                'Fragrance': ['perfume', 'cologne', 'fragrance', 'scent', 'body spray'],
+                'Tools': ['brush', 'comb', 'razor', 'tweezers', 'mirror', 'tweezers']
+            },
+            'Sports & Outdoors': {
+                'Fitness': ['weights', 'dumbbell', 'yoga', 'mat', 'resistance', 'exercise'],
+                'Outdoor': ['camping', 'hiking', 'backpack', 'tent', 'sleeping', 'gear'],
+                'Team Sports': ['ball', 'basketball', 'football', 'soccer', 'baseball'],
+                'Water Sports': ['swimming', 'surf', 'paddle', 'kayak', 'snorkel'],
+                'Winter Sports': ['ski', 'snowboard', 'ice', 'skate', 'sled']
+            },
+            'Toys & Games': {
+                'Action Figures': ['action', 'figure', 'doll', 'toy', 'character'],
+                'Board Games': ['board', 'game', 'puzzle', 'card', 'strategy'],
+                'Electronics': ['video', 'game', 'console', 'controller', 'gaming'],
+                'Educational': ['educational', 'learning', 'stem', 'science', 'math']
+            },
+            'Books & Stationery': {
+                'Books': ['book', 'novel', 'magazine', 'textbook', 'manual'],
+                'Writing': ['pen', 'pencil', 'marker', 'highlighter', 'eraser'],
+                'Paper': ['notebook', 'paper', 'journal', 'planner', 'calendar'],
+                'Office': ['stapler', 'tape', 'folder', 'binder', 'envelope']
+            },
+            'Tools & Hardware': {
+                'Hand Tools': ['hammer', 'screwdriver', 'wrench', 'pliers', 'tool'],
+                'Power Tools': ['drill', 'saw', 'sander', 'grinder', 'power'],
+                'Hardware': ['screw', 'nail', 'bolt', 'nut', 'hardware'],
+                'Paint & Supplies': ['paint', 'brush', 'roller', 'tape', 'primer']
+            },
+            'Health & Wellness': {
+                'Supplements': ['vitamin', 'supplement', 'pill', 'capsule', 'tablet'],
+                'Medical': ['medicine', 'bandage', 'thermometer', 'first aid'],
+                'Wellness': ['health', 'wellness', 'fitness', 'nutrition'],
+                'Personal Care': ['sanitizer', 'mask', 'gloves', 'wipes']
+            },
+            'Pet Supplies': {
+                'Food': ['pet food', 'dog food', 'cat food', 'treat', 'kibble'],
+                'Toys': ['pet toy', 'dog toy', 'cat toy', 'chew'],
+                'Accessories': ['collar', 'leash', 'cage', 'aquarium', 'bed'],
+                'Care': ['litter', 'bowl', 'grooming', 'shampoo']
+            },
+            'Automotive': {
+                'Parts': ['tire', 'oil', 'filter', 'brake', 'engine', 'battery'],
+                'Accessories': ['wiper', 'light', 'mirror', 'seat cover', 'mat'],
+                'Maintenance': ['fluids', 'cleaner', 'wax', 'polish']
+            }
+        }
+        
+        best_match = None
+        best_score = 0
+        
+        # Find best matching category hierarchy
+        for parent_cat, subcats in category_hierarchy.items():
+            # Check parent category keywords
+            parent_keywords = self.category_keywords.get(parent_cat, [])
+            parent_score = sum(1 for kw in parent_keywords if kw in all_text)
+            
+            if parent_score > 0:
+                # Check subcategories
+                best_subcat = None
+                best_subcat_score = 0
+                
+                for subcat, subcat_keywords in subcats.items():
+                    subcat_score = sum(1 for kw in subcat_keywords if kw in all_text)
+                    total_score = parent_score + (subcat_score * 2)  # Weight subcategory higher
+                    
+                    if total_score > best_score:
+                        best_score = total_score
+                        best_subcat = subcat
+                        best_subcat_score = subcat_score
+                
+                # If subcategory found, use hierarchy path
+                if best_subcat:
+                    best_match = f"{parent_cat} > {best_subcat}"
+                else:
+                    # Use parent category only
+                    if parent_score > best_score:
+                        best_match = parent_cat
+                        best_score = parent_score
+        
+        if best_match:
+            # Normalize confidence score (0.0 to 1.0)
+            confidence = min(best_score / 10.0, 1.0)
+            return {
+                'category_name': best_match,
+                'confidence': confidence
+            }
+        
+        return None
+    
     def _match_category(self, metadata):
         """
-        Match product to category using keyword matching
+        Match product to category using intelligent hierarchy first, then fallback to simple matching
         """
+        # Try hierarchy matching first (more intelligent, creates parent-child categories)
+        hierarchy_match = self._match_category_with_hierarchy(metadata)
+        if hierarchy_match:
+            return hierarchy_match
+        
+        # Fallback to simple keyword matching if hierarchy doesn't match
         # Combine all text data
         all_text = ' '.join(
             metadata.get('keywords', []) +

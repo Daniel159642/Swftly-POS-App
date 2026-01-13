@@ -62,7 +62,7 @@ def setup_admin_users():
             last_name='User',
             position='admin',
             date_started='2024-01-01',
-            password='admin123',  # Change this in production!
+            password='123456',  # Admin passwords must be numeric only
             email='admin@pos.com',
             phone='555-0001',
             department='Management',
@@ -79,7 +79,7 @@ def setup_admin_users():
         print(f"  - ID: {admin_id}")
         print(f"  - Username: {admin.get('username', 'admin')}")
         print(f"  - Name: {admin['first_name']} {admin['last_name']}")
-        print(f"  - Password: admin123 (CHANGE THIS IN PRODUCTION!)")
+        print(f"  - Password: 123456 (Admin passwords must be numeric only - CHANGE THIS IN PRODUCTION!)")
         print(f"  - Role: Admin (Full Access)")
         print()
     except Exception as e:
@@ -151,7 +151,7 @@ def setup_admin_users():
     print("Login Credentials:")
     print("  Admin User:")
     print("    Username: admin")
-    print("    Password: admin123")
+    print("    Password: 123456 (numeric only)")
     print()
     print("  Employee (Cashier):")
     print("    Username: cashier1")

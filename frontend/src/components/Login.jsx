@@ -1,33 +1,51 @@
 import { useState, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import '../index.css'
 
 function Login({ onLogin }) {
-  const { themeMode } = useTheme()
+  const { themeColor } = useTheme()
   const [employeeCode, setEmployeeCode] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [employees, setEmployees] = useState([])
+  const [loadingEmployees, setLoadingEmployees] = useState(true)
+
+  // Convert hex to RGB for rgba usage
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+  }
   
-  // Determine if dark mode is active
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    return document.documentElement.classList.contains('dark-theme')
-  })
-  
+  const themeColorRgb = hexToRgb(themeColor)
+
   useEffect(() => {
-    const checkDarkMode = () => {
-      setIsDarkMode(document.documentElement.classList.contains('dark-theme'))
+    const fetchEmployees = async () => {
+      try {
+        const response = await fetch('/api/employees')
+        const data = await response.json()
+        setEmployees(data.data || [])
+      } catch (err) {
+        console.error('Error fetching employees:', err)
+      } finally {
+        setLoadingEmployees(false)
+      }
     }
-    
-    checkDarkMode()
-    
-    const observer = new MutationObserver(checkDarkMode)
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class']
-    })
-    
-    return () => observer.disconnect()
-  }, [themeMode])
+    fetchEmployees()
+  }, [])
+
+  const handleNumpadClick = (value) => {
+    if (value === 'backspace') {
+      setPassword(prev => prev.slice(0, -1))
+    } else {
+      setPassword(prev => {
+        if (prev.length >= 6) {
+          return prev
+        }
+        return prev + value
+      })
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -90,125 +108,217 @@ function Login({ onLogin }) {
       justifyContent: 'center',
       alignItems: 'center',
       minHeight: '100vh',
-      backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#f5f5f5'
+      backgroundColor: 'var(--bg-secondary)',
+      padding: '20px'
     }}>
       <div style={{
-        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-        padding: '40px',
+        backgroundColor: 'var(--bg-primary)',
+        padding: '24px 40px 40px 40px',
         borderRadius: '8px',
-        boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.1)',
+        boxShadow: '0 2px 8px var(--shadow)',
         width: '100%',
         maxWidth: '400px',
-        border: isDarkMode ? '1px solid var(--border-color, #404040)' : 'none'
+        border: '1px solid var(--border-light)'
       }}>
-        <h1 style={{ 
-          marginTop: 0, 
-          marginBottom: '30px', 
-          textAlign: 'center',
-          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-        }}>
-          POS System Login
-        </h1>
-        
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '8px', 
-              fontWeight: 500,
-              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-            }}>
-              Username / Employee Code
-            </label>
-            <input
-              type="text"
+            <select
               value={employeeCode}
               onChange={(e) => setEmployeeCode(e.target.value)}
               required
+              disabled={loadingEmployees}
               style={{
                 width: '100%',
-                padding: '10px',
-                border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '16px',
-                boxSizing: 'border-box',
-                backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                padding: '14px 16px',
+                border: `2px solid rgba(${themeColorRgb}, 0.4)`,
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontFamily: 'inherit',
+                background: 'var(--bg-primary)',
+                color: 'var(--text-primary)',
+                cursor: loadingEmployees ? 'wait' : 'pointer',
+                opacity: loadingEmployees ? 0.6 : 1,
+                outline: 'none',
+                transition: 'all 0.2s ease',
+                boxShadow: `0 2px 8px rgba(${themeColorRgb}, 0.1)`
               }}
-            />
+              onFocus={(e) => {
+                e.target.style.borderColor = `rgba(${themeColorRgb}, 0.7)`
+                e.target.style.boxShadow = `0 4px 12px rgba(${themeColorRgb}, 0.2)`
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = `rgba(${themeColorRgb}, 0.4)`
+                e.target.style.boxShadow = `0 2px 8px rgba(${themeColorRgb}, 0.1)`
+              }}
+            >
+              <option value="">
+                {loadingEmployees ? 'Loading employees...' : 'Select an employee...'}
+              </option>
+              {employees.map((emp) => (
+                <option key={emp.employee_id} value={emp.username || emp.employee_code}>
+                  {emp.first_name} {emp.last_name} {emp.username ? `(${emp.username})` : emp.employee_code ? `(${emp.employee_code})` : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '8px', 
-              fontWeight: 500,
-              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-            }}>
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
+          <div style={{
+            textAlign: 'center',
+            fontSize: '36px',
+            letterSpacing: '12px',
+            fontFamily: 'monospace',
+            minHeight: '50px',
+            padding: '15px 0',
+            marginBottom: '15px',
+            display: 'flex',
+            justifyContent: 'center',
+            gap: '8px'
+          }}>
+            {Array.from({ length: 6 }, (_, index) => (
+              <div key={index} style={{
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                backgroundColor: index < password.length ? '#666' : 'transparent',
+                border: '2px solid #666',
+                transition: 'background-color 0.2s ease'
+              }}>
+              </div>
+            ))}
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '8px',
+            marginTop: '15px',
+            marginBottom: '8px',
+            justifyContent: 'center'
+          }}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+              <button
+                key={num}
+                type="button"
+                onClick={() => handleNumpadClick(num.toString())}
+                style={{
+                  width: '80px',
+                  height: '80px',
+                  padding: 0,
+                  fontSize: '28px',
+                  fontWeight: 600,
+                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                  backdropFilter: 'blur(10px)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                  color: '#fff',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  borderRadius: '50%',
+                  cursor: 'pointer',
+                  boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                  transition: 'all 0.3s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.85)`
+                  e.target.style.transform = 'scale(0.95)'
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+                  e.target.style.transform = 'scale(1)'
+                }}
+              >
+                {num}
+              </button>
+            ))}
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '8px',
+            marginBottom: '20px',
+            justifyContent: 'center'
+          }}>
+            <button
+              type="button"
+              onClick={() => handleNumpadClick('backspace')}
               style={{
-                width: '100%',
-                padding: '10px',
-                border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '16px',
-                boxSizing: 'border-box',
-                backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                fontSize: '24px',
+                fontWeight: 500,
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto'
               }}
-            />
+            >
+              ⌫
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNumpadClick('0')}
+              style={{
+                width: '80px',
+                height: '80px',
+                padding: 0,
+                fontSize: '28px',
+                fontWeight: 600,
+                backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+                color: '#fff',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '50%',
+                cursor: 'pointer',
+                boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                transition: 'all 0.3s ease',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.85)`
+                e.target.style.transform = 'scale(0.95)'
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+                e.target.style.transform = 'scale(1)'
+              }}
+            >
+              0
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                fontSize: '16px',
+                fontWeight: 500,
+                color: loading ? 'var(--text-tertiary)' : 'var(--text-primary)',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto'
+              }}
+            >
+              {loading ? '...' : 'Login'}
+            </button>
           </div>
 
           {error && (
-            <div style={{
-              padding: '10px',
-              marginBottom: '20px',
-              backgroundColor: isDarkMode ? 'rgba(198, 40, 40, 0.2)' : '#ffebee',
-              color: isDarkMode ? '#ef5350' : '#d32f2f',
-              borderRadius: '4px',
-              fontSize: '14px',
-              border: isDarkMode ? '1px solid rgba(198, 40, 40, 0.4)' : 'none'
-            }}>
+            <div className="alert alert-error" style={{ marginTop: '20px', marginBottom: '0' }}>
               {error}
             </div>
           )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: '100%',
-              padding: '12px',
-              backgroundColor: loading 
-                ? (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#ccc') 
-                : (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#000'),
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '16px',
-              fontWeight: 500,
-              cursor: loading ? 'not-allowed' : 'pointer',
-              transition: 'background-color 0.2s'
-            }}
-            onMouseEnter={(e) => {
-              if (!loading) {
-                e.target.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#333'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!loading) {
-                e.target.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#000'
-              }
-            }}
-          >
-            {loading ? 'Logging in...' : 'Login'}
-          </button>
         </form>
       </div>
     </div>
