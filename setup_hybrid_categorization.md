@@ -130,3 +130,7 @@ response = ollama.generate(model='llama3', ...)
 options={'temperature': 0.2, ...}
 ```
 
+
+
+
+

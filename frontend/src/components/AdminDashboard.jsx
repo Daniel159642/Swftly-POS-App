@@ -7,7 +7,9 @@ function AdminDashboard() {
   const { hasPermission } = usePermissions();
   const [employees, setEmployees] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('employees');
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showPermissions, setShowPermissions] = useState(false);
@@ -25,7 +27,14 @@ function AdminDashboard() {
     loadEmployees();
     loadRoles();
     loadDisplaySettings();
+    loadSchedules();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'schedules') {
+      loadSchedules();
+    }
+  }, [activeTab]);
 
   const loadDisplaySettings = async () => {
     try {
@@ -92,6 +101,42 @@ function AdminDashboard() {
     } catch (err) {
       console.error('Failed to load roles:', err);
     }
+  };
+
+  const loadSchedules = async () => {
+    try {
+      // Calculate date range (current week + 2 weeks ahead)
+      const today = new Date();
+      const startDate = new Date(today);
+      startDate.setDate(today.getDate() - 7); // Start from a week ago
+      const endDate = new Date(today);
+      endDate.setDate(today.getDate() + 14); // 2 weeks ahead
+
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+
+      const response = await fetch(`/api/employee_schedule?start_date=${startDateStr}&end_date=${endDateStr}`);
+      const data = await response.json();
+      setSchedules(data.data || []);
+    } catch (err) {
+      console.error('Failed to load schedules:', err);
+      setError('Failed to load schedules');
+    }
+  };
+
+  const formatTime = (timeStr) => {
+    if (!timeStr) return '';
+    const [hours, minutes] = timeStr.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 || 12;
+    return `${displayHour}:${minutes} ${ampm}`;
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   };
 
   const handleAddEmployee = () => {
@@ -171,9 +216,14 @@ function AdminDashboard() {
           >
             {showDisplaySettings ? 'Hide' : 'Show'} Display Settings
           </button>
-          {hasPermission('add_employee') && (
+          {activeTab === 'employees' && hasPermission('add_employee') && (
             <button className="btn btn-primary" onClick={handleAddEmployee}>
               Add Employee
+            </button>
+          )}
+          {activeTab === 'schedules' && (
+            <button className="btn btn-secondary" onClick={loadSchedules}>
+              Refresh
             </button>
           )}
         </div>
@@ -191,7 +241,40 @@ function AdminDashboard() {
         </div>
       )}
 
-      <div className="employees-table">
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '1px solid #ddd', paddingBottom: '10px' }}>
+        <button
+          onClick={() => setActiveTab('employees')}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: activeTab === 'employees' ? 'var(--theme-color, purple)' : 'transparent',
+            color: activeTab === 'employees' ? '#fff' : '#666',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: activeTab === 'employees' ? 'bold' : 'normal'
+          }}
+        >
+          Employees
+        </button>
+        <button
+          onClick={() => setActiveTab('schedules')}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: activeTab === 'schedules' ? 'var(--theme-color, purple)' : 'transparent',
+            color: activeTab === 'schedules' ? '#fff' : '#666',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: activeTab === 'schedules' ? 'bold' : 'normal'
+          }}
+        >
+          All Schedules
+        </button>
+      </div>
+
+      {activeTab === 'employees' && (
+        <div className="employees-table">
         <table>
           <thead>
             <tr>
@@ -253,6 +336,66 @@ function AdminDashboard() {
           </tbody>
         </table>
       </div>
+      )}
+
+      {activeTab === 'schedules' && (
+        <div className="schedules-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Date</th>
+                <th>Start Time</th>
+                <th>End Time</th>
+                <th>Hours</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {schedules.length === 0 ? (
+                <tr>
+                  <td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>
+                    No schedules found
+                  </td>
+                </tr>
+              ) : (
+                schedules.map((schedule, index) => {
+                  const startTime = schedule.start_time ? formatTime(schedule.start_time) : '';
+                  const endTime = schedule.end_time ? formatTime(schedule.end_time) : '';
+                  const scheduleDate = schedule.schedule_date || schedule.shift_date;
+                  const dateStr = formatDate(scheduleDate);
+                  
+                  // Calculate hours
+                  let hours = '';
+                  if (schedule.start_time && schedule.end_time) {
+                    const [startH, startM] = schedule.start_time.split(':').map(Number);
+                    const [endH, endM] = schedule.end_time.split(':').map(Number);
+                    const startMinutes = startH * 60 + startM;
+                    const endMinutes = endH * 60 + endM;
+                    const breakMinutes = (schedule.break_duration || 0) * 60;
+                    const totalMinutes = endMinutes - startMinutes - breakMinutes;
+                    const totalHours = (totalMinutes / 60).toFixed(2);
+                    hours = `${totalHours} hrs`;
+                  }
+                  
+                  return (
+                    <tr key={schedule.schedule_id || schedule.scheduled_shift_id || index}>
+                      <td>{schedule.employee_name || 'N/A'}</td>
+                      <td>{dateStr}</td>
+                      <td>{startTime}</td>
+                      <td>{endTime}</td>
+                      <td>{hours}</td>
+                      <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {schedule.notes || ''}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {showEmployeeForm && (
         <EmployeeForm

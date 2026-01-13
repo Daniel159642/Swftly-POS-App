@@ -17,6 +17,7 @@ function Profile({ employeeId, employeeName }) {
   const themeColorRgb = hexToRgb(themeColor)
   const [loading, setLoading] = useState(true)
   const [weekSchedules, setWeekSchedules] = useState([])
+  const [weekOffset, setWeekOffset] = useState(0) // 0 = this week, 1 = next week, -1 = last week
   const [hoursStats, setHoursStats] = useState({ thisWeek: 0, thisMonth: 0 })
   
   // Determine if dark mode is active
@@ -71,51 +72,72 @@ function Profile({ employeeId, employeeName }) {
 
   useEffect(() => {
     if (employeeId) {
-      loadProfileData()
+      loadProfileData(weekOffset)
       loadAppSettings()
     }
-  }, [employeeId])
+  }, [employeeId, weekOffset])
 
-  const loadProfileData = async () => {
+  const loadProfileData = async (weekOffsetParam = 0) => {
     setLoading(true)
     try {
       const today = new Date()
       const startOfWeek = new Date(today)
-      startOfWeek.setDate(today.getDate() - today.getDay())
+      startOfWeek.setDate(today.getDate() - today.getDay() + (weekOffsetParam * 7))
       startOfWeek.setHours(0, 0, 0, 0)
       const endOfWeek = new Date(startOfWeek)
       endOfWeek.setDate(startOfWeek.getDate() + 6)
       endOfWeek.setHours(23, 59, 59, 999)
       
       const startDate = startOfWeek.toISOString().split('T')[0]
-      const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0)
-      const endDate = endOfMonth.toISOString().split('T')[0]
+      // Fetch a wider range (2 months back, 3 months forward) to support week navigation
+      const fetchStartDate = new Date(startOfWeek)
+      fetchStartDate.setDate(startOfWeek.getDate() - 60) // 2 months back
+      const fetchEndDate = new Date(startOfWeek)
+      fetchEndDate.setDate(startOfWeek.getDate() + 90) // 3 months forward
+      
+      const fetchStartDateStr = fetchStartDate.toISOString().split('T')[0]
+      const fetchEndDateStr = fetchEndDate.toISOString().split('T')[0]
 
-      // Get schedules for the month
-      const scheduleRes = await fetch(`/api/employee_schedule?employee_id=${employeeId}&start_date=${startDate}&end_date=${endDate}`)
+      // Get schedules for a wider range
+      const scheduleRes = await fetch(`/api/employee_schedule?employee_id=${employeeId}&start_date=${fetchStartDateStr}&end_date=${fetchEndDateStr}`)
       const scheduleData = await scheduleRes.json()
       const allSchedules = scheduleData.data || []
+      
 
       // Get this week's schedules
       const weekScheds = allSchedules
         .filter(s => {
-          const sDate = new Date(s.schedule_date)
+          const dateField = s.schedule_date || s.shift_date
+          if (!dateField) return false
+          const sDate = new Date(dateField)
+          if (isNaN(sDate.getTime())) return false
           return sDate >= startOfWeek && sDate <= endOfWeek
         })
-        .sort((a, b) => new Date(a.schedule_date) - new Date(b.schedule_date))
+        .sort((a, b) => {
+          const dateA = new Date(a.schedule_date || a.shift_date || 0)
+          const dateB = new Date(b.schedule_date || b.shift_date || 0)
+          return dateA - dateB
+        })
       setWeekSchedules(weekScheds)
+      
 
       // Calculate hours
       const thisWeekHours = allSchedules
         .filter(s => {
-          const sDate = new Date(s.schedule_date)
+          const dateField = s.schedule_date || s.shift_date
+          if (!dateField) return false
+          const sDate = new Date(dateField)
+          if (isNaN(sDate.getTime())) return false
           return sDate >= startOfWeek && sDate <= endOfWeek && s.hours_worked
         })
         .reduce((sum, s) => sum + (s.hours_worked || 0), 0)
       
       const thisMonthHours = allSchedules
         .filter(s => {
-          const sDate = new Date(s.schedule_date)
+          const dateField = s.schedule_date || s.shift_date
+          if (!dateField) return false
+          const sDate = new Date(dateField)
+          if (isNaN(sDate.getTime())) return false
           return sDate.getMonth() === today.getMonth() && 
                  sDate.getFullYear() === today.getFullYear() && 
                  s.hours_worked
@@ -525,72 +547,237 @@ function Profile({ employeeId, employeeName }) {
         marginBottom: '32px',
         boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
       }}>
-        <h2 style={{ 
-          margin: '0 0 24px 0', 
-          fontSize: '22px', 
-          fontWeight: 600,
-          color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginBottom: '24px'
         }}>
-          This Week's Schedule
-        </h2>
-        {weekSchedules.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {weekSchedules.map((schedule) => (
-              <div 
-                key={schedule.schedule_id} 
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '18px',
-                  border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #e8e8e8',
-                  borderRadius: '8px',
-                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'
-                  e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#d0d0d0'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'
-                  e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-light, #333)' : '#e8e8e8'
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '6px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>
-                    {getDayName(schedule.schedule_date)}
-                  </div>
-                  <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>
-                    {formatDate(schedule.schedule_date)}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '16px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>
-                    {formatTime(schedule.start_time)} - {formatTime(schedule.end_time)}
-                  </div>
-                  {schedule.hours_worked && (
-                    <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '6px' }}>
-                      {schedule.hours_worked.toFixed(1)}h worked
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ 
-            color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', 
-            fontSize: '14px', 
-            textAlign: 'center', 
-            padding: '60px 20px',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
+          <button
+            onClick={() => setWeekOffset(prev => prev - 1)}
+            style={{
+              padding: '8px 12px',
+              backgroundColor: 'transparent',
+              border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '18px',
+              color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: '40px',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5'
+              e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-light, #333)' : '#ccc'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'
+            }}
+          >
+            ←
+          </button>
+          <h2 style={{ 
+            margin: 0, 
+            fontSize: '22px', 
+            fontWeight: 600,
+            color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
+            textAlign: 'center'
           }}>
-            No schedules for this week
-          </div>
-        )}
+            {(() => {
+              const today = new Date()
+              const startOfWeek = new Date(today)
+              startOfWeek.setDate(today.getDate() - today.getDay() + (weekOffset * 7))
+              
+              if (weekOffset === 0) {
+                return "This Week's Schedule"
+              } else if (weekOffset === 1) {
+                return "Next Week's Schedule"
+              } else if (weekOffset === -1) {
+                return "Last Week's Schedule"
+              } else {
+                const weekStartStr = startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                const weekEnd = new Date(startOfWeek)
+                weekEnd.setDate(startOfWeek.getDate() + 6)
+                const weekEndStr = weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                return `Week of ${weekStartStr} - ${weekEndStr}`
+              }
+            })()}
+          </h2>
+          <button
+            onClick={() => setWeekOffset(prev => prev + 1)}
+            style={{
+              padding: '8px 12px',
+              backgroundColor: 'transparent',
+              border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '18px',
+              color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: '40px',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5'
+              e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-light, #333)' : '#ccc'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'
+            }}
+          >
+            →
+          </button>
+        </div>
+        {(() => {
+          // Organize schedules by date in the week
+          const today = new Date()
+          const startOfWeek = new Date(today)
+          startOfWeek.setDate(today.getDate() - today.getDay() + (weekOffset * 7))
+          startOfWeek.setHours(0, 0, 0, 0)
+          
+          // Create a map of schedules by date (YYYY-MM-DD format)
+          const scheduleByDate = {}
+          weekSchedules.forEach(schedule => {
+            const dateField = schedule.schedule_date || schedule.shift_date
+            if (dateField) {
+              const sDate = new Date(dateField)
+              if (!isNaN(sDate.getTime())) {
+                const dateKey = sDate.toISOString().split('T')[0] // YYYY-MM-DD
+                scheduleByDate[dateKey] = schedule
+              }
+            }
+          })
+          
+          const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+          
+          // Generate dates for each day of the week
+          const weekDays = []
+          for (let i = 0; i < 7; i++) {
+            const dayDate = new Date(startOfWeek)
+            dayDate.setDate(startOfWeek.getDate() + i)
+            const dateKey = dayDate.toISOString().split('T')[0]
+            weekDays.push({
+              date: dayDate,
+              dateKey: dateKey,
+              schedule: scheduleByDate[dateKey] || null
+            })
+          }
+          
+          return (
+            <div style={{
+              border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
+              borderRadius: '8px',
+              overflow: 'hidden',
+              backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'
+            }}>
+              {/* Header */}
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(7, 1fr)',
+                borderBottom: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
+                backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'
+              }}>
+                {weekDays.map((dayInfo, index) => {
+                  const isToday = dayInfo.date.toDateString() === new Date().toDateString()
+                  const dayName = dayInfo.date.toLocaleDateString('en-US', { weekday: 'short' })
+                  
+                  return (
+                    <div 
+                      key={dayInfo.dateKey}
+                      style={{
+                        padding: '12px 8px',
+                        borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none',
+                        textAlign: 'center',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#555',
+                        backgroundColor: isToday ? (isDarkMode ? `rgba(${themeColorRgb}, 0.2)` : `rgba(${themeColorRgb}, 0.1)`) : 'transparent'
+                      }}
+                    >
+                      {dayName}
+                      <div style={{ fontSize: '11px', fontWeight: 400, marginTop: '4px', opacity: 0.7 }}>
+                        {dayInfo.date.getDate()}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              
+              {/* Schedule Content */}
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(7, 1fr)',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
+              }}>
+                {weekDays.map((dayInfo, index) => {
+                  const schedule = dayInfo.schedule
+                  const hasSchedule = schedule && schedule.start_time && schedule.end_time
+                  
+                  return (
+                    <div 
+                      key={dayInfo.dateKey}
+                      style={{
+                        padding: '20px 8px',
+                        borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none',
+                        textAlign: 'center',
+                        minHeight: '80px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'
+                      }}
+                    >
+                      {hasSchedule ? (
+                        <>
+                          <div style={{ 
+                            fontSize: '14px', 
+                            fontWeight: 600, 
+                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
+                            marginBottom: '4px'
+                          }}>
+                            {formatTime(schedule.start_time)}
+                          </div>
+                          <div style={{ 
+                            fontSize: '12px', 
+                            color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
+                            marginBottom: '4px'
+                          }}>
+                            to
+                          </div>
+                          <div style={{ 
+                            fontSize: '14px', 
+                            fontWeight: 600, 
+                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a'
+                          }}>
+                            {formatTime(schedule.end_time)}
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ 
+                          fontSize: '13px', 
+                          color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
+                          fontStyle: 'italic'
+                        }}>
+                          Off
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       {/* Availability Section */}

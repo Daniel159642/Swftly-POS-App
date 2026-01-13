@@ -100,3 +100,7 @@ results = ms.intelligent_search("your search query", limit=20)
 
 Remember: Everything is 100% free - no API costs, no subscriptions, no paid services!
 
+
+
+
+

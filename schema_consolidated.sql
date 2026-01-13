@@ -450,3 +450,7 @@ BEGIN
     WHERE product_id = NEW.product_id;
 END;
 
+
+
+
+

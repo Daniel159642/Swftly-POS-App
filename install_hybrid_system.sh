@@ -78,3 +78,7 @@ echo "Run categorization:"
 echo "  python3 -c \"from metadata_extraction import FreeMetadataSystem; ms = FreeMetadataSystem(); ms.auto_categorize_products_kmeans()\""
 echo ""
 
+
+
+
+

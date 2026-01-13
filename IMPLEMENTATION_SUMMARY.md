@@ -212,3 +212,7 @@ extract_metadata_for_product(product_id, auto_sync_category=True)
 
 The system is now fully automated - just create products and approve shipments normally, and metadata will be extracted automatically!
 
+
+
+
+

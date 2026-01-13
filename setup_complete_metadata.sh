@@ -79,3 +79,7 @@ echo "  - Use intelligent search: python3 -c \"from metadata_extraction import F
 echo "  - Check metadata: python3 check_dependencies.py"
 echo ""
 
+
+
+
+

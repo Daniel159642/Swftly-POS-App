@@ -1068,6 +1068,7 @@ def api_employee_schedule():
         end_date = request.args.get('end_date')
         employee_id = request.args.get('employee_id')
         
+        # Get schedules from employee_schedule table (old system)
         query = """
             SELECT 
                 es.*,
@@ -1091,15 +1092,88 @@ def api_employee_schedule():
             query += " AND es.employee_id = ?"
             params.append(employee_id)
         
-        query += " ORDER BY es.schedule_date DESC, es.start_time"
-        
         cursor.execute(query, params)
-        rows = cursor.fetchall()
-        columns = [description[0] for description in cursor.description]
-        data = [{col: row[col] for col in columns} for row in rows]
+        old_schedules = cursor.fetchall()
+        
+        # Also get published schedules from Scheduled_Shifts (new system)
+        # Check if Scheduled_Shifts table exists
+        cursor.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='Scheduled_Shifts'
+        """)
+        has_scheduled_shifts = cursor.fetchone()
+        
+        new_schedules = []
+        if has_scheduled_shifts:
+            new_query = """
+                SELECT 
+                    ss.scheduled_shift_id as schedule_id,
+                    ss.employee_id,
+                    ss.shift_date as schedule_date,
+                    ss.start_time,
+                    ss.end_time,
+                    ss.break_duration,
+                    ss.notes,
+                    NULL as clock_in_time,
+                    NULL as clock_out_time,
+                    NULL as hours_worked,
+                    NULL as overtime_hours,
+                    'scheduled' as status,
+                    0 as confirmed,
+                    NULL as confirmed_at,
+                    e.first_name || ' ' || e.last_name as employee_name,
+                    e.employee_code
+                FROM Scheduled_Shifts ss
+                JOIN employees e ON ss.employee_id = e.employee_id
+                JOIN Schedule_Periods sp ON ss.period_id = sp.period_id
+                WHERE ss.is_draft = 0 AND sp.status = 'published'
+            """
+            new_params = []
+            
+            if start_date:
+                new_query += " AND ss.shift_date >= ?"
+                new_params.append(start_date)
+            
+            if end_date:
+                new_query += " AND ss.shift_date <= ?"
+                new_params.append(end_date)
+            
+            if employee_id:
+                new_query += " AND ss.employee_id = ?"
+                new_params.append(employee_id)
+            
+            new_query += " ORDER BY ss.shift_date DESC, ss.start_time"
+            
+            cursor.execute(new_query, new_params)
+            new_schedules = cursor.fetchall()
+        
+        # Combine both schedules
+        all_schedules = []
+        
+        # Add old schedules
+        for row in old_schedules:
+            schedule_dict = {col: row[col] for col in row.keys()}
+            all_schedules.append(schedule_dict)
+        
+        # Add new schedules (convert to same format)
+        for row in new_schedules:
+            schedule_dict = {col: row[col] for col in row.keys()}
+            all_schedules.append(schedule_dict)
+        
+        # Sort by date and time
+        all_schedules.sort(key=lambda x: (
+            x.get('schedule_date') or '',
+            x.get('start_time') or ''
+        ), reverse=True)
+        
+        # Get columns (use columns from first schedule, or from old query if no schedules)
+        if all_schedules:
+            columns = list(all_schedules[0].keys())
+        else:
+            columns = [description[0] for description in cursor.description] if old_schedules else []
         
         conn.close()
-        return jsonify({'columns': columns, 'data': data})
+        return jsonify({'columns': columns, 'data': all_schedules})
     
     elif request.method == 'POST':
         # Create new schedule

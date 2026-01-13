@@ -170,3 +170,7 @@ Legacy fields are preserved:
 - Old tables are not automatically dropped - manual cleanup after verification
 - Migration is idempotent - safe to run multiple times
 
+
+
+
+

@@ -61,17 +61,25 @@ class AutomatedScheduleGenerator:
         else:
             week_end_date = week_start_date + timedelta(days=6)
         
-        # Check if a draft period already exists for this date range
+        # Check if a period already exists for this week_start_date
         cursor.execute("""
-            SELECT period_id FROM Schedule_Periods
-            WHERE week_start_date = ? AND status = 'draft'
+            SELECT period_id, status FROM Schedule_Periods
+            WHERE week_start_date = ?
         """, (week_start_date,))
         
         existing_period = cursor.fetchone()
         
         if existing_period:
-            # Delete existing draft period and its shifts
-            period_id = existing_period['period_id']
+            existing_period_dict = dict(existing_period)
+            # If it's a published schedule, we shouldn't overwrite it
+            if existing_period_dict.get('status') == 'published':
+                conn.rollback()
+                cursor.close()
+                conn.close()
+                raise ValueError(f"A published schedule already exists for week starting {week_start_date}. Please use a different date or archive the existing schedule first.")
+            
+            # Delete existing draft/archived period and its shifts
+            period_id = existing_period_dict['period_id']
             
             # Delete all shifts for this period
             cursor.execute("""
@@ -326,9 +334,23 @@ class AutomatedScheduleGenerator:
                    a.get('availability_type') != 'unavailable'
             ]
             
+            # If employee has no availability restrictions OR has availability for this day, include them
+            has_availability_records = len(emp.get('availability', [])) > 0
+            
             if day_availability:
+                # Employee has explicit availability for this day
                 emp['day_availability'] = day_availability
                 available.append(emp)
+            elif not has_availability_records:
+                # Employee has no availability records - consider them available (default behavior)
+                emp['day_availability'] = [{
+                    'day_of_week': day_name,
+                    'start_time': '09:00',
+                    'end_time': '17:00',
+                    'availability_type': 'available'
+                }]
+                available.append(emp)
+            # If has_availability_records but no match for this day, skip (employee has restrictions but not for this day)
         
         return available
     
