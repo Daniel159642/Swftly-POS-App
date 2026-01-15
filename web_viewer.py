@@ -197,7 +197,7 @@ def serve_assets(path):
 
 @app.route('/api/inventory')
 def api_inventory():
-    """Get inventory data with vendor names"""
+    """Get inventory data with vendor names and metadata"""
     try:
         conn = sqlite3.connect(DB_NAME)
         conn.row_factory = sqlite3.Row
@@ -206,9 +206,13 @@ def api_inventory():
         cursor.execute("""
             SELECT 
                 i.*,
-                v.vendor_name
+                v.vendor_name,
+                pm.keywords,
+                pm.tags,
+                pm.attributes
             FROM inventory i
             LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
+            LEFT JOIN product_metadata pm ON i.product_id = pm.product_id
             ORDER BY i.product_name
         """)
         

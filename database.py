@@ -1261,8 +1261,11 @@ def add_item_to_inventory_immediately(
                 # Extract metadata
                 try:
                     extract_metadata_for_product(product_id, auto_sync_category=True)
+                    print(f"✓ Extracted metadata for new product {product_id} ({product_name})")
                 except Exception as e:
-                    print(f"Warning: Metadata extraction failed: {e}")
+                    print(f"⚠ Warning: Metadata extraction failed for product {product_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
                 
                 # Update pending item with product_id
                 cursor.execute("""
@@ -1278,6 +1281,16 @@ def add_item_to_inventory_immediately(
                     SET barcode = ?
                     WHERE product_id = ? AND (barcode IS NULL OR barcode = '')
                 """, (item['barcode'], product_id))
+            
+            # Check if product needs metadata extraction
+            try:
+                cursor.execute("SELECT metadata_id FROM product_metadata WHERE product_id = ?", (product_id,))
+                has_metadata = cursor.fetchone()
+                if not has_metadata:
+                    # Product exists but has no metadata - extract it
+                    extract_metadata_for_product(product_id, auto_sync_category=True)
+            except Exception as e:
+                print(f"Warning: Metadata check/extraction failed for existing product {product_id}: {e}")
         
         # Ensure approved_shipment exists for this pending shipment (for auto-add mode)
         cursor.execute("""
@@ -1458,6 +1471,17 @@ def update_pending_item_verification(
             cursor.execute(query, values)
             conn.commit()
             success = cursor.rowcount > 0
+            
+            # Extract metadata if product was matched/created
+            if success and product_id is not None:
+                try:
+                    cursor.execute("SELECT metadata_id FROM product_metadata WHERE product_id = ?", (product_id,))
+                    has_metadata = cursor.fetchone()
+                    if not has_metadata:
+                        # Extract metadata for newly matched product
+                        extract_metadata_for_product(product_id, auto_sync_category=True)
+                except Exception as e:
+                    print(f"Warning: Metadata extraction failed for product {product_id}: {e}")
             
             # If auto-add mode and quantity was updated, add to inventory immediately
             if success and verification_mode == 'auto_add' and quantity_verified is not None and quantity_verified > 0 and employee_id:
@@ -5554,6 +5578,25 @@ def complete_verification(pending_shipment_id: int, employee_id: int, notes: Opt
         AND product_sku IS NOT NULL
     """, (pending_shipment_id,))
     
+    # Extract metadata for newly matched products (that now have product_id set)
+    try:
+        cursor.execute("""
+            SELECT DISTINCT psi.product_id
+            FROM pending_shipment_items psi
+            LEFT JOIN product_metadata pm ON psi.product_id = pm.product_id
+            WHERE psi.pending_shipment_id = ?
+            AND psi.product_id IS NOT NULL
+            AND pm.metadata_id IS NULL
+        """, (pending_shipment_id,))
+        newly_matched_products = cursor.fetchall()
+        for product_row in newly_matched_products:
+            try:
+                extract_metadata_for_product(product_row['product_id'], auto_sync_category=True)
+            except Exception as e:
+                print(f"Warning: Metadata extraction failed for matched product {product_row['product_id']}: {e}")
+    except Exception as e:
+        print(f"Warning: Error checking metadata for matched products: {e}")
+    
     # Update barcodes for existing products that don't have one
     cursor.execute("""
         UPDATE inventory
@@ -5639,8 +5682,11 @@ def complete_verification(pending_shipment_id: int, employee_id: int, notes: Opt
                 # Automatically extract metadata and assign category with hierarchy
                 try:
                     extract_metadata_for_product(new_product_id, auto_sync_category=True)
+                    print(f"✓ Extracted metadata for new product {new_product_id} ({product_name})")
                 except Exception as e:
-                    print(f"Warning: Metadata extraction failed for product {new_product_id} (SKU: {sku}): {e}")
+                    print(f"⚠ Warning: Metadata extraction failed for product {new_product_id} (SKU: {sku}): {e}")
+                    import traceback
+                    traceback.print_exc()
                     # Continue even if metadata extraction fails
             
             # Update pending_shipment_items with the new product_id

@@ -73,6 +73,434 @@ class FreeMetadataSystem:
         # Load product knowledge base
         self.category_keywords = self._load_category_keywords()
         self.brand_list = self._load_known_brands()
+        self.product_knowledge = self._load_product_knowledge_base()
+        self.product_to_category = self._load_product_to_category_mapping()
+    
+    def _load_product_knowledge_base(self):
+        """
+        Human-like product knowledge base
+        Think like a human: what would you say about an apple? It's crunchy, sweet, red or green, 
+        good for snacking, baking, salads. This captures real-world understanding.
+        """
+        return {
+            # Fruits with human-like attributes
+            'apple': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'fruit',
+                'texture': 'crunchy',
+                'taste': 'sweet',
+                'colors': ['red', 'green', 'yellow'],
+                'uses': ['snack', 'baking', 'salad', 'juice', 'sauce'],
+                'characteristics': ['round', 'firm', 'juicy', 'refreshing', 'healthy'],
+                'storage': 'refrigerate',
+                'description': 'Crisp, sweet fruit perfect for snacking or cooking'
+            },
+            'apples': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'fruit',
+                'texture': 'crunchy',
+                'taste': 'sweet',
+                'colors': ['red', 'green', 'yellow'],
+                'uses': ['snack', 'baking', 'salad', 'juice', 'sauce'],
+                'characteristics': ['round', 'firm', 'juicy', 'refreshing', 'healthy'],
+                'storage': 'refrigerate',
+                'description': 'Crisp, sweet fruit perfect for snacking or cooking'
+            },
+            'banana': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'fruit',
+                'texture': 'soft',
+                'taste': 'sweet',
+                'colors': ['yellow', 'green'],
+                'uses': ['snack', 'smoothie', 'baking', 'cereal'],
+                'characteristics': ['curved', 'creamy', 'portable', 'energy', 'potassium'],
+                'storage': 'room temperature',
+                'description': 'Sweet, creamy fruit great for quick energy'
+            },
+            'bananas': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'fruit',
+                'texture': 'soft',
+                'taste': 'sweet',
+                'colors': ['yellow', 'green'],
+                'uses': ['snack', 'smoothie', 'baking', 'cereal'],
+                'characteristics': ['curved', 'creamy', 'portable', 'energy', 'potassium'],
+                'storage': 'room temperature',
+                'description': 'Sweet, creamy fruit great for quick energy'
+            },
+            'cucumber': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'crisp',
+                'taste': 'mild',
+                'colors': ['green'],
+                'uses': ['salad', 'pickle', 'snack', 'smoothie', 'garnish'],
+                'characteristics': ['refreshing', 'hydrating', 'cool', 'long', 'cylindrical', 'high water'],
+                'storage': 'refrigerate',
+                'description': 'Cool, crisp vegetable perfect for salads and refreshing snacks'
+            },
+            'cucumbers': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'crisp',
+                'taste': 'mild',
+                'colors': ['green'],
+                'uses': ['salad', 'pickle', 'snack', 'smoothie', 'garnish'],
+                'characteristics': ['refreshing', 'hydrating', 'cool', 'long', 'cylindrical', 'high water'],
+                'storage': 'refrigerate',
+                'description': 'Cool, crisp vegetable perfect for salads and refreshing snacks'
+            },
+            'tomato': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'juicy',
+                'taste': 'sweet',
+                'colors': ['red', 'yellow', 'green'],
+                'uses': ['salad', 'sauce', 'soup', 'sandwich', 'cooking'],
+                'characteristics': ['juicy', 'versatile', 'round', 'fresh', 'flavorful'],
+                'storage': 'room temperature',
+                'description': 'Juicy, versatile vegetable used in countless dishes'
+            },
+            'tomatoes': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'juicy',
+                'taste': 'sweet',
+                'colors': ['red', 'yellow', 'green'],
+                'uses': ['salad', 'sauce', 'soup', 'sandwich', 'cooking'],
+                'characteristics': ['juicy', 'versatile', 'round', 'fresh', 'flavorful'],
+                'storage': 'room temperature',
+                'description': 'Juicy, versatile vegetable used in countless dishes'
+            },
+            'cherry tomato': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'juicy',
+                'taste': 'sweet',
+                'colors': ['red', 'yellow'],
+                'uses': ['salad', 'snack', 'garnish', 'roasting'],
+                'characteristics': ['small', 'sweet', 'bite-sized', 'pop', 'bursting'],
+                'storage': 'room temperature',
+                'description': 'Small, sweet tomatoes perfect for snacking and salads'
+            },
+            'cherry tomatoes': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'juicy',
+                'taste': 'sweet',
+                'colors': ['red', 'yellow'],
+                'uses': ['salad', 'snack', 'garnish', 'roasting'],
+                'characteristics': ['small', 'sweet', 'bite-sized', 'pop', 'bursting'],
+                'storage': 'room temperature',
+                'description': 'Small, sweet tomatoes perfect for snacking and salads'
+            },
+            'carrot': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'crunchy',
+                'taste': 'sweet',
+                'colors': ['orange', 'purple', 'yellow'],
+                'uses': ['snack', 'cooking', 'salad', 'juice', 'soup'],
+                'characteristics': ['crunchy', 'sweet', 'long', 'root', 'vitamin a', 'healthy'],
+                'storage': 'refrigerate',
+                'description': 'Crunchy, sweet root vegetable great for snacking and cooking'
+            },
+            'carrots': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'crunchy',
+                'taste': 'sweet',
+                'colors': ['orange', 'purple', 'yellow'],
+                'uses': ['snack', 'cooking', 'salad', 'juice', 'soup'],
+                'characteristics': ['crunchy', 'sweet', 'long', 'root', 'vitamin a', 'healthy'],
+                'storage': 'refrigerate',
+                'description': 'Crunchy, sweet root vegetable great for snacking and cooking'
+            },
+            'lettuce': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'crisp',
+                'taste': 'mild',
+                'colors': ['green'],
+                'uses': ['salad', 'sandwich', 'wrap', 'garnish'],
+                'characteristics': ['leafy', 'fresh', 'crisp', 'light', 'hydrating'],
+                'storage': 'refrigerate',
+                'description': 'Fresh, crisp leafy green perfect for salads and sandwiches'
+            },
+            'milk': {
+                'category': 'Food & Beverage > Dairy',
+                'type': 'dairy',
+                'texture': 'liquid',
+                'taste': 'creamy',
+                'colors': ['white'],
+                'uses': ['drink', 'cooking', 'baking', 'cereal', 'coffee'],
+                'characteristics': ['creamy', 'nutritious', 'calcium', 'protein', 'versatile'],
+                'storage': 'refrigerate',
+                'description': 'Creamy, nutritious dairy product essential for cooking and drinking'
+            },
+            # Add more products as needed
+        }
+    
+    def _load_product_to_category_mapping(self):
+        """
+        Map specific products to their semantic categories
+        This allows "apple" to be categorized as "fruit" even if "fruit" doesn't appear in the name
+        """
+        # Extract just category mappings from knowledge base for backward compatibility
+        knowledge_base = self._load_product_knowledge_base()
+        mapping = {}
+        for product, info in knowledge_base.items():
+            if isinstance(info, dict):
+                mapping[product] = info['category']
+            else:
+                # Handle simple string mappings (backward compatibility)
+                mapping[product] = info
+        return mapping
+    
+    def _load_product_knowledge_base(self):
+        """
+        Human-like product knowledge base
+        Think like a human: what would you say about an apple? It's crunchy, sweet, red or green, 
+        good for snacking, baking, salads. This captures real-world understanding.
+        """
+        return {
+            # Fruits with human-like attributes
+            'apple': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'fruit',
+                'texture': 'crunchy',
+                'taste': 'sweet',
+                'colors': ['red', 'green', 'yellow'],
+                'uses': ['snack', 'baking', 'salad', 'juice', 'sauce'],
+                'characteristics': ['round', 'firm', 'juicy', 'refreshing', 'healthy'],
+                'storage': 'refrigerate',
+                'description': 'Crisp, sweet fruit perfect for snacking or cooking'
+            },
+            'apples': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'fruit',
+                'texture': 'crunchy',
+                'taste': 'sweet',
+                'colors': ['red', 'green', 'yellow'],
+                'uses': ['snack', 'baking', 'salad', 'juice', 'sauce'],
+                'characteristics': ['round', 'firm', 'juicy', 'refreshing', 'healthy'],
+                'storage': 'refrigerate',
+                'description': 'Crisp, sweet fruit perfect for snacking or cooking'
+            },
+            'banana': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'fruit',
+                'texture': 'soft',
+                'taste': 'sweet',
+                'colors': ['yellow', 'green'],
+                'uses': ['snack', 'smoothie', 'baking', 'cereal'],
+                'characteristics': ['curved', 'creamy', 'portable', 'energy', 'potassium'],
+                'storage': 'room temperature',
+                'description': 'Sweet, creamy fruit great for quick energy'
+            },
+            'bananas': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'fruit',
+                'texture': 'soft',
+                'taste': 'sweet',
+                'colors': ['yellow', 'green'],
+                'uses': ['snack', 'smoothie', 'baking', 'cereal'],
+                'characteristics': ['curved', 'creamy', 'portable', 'energy', 'potassium'],
+                'storage': 'room temperature',
+                'description': 'Sweet, creamy fruit great for quick energy'
+            },
+            'cucumber': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'crisp',
+                'taste': 'mild',
+                'colors': ['green'],
+                'uses': ['salad', 'pickle', 'snack', 'smoothie', 'garnish'],
+                'characteristics': ['refreshing', 'hydrating', 'cool', 'long', 'cylindrical', 'high water'],
+                'storage': 'refrigerate',
+                'description': 'Cool, crisp vegetable perfect for salads and refreshing snacks'
+            },
+            'cucumbers': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'crisp',
+                'taste': 'mild',
+                'colors': ['green'],
+                'uses': ['salad', 'pickle', 'snack', 'smoothie', 'garnish'],
+                'characteristics': ['refreshing', 'hydrating', 'cool', 'long', 'cylindrical', 'high water'],
+                'storage': 'refrigerate',
+                'description': 'Cool, crisp vegetable perfect for salads and refreshing snacks'
+            },
+            'tomato': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'juicy',
+                'taste': 'sweet',
+                'colors': ['red', 'yellow', 'green'],
+                'uses': ['salad', 'sauce', 'soup', 'sandwich', 'cooking'],
+                'characteristics': ['juicy', 'versatile', 'round', 'fresh', 'flavorful'],
+                'storage': 'room temperature',
+                'description': 'Juicy, versatile vegetable used in countless dishes'
+            },
+            'tomatoes': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'juicy',
+                'taste': 'sweet',
+                'colors': ['red', 'yellow', 'green'],
+                'uses': ['salad', 'sauce', 'soup', 'sandwich', 'cooking'],
+                'characteristics': ['juicy', 'versatile', 'round', 'fresh', 'flavorful'],
+                'storage': 'room temperature',
+                'description': 'Juicy, versatile vegetable used in countless dishes'
+            },
+            'cherry tomato': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'juicy',
+                'taste': 'sweet',
+                'colors': ['red', 'yellow'],
+                'uses': ['salad', 'snack', 'garnish', 'roasting'],
+                'characteristics': ['small', 'sweet', 'bite-sized', 'pop', 'bursting'],
+                'storage': 'room temperature',
+                'description': 'Small, sweet tomatoes perfect for snacking and salads'
+            },
+            'cherry tomatoes': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'juicy',
+                'taste': 'sweet',
+                'colors': ['red', 'yellow'],
+                'uses': ['salad', 'snack', 'garnish', 'roasting'],
+                'characteristics': ['small', 'sweet', 'bite-sized', 'pop', 'bursting'],
+                'storage': 'room temperature',
+                'description': 'Small, sweet tomatoes perfect for snacking and salads'
+            },
+            'carrot': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'crunchy',
+                'taste': 'sweet',
+                'colors': ['orange', 'purple', 'yellow'],
+                'uses': ['snack', 'cooking', 'salad', 'juice', 'soup'],
+                'characteristics': ['crunchy', 'sweet', 'long', 'root', 'vitamin a', 'healthy'],
+                'storage': 'refrigerate',
+                'description': 'Crunchy, sweet root vegetable great for snacking and cooking'
+            },
+            'carrots': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'crunchy',
+                'taste': 'sweet',
+                'colors': ['orange', 'purple', 'yellow'],
+                'uses': ['snack', 'cooking', 'salad', 'juice', 'soup'],
+                'characteristics': ['crunchy', 'sweet', 'long', 'root', 'vitamin a', 'healthy'],
+                'storage': 'refrigerate',
+                'description': 'Crunchy, sweet root vegetable great for snacking and cooking'
+            },
+            'lettuce': {
+                'category': 'Food & Beverage > Produce',
+                'type': 'vegetable',
+                'texture': 'crisp',
+                'taste': 'mild',
+                'colors': ['green'],
+                'uses': ['salad', 'sandwich', 'wrap', 'garnish'],
+                'characteristics': ['leafy', 'fresh', 'crisp', 'light', 'hydrating'],
+                'storage': 'refrigerate',
+                'description': 'Fresh, crisp leafy green perfect for salads and sandwiches'
+            },
+            'milk': {
+                'category': 'Food & Beverage > Dairy',
+                'type': 'dairy',
+                'texture': 'liquid',
+                'taste': 'creamy',
+                'colors': ['white'],
+                'uses': ['drink', 'cooking', 'baking', 'cereal', 'coffee'],
+                'characteristics': ['creamy', 'nutritious', 'calcium', 'protein', 'versatile'],
+                'storage': 'refrigerate',
+                'description': 'Creamy, nutritious dairy product essential for cooking and drinking'
+            },
+            # Add more products as needed - keep old simple mappings for products not yet in knowledge base
+            # Note: 'banana', 'bananas', 'cherry tomato', 'cherry tomatoes' already defined above as dicts
+            'orange': 'Food & Beverage > Produce',
+            'oranges': 'Food & Beverage > Produce',
+            'grape': 'Food & Beverage > Produce',
+            'grapes': 'Food & Beverage > Produce',
+            'strawberry': 'Food & Beverage > Produce',
+            'strawberries': 'Food & Beverage > Produce',
+            'blueberry': 'Food & Beverage > Produce',
+            'blueberries': 'Food & Beverage > Produce',
+            'raspberry': 'Food & Beverage > Produce',
+            'raspberries': 'Food & Beverage > Produce',
+            'blackberry': 'Food & Beverage > Produce',
+            'blackberries': 'Food & Beverage > Produce',
+            'peach': 'Food & Beverage > Produce',
+            'peaches': 'Food & Beverage > Produce',
+            'pear': 'Food & Beverage > Produce',
+            'pears': 'Food & Beverage > Produce',
+            'plum': 'Food & Beverage > Produce',
+            'plums': 'Food & Beverage > Produce',
+            'cherry': 'Food & Beverage > Produce',
+            'cherries': 'Food & Beverage > Produce',
+            'mango': 'Food & Beverage > Produce',
+            'mangoes': 'Food & Beverage > Produce',
+            'pineapple': 'Food & Beverage > Produce',
+            'watermelon': 'Food & Beverage > Produce',
+            'melon': 'Food & Beverage > Produce',
+            'cantaloupe': 'Food & Beverage > Produce',
+            'kiwi': 'Food & Beverage > Produce',
+            'avocado': 'Food & Beverage > Produce',
+            'avocados': 'Food & Beverage > Produce',
+            'lemon': 'Food & Beverage > Produce',
+            'lemons': 'Food & Beverage > Produce',
+            'lime': 'Food & Beverage > Produce',
+            'limes': 'Food & Beverage > Produce',
+            
+            # Vegetables
+            # Note: 'carrot', 'carrots', 'tomato', 'tomatoes' already defined above as dicts
+            'lettuce': 'Food & Beverage > Produce',
+            'potato': 'Food & Beverage > Produce',
+            'potatoes': 'Food & Beverage > Produce',
+            'onion': 'Food & Beverage > Produce',
+            'onions': 'Food & Beverage > Produce',
+            'garlic': 'Food & Beverage > Produce',
+            'pepper': 'Food & Beverage > Produce',
+            'peppers': 'Food & Beverage > Produce',
+            'bell pepper': 'Food & Beverage > Produce',
+            # Note: 'cucumber' and 'cucumbers' already defined above as dicts - don't override
+            'broccoli': 'Food & Beverage > Produce',
+            'cauliflower': 'Food & Beverage > Produce',
+            'spinach': 'Food & Beverage > Produce',
+            'kale': 'Food & Beverage > Produce',
+            'celery': 'Food & Beverage > Produce',
+            'corn': 'Food & Beverage > Produce',
+            'peas': 'Food & Beverage > Produce',
+            'green beans': 'Food & Beverage > Produce',
+            'asparagus': 'Food & Beverage > Produce',
+            'zucchini': 'Food & Beverage > Produce',
+            'squash': 'Food & Beverage > Produce',
+            'mushroom': 'Food & Beverage > Produce',
+            'mushrooms': 'Food & Beverage > Produce',
+            
+            # Dairy
+            # Note: 'milk' already defined above as dict - don't override
+            'cheese': 'Food & Beverage > Dairy',
+            'yogurt': 'Food & Beverage > Dairy',
+            'butter': 'Food & Beverage > Dairy',
+            'cream': 'Food & Beverage > Dairy',
+            'sour cream': 'Food & Beverage > Dairy',
+            'cottage cheese': 'Food & Beverage > Dairy',
+            
+            # Beverages
+            'coffee': 'Food & Beverage > Beverages',
+            'tea': 'Food & Beverage > Beverages',
+            'juice': 'Food & Beverage > Beverages',
+            'soda': 'Food & Beverage > Beverages',
+            'water': 'Food & Beverage > Beverages',
+            'beer': 'Food & Beverage > Beverages',
+            'wine': 'Food & Beverage > Beverages',
+            
+            # Add more product mappings as needed
+        }
     
     def _load_category_keywords(self):
         """
@@ -207,9 +635,44 @@ class FreeMetadataSystem:
             metadata = self._merge_metadata(metadata, vendor_data)
         
         # 5. Rule-based categorization (FREE)
-        category_match = self._match_category(metadata)
-        if category_match:
-            metadata['category_suggestions'] = [category_match]
+        # Make sure product_name is in metadata for category matching
+        if 'product_name' not in metadata:
+            metadata['product_name'] = product_name
+        
+        # First, try to get human-like product knowledge
+        product_knowledge = self._get_product_knowledge(product_name)
+        if product_knowledge and isinstance(product_knowledge, dict):
+            # Enrich metadata with human-like understanding
+            metadata['attributes'].update({
+                'type': product_knowledge.get('type'),
+                'texture': product_knowledge.get('texture'),
+                'taste': product_knowledge.get('taste'),
+                'storage': product_knowledge.get('storage'),
+                'description': product_knowledge.get('description')
+            })
+            # Add colors, uses, and characteristics as tags/keywords
+            if product_knowledge.get('colors'):
+                metadata['tags'].extend(product_knowledge['colors'])
+            if product_knowledge.get('uses'):
+                metadata['tags'].extend(product_knowledge['uses'])
+            if product_knowledge.get('characteristics'):
+                metadata['keywords'].extend(product_knowledge['characteristics'])
+            
+            # Set category from knowledge base
+            metadata['category_suggestions'] = [{
+                'category_name': product_knowledge['category'],
+                'confidence': 0.95
+            }]
+        else:
+            # Fall back to semantic matching
+            semantic_match = self._match_product_semantically(product_name)
+            if semantic_match:
+                metadata['category_suggestions'] = [semantic_match]
+            else:
+                # Fall back to keyword-based matching
+                category_match = self._match_category(metadata)
+                if category_match:
+                    metadata['category_suggestions'] = [category_match]
         
         # 6. Extract brand
         brand = self._extract_brand(product_name)
@@ -378,6 +841,76 @@ class FreeMetadataSystem:
         
         return attributes
     
+    def _get_product_knowledge(self, product_name):
+        """
+        Get human-like product knowledge (attributes, uses, characteristics)
+        Returns None if product not in knowledge base
+        """
+        if not product_name:
+            return None
+        
+        product_name_lower = product_name.lower()
+        
+        # Try full product name first
+        if product_name_lower in self.product_knowledge:
+            result = self.product_knowledge[product_name_lower]
+            return result if isinstance(result, dict) else None
+        
+        # Try multi-word combinations first (e.g., "cherry tomato", "cherry tomatoes")
+        words = product_name_lower.split()
+        for i in range(len(words)):
+            for j in range(i+1, len(words)+1):
+                phrase = ' '.join(words[i:j])
+                if phrase in self.product_knowledge:
+                    result = self.product_knowledge[phrase]
+                    if isinstance(result, dict):
+                        return result
+        
+        # Try individual words (singular/plural)
+        for word in words:
+            # Remove common prefixes/suffixes
+            clean_word = word.strip('.,!?;:()[]{}"\'-')
+            if clean_word in self.product_knowledge:
+                result = self.product_knowledge[clean_word]
+                if isinstance(result, dict):
+                    return result
+        
+        return None
+    
+    def _match_product_semantically(self, product_name):
+        """
+        Match product to category based on semantic understanding
+        e.g., "apple" -> "fruit" even if "fruit" doesn't appear in the name
+        """
+        if not product_name:
+            return None
+        
+        product_name_lower = product_name.lower()
+        
+        # Check each word in the product name against our semantic mapping
+        words = product_name_lower.split()
+        
+        # Try full product name first
+        if product_name_lower in self.product_to_category:
+            category_path = self.product_to_category[product_name_lower]
+            return {
+                'category_name': category_path,
+                'confidence': 0.95  # High confidence for exact semantic matches
+            }
+        
+        # Try individual words
+        for word in words:
+            # Remove common prefixes/suffixes
+            clean_word = word.strip('.,!?;:()[]{}"\'-')
+            if clean_word in self.product_to_category:
+                category_path = self.product_to_category[clean_word]
+                return {
+                    'category_name': category_path,
+                    'confidence': 0.90  # High confidence for semantic matches
+                }
+        
+        return None
+    
     def _match_category_with_hierarchy(self, metadata):
         """
         Match category with intelligent parent-child hierarchy
@@ -387,6 +920,34 @@ class FreeMetadataSystem:
         keywords = [k.lower() for k in metadata.get('keywords', [])]
         tags = [t.lower() for t in metadata.get('tags', [])]
         all_text = product_name_lower + ' ' + ' '.join(keywords) + ' ' + ' '.join(tags)
+        
+        # Helper function to check if keyword matches (handles plurals and word boundaries)
+        import re
+        def keyword_matches(text, keyword):
+            """Check if keyword matches text, handling plurals and word boundaries"""
+            # Use word boundaries to avoid partial matches (e.g., "car" in "carrots")
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+            # Try plural/singular variations with word boundaries
+            if keyword.endswith('s'):
+                # Keyword is plural, try singular
+                singular = keyword[:-1]
+                pattern = r'\b' + re.escape(singular) + r'\b'
+                if re.search(pattern, text, re.IGNORECASE):
+                    return True
+            else:
+                # Keyword is singular, try plural
+                plural = keyword + 's'
+                pattern = r'\b' + re.escape(plural) + r'\b'
+                if re.search(pattern, text, re.IGNORECASE):
+                    return True
+                # Try 'es' plural
+                plural_es = keyword + 'es'
+                pattern = r'\b' + re.escape(plural_es) + r'\b'
+                if re.search(pattern, text, re.IGNORECASE):
+                    return True
+            return False
         
         # Define category hierarchy with specific subcategories
         category_hierarchy = {
@@ -409,7 +970,7 @@ class FreeMetadataSystem:
                 'Snacks': ['snack', 'chip', 'cracker', 'cookie', 'candy', 'nuts'],
                 'Beverages': ['drink', 'soda', 'juice', 'water', 'beverage', 'tea', 'coffee'],
                 'Dairy': ['milk', 'cheese', 'yogurt', 'butter', 'cream'],
-                'Produce': ['fruit', 'vegetable', 'apple', 'banana', 'lettuce', 'tomato'],
+                'Produce': ['fruit', 'vegetable', 'apple', 'banana', 'lettuce', 'tomato', 'carrot', 'carrots', 'produce', 'organic', 'fresh'],
                 'Pantry': ['pasta', 'rice', 'cereal', 'flour', 'sugar', 'spice']
             },
             'Home & Kitchen': {
@@ -477,30 +1038,32 @@ class FreeMetadataSystem:
         for parent_cat, subcats in category_hierarchy.items():
             # Check parent category keywords
             parent_keywords = self.category_keywords.get(parent_cat, [])
-            parent_score = sum(1 for kw in parent_keywords if kw in all_text)
+            parent_score = sum(1 for kw in parent_keywords if keyword_matches(all_text, kw))
             
-            if parent_score > 0:
-                # Check subcategories
-                best_subcat = None
-                best_subcat_score = 0
-                
-                for subcat, subcat_keywords in subcats.items():
-                    subcat_score = sum(1 for kw in subcat_keywords if kw in all_text)
-                    total_score = parent_score + (subcat_score * 2)  # Weight subcategory higher
+            # Always check subcategories (even if parent doesn't match)
+            # This allows matching subcategories that might not have parent keyword matches
+            best_subcat = None
+            best_subcat_score = 0
+            
+            for subcat, subcat_keywords in subcats.items():
+                subcat_score = sum(1 for kw in subcat_keywords if keyword_matches(all_text, kw))
+                # If subcategory matches, use it (even without parent match)
+                if subcat_score > 0:
+                    total_score = parent_score + (subcat_score * 3)  # Weight subcategory much higher
                     
                     if total_score > best_score:
                         best_score = total_score
                         best_subcat = subcat
                         best_subcat_score = subcat_score
-                
-                # If subcategory found, use hierarchy path
-                if best_subcat:
-                    best_match = f"{parent_cat} > {best_subcat}"
-                else:
-                    # Use parent category only
-                    if parent_score > best_score:
-                        best_match = parent_cat
-                        best_score = parent_score
+            
+            # If subcategory found, use hierarchy path
+            if best_subcat:
+                best_match = f"{parent_cat} > {best_subcat}"
+            elif parent_score > 0:
+                # Use parent category only if no subcategory matched
+                if parent_score > best_score:
+                    best_match = parent_cat
+                    best_score = parent_score
         
         if best_match:
             # Normalize confidence score (0.0 to 1.0)
@@ -532,10 +1095,38 @@ class FreeMetadataSystem:
         # Score each category
         category_scores = {}
         
+        # Helper function to check if keyword matches (handles plurals and word boundaries)
+        import re
+        def keyword_matches(text, keyword):
+            """Check if keyword matches text, handling plurals and word boundaries"""
+            # Use word boundaries to avoid partial matches (e.g., "car" in "carrots")
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+            # Try plural/singular variations with word boundaries
+            if keyword.endswith('s'):
+                # Keyword is plural, try singular
+                singular = keyword[:-1]
+                pattern = r'\b' + re.escape(singular) + r'\b'
+                if re.search(pattern, text, re.IGNORECASE):
+                    return True
+            else:
+                # Keyword is singular, try plural
+                plural = keyword + 's'
+                pattern = r'\b' + re.escape(plural) + r'\b'
+                if re.search(pattern, text, re.IGNORECASE):
+                    return True
+                # Try 'es' plural
+                plural_es = keyword + 'es'
+                pattern = r'\b' + re.escape(plural_es) + r'\b'
+                if re.search(pattern, text, re.IGNORECASE):
+                    return True
+            return False
+        
         for category, keywords in self.category_keywords.items():
             score = 0
             for keyword in keywords:
-                if keyword in all_text:
+                if keyword_matches(all_text, keyword):
                     score += 1
             
             if score > 0:

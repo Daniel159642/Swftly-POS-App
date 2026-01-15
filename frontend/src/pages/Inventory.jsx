@@ -168,17 +168,153 @@ function Inventory() {
   // Get all vendors from vendors table (not just vendors with products)
   const vendors = allVendors.map(vendor => vendor.vendor_name).sort()
 
+  // Fuzzy string matching function - allows for typos
+  const fuzzyMatch = (str, pattern) => {
+    if (!str || !pattern) return false
+    
+    const strLower = str.toLowerCase()
+    const patternLower = pattern.toLowerCase()
+    
+    // Exact match or contains match (fastest)
+    if (strLower.includes(patternLower)) return true
+    
+    // Simple fuzzy matching: allow 1-2 character differences for short patterns
+    if (pattern.length <= 3) {
+      // For very short patterns, be more lenient
+      const maxDistance = Math.max(1, Math.floor(pattern.length * 0.5))
+      return levenshteinDistance(strLower, patternLower) <= maxDistance
+    }
+    
+    // For longer patterns, check if pattern is mostly contained
+    // Allow up to 30% character difference
+    const maxDistance = Math.max(1, Math.floor(pattern.length * 0.3))
+    return levenshteinDistance(strLower, patternLower) <= maxDistance
+  }
+  
+  // Simple Levenshtein distance calculation
+  const levenshteinDistance = (str1, str2) => {
+    const matrix = []
+    
+    for (let i = 0; i <= str2.length; i++) {
+      matrix[i] = [i]
+    }
+    
+    for (let j = 0; j <= str1.length; j++) {
+      matrix[0][j] = j
+    }
+    
+    for (let i = 1; i <= str2.length; i++) {
+      for (let j = 1; j <= str1.length; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1]
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1, // substitution
+            matrix[i][j - 1] + 1,     // insertion
+            matrix[i - 1][j] + 1      // deletion
+          )
+        }
+      }
+    }
+    
+    return matrix[str2.length][str1.length]
+  }
+
   // Filter inventory based on search
   const filteredInventory = inventory.filter(item => {
     if (!searchQuery) return true
     const query = searchQuery.toLowerCase()
-    return (
-      item.product_name?.toLowerCase().includes(query) ||
-      item.sku?.toLowerCase().includes(query) ||
-      item.barcode?.toLowerCase().includes(query) ||
-      item.category?.toLowerCase().includes(query) ||
-      (item.vendor_name || item.vendor)?.toLowerCase().includes(query)
-    )
+    
+    // Special handling for semantic searches (fruit, vegetable, etc.)
+    const semanticTypes = {
+      'fruit': 'fruit',
+      'fruits': 'fruit',
+      'vegetable': 'vegetable',
+      'vegetables': 'vegetable',
+      'dairy': 'dairy',
+      'produce': null // Produce is a category, not a type
+    }
+    
+    const expectedType = semanticTypes[query]
+    
+    const nameMatch = fuzzyMatch(item.product_name, searchQuery)
+    const skuMatch = fuzzyMatch(item.sku, searchQuery)
+    const barcodeMatch = fuzzyMatch(item.barcode, searchQuery)
+    const categoryMatch = fuzzyMatch(item.category, searchQuery)
+    const vendorMatch = fuzzyMatch(item.vendor_name || item.vendor, searchQuery)
+    
+    // Search in metadata keywords
+    let keywordMatch = false
+    if (item.keywords) {
+      try {
+        const keywords = typeof item.keywords === 'string' 
+          ? JSON.parse(item.keywords) 
+          : item.keywords
+        if (Array.isArray(keywords)) {
+          keywordMatch = keywords.some(kw => 
+            kw && fuzzyMatch(kw, searchQuery)
+          )
+        }
+      } catch (e) {
+        // If not JSON, treat as string
+        keywordMatch = fuzzyMatch(item.keywords, searchQuery)
+      }
+    }
+    
+    // Search in metadata tags
+    let tagMatch = false
+    if (item.tags) {
+      try {
+        const tags = typeof item.tags === 'string' 
+          ? JSON.parse(item.tags) 
+          : item.tags
+        if (Array.isArray(tags)) {
+          tagMatch = tags.some(tag => 
+            tag && fuzzyMatch(tag, searchQuery)
+          )
+        }
+      } catch (e) {
+        // If not JSON, treat as string
+        tagMatch = fuzzyMatch(item.tags, searchQuery)
+      }
+    }
+    
+    // Search in metadata attributes (type, texture, taste, etc.)
+    let attributeMatch = false
+    let typeMatch = false
+    if (item.attributes) {
+      try {
+        const attrs = typeof item.attributes === 'string' 
+          ? JSON.parse(item.attributes) 
+          : item.attributes
+        if (typeof attrs === 'object' && attrs !== null) {
+          // Check all attribute values for general match
+          attributeMatch = Object.values(attrs).some(val => {
+            if (typeof val === 'string') {
+              return fuzzyMatch(val, searchQuery)
+            }
+            return false
+          })
+          
+          // For semantic searches (fruit, vegetable), check type attribute specifically
+          // Use exact match for type to avoid false positives
+          if (expectedType !== null && expectedType !== undefined) {
+            typeMatch = attrs.type && attrs.type.toLowerCase() === expectedType
+          }
+        }
+      } catch (e) {
+        // If not JSON, treat as string
+        attributeMatch = fuzzyMatch(item.attributes, searchQuery)
+      }
+    }
+    
+    // If searching for a specific type (fruit, vegetable), require type match
+    if (expectedType !== null && expectedType !== undefined) {
+      return typeMatch || nameMatch || skuMatch
+    }
+    
+    // Otherwise, match on any field
+    return nameMatch || skuMatch || barcodeMatch || categoryMatch || vendorMatch || keywordMatch || tagMatch || attributeMatch
   })
 
   // Get items by category
