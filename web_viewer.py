@@ -842,6 +842,26 @@ def api_create_order():
         traceback.print_exc()
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
+@app.route('/api/receipt/transaction/<int:transaction_id>', methods=['GET'])
+def api_generate_transaction_receipt(transaction_id):
+    """Generate receipt PDF for a transaction"""
+    try:
+        from receipt_generator import generate_transaction_receipt
+        
+        pdf_bytes = generate_transaction_receipt(transaction_id)
+        
+        if pdf_bytes:
+            response = Response(pdf_bytes, mimetype='application/pdf')
+            response.headers['Content-Disposition'] = f'attachment; filename=receipt_transaction_{transaction_id}.pdf'
+            return response
+        else:
+            return jsonify({'success': False, 'message': 'Transaction not found or error generating receipt'}), 404
+    except ImportError as e:
+        return jsonify({'success': False, 'message': 'Receipt generation not available. Install reportlab: pip install reportlab qrcode'}), 500
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/receipt/<int:order_id>', methods=['GET'])
 def api_generate_receipt(order_id):
     """Generate receipt PDF for an order"""
@@ -893,11 +913,12 @@ def api_update_receipt_settings():
             # Insert new settings
             cursor.execute("""
                 INSERT INTO receipt_settings (
-                    store_name, store_address, store_city, store_state, store_zip,
-                    store_phone, store_email, store_website, footer_message,
+                    receipt_type, store_name, store_address, store_city, store_state, store_zip,
+                    store_phone, store_email, store_website, footer_message, return_policy,
                     show_tax_breakdown, show_payment_method
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
+                data.get('receipt_type', 'traditional'),
                 data.get('store_name', 'Store'),
                 data.get('store_address', ''),
                 data.get('store_city', ''),
@@ -907,6 +928,7 @@ def api_update_receipt_settings():
                 data.get('store_email', ''),
                 data.get('store_website', ''),
                 data.get('footer_message', 'Thank you for your business!'),
+                data.get('return_policy', ''),
                 data.get('show_tax_breakdown', 1),
                 data.get('show_payment_method', 1)
             ))
@@ -914,6 +936,7 @@ def api_update_receipt_settings():
             # Update existing settings
             cursor.execute("""
                 UPDATE receipt_settings SET
+                    receipt_type = ?,
                     store_name = ?,
                     store_address = ?,
                     store_city = ?,
@@ -923,6 +946,7 @@ def api_update_receipt_settings():
                     store_email = ?,
                     store_website = ?,
                     footer_message = ?,
+                    return_policy = ?,
                     show_tax_breakdown = ?,
                     show_payment_method = ?,
                     updated_at = CURRENT_TIMESTAMP

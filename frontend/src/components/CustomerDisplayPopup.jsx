@@ -20,9 +20,18 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
 
   // Initialize Socket.IO connection
   useEffect(() => {
-    const newSocket = io({
+    // Connect to backend Socket.IO server
+    // In development, Vite proxy should handle /socket.io to localhost:5001
+    // But we'll connect directly to backend to avoid proxy issues
+    const socketUrl = 'http://localhost:5001'
+    
+    const newSocket = io(socketUrl, {
       transports: ['websocket', 'polling'],
-      path: '/socket.io/'
+      path: '/socket.io/',
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: 5,
+      timeout: 20000
     })
     
     newSocket.on('connect', () => {
@@ -163,10 +172,16 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
       const response = await fetch('/api/payment-methods')
       const result = await response.json()
       if (result.success) {
-        setPaymentMethods(result.data)
+        setPaymentMethods(result.data || [])
+      } else {
+        console.error('Failed to load payment methods:', result.error)
+        // Set empty array as fallback
+        setPaymentMethods([])
       }
     } catch (err) {
       console.error('Error loading payment methods:', err)
+      // Set empty array as fallback
+      setPaymentMethods([])
     }
   }
 
@@ -313,9 +328,40 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
     }
   }, [paymentCompleted, currentScreen])
 
-  const selectReceipt = (type) => {
+  const selectReceipt = async (type) => {
     setReceiptType(type)
-    if (type === 'email' || type === 'sms') {
+    if (type === 'printed') {
+      // Generate and download receipt PDF
+      if (transactionId) {
+        try {
+          const response = await fetch(`/api/receipt/transaction/${transactionId}`)
+          if (response.ok) {
+            const blob = await response.blob()
+            const url = window.URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `receipt_transaction_${transactionId}.pdf`
+            document.body.appendChild(a)
+            a.click()
+            window.URL.revokeObjectURL(url)
+            document.body.removeChild(a)
+            // After download, save preference and show success
+            await submitReceiptPreference(type)
+          } else {
+            console.error('Failed to generate receipt')
+            // Still save preference even if download fails
+            await submitReceiptPreference(type)
+          }
+        } catch (err) {
+          console.error('Error generating receipt:', err)
+          // Still save preference even if download fails
+          await submitReceiptPreference(type)
+        }
+      } else {
+        // No transaction ID, just save preference
+        submitReceiptPreference(type)
+      }
+    } else if (type === 'email' || type === 'sms') {
       // Show input field (handled in render)
     } else {
       submitReceiptPreference(type)
@@ -440,12 +486,41 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
             </div>
 
             <div style={{ display: 'flex', gap: '20px', width: '100%', marginTop: '20px' }}>
-              {paymentMethods
-                .filter(method => method.method_type === 'cash' || method.method_type === 'card')
-                .map((method) => (
+              {paymentMethods.length > 0 ? (
+                paymentMethods
+                  .filter(method => method.method_type === 'cash' || method.method_type === 'card')
+                  .map((method) => (
+                    <button
+                      key={method.payment_method_id}
+                      onClick={() => selectPaymentMethod(method)}
+                      style={{
+                        flex: 1,
+                        height: '100px',
+                        padding: '16px',
+                        backgroundColor: 'rgba(128, 0, 128, 0.7)',
+                        backdropFilter: 'blur(10px)',
+                        WebkitBackdropFilter: 'blur(10px)',
+                        color: '#fff',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        borderRadius: '8px',
+                        fontSize: '24px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 15px rgba(128, 0, 128, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
+                        transition: 'all 0.3s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      {method.method_type === 'cash' ? 'Cash' : 'Card'}
+                    </button>
+                  ))
+              ) : (
+                // Fallback: Show default payment buttons if payment methods haven't loaded
+                <>
                   <button
-                    key={method.payment_method_id}
-                    onClick={() => selectPaymentMethod(method)}
+                    onClick={() => selectPaymentMethod({ method_type: 'cash', payment_method_id: 'cash_default' })}
                     style={{
                       flex: 1,
                       height: '100px',
@@ -466,9 +541,34 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
                       justifyContent: 'center'
                     }}
                   >
-                    {method.method_type === 'cash' ? 'Cash' : 'Card'}
+                    Cash
                   </button>
-                ))}
+                  <button
+                    onClick={() => selectPaymentMethod({ method_type: 'card', payment_method_id: 'card_default' })}
+                    style={{
+                      flex: 1,
+                      height: '100px',
+                      padding: '16px',
+                      backgroundColor: 'rgba(128, 0, 128, 0.7)',
+                      backdropFilter: 'blur(10px)',
+                      WebkitBackdropFilter: 'blur(10px)',
+                      color: '#fff',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      borderRadius: '8px',
+                      fontSize: '24px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 15px rgba(128, 0, 128, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
+                      transition: 'all 0.3s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    Card
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}

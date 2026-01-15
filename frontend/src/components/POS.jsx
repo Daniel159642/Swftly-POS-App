@@ -495,8 +495,12 @@ function POS({ employeeId, employeeName }) {
 
   const handleDismissChange = () => {
     setShowChangeScreen(false)
-    // Show customer display for receipt selection
-    if (paymentCompleted) {
+    // Show customer display for receipt selection after cash payment
+    if (paymentCompleted && paymentMethod === 'cash') {
+      setShowCustomerDisplay(true)
+      setShowSummary(false) // Don't show summary, go straight to receipt screen
+    } else if (paymentCompleted) {
+      // For non-cash, customer display should already be showing
       setShowCustomerDisplay(true)
     } else {
       // If payment wasn't completed, reset everything
@@ -667,24 +671,25 @@ function POS({ employeeId, employeeName }) {
             // Trigger customer display to show receipt screen
             setPaymentCompleted(true)
             
-            // For cash payments, show change screen instead of immediately clearing
+            // For cash payments, show change screen briefly then automatically show customer display
             if (paymentMethod === 'cash') {
               const change = result.data.data?.change || calculateChange()
               setChangeAmount(change)
               setShowChangeScreen(true)
               setShowPaymentForm(false)
-              // Don't close customer display yet - let them see receipt options
+              // Automatically show customer display for receipt selection after 3 seconds
+              setTimeout(() => {
+                setShowChangeScreen(false)
+                setShowCustomerDisplay(true)
+                setShowSummary(false) // Don't show summary, go straight to receipt screen
+              }, 3000)
             } else {
-              // For non-cash payments, keep customer display open for receipt selection
-              // Will close after receipt selection
+              // For non-cash payments, show customer display for receipt selection
+              setShowCustomerDisplay(true)
+              setShowPaymentForm(false)
             }
             // Clear active transaction
             sessionStorage.removeItem('activeTransaction')
-            // Payment completed - show customer display for receipt selection
-            // For cash payments, show customer display again for receipt
-            if (paymentMethod === 'cash') {
-              setShowCustomerDisplay(true)
-            }
           } else {
             setMessage({ type: 'error', text: result.data?.error || 'Failed to process payment' })
           }
@@ -712,19 +717,22 @@ function POS({ employeeId, employeeName }) {
             }
             
             // Payment completed - show customer display for receipt selection
-            // For cash payments, show customer display again for receipt
+            // For cash payments, show change screen briefly then automatically show customer display
             if (paymentMethod === 'cash') {
               const change = calculateChange()
               setChangeAmount(change)
               setShowChangeScreen(true)
               setShowPaymentForm(false)
-              // Show customer display for receipt selection after showing change
+              // Automatically show customer display for receipt selection after 3 seconds
               setTimeout(() => {
                 setShowChangeScreen(false)
                 setShowCustomerDisplay(true)
+                setShowSummary(false) // Don't show summary, go straight to receipt screen
               }, 3000)
             } else {
-              // Keep customer display open for receipt selection
+              // For non-cash payments, show customer display for receipt selection
+              setShowCustomerDisplay(true)
+              setShowPaymentForm(false)
             }
           } else {
             setMessage({ type: 'error', text: result.message || 'Failed to process order' })
@@ -1036,7 +1044,7 @@ function POS({ employeeId, employeeName }) {
                 tax={calculateTax()}
                 total={calculateTotal()}
                 tip={selectedTip}
-                paymentMethod={showPaymentForm && paymentMethod === 'credit_card' ? paymentMethod : null}
+                paymentMethod={paymentCompleted ? paymentMethod : (showPaymentForm && paymentMethod === 'credit_card' ? paymentMethod : null)}
                 amountPaid={amountPaid}
                 onClose={() => {
                   setShowCustomerDisplay(false)
@@ -1378,7 +1386,7 @@ function POS({ employeeId, employeeName }) {
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#333'}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#000'}
               >
-                Return to POS
+                Show Receipt Options
               </button>
             </div>
           </>

@@ -1239,22 +1239,14 @@ Category name only (no explanation):"""
             confidence = 0
             
             if category_match:
-                # Find or create category
-                cursor.execute("""
-                    SELECT category_id FROM categories
-                    WHERE category_name = ?
-                """, (category_match.get('category_name'),))
-                
-                result = cursor.fetchone()
-                if result:
-                    category_id = result[0]
+                # Find or create category with hierarchy support
+                from database import create_or_get_category_with_hierarchy
+                category_path = category_match.get('category_name')
+                if category_path:
+                    # Use hierarchy function to create/get category
+                    category_id = create_or_get_category_with_hierarchy(category_path, conn)
                 else:
-                    # Create new category
-                    cursor.execute("""
-                        INSERT INTO categories (category_name, is_auto_generated)
-                        VALUES (?, 1)
-                    """, (category_match.get('category_name'),))
-                    category_id = cursor.lastrowid
+                    category_id = None
                 
                 confidence = category_match.get('confidence', 0)
             

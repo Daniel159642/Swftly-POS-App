@@ -172,7 +172,10 @@ def extract_metadata_for_product(product_id: int, auto_sync_category: bool = Tru
         # Get product
         product = get_product(product_id)
         if not product:
+            print(f"Warning: Product {product_id} not found for metadata extraction")
             return False
+        
+        print(f"Extracting metadata for product {product_id}: {product['product_name']}")
         
         # Extract metadata
         metadata_system = FreeMetadataSystem()
@@ -182,12 +185,16 @@ def extract_metadata_for_product(product_id: int, auto_sync_category: bool = Tru
             description=None
         )
         
+        print(f"Extracted metadata: {len(metadata.get('keywords', []))} keywords, {len(metadata.get('tags', []))} tags, {len(metadata.get('category_suggestions', []))} category suggestions")
+        
         # Save metadata
         metadata_system.save_product_metadata(
             product_id=product_id,
             metadata=metadata,
             extraction_method='auto_on_create'
         )
+        
+        print(f"Saved metadata for product {product_id}")
         
         # Optionally sync category to inventory.category field
         if auto_sync_category:
@@ -197,6 +204,7 @@ def extract_metadata_for_product(product_id: int, auto_sync_category: bool = Tru
                 if category_suggestions and len(category_suggestions) > 0:
                     suggested_category = category_suggestions[0].get('category_name')
                     if suggested_category:
+                        print(f"Syncing category '{suggested_category}' to product {product_id}")
                         conn = get_connection()
                         cursor = conn.cursor()
                         
@@ -205,28 +213,42 @@ def extract_metadata_for_product(product_id: int, auto_sync_category: bool = Tru
                             suggested_category, conn
                         )
                         
-                        # Update inventory.category with most specific category name
-                        # Extract just the last part (most specific)
-                        category_parts = [p.strip() for p in re.split(r'[>→]', suggested_category)]
-                        most_specific = category_parts[-1] if category_parts else suggested_category
-                        
-                        if product.get('category') != most_specific:
-                            cursor.execute("""
-                                UPDATE inventory 
-                                SET category = ?, updated_at = CURRENT_TIMESTAMP
-                                WHERE product_id = ?
-                            """, (most_specific, product_id))
-                        
-                        conn.commit()
+                        if category_id:
+                            print(f"Created/found category_id {category_id} for '{suggested_category}'")
+                            
+                            # Update inventory.category with most specific category name
+                            # Extract just the last part (most specific)
+                            category_parts = [p.strip() for p in re.split(r'[>→]', suggested_category)]
+                            most_specific = category_parts[-1] if category_parts else suggested_category
+                            
+                            if product.get('category') != most_specific:
+                                cursor.execute("""
+                                    UPDATE inventory 
+                                    SET category = ?, updated_at = CURRENT_TIMESTAMP
+                                    WHERE product_id = ?
+                                """, (most_specific, product_id))
+                                print(f"Updated inventory.category to '{most_specific}' for product {product_id}")
+                            
+                            conn.commit()
+                        else:
+                            print(f"Warning: Failed to create/get category '{suggested_category}'")
                         conn.close()
+                    else:
+                        print(f"Warning: No category_name in category suggestion for product {product_id}")
+                else:
+                    print(f"Warning: No category suggestions found for product {product_id}")
             except Exception as e:
-                print(f"Warning: Category sync failed for product {product_id}: {e}")
-                pass  # Don't fail if category sync fails
+                print(f"Error: Category sync failed for product {product_id}: {e}")
+                import traceback
+                traceback.print_exc()
+                # Don't fail if category sync fails, but log the error
         
         return True
     except Exception as e:
-        # Silently fail - metadata extraction is optional
-        # Uncomment for debugging: print(f"Metadata extraction failed for product {product_id}: {e}")
+        # Log error instead of silently failing
+        print(f"Error: Metadata extraction failed for product {product_id}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def add_product(
@@ -1417,11 +1439,12 @@ def update_pending_item_verification(
             current_verified = None
             verification_mode = 'verify_whole_shipment'
             pending_shipment_id = None
+            current_product_id = None
             
             if quantity_verified is not None:
                 cursor.execute("""
                     SELECT psi.quantity_expected, COALESCE(psi.quantity_verified, 0) as quantity_verified,
-                           ps.verification_mode, ps.pending_shipment_id
+                           ps.verification_mode, ps.pending_shipment_id, psi.product_id
                     FROM pending_shipment_items psi
                     JOIN pending_shipments ps ON psi.pending_shipment_id = ps.pending_shipment_id
                     WHERE psi.pending_item_id = ?
@@ -1433,6 +1456,7 @@ def update_pending_item_verification(
                     current_verified = item['quantity_verified']
                     verification_mode = item.get('verification_mode', 'verify_whole_shipment')
                     pending_shipment_id = item['pending_shipment_id']
+                    current_product_id = item.get('product_id')
             
             updates = []
             values = []
@@ -1440,23 +1464,100 @@ def update_pending_item_verification(
             if quantity_verified is not None:
                 updates.append("quantity_verified = ?")
                 values.append(quantity_verified)
-                # Update verified_by and verified_at when quantity changes
-                if employee_id is not None:
-                    updates.append("verified_by = ?")
-                    values.append(employee_id)
-                    updates.append("verified_at = CURRENT_TIMESTAMP")
-                # Update status
-                if expected is not None:
-                    if quantity_verified >= expected:
-                        updates.append("status = 'verified'")
-                    elif quantity_verified > 0:
-                        updates.append("status = 'pending'")
-                    else:
-                        updates.append("status = 'pending'")
+                # Note: status column doesn't exist in pending_shipment_items table
+                # Status is calculated based on quantity_verified vs quantity_expected
+            
+            # Always try to find or create product and extract metadata when checking in items
+            # This ensures metadata is created on the FIRST check-in, not waiting until all are checked in
+            product_id_to_use = None
+            should_extract_metadata = False
             
             if product_id is not None:
+                # Product ID explicitly provided
+                product_id_to_use = product_id
                 updates.append("product_id = ?")
-                values.append(product_id)
+                values.append(product_id_to_use)
+                should_extract_metadata = True  # Always check if metadata needs extraction
+            elif current_product_id is not None:
+                # Item already has a product_id from previous check-in
+                product_id_to_use = current_product_id
+                should_extract_metadata = True  # Check if metadata exists
+            elif quantity_verified is not None and quantity_verified > 0:
+                # Try to find or create product if we're checking in items
+                cursor.execute("""
+                    SELECT psi.product_sku, psi.product_name, psi.unit_cost, ps.vendor_id, v.vendor_name
+                    FROM pending_shipment_items psi
+                    JOIN pending_shipments ps ON psi.pending_shipment_id = ps.pending_shipment_id
+                    JOIN vendors v ON ps.vendor_id = v.vendor_id
+                    WHERE psi.pending_item_id = ?
+                """, (pending_item_id,))
+                item_info = cursor.fetchone()
+                
+                if item_info and item_info['product_sku']:
+                    sku = item_info['product_sku'].strip()
+                    if sku:
+                        # Check if product exists
+                        cursor.execute("SELECT product_id FROM inventory WHERE sku = ?", (sku,))
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            product_id_to_use = existing['product_id']
+                            updates.append("product_id = ?")
+                            values.append(product_id_to_use)
+                            should_extract_metadata = True  # Check if metadata exists
+                        else:
+                            # Create new product
+                            product_name = item_info['product_name'] or f'Product {sku}'
+                            unit_cost = item_info['unit_cost'] or 0.0
+                            vendor_id = item_info['vendor_id']
+                            vendor_name = item_info['vendor_name']
+                            
+                            cursor.execute("""
+                                INSERT INTO inventory 
+                                (product_name, sku, product_price, product_cost, vendor, vendor_id, current_quantity, category)
+                                VALUES (?, ?, ?, ?, ?, ?, 0, NULL)
+                            """, (product_name, sku, unit_cost, unit_cost, vendor_name, vendor_id))
+                            product_id_to_use = cursor.lastrowid
+                            
+                            updates.append("product_id = ?")
+                            values.append(product_id_to_use)
+                            should_extract_metadata = True  # Always extract for new products
+                            print(f"✓ Created product {product_id_to_use} ({product_name})")
+            
+            # Extract metadata if needed - do this IMMEDIATELY after finding/creating product
+            # This ensures metadata is created on the FIRST check-in, not waiting until all are checked in
+            if should_extract_metadata and product_id_to_use:
+                try:
+                    # Commit product creation first if we just created it (to avoid lock issues)
+                    if 'product_id = ?' in updates:
+                        conn.commit()
+                        # Get fresh cursor after commit
+                        cursor = conn.cursor()
+                    
+                    # Check if metadata exists
+                    cursor.execute("SELECT metadata_id FROM product_metadata WHERE product_id = ?", (product_id_to_use,))
+                    has_metadata = cursor.fetchone()
+                    if not has_metadata:
+                        # Extract metadata NOW (before final pending item update commit)
+                        # Close connection to avoid lock issues during metadata extraction
+                        conn.close()
+                        extract_metadata_for_product(product_id_to_use, auto_sync_category=True)
+                        print(f"✓ Extracted metadata for product {product_id_to_use}")
+                        # Reopen connection for pending item update
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                    else:
+                        print(f"Product {product_id_to_use} already has metadata")
+                except Exception as e:
+                    print(f"Warning: Metadata extraction failed for product {product_id_to_use}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Make sure connection is still valid
+                    try:
+                        cursor.execute("SELECT 1")
+                    except:
+                        conn = get_connection()
+                        cursor = conn.cursor()
             
             if discrepancy_notes is not None:
                 updates.append("discrepancy_notes = ?")
@@ -1477,22 +1578,12 @@ def update_pending_item_verification(
             conn.commit()
             success = cursor.rowcount > 0
             
-            # Extract metadata if product was matched/created
-            if success and product_id is not None:
-                try:
-                    cursor.execute("SELECT metadata_id FROM product_metadata WHERE product_id = ?", (product_id,))
-                    has_metadata = cursor.fetchone()
-                    if not has_metadata:
-                        # Extract metadata for newly matched product
-                        extract_metadata_for_product(product_id, auto_sync_category=True)
-                except Exception as e:
-                    print(f"Warning: Metadata extraction failed for product {product_id}: {e}")
-            
             # If auto-add mode and quantity was updated, add to inventory immediately
+            # This will also extract metadata when creating new products
             if success and verification_mode == 'auto_add' and quantity_verified is not None and quantity_verified > 0 and employee_id:
                 conn.close()  # Close current connection first
                 try:
-                    # Add to inventory immediately
+                    # Add to inventory immediately (this will extract metadata for new products)
                     result = add_item_to_inventory_immediately(pending_item_id, employee_id)
                     if not result.get('success'):
                         print(f"ERROR: Failed to add item to inventory in auto-add mode: {result.get('message', 'Unknown error')}")
@@ -1500,12 +1591,27 @@ def update_pending_item_verification(
                         traceback.print_exc()
                     else:
                         print(f"SUCCESS: Added {result.get('quantity_added', 0)} units of product {result.get('product_id')} to inventory")
+                        # Metadata extraction is handled in add_item_to_inventory_immediately
                 except Exception as e:
                     print(f"ERROR: Exception adding item to inventory in auto-add mode: {e}")
                     import traceback
                     traceback.print_exc()
                     # Don't fail the update if auto-add fails
             else:
+                # Even if not in auto-add mode, extract metadata if product was matched/created
+                if success and product_id is not None:
+                    try:
+                        cursor.execute("SELECT metadata_id FROM product_metadata WHERE product_id = ?", (product_id,))
+                        has_metadata = cursor.fetchone()
+                        if not has_metadata:
+                            # Extract metadata for newly matched product
+                            extract_metadata_for_product(product_id, auto_sync_category=True)
+                            print(f"✓ Extracted metadata for product {product_id}")
+                    except Exception as e:
+                        print(f"Warning: Metadata extraction failed for product {product_id}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
                 if success:
                     print(f"DEBUG: Not adding to inventory - mode={verification_mode}, qty={quantity_verified}, emp={employee_id}")
                 conn.close()
@@ -5438,14 +5544,20 @@ def get_verification_progress(pending_shipment_id: int) -> Dict[str, Any]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Overall stats
+    # Overall stats - calculate status based on quantity_verified and discrepancy_notes
     cursor.execute("""
         SELECT 
             COUNT(*) as total_items,
             COALESCE(SUM(quantity_expected), 0) as total_expected_quantity,
             COALESCE(SUM(quantity_verified), 0) as total_verified_quantity,
-            SUM(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) as items_fully_verified,
-            SUM(CASE WHEN status = 'issue' THEN 1 ELSE 0 END) as items_with_issues
+            SUM(CASE 
+                WHEN COALESCE(quantity_verified, 0) >= quantity_expected THEN 1 
+                ELSE 0 
+            END) as items_fully_verified,
+            SUM(CASE 
+                WHEN discrepancy_notes IS NOT NULL AND discrepancy_notes != '' THEN 1 
+                ELSE 0 
+            END) as items_with_issues
         FROM pending_shipment_items
         WHERE pending_shipment_id = ?
     """, (pending_shipment_id,))
@@ -5456,12 +5568,12 @@ def get_verification_progress(pending_shipment_id: int) -> Dict[str, Any]:
     cursor.execute("""
         SELECT pending_item_id, product_sku, product_name, 
                quantity_expected, COALESCE(quantity_verified, 0) as quantity_verified,
-               unit_cost, product_id, barcode, lot_number, expiration_date,
-               verification_photo,
+               unit_cost, product_id, lot_number, expiration_date,
+               discrepancy_notes,
                (quantity_expected - COALESCE(quantity_verified, 0)) as remaining
         FROM pending_shipment_items
         WHERE pending_shipment_id = ?
-        ORDER BY COALESCE(line_number, pending_item_id)
+        ORDER BY pending_item_id
     """, (pending_shipment_id,))
     
     pending_items = [dict(row) for row in cursor.fetchall()]

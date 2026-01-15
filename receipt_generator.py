@@ -45,6 +45,7 @@ def get_receipt_settings() -> Dict[str, Any]:
     else:
         # Return default settings
         return {
+            'receipt_type': 'traditional',
             'store_name': 'Store',
             'store_address': '',
             'store_city': '',
@@ -54,6 +55,7 @@ def get_receipt_settings() -> Dict[str, Any]:
             'store_email': '',
             'store_website': '',
             'footer_message': 'Thank you for your business!',
+            'return_policy': '',
             'show_tax_breakdown': 1,
             'show_payment_method': 1
         }
@@ -109,9 +111,16 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
         except Exception as e:
             print(f"Error generating barcode: {e}")
     
-    doc = SimpleDocTemplate(buffer, pagesize=letter, 
-                           rightMargin=0.5*inch, leftMargin=0.5*inch,
-                           topMargin=0.5*inch, bottomMargin=0.5*inch)
+    # Thermal receipt format: 80mm wide (3.15 inches) - standard receipt printer size
+    receipt_width = 3.15 * inch
+    receipt_height = 11 * inch  # Standard letter height, but will cut at content
+    
+    doc = SimpleDocTemplate(buffer, 
+                           pagesize=(receipt_width, receipt_height),
+                           rightMargin=0.15*inch, 
+                           leftMargin=0.15*inch,
+                           topMargin=0.2*inch, 
+                           bottomMargin=0.2*inch)
     
     # Get receipt settings
     settings = get_receipt_settings()
@@ -120,31 +129,43 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
     story = []
     styles = getSampleStyleSheet()
     
-    # Custom styles
+    # Custom styles for thermal receipt printer (smaller fonts, black and white)
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
-        fontSize=18,
+        fontSize=14,
         textColor=colors.black,
         alignment=TA_CENTER,
-        spaceAfter=12
+        spaceAfter=8,
+        fontName='Helvetica-Bold'
     )
     
     header_style = ParagraphStyle(
         'CustomHeader',
         parent=styles['Normal'],
-        fontSize=12,
+        fontSize=9,
         textColor=colors.black,
         alignment=TA_CENTER,
-        spaceAfter=6
+        spaceAfter=4,
+        fontName='Helvetica'
     )
     
     normal_style = ParagraphStyle(
         'CustomNormal',
         parent=styles['Normal'],
-        fontSize=10,
+        fontSize=8,
         textColor=colors.black,
-        alignment=TA_LEFT
+        alignment=TA_LEFT,
+        fontName='Helvetica'
+    )
+    
+    small_style = ParagraphStyle(
+        'CustomSmall',
+        parent=styles['Normal'],
+        fontSize=7,
+        textColor=colors.black,
+        alignment=TA_LEFT,
+        fontName='Helvetica'
     )
     
     # Store header
@@ -173,53 +194,47 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
         if part:
             story.append(Paragraph(part, header_style))
     
-    story.append(Spacer(1, 0.2*inch))
-    
-    # Order information
-    order_date = datetime.fromisoformat(order_data['order_date'].replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S')
-    story.append(Paragraph(f"<b>Order Number:</b> {order_data['order_number']}", normal_style))
-    story.append(Paragraph(f"<b>Date:</b> {order_date}", normal_style))
     story.append(Spacer(1, 0.1*inch))
     
-    # Items table
-    table_data = [['Item', 'Qty', 'Price', 'Total']]
+    # Divider line
+    story.append(Paragraph("─" * 40, header_style))
+    story.append(Spacer(1, 0.05*inch))
     
+    # Order information
+    try:
+        order_date_str = order_data['order_date']
+        if 'T' in order_date_str:
+            order_date = datetime.fromisoformat(order_date_str.replace('Z', '+00:00'))
+        else:
+            order_date = datetime.strptime(order_date_str, '%Y-%m-%d %H:%M:%S')
+        formatted_date = order_date.strftime('%m/%d/%Y %I:%M %p')
+    except:
+        formatted_date = order_data.get('order_date', '')
+    
+    story.append(Paragraph(f"Order: {order_data['order_number']}", normal_style))
+    story.append(Paragraph(f"Date: {formatted_date}", normal_style))
+    story.append(Spacer(1, 0.05*inch))
+    story.append(Paragraph("─" * 40, header_style))
+    story.append(Spacer(1, 0.05*inch))
+    
+    # Items table - compact format for receipt
     for item in order_items:
         product_name = item.get('product_name', 'Unknown')
         quantity = item.get('quantity', 0)
         unit_price = item.get('unit_price', 0.0)
         item_total = quantity * unit_price
         
-        # Truncate long product names
-        if len(product_name) > 30:
-            product_name = product_name[:27] + '...'
+        # Truncate long product names for receipt
+        if len(product_name) > 25:
+            product_name = product_name[:22] + '...'
         
-        table_data.append([
-            product_name,
-            str(quantity),
-            f"${unit_price:.2f}",
-            f"${item_total:.2f}"
-        ])
+        # Format as receipt line: "Product Name         2 x $10.00 = $20.00"
+        line = f"{product_name:<20} {quantity} x ${unit_price:.2f} = ${item_total:.2f}"
+        story.append(Paragraph(line, small_style))
     
-    # Create table
-    item_table = Table(table_data, colWidths=[3*inch, 0.8*inch, 1*inch, 1*inch])
-    item_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
-        ('ALIGN', (2, 0), (-1, -1), 'RIGHT'),
-        ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('FONTSIZE', (0, 1), (-1, -1), 9),
-    ]))
-    
-    story.append(item_table)
-    story.append(Spacer(1, 0.2*inch))
+    story.append(Spacer(1, 0.05*inch))
+    story.append(Paragraph("─" * 40, header_style))
+    story.append(Spacer(1, 0.05*inch))
     
     # Totals
     totals_data = []
@@ -246,53 +261,97 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
     total = order_data.get('total', 0.0)
     totals_data.append(['<b>TOTAL:</b>', f"<b>${total:.2f}</b>"])
     
-    totals_table = Table(totals_data, colWidths=[4*inch, 1.5*inch])
-    totals_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-        ('FONTNAME', (0, -1), (1, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, -1), (1, -1), 12),
-        ('TOPPADDING', (0, -1), (1, -1), 6),
-    ]))
+    # Totals - simple format for receipt
+    for label, value in totals_data:
+        if '<b>' in label or '<b>' in value:
+            # Total line - bold
+            line = f"{label.replace('<b>', '').replace('</b>', ''):<20} {value.replace('<b>', '').replace('</b>', '')}"
+            story.append(Paragraph(f"<b>{line}</b>", normal_style))
+        else:
+            line = f"{label:<20} {value}"
+            story.append(Paragraph(line, small_style))
     
-    story.append(totals_table)
-    story.append(Spacer(1, 0.2*inch))
+    story.append(Spacer(1, 0.05*inch))
+    story.append(Paragraph("─" * 40, header_style))
+    story.append(Spacer(1, 0.05*inch))
     
     # Payment method
     if settings.get('show_payment_method', 1):
         payment_method = order_data.get('payment_method', 'Unknown')
         payment_method_display = payment_method.replace('_', ' ').title()
-        story.append(Paragraph(f"<b>Payment Method:</b> {payment_method_display}", normal_style))
-        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph(f"Payment: {payment_method_display}", small_style))
+        story.append(Spacer(1, 0.05*inch))
     
-    # Barcode
+    # Barcode/QR Code - always try to show
+    story.append(Spacer(1, 0.1*inch))
     if barcode_data:
         try:
             from reportlab.platypus import Image
             from reportlab.lib.utils import ImageReader
             barcode_img = ImageReader(io.BytesIO(barcode_data))
-            story.append(Spacer(1, 0.1*inch))
-            story.append(Paragraph("<b>Order Barcode:</b>", normal_style))
+            # Center the barcode
+            story.append(Paragraph(order_number, ParagraphStyle(
+                'BarcodeLabel',
+                parent=styles['Normal'],
+                fontSize=7,
+                textColor=colors.black,
+                alignment=TA_CENTER,
+                fontName='Helvetica'
+            )))
+            story.append(Spacer(1, 0.02*inch))
+            # Smaller barcode for receipt (1 inch square) - centered using table
+            from reportlab.platypus import Image
+            img = Image(barcode_img, width=1.0*inch, height=1.0*inch)
+            # Use a table to center the image
+            barcode_table = Table([[img]], colWidths=[receipt_width - 0.3*inch])
+            barcode_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (0, 0), 'CENTER'),
+            ]))
+            story.append(barcode_table)
             story.append(Spacer(1, 0.05*inch))
-            # Add barcode image
-            img = Image(barcode_img, width=1.5*inch, height=1.5*inch)
-            story.append(img)
-            story.append(Spacer(1, 0.1*inch))
         except Exception as e:
             print(f"Error adding barcode to receipt: {e}")
+            # Fallback: show order number if barcode fails
+            story.append(Paragraph(f"Order #: {order_number}", small_style))
+    else:
+        # Show order number if barcode not available
+        story.append(Paragraph(f"Order #: {order_number}", small_style))
+    
+    story.append(Spacer(1, 0.05*inch))
+    story.append(Paragraph("─" * 40, header_style))
     
     # Footer
-    story.append(Spacer(1, 0.2*inch))
+    story.append(Spacer(1, 0.1*inch))
     footer_text = settings.get('footer_message', 'Thank you for your business!')
     footer_style = ParagraphStyle(
         'CustomFooter',
         parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.grey,
+        fontSize=7,
+        textColor=colors.black,
         alignment=TA_CENTER,
-        spaceBefore=12
+        spaceBefore=6,
+        fontName='Helvetica'
     )
     story.append(Paragraph(footer_text, footer_style))
+    
+    # Return Policy (if set)
+    return_policy = settings.get('return_policy', '')
+    if return_policy:
+        story.append(Spacer(1, 0.05*inch))
+        story.append(Paragraph("─" * 40, header_style))
+        story.append(Spacer(1, 0.05*inch))
+        return_policy_style = ParagraphStyle(
+            'ReturnPolicy',
+            parent=styles['Normal'],
+            fontSize=7,
+            textColor=colors.black,
+            alignment=TA_CENTER,
+            spaceBefore=4,
+            fontName='Helvetica'
+        )
+        story.append(Paragraph(f"Return Policy: {return_policy}", return_policy_style))
+    
+    story.append(Spacer(1, 0.1*inch))
     
     # Build PDF
     doc.build(story)
@@ -352,6 +411,109 @@ def generate_receipt_with_barcode(order_id: int) -> Optional[bytes]:
         
     except Exception as e:
         print(f"Error generating receipt: {e}")
+        import traceback
+        traceback.print_exc()
+        if conn:
+            conn.close()
+        return None
+
+def generate_transaction_receipt(transaction_id: int) -> Optional[bytes]:
+    """
+    Generate receipt PDF for a transaction
+    
+    Args:
+        transaction_id: Transaction ID
+    
+    Returns:
+        PDF bytes or None if error
+    """
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        # Get transaction data
+        cursor.execute("""
+            SELECT t.*, 
+                   e.first_name || ' ' || e.last_name as employee_name,
+                   c.customer_name
+            FROM transactions t
+            LEFT JOIN employees e ON t.employee_id = e.employee_id
+            LEFT JOIN customers c ON t.customer_id = c.customer_id
+            WHERE t.transaction_id = ?
+        """, (transaction_id,))
+        
+        transaction_row = cursor.fetchone()
+        if not transaction_row:
+            return None
+        
+        transaction = dict(transaction_row)
+        
+        # Get transaction items
+        cursor.execute("""
+            SELECT ti.*, i.product_name
+            FROM transaction_items ti
+            LEFT JOIN inventory i ON ti.product_id = i.product_id
+            WHERE ti.transaction_id = ?
+            ORDER BY ti.item_id
+        """, (transaction_id,))
+        
+        transaction_items = [dict(row) for row in cursor.fetchall()]
+        
+        # Get payment method
+        payment_method = 'Cash'  # Default
+        try:
+            cursor.execute("""
+                SELECT pm.method_name, pm.method_type
+                FROM payments p
+                JOIN payment_methods pm ON p.payment_method_id = pm.payment_method_id
+                WHERE p.transaction_id = ?
+                ORDER BY p.payment_id DESC
+                LIMIT 1
+            """, (transaction_id,))
+            
+            payment_row = cursor.fetchone()
+            if payment_row:
+                payment_method = payment_row['method_name']
+        except:
+            # If payments table doesn't exist or query fails, use default
+            pass
+        
+        # Convert transaction data to order-like format for receipt generation
+        order_data = {
+            'order_id': transaction['transaction_id'],
+            'order_number': transaction['transaction_number'],
+            'order_date': transaction['created_at'],
+            'employee_name': transaction.get('employee_name', ''),
+            'customer_name': transaction.get('customer_name', ''),
+            'subtotal': transaction['subtotal'],
+            'tax_amount': transaction['tax'],
+            'tax_rate': transaction['tax'] / transaction['subtotal'] if transaction['subtotal'] > 0 else 0,
+            'discount': transaction.get('discount', 0),
+            'tip': transaction.get('tip', 0),
+            'total': transaction['total'],
+            'payment_method': payment_method,
+            'transaction_fee': 0  # Transactions don't have transaction fees in this system
+        }
+        
+        # Convert transaction items to order items format
+        order_items = []
+        for item in transaction_items:
+            order_items.append({
+                'product_name': item.get('product_name', 'Unknown Product'),
+                'quantity': item['quantity'],
+                'unit_price': item['unit_price'],
+                'subtotal': item['subtotal'],
+                'discount': item.get('discount', 0)
+            })
+        
+        conn.close()
+        
+        # Generate PDF using existing function
+        return generate_receipt_pdf(order_data, order_items)
+        
+    except Exception as e:
+        print(f"Error generating transaction receipt: {e}")
         import traceback
         traceback.print_exc()
         if conn:

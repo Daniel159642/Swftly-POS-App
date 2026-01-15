@@ -8,6 +8,7 @@ function Settings() {
     auto_add_to_inventory: 'true'
   })
   const [receiptSettings, setReceiptSettings] = useState({
+    receipt_type: 'traditional',
     store_name: 'Store',
     store_address: '',
     store_city: '',
@@ -17,6 +18,7 @@ function Settings() {
     store_email: '',
     store_website: '',
     footer_message: 'Thank you for your business!',
+    return_policy: '',
     show_tax_breakdown: true,
     show_payment_method: true
   })
@@ -61,6 +63,8 @@ function Settings() {
       if (data.success && data.settings) {
         setReceiptSettings({
           ...data.settings,
+          receipt_type: data.settings.receipt_type || 'traditional',
+          return_policy: data.settings.return_policy || '',
           show_tax_breakdown: data.settings.show_tax_breakdown === 1,
           show_payment_method: data.settings.show_payment_method === 1
         })
@@ -108,6 +112,8 @@ function Settings() {
         },
         body: JSON.stringify({
           ...receiptSettings,
+          receipt_type: receiptSettings.receipt_type || 'traditional',
+          return_policy: receiptSettings.return_policy || '',
           show_tax_breakdown: receiptSettings.show_tax_breakdown ? 1 : 0,
           show_payment_method: receiptSettings.show_payment_method ? 1 : 0
         })
@@ -418,6 +424,96 @@ function Settings() {
           </h2>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Receipt Type */}
+            <div>
+              <h3 style={{
+                marginBottom: '12px',
+                fontSize: '16px',
+                fontWeight: 600,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Receipt Type
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  padding: '16px',
+                  border: `2px solid ${receiptSettings.receipt_type === 'traditional' ? `rgba(${themeColorRgb}, 0.7)` : (isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0')}`,
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  backgroundColor: receiptSettings.receipt_type === 'traditional' 
+                    ? (isDarkMode ? `rgba(${themeColorRgb}, 0.1)` : `rgba(${themeColorRgb}, 0.05)`)
+                    : 'transparent',
+                  transition: 'all 0.2s ease'
+                }}>
+                  <input
+                    type="radio"
+                    name="receipt_type"
+                    value="traditional"
+                    checked={receiptSettings.receipt_type === 'traditional'}
+                    onChange={(e) => setReceiptSettings({ ...receiptSettings, receipt_type: e.target.value })}
+                    style={{ marginTop: '4px' }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{
+                      fontWeight: 600,
+                      marginBottom: '4px',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                    }}>
+                      Traditional Receipt
+                    </div>
+                    <div style={{
+                      fontSize: '14px',
+                      color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                      lineHeight: '1.5'
+                    }}>
+                      Standard thermal printer format (80mm width, black & white, compact layout)
+                    </div>
+                  </div>
+                </label>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  padding: '16px',
+                  border: `2px solid ${receiptSettings.receipt_type === 'custom' ? `rgba(${themeColorRgb}, 0.7)` : (isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0')}`,
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  backgroundColor: receiptSettings.receipt_type === 'custom' 
+                    ? (isDarkMode ? `rgba(${themeColorRgb}, 0.1)` : `rgba(${themeColorRgb}, 0.05)`)
+                    : 'transparent',
+                  transition: 'all 0.2s ease'
+                }}>
+                  <input
+                    type="radio"
+                    name="receipt_type"
+                    value="custom"
+                    checked={receiptSettings.receipt_type === 'custom'}
+                    onChange={(e) => setReceiptSettings({ ...receiptSettings, receipt_type: e.target.value })}
+                    style={{ marginTop: '4px' }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{
+                      fontWeight: 600,
+                      marginBottom: '4px',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                    }}>
+                      Custom Receipt
+                    </div>
+                    <div style={{
+                      fontSize: '14px',
+                      color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                      lineHeight: '1.5'
+                    }}>
+                      Full customization with all information, return policy, and detailed formatting
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
             {/* Store Information */}
             <div>
               <h3 style={{
@@ -574,6 +670,43 @@ function Settings() {
                   fontFamily: 'inherit'
                 }}
               />
+            </div>
+
+            {/* Return Policy */}
+            <div>
+              <h3 style={{
+                marginBottom: '12px',
+                fontSize: '16px',
+                fontWeight: 600,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Return Policy
+              </h3>
+              <textarea
+                placeholder="Enter your store's return policy (e.g., 'Returns accepted within 30 days with receipt')"
+                value={receiptSettings.return_policy}
+                onChange={(e) => setReceiptSettings({ ...receiptSettings, return_policy: e.target.value })}
+                rows={4}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px',
+                  resize: 'vertical',
+                  fontFamily: 'inherit'
+                }}
+              />
+              <p style={{
+                marginTop: '8px',
+                fontSize: '13px',
+                color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                fontStyle: 'italic'
+              }}>
+                This will appear at the bottom of receipts
+              </p>
             </div>
 
             {/* Display Options */}
