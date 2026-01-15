@@ -4477,19 +4477,55 @@ def api_update_store_location_settings():
         
         employee_id = session_result.get('employee_id')
         
-        # Check if user has admin permissions
-        pm = get_permission_manager()
-        if not pm.has_permission(employee_id, 'manage_settings'):
-            return jsonify({'success': False, 'message': 'Permission denied'}), 403
+        # Check if user is admin or has manage_settings permission
+        employee = get_employee(employee_id)
+        is_admin = employee and employee.get('position', '').lower() == 'admin'
         
-        # Update settings
+        pm = get_permission_manager()
+        has_permission = pm.has_permission(employee_id, 'manage_settings')
+        
+        if not is_admin and not has_permission:
+            return jsonify({'success': False, 'message': 'Permission denied. Admin access or manage_settings permission required.'}), 403
+        
+        # Update settings - convert types properly
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        allowed_radius = data.get('allowed_radius_meters')
+        
+        # Convert to float if provided and not None/empty
+        if latitude is not None and latitude != '':
+            try:
+                latitude = float(latitude)
+            except (ValueError, TypeError):
+                latitude = None
+        
+        if longitude is not None and longitude != '':
+            try:
+                longitude = float(longitude)
+            except (ValueError, TypeError):
+                longitude = None
+        
+        if allowed_radius is not None and allowed_radius != '':
+            try:
+                allowed_radius = float(allowed_radius)
+            except (ValueError, TypeError):
+                allowed_radius = None
+        
+        # Convert require_location to int if provided
+        require_location = data.get('require_location')
+        if require_location is not None:
+            try:
+                require_location = int(require_location)
+            except (ValueError, TypeError):
+                require_location = None
+        
         success = update_store_location_settings(
-            store_name=data.get('store_name'),
-            latitude=data.get('latitude'),
-            longitude=data.get('longitude'),
-            address=data.get('address'),
-            allowed_radius_meters=data.get('allowed_radius_meters'),
-            require_location=data.get('require_location')
+            store_name=data.get('store_name') or None,
+            latitude=latitude,
+            longitude=longitude,
+            address=data.get('address') or None,
+            allowed_radius_meters=allowed_radius,
+            require_location=require_location
         )
         
         if success:

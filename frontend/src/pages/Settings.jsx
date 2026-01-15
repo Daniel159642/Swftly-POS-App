@@ -1151,6 +1151,36 @@ function Settings() {
                 When disabled, location is still recorded but not validated.
               </p>
             </div>
+
+            {/* Save Button */}
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'flex-end', 
+              marginTop: '32px',
+              paddingTop: '24px',
+              borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
+            }}>
+              <button
+                onClick={saveStoreLocationSettings}
+                disabled={saving}
+                style={{
+                  padding: '12px 32px',
+                  backgroundColor: saving ? (isDarkMode ? '#3a3a3a' : '#ccc') : `rgba(${themeColorRgb}, 0.7)`,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  boxShadow: saving ? 'none' : `0 4px 15px rgba(${themeColorRgb}, 0.3)`,
+                  transition: 'all 0.3s ease',
+                  opacity: saving ? 0.6 : 1,
+                  minWidth: '150px'
+                }}
+              >
+                {saving ? 'Saving...' : 'Save Location Settings'}
+              </button>
+            </div>
           </div>
         </div>
       )}
