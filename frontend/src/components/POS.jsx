@@ -1700,7 +1700,23 @@ function POS({ employeeId, employeeName }) {
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {searchResults.map(product => (
+                    {searchResults.map(product => {
+                      const productImage = product.photo
+                      // Construct image URL - handle both relative paths and full paths
+                      let imageUrl = null
+                      if (productImage) {
+                        if (productImage.startsWith('http://') || productImage.startsWith('https://')) {
+                          imageUrl = productImage
+                        } else if (productImage.startsWith('/')) {
+                          imageUrl = productImage
+                        } else if (productImage.startsWith('uploads/')) {
+                          imageUrl = `/${productImage}`
+                        } else {
+                          imageUrl = `/uploads/${productImage}`
+                        }
+                      }
+                      
+                      return (
                       <div
                         key={product.product_id}
                         onClick={() => addToCart(product)}
@@ -1710,12 +1726,57 @@ function POS({ employeeId, employeeName }) {
                           borderRadius: '4px',
                           cursor: 'pointer',
                           transition: 'all 0.2s',
-                          backgroundColor: (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'
+                          backgroundColor: (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee',
+                          display: 'flex',
+                          gap: '12px',
+                          alignItems: 'center'
                         }}
                         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
                         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        {/* Product Image */}
+                        {imageUrl ? (
+                          <div style={{
+                            width: '50px',
+                            height: '50px',
+                            minWidth: '50px',
+                            borderRadius: '4px',
+                            overflow: 'hidden',
+                            backgroundColor: '#e0e0e0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <img
+                              src={imageUrl}
+                              alt={product.product_name}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover'
+                              }}
+                              onError={(e) => {
+                                e.target.style.display = 'none'
+                                e.target.parentElement.innerHTML = '<span style="color: #999; font-size: 20px;">📦</span>'
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div style={{
+                            width: '50px',
+                            height: '50px',
+                            minWidth: '50px',
+                            borderRadius: '4px',
+                            backgroundColor: '#e0e0e0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '20px'
+                          }}>
+                            📦
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flex: 1 }}>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 500, fontSize: '14px', marginBottom: '2px' }}>
                               {product.product_name}
@@ -1737,7 +1798,7 @@ function POS({ employeeId, employeeName }) {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )
               ) : selectedCategory ? (
@@ -1748,7 +1809,23 @@ function POS({ employeeId, employeeName }) {
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {categoryProducts.map(product => (
+                    {categoryProducts.map(product => {
+                      const productImage = product.photo
+                      // Construct image URL - handle both relative paths and full paths
+                      let imageUrl = null
+                      if (productImage) {
+                        if (productImage.startsWith('http://') || productImage.startsWith('https://')) {
+                          imageUrl = productImage
+                        } else if (productImage.startsWith('/')) {
+                          imageUrl = productImage
+                        } else if (productImage.startsWith('uploads/')) {
+                          imageUrl = `/${productImage}`
+                        } else {
+                          imageUrl = `/uploads/${productImage}`
+                        }
+                      }
+                      
+                      return (
                       <div
                         key={product.product_id}
                         onClick={() => addToCart(product)}
@@ -1758,12 +1835,57 @@ function POS({ employeeId, employeeName }) {
                           borderRadius: '4px',
                           cursor: 'pointer',
                           transition: 'all 0.2s',
-                          backgroundColor: (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'
+                          backgroundColor: (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee',
+                          display: 'flex',
+                          gap: '12px',
+                          alignItems: 'center'
                         }}
                         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
                         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = (product.current_quantity || 0) > 0 ? '#fff' : '#ffebee'}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        {/* Product Image */}
+                        {imageUrl ? (
+                          <div style={{
+                            width: '50px',
+                            height: '50px',
+                            minWidth: '50px',
+                            borderRadius: '4px',
+                            overflow: 'hidden',
+                            backgroundColor: '#e0e0e0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <img
+                              src={imageUrl}
+                              alt={product.product_name}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover'
+                              }}
+                              onError={(e) => {
+                                e.target.style.display = 'none'
+                                e.target.parentElement.innerHTML = '<span style="color: #999; font-size: 20px;">📦</span>'
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div style={{
+                            width: '50px',
+                            height: '50px',
+                            minWidth: '50px',
+                            borderRadius: '4px',
+                            backgroundColor: '#e0e0e0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '20px'
+                          }}>
+                            📦
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flex: 1 }}>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 500, fontSize: '14px', marginBottom: '2px' }}>
                               {product.product_name}
@@ -1785,7 +1907,7 @@ function POS({ employeeId, employeeName }) {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )
               ) : (

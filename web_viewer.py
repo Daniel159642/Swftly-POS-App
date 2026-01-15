@@ -441,19 +441,56 @@ def api_update_item_verification(item_id):
         
         quantity_verified = data.get('quantity_verified')
         
-        if quantity_verified is None:
-            return jsonify({'success': False, 'message': 'quantity_verified is required'}), 400
+        # Handle photo upload if provided
+        verification_photo = None
+        if 'photo' in request.files:
+            photo = request.files['photo']
+            if photo.filename:
+                filename = secure_filename(f"verification_{item_id}_{datetime.now().timestamp()}_{photo.filename}")
+                upload_dir = 'uploads/verification_photos'
+                os.makedirs(upload_dir, exist_ok=True)
+                photo_path = os.path.join(upload_dir, filename)
+                photo.save(photo_path)
+                verification_photo = photo_path
+                
+                # Get product_id from pending item and update product photo if it doesn't have one
+                try:
+                    from database import get_connection, get_product, update_product
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT product_id FROM pending_shipment_items WHERE pending_item_id = ?", (item_id,))
+                    row = cursor.fetchone()
+                    conn.close()
+                    
+                    if row and row[0]:  # product_id exists
+                        product_id = row[0]
+                        product = get_product(product_id)
+                        # Always update product photo with verification photo (even if product already has a photo)
+                        if product:
+                            update_product(
+                                product_id=product_id,
+                                photo=verification_photo
+                            )
+                            print(f"Updated product {product_id} photo with verification photo: {verification_photo}")
+                except Exception as e:
+                    print(f"Warning: Could not update product photo: {e}")
+        
+        # If no quantity_verified but photo is provided, still update
+        if quantity_verified is None and verification_photo is None:
+            return jsonify({'success': False, 'message': 'quantity_verified or photo is required'}), 400
         
         success = update_pending_item_verification(
             pending_item_id=item_id,
             quantity_verified=quantity_verified,
-            employee_id=employee_id
+            employee_id=employee_id,
+            verification_photo=verification_photo
         )
         
         if success:
             return jsonify({
                 'success': True,
                 'quantity_verified': quantity_verified,
+                'verification_photo': verification_photo,
                 'timestamp': datetime.now().isoformat()
             })
         else:
@@ -2075,12 +2112,14 @@ def api_audit_log():
 
 @app.route('/api/dashboard/statistics')
 def api_dashboard_statistics():
-    """Get dashboard statistics: total orders, total returns, and weekly revenue"""
+    """Get comprehensive dashboard statistics"""
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     try:
+        from datetime import datetime, timedelta
+        
         # Get total orders count
         cursor.execute("SELECT COUNT(*) as total FROM orders")
         total_orders = cursor.fetchone()['total']
@@ -2090,10 +2129,56 @@ def api_dashboard_statistics():
             cursor.execute("SELECT COUNT(*) as total FROM pending_returns")
             total_returns = cursor.fetchone()['total']
         except sqlite3.OperationalError:
-            # Table doesn't exist, set to 0
             total_returns = 0
         
-        # Get weekly revenue (last 7 days)
+        # Revenue by period
+        # All time revenue
+        cursor.execute("""
+            SELECT COALESCE(SUM(total), 0) as revenue
+            FROM orders
+            WHERE order_status != 'voided'
+        """)
+        all_time_revenue = cursor.fetchone()['revenue'] or 0
+        
+        # Today's revenue
+        cursor.execute("""
+            SELECT COALESCE(SUM(total), 0) as revenue
+            FROM orders
+            WHERE DATE(order_date) = DATE('now')
+                AND order_status != 'voided'
+        """)
+        today_revenue = cursor.fetchone()['revenue'] or 0
+        
+        # This week's revenue
+        cursor.execute("""
+            SELECT COALESCE(SUM(total), 0) as revenue
+            FROM orders
+            WHERE order_date >= datetime('now', '-7 days')
+                AND order_status != 'voided'
+        """)
+        week_revenue = cursor.fetchone()['revenue'] or 0
+        
+        # This month's revenue
+        cursor.execute("""
+            SELECT COALESCE(SUM(total), 0) as revenue
+            FROM orders
+            WHERE order_date >= datetime('now', 'start of month')
+                AND order_status != 'voided'
+        """)
+        month_revenue = cursor.fetchone()['revenue'] or 0
+        
+        # Average order value
+        cursor.execute("""
+            SELECT 
+                COALESCE(AVG(total), 0) as avg_order_value,
+                COUNT(*) as order_count
+            FROM orders
+            WHERE order_status != 'voided'
+        """)
+        avg_result = cursor.fetchone()
+        avg_order_value = avg_result['avg_order_value'] or 0 if avg_result['order_count'] > 0 else 0
+        
+        # Weekly revenue (last 7 days) - detailed
         cursor.execute("""
             SELECT 
                 strftime('%Y-%m-%d', order_date) as date,
@@ -2108,14 +2193,12 @@ def api_dashboard_statistics():
         revenue_rows = cursor.fetchall()
         weekly_revenue = {row['date']: row['revenue'] for row in revenue_rows}
         
-        # Generate all 7 days of the week (including days with 0 revenue)
-        from datetime import datetime, timedelta
         today = datetime.now().date()
         week_data = []
-        for i in range(6, -1, -1):  # Last 7 days (6 days ago to today)
+        for i in range(6, -1, -1):  # Last 7 days
             day = today - timedelta(days=i)
             date_str = day.strftime('%Y-%m-%d')
-            day_name = day.strftime('%a')  # Mon, Tue, etc.
+            day_name = day.strftime('%a')
             revenue = weekly_revenue.get(date_str, 0)
             week_data.append({
                 'date': date_str,
@@ -2123,11 +2206,109 @@ def api_dashboard_statistics():
                 'revenue': revenue
             })
         
+        # Monthly revenue (last 12 months)
+        cursor.execute("""
+            SELECT 
+                strftime('%Y-%m', order_date) as month,
+                COALESCE(SUM(total), 0) as revenue
+            FROM orders
+            WHERE order_date >= datetime('now', '-12 months')
+                AND order_status != 'voided'
+            GROUP BY strftime('%Y-%m', order_date)
+            ORDER BY month ASC
+        """)
+        
+        monthly_rows = cursor.fetchall()
+        monthly_revenue = {row['month']: row['revenue'] for row in monthly_rows}
+        
+        # Generate last 12 months
+        monthly_data = []
+        for i in range(11, -1, -1):
+            month_date = (datetime.now() - timedelta(days=30*i)).replace(day=1)
+            month_str = month_date.strftime('%Y-%m')
+            month_name = month_date.strftime('%b')
+            revenue = monthly_revenue.get(month_str, 0)
+            monthly_data.append({
+                'month': month_str,
+                'month_name': month_name,
+                'revenue': revenue
+            })
+        
+        # Order status breakdown
+        cursor.execute("""
+            SELECT 
+                order_status,
+                COUNT(*) as count
+            FROM orders
+            GROUP BY order_status
+        """)
+        status_rows = cursor.fetchall()
+        order_status_breakdown = {row['order_status']: row['count'] for row in status_rows}
+        
+        # Top selling products (last 30 days)
+        cursor.execute("""
+            SELECT 
+                i.product_id,
+                i.product_name,
+                SUM(oi.quantity) as total_quantity,
+                SUM(oi.subtotal) as total_revenue
+            FROM order_items oi
+            JOIN orders o ON oi.order_id = o.order_id
+            JOIN inventory i ON oi.product_id = i.product_id
+            WHERE o.order_date >= datetime('now', '-30 days')
+                AND o.order_status != 'voided'
+            GROUP BY i.product_id, i.product_name
+            ORDER BY total_quantity DESC
+            LIMIT 10
+        """)
+        top_products = [dict(row) for row in cursor.fetchall()]
+        
+        # Inventory statistics
+        try:
+            cursor.execute("SELECT COUNT(*) as total FROM inventory")
+            total_products = cursor.fetchone()['total']
+            
+            cursor.execute("""
+                SELECT COUNT(*) as low_stock
+                FROM inventory
+                WHERE quantity <= reorder_point
+            """)
+            low_stock = cursor.fetchone()['low_stock']
+            
+            cursor.execute("""
+                SELECT COALESCE(SUM(quantity * cost), 0) as total_value
+                FROM inventory
+            """)
+            inventory_value = cursor.fetchone()['total_value'] or 0
+        except sqlite3.OperationalError:
+            total_products = 0
+            low_stock = 0
+            inventory_value = 0
+        
+        # Returns rate
+        returns_rate = (total_returns / total_orders * 100) if total_orders > 0 else 0
+        
         conn.close()
         return jsonify({
             'total_orders': total_orders,
             'total_returns': total_returns,
-            'weekly_revenue': week_data
+            'returns_rate': round(returns_rate, 2),
+            'revenue': {
+                'all_time': all_time_revenue,
+                'today': today_revenue,
+                'week': week_revenue,
+                'month': month_revenue
+            },
+            'avg_order_value': round(avg_order_value, 2),
+            'weekly_revenue': week_data,
+            'monthly_revenue': monthly_data,
+            'order_status_breakdown': order_status_breakdown,
+            'top_products': top_products,
+            'inventory': {
+                'total_products': total_products,
+                'low_stock': low_stock,
+                'total_value': inventory_value
+            }
         })
     except Exception as e:
         conn.close()
@@ -4031,6 +4212,15 @@ def api_add_to_inventory(shipment_id):
 def customer_display():
     """Render customer display page"""
     return render_template('customer_display.html')
+
+@app.route('/uploads/<path:filename>')
+def serve_upload(filename):
+    """Serve uploaded files"""
+    try:
+        return send_from_directory('uploads', filename)
+    except Exception as e:
+        print(f"Error serving file {filename}: {e}")
+        return jsonify({'error': 'File not found'}), 404
 
 if __name__ == '__main__':
     print("Starting web viewer...")

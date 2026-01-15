@@ -21,8 +21,50 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
     return () => observer.disconnect()
   }, [])
   
-  const formatValue = (value, column) => {
+  const formatValue = (value, column, row) => {
     if (value === null || value === undefined) return ''
+    
+    // Handle photo/image columns
+    if (column === 'photo' || column.includes('image') || column.includes('photo')) {
+      if (!value) return '📦'
+      // Construct image URL - handle both relative paths and full paths
+      let imageUrl = null
+      if (value.startsWith('http://') || value.startsWith('https://')) {
+        imageUrl = value
+      } else if (value.startsWith('/')) {
+        imageUrl = value
+      } else if (value.startsWith('uploads/')) {
+        imageUrl = `/${value}`
+      } else {
+        imageUrl = `/uploads/${value}`
+      }
+      return (
+        <div style={{
+          width: '40px',
+          height: '40px',
+          borderRadius: '4px',
+          overflow: 'hidden',
+          backgroundColor: '#e0e0e0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <img
+            src={imageUrl}
+            alt={row?.product_name || 'Product'}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover'
+            }}
+            onError={(e) => {
+              e.target.style.display = 'none'
+              e.target.parentElement.innerHTML = '<span style="color: #999; font-size: 16px;">📦</span>'
+            }}
+          />
+        </div>
+      )
+    }
     
     // Format currency fields
     if (column.includes('price') || column.includes('cost') || column.includes('total') || 
@@ -79,6 +121,11 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
       borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee',
       fontSize: '14px',
       color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+    }
+    
+    // Photo/image columns should be centered
+    if (col === 'photo' || col.includes('image') || col.includes('photo')) {
+      return { ...baseStyle, textAlign: 'center', width: '60px' }
     }
     
     if (col.includes('price') || col.includes('cost') || col.includes('total') || 
@@ -165,16 +212,17 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
                 key={col}
                 style={{
                   padding: '12px',
-                  textAlign: 'left',
+                  textAlign: (col === 'photo' || col.includes('image') || col.includes('photo')) ? 'center' : 'left',
                   fontWeight: 600,
                   borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #dee2e6',
                   color: isDarkMode ? 'var(--text-primary, #fff)' : '#495057',
                   fontSize: '13px',
                   textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
+                  letterSpacing: '0.5px',
+                  width: (col === 'photo' || col.includes('image') || col.includes('photo')) ? '60px' : 'auto'
                 }}
               >
-                {col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                {col === 'photo' ? '📷' : col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
               </th>
             ))}
             {onEdit && (
@@ -216,7 +264,7 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
             )}
             {columns.map(col => (
               <td key={col} style={getCellStyle(col, row[col])}>
-                {formatValue(row[col], col)}
+                {formatValue(row[col], col, row)}
               </td>
             ))}
             {onEdit && (

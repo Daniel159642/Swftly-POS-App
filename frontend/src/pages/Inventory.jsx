@@ -388,7 +388,7 @@ function Inventory() {
           </div>
           {items.length > 0 ? (
             <Table 
-              columns={['product_name', 'sku', 'barcode', 'product_price', 'current_quantity', 'vendor_name', 'vendor']} 
+              columns={['photo', 'product_name', 'sku', 'barcode', 'product_price', 'current_quantity', 'vendor_name', 'vendor']} 
               data={items}
               onEdit={handleEditProduct}
             />
@@ -476,7 +476,7 @@ function Inventory() {
           </div>
           {items.length > 0 ? (
             <Table 
-              columns={['product_name', 'sku', 'barcode', 'product_price', 'current_quantity', 'category']} 
+              columns={['photo', 'product_name', 'sku', 'barcode', 'product_price', 'current_quantity', 'category']} 
               data={items}
               onEdit={handleEditProduct}
             />
@@ -561,7 +561,7 @@ function Inventory() {
     return (
       <div style={{ marginTop: '20px' }}>
         <Table 
-          columns={['product_name', 'sku', 'barcode', 'product_price', 'current_quantity', 'category', 'vendor_name', 'vendor']} 
+          columns={['photo', 'product_name', 'sku', 'barcode', 'product_price', 'current_quantity', 'category', 'vendor_name', 'vendor']} 
           data={filteredInventory}
           onEdit={handleEditProduct}
         />

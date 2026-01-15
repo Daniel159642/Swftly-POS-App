@@ -424,6 +424,11 @@ function ShipmentVerificationDetail({ shipmentId }) {
   const [workflowSettings, setWorkflowSettings] = useState({ workflow_mode: 'simple', auto_add_to_inventory: 'true' })
   const [currentWorkflowStep, setCurrentWorkflowStep] = useState(null) // 'verify', 'confirm_pricing', 'ready_for_inventory'
   const [loadingSettings, setLoadingSettings] = useState(true)
+  const [showImageUploadModal, setShowImageUploadModal] = useState(false)
+  const [selectedItemForImage, setSelectedItemForImage] = useState(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [verificationPhotos, setVerificationPhotos] = useState({}) // Cache verification photos
+  const [imageErrors, setImageErrors] = useState({}) // Track which images failed to load
   
   // Convert hex to RGB
   const hexToRgb = (hex) => {
@@ -471,7 +476,7 @@ function ShipmentVerificationDetail({ shipmentId }) {
     }
   }, [progress])
 
-  // Load product images when progress data changes
+  // Load product images and verification photos when progress data changes
   useEffect(() => {
     if (progress && progress.pending_items) {
       const loadImages = async () => {
@@ -485,17 +490,29 @@ function ShipmentVerificationDetail({ shipmentId }) {
             
             // Create a map of product_id -> photo
             const newImages = {}
-            progress.pending_items
-              .filter(item => item.product_id && !productImages[item.product_id])
-              .forEach(item => {
+            const newVerificationPhotos = {}
+            
+            progress.pending_items.forEach(item => {
+              // Load product images
+              if (item.product_id && !productImages[item.product_id]) {
                 const product = allProducts.find(p => p.product_id === item.product_id)
                 if (product && product.photo) {
                   newImages[item.product_id] = product.photo
                 }
-              })
+              }
+              
+              // Load verification photos
+              if (item.verification_photo && !verificationPhotos[item.pending_item_id]) {
+                newVerificationPhotos[item.pending_item_id] = item.verification_photo
+              }
+            })
             
             if (Object.keys(newImages).length > 0) {
               setProductImages(prev => ({ ...prev, ...newImages }))
+            }
+            
+            if (Object.keys(newVerificationPhotos).length > 0) {
+              setVerificationPhotos(prev => ({ ...prev, ...newVerificationPhotos }))
             }
           }
         } catch (error) {
@@ -504,6 +521,26 @@ function ShipmentVerificationDetail({ shipmentId }) {
       }
       
       loadImages()
+    }
+  }, [progress])
+  
+  // Clear image errors when verification photos are detected
+  useEffect(() => {
+    if (progress && progress.pending_items) {
+      setImageErrors(prev => {
+        const newErrors = { ...prev }
+        let cleared = false
+        progress.pending_items.forEach(item => {
+          if (item.verification_photo && newErrors[item.pending_item_id]) {
+            delete newErrors[item.pending_item_id]
+            cleared = true
+          }
+        })
+        if (cleared) {
+          console.log('Cleared image errors for items with verification photos')
+        }
+        return newErrors
+      })
     }
   }, [progress])
 
@@ -530,6 +567,25 @@ function ShipmentVerificationDetail({ shipmentId }) {
       if (data.shipment) {
         setCurrentWorkflowStep(data.shipment.workflow_step || (data.shipment.status === 'in_progress' ? 'verify' : null))
       }
+      
+      // Clear image errors for items that have verification photos - allow retry
+      if (data.pending_items) {
+        setImageErrors(prev => {
+          const newErrors = { ...prev }
+          let clearedCount = 0
+          data.pending_items.forEach(item => {
+            if (item.verification_photo && newErrors[item.pending_item_id]) {
+              delete newErrors[item.pending_item_id]
+              clearedCount++
+            }
+          })
+          if (clearedCount > 0) {
+            console.log(`Cleared ${clearedCount} image error(s) to allow retry`)
+          }
+          return newErrors
+        })
+      }
+      
       return data
     } catch (error) {
       console.error('Error loading progress:', error)
@@ -735,6 +791,59 @@ function ShipmentVerificationDetail({ shipmentId }) {
     checkInItem(item, 1)
   }
 
+  const handleImageUpload = async (file, item) => {
+    if (!file) return
+    
+    setUploadingImage(true)
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      const formData = new FormData()
+      formData.append('photo', file)
+      
+      const response = await fetch(`/api/pending_items/${item.pending_item_id}/update`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: formData
+      })
+      
+      const data = await response.json()
+      
+      if (data.success) {
+        // Update local state with the new verification photo
+        if (data.verification_photo) {
+          console.log('Photo uploaded successfully:', data.verification_photo)
+          setVerificationPhotos(prev => ({
+            ...prev,
+            [item.pending_item_id]: data.verification_photo
+          }))
+          // Clear any previous image errors for this item - IMPORTANT!
+          setImageErrors(prev => {
+            const newErrors = { ...prev }
+            delete newErrors[item.pending_item_id]
+            console.log('Cleared image error for item:', item.pending_item_id, 'new errors:', newErrors)
+            return newErrors
+          })
+        }
+        // Small delay to ensure state updates
+        await new Promise(resolve => setTimeout(resolve, 100))
+        // Reload progress to get updated data
+        await loadProgress()
+        setShowImageUploadModal(false)
+        setSelectedItemForImage(null)
+      } else {
+        alert(`Failed to upload image: ${data.message || 'Unknown error'}`)
+        console.error('Upload failed:', data)
+      }
+    } catch (error) {
+      console.error('Error uploading image:', error)
+      alert(`Failed to upload image: ${error.message}`)
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
   const checkInAll = (item) => {
     const remainingQuantity = item.quantity_expected - item.quantity_verified
     if (remainingQuantity > 0) {
@@ -761,15 +870,24 @@ function ShipmentVerificationDetail({ shipmentId }) {
     if (!productPrices[itemId]) {
       const item = progress?.pending_items?.find(pi => pi.pending_item_id === itemId)
       if (item && item.product_id) {
-        // Fetch current product price if product exists
-        fetch(`/api/inventory/${item.product_id}`)
+        // Fetch all products and find the one we need (since GET /api/inventory/<id> is not supported)
+        fetch(`/api/inventory`)
           .then(res => res.json())
           .then(data => {
-            if (data.data && data.data.product_price) {
-              setProductPrices(prev => ({
-                ...prev,
-                [itemId]: data.data.product_price
-              }))
+            if (data.data) {
+              const product = data.data.find(p => p.product_id === item.product_id)
+              if (product && product.product_price) {
+                setProductPrices(prev => ({
+                  ...prev,
+                  [itemId]: product.product_price
+                }))
+              } else if (item.unit_cost) {
+                // Use unit_cost as default if no price set
+                setProductPrices(prev => ({
+                  ...prev,
+                  [itemId]: item.unit_cost
+                }))
+              }
             } else if (item.unit_cost) {
               // Use unit_cost as default if no price set
               setProductPrices(prev => ({
@@ -1190,7 +1308,39 @@ function ShipmentVerificationDetail({ shipmentId }) {
               const productId = item.product_id || item.productId
               const cachedImage = productId ? productImages[productId] : null
               const productImage = cachedImage || item.product_image || item.photo || item.image_url || null
-              const imageUrl = productImage ? (productImage.startsWith('http') || productImage.startsWith('/') ? productImage : `/uploads/${productImage}`) : null
+              // Check for verification photo first, then product image
+              const verificationPhoto = item.verification_photo || verificationPhotos[item.pending_item_id]
+              const displayImage = verificationPhoto || productImage
+              
+              // Construct image URL - handle both relative paths and full paths
+              let imageUrl = null
+              if (displayImage) {
+                if (displayImage.startsWith('http://') || displayImage.startsWith('https://')) {
+                  imageUrl = displayImage
+                } else if (displayImage.startsWith('/')) {
+                  // Already absolute path
+                  imageUrl = displayImage
+                } else if (displayImage.startsWith('uploads/')) {
+                  // Path starts with uploads/ - make it absolute
+                  imageUrl = `/${displayImage}`
+                } else {
+                  // Relative path - prepend /uploads/
+                  imageUrl = `/uploads/${displayImage}`
+                }
+              }
+              
+              // Debug logging - only log if there's an issue
+              if (imageUrl && imageErrors[item.pending_item_id]) {
+                console.log(`[Item ${item.pending_item_id}] ⚠️ Image URL exists but has error flag. Clearing error to retry...`)
+                // Clear the error to allow retry
+                setTimeout(() => {
+                  setImageErrors(prev => {
+                    const newErrors = { ...prev }
+                    delete newErrors[item.pending_item_id]
+                    return newErrors
+                  })
+                }, 100)
+              }
               
               const isExpanded = expandedItems[item.pending_item_id]
               const currentPrice = productPrices[item.pending_item_id] ?? (item.product_price ?? item.unit_cost ?? 0)
@@ -1218,41 +1368,128 @@ function ShipmentVerificationDetail({ shipmentId }) {
                     transition: 'background-color 0.2s ease'
                   }}
                 >
-                  {/* Product Image */}
-                  <div style={{
-                    width: '60px',
-                    height: '60px',
-                    minWidth: '60px',
-                    borderRadius: '6px',
-                    backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#e0e0e0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    overflow: 'hidden',
-                    border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #ddd'
-                  }}>
+                  {/* Product Image - Clickable */}
+                  <div 
+                    onClick={() => {
+                      setSelectedItemForImage(item)
+                      setShowImageUploadModal(true)
+                    }}
+                    style={{
+                      width: '60px',
+                      height: '60px',
+                      minWidth: '60px',
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#e0e0e0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden',
+                      border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
+                      cursor: 'pointer',
+                      position: 'relative',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.opacity = '0.8'
+                      e.currentTarget.style.transform = 'scale(1.05)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.opacity = '1'
+                      e.currentTarget.style.transform = 'scale(1)'
+                    }}
+                    title="Click to add or take a photo"
+                  >
                     {imageUrl ? (
-                      <img
-                        src={imageUrl}
-                        alt={item.product_name}
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover'
-                        }}
-                        onError={(e) => {
-                          // Hide image on error, show placeholder
-                          e.target.style.display = 'none'
-                          e.target.parentElement.innerHTML = '<span style="color: var(--text-tertiary, #999); font-size: 24px;">📦</span>'
-                        }}
-                      />
+                      !imageErrors[item.pending_item_id] ? (
+                        <>
+                          <img
+                            key={`img-${item.pending_item_id}-${imageUrl}`}
+                            src={imageUrl}
+                            alt={item.product_name}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                              display: 'block',
+                              maxWidth: '100%',
+                              maxHeight: '100%'
+                            }}
+                            onError={(e) => {
+                              // Mark this image as failed
+                              console.error('❌ Image failed to load:', imageUrl, 'for item:', item.pending_item_id)
+                              console.error('Attempted URL:', e.target?.src)
+                              console.error('Error details:', e.target?.naturalWidth, e.target?.naturalHeight)
+                              setImageErrors(prev => ({
+                                ...prev,
+                                [item.pending_item_id]: true
+                              }))
+                            }}
+                            onLoad={(e) => {
+                              console.log('✅ Image loaded successfully:', imageUrl, 'for item:', item.pending_item_id)
+                              console.log('Image size:', e.target.naturalWidth, 'x', e.target.naturalHeight)
+                            }}
+                          />
+                        {/* Camera icon overlay to indicate clickable */}
+                        <div style={{
+                          position: 'absolute',
+                          bottom: '2px',
+                          right: '2px',
+                          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                          borderRadius: '4px',
+                          padding: '2px 4px',
+                          fontSize: '10px',
+                          zIndex: 2,
+                          pointerEvents: 'none'
+                        }}>
+                          📷
+                        </div>
+                        {/* Badge if verification photo exists */}
+                        {verificationPhoto && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '2px',
+                            right: '2px',
+                            backgroundColor: `rgba(${themeColorRgb}, 0.9)`,
+                            borderRadius: '50%',
+                            width: '12px',
+                            height: '12px',
+                            border: '2px solid white',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                            zIndex: 3,
+                            pointerEvents: 'none'
+                          }} title="Verification photo added" />
+                        )}
+                      </>
+                      ) : (
+                        // Image previously failed - show placeholder but allow retry
+                        <span style={{
+                          color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
+                          fontSize: '24px'
+                        }}>
+                          📦
+                        </span>
+                      )
                     ) : (
-                      <span style={{
-                        color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
-                        fontSize: '24px'
-                      }}>
-                        📦
-                      </span>
+                      <>
+                        <span style={{
+                          color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
+                          fontSize: '24px'
+                        }}>
+                          📦
+                        </span>
+                        {/* Camera icon overlay */}
+                        <div style={{
+                          position: 'absolute',
+                          bottom: '2px',
+                          right: '2px',
+                          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                          borderRadius: '4px',
+                          padding: '2px 4px',
+                          fontSize: '10px'
+                        }}>
+                          📷
+                        </div>
+                      </>
                     )}
                   </div>
                   
@@ -1835,6 +2072,104 @@ function ShipmentVerificationDetail({ shipmentId }) {
           onClose={() => setShowBarcodeScanner(false)}
           themeColor={themeColor}
         />
+      )}
+
+      {/* Image Upload Modal */}
+      {showImageUploadModal && selectedItemForImage && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          padding: '20px'
+        }}>
+          <div style={{
+            backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+            borderRadius: '12px',
+            padding: '24px',
+            maxWidth: '500px',
+            width: '100%',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
+          }}>
+            <h3 style={{ margin: '0 0 20px 0', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+              Add Photo for {selectedItemForImage.product_name}
+            </h3>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                id="image-file-input"
+                onChange={(e) => {
+                  const file = e.target.files[0]
+                  if (file) {
+                    handleImageUpload(file, selectedItemForImage)
+                  }
+                }}
+                style={{ display: 'none' }}
+              />
+              
+              <button
+                onClick={() => document.getElementById('image-file-input').click()}
+                disabled={uploadingImage}
+                style={{
+                  padding: '12px 20px',
+                  backgroundColor: uploadingImage 
+                    ? `rgba(${themeColorRgb}, 0.4)` 
+                    : `rgba(${themeColorRgb}, 0.7)`,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: uploadingImage ? 'not-allowed' : 'pointer',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}
+              >
+                {uploadingImage ? '⏳ Uploading...' : '📷 Take Photo or Choose File'}
+              </button>
+              
+              <div style={{
+                fontSize: '12px',
+                color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                textAlign: 'center'
+              }}>
+                Click to take a photo with your camera or select an image file
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setShowImageUploadModal(false)
+                  setSelectedItemForImage(null)
+                }}
+                disabled={uploadingImage}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#e0e0e0',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: uploadingImage ? 'not-allowed' : 'pointer',
+                  fontWeight: 500
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

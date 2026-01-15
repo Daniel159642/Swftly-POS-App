@@ -1,20 +1,11 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 
 function Statistics() {
-  // All hooks must be declared at the top, before any early returns
   const { themeMode, themeColor } = useTheme()
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [activeView, setActiveView] = useState(0) // 0 = Weekly Revenue, 1 = Overview
-  const [touchStart, setTouchStart] = useState(null)
-  const [touchEnd, setTouchEnd] = useState(null)
-  const [isTransitioning, setIsTransitioning] = useState(false)
-  const [mouseStart, setMouseStart] = useState(null)
-  const [mouseEnd, setMouseEnd] = useState(null)
-  const [isDragging, setIsDragging] = useState(false)
-  const containerRef = useRef(null)
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return document.documentElement.classList.contains('dark-theme')
   })
@@ -33,10 +24,8 @@ function Statistics() {
       setIsDarkMode(document.documentElement.classList.contains('dark-theme'))
     }
     
-    // Check initially
     checkDarkMode()
     
-    // Watch for class changes
     const observer = new MutationObserver(checkDarkMode)
     observer.observe(document.documentElement, {
       attributes: true,
@@ -45,9 +34,6 @@ function Statistics() {
     
     return () => observer.disconnect()
   }, [themeMode])
-
-  // Minimum swipe distance (in pixels)
-  const minSwipeDistance = 50
 
   useEffect(() => {
     loadStats()
@@ -72,91 +58,291 @@ function Statistics() {
     }
   }
 
+  const formatCurrency = (value) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(value)
+  }
+
+  const StatCard = ({ title, value, subtitle, icon, color }) => {
+    const cardBg = isDarkMode ? '#2a2a2a' : '#ffffff'
+    const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
+    const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
+    const subtitleColor = isDarkMode ? '#999' : '#666'
+    
+    return (
+      <div style={{
+        backgroundColor: cardBg,
+        border: `1px solid ${borderColor}`,
+        borderRadius: '12px',
+        padding: '20px',
+        boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+        transition: 'all 0.3s ease',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        {icon && (
+          <div style={{
+            position: 'absolute',
+            top: '20px',
+            right: '20px',
+            fontSize: '32px',
+            opacity: 0.1
+          }}>
+            {icon}
+          </div>
+        )}
+        <div style={{
+          fontSize: '13px',
+          fontWeight: 500,
+          color: subtitleColor,
+          marginBottom: '8px',
+          textTransform: 'uppercase',
+          letterSpacing: '0.5px'
+        }}>
+          {title}
+        </div>
+        <div style={{
+          fontSize: '28px',
+          fontWeight: 700,
+          color: color || textColor,
+          marginBottom: subtitle ? '4px' : '0',
+          lineHeight: 1.2
+        }}>
+          {value}
+        </div>
+        {subtitle && (
+          <div style={{
+            fontSize: '12px',
+            color: subtitleColor,
+            marginTop: '4px'
+          }}>
+            {subtitle}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const renderWeeklyChart = () => {
-    if (!stats || !stats.weekly_revenue || stats.weekly_revenue.length === 0) {
-      return <div style={{ padding: '20px', textAlign: 'center', color: isDarkMode ? '#fff' : '#999', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No revenue data</div>
+    if (!stats?.weekly_revenue || stats.weekly_revenue.length === 0) {
+      return <div style={{ padding: '20px', textAlign: 'center', color: isDarkMode ? '#999' : '#999' }}>No revenue data</div>
     }
 
     const maxRevenue = Math.max(...stats.weekly_revenue.map(d => d.revenue), 1)
-    const chartHeight = 200
-    const svgWidth = 400
-    const barWidth = 40
-    const spacing = 20
+    const chartHeight = 180
+    const svgWidth = 100
+    const barWidth = 12
+    const spacing = 8
     
-    // Theme-aware colors
-    const axisColor = isDarkMode ? '#fff' : '#ddd'
-    const dayLabelColor = isDarkMode ? '#fff' : '#666'
+    const axisColor = isDarkMode ? '#444' : '#ddd'
+    const dayLabelColor = isDarkMode ? '#999' : '#666'
     const revenueLabelColor = isDarkMode ? '#fff' : '#333'
-    const titleColor = isDarkMode ? '#fff' : '#333'
-    // Bar color uses theme color
-    const barColor = isDarkMode ? `rgba(${themeColorRgb}, 0.6)` : `rgba(${themeColorRgb}, 0.5)`
+    const barColor = `rgba(${themeColorRgb}, ${isDarkMode ? '0.7' : '0.6'})`
 
     return (
-      <div style={{ padding: '8px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: '100%', flexShrink: 0, boxSizing: 'border-box' }}>
-        <h3 style={{ margin: '0 0 8px 0', fontSize: '12px', fontWeight: 500, color: titleColor }}>
-          Weekly Revenue
-        </h3>
-        <div style={{ overflow: 'hidden', width: '100%', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <svg width="100%" height="100%" viewBox={`0 0 ${svgWidth} ${chartHeight + 25}`} preserveAspectRatio="xMidYMid meet" style={{ overflow: 'visible', maxWidth: '100%', minHeight: '200px' }}>
-            {/* Bars */}
-            {stats.weekly_revenue.map((day, index) => {
-              const barHeight = maxRevenue > 0 ? (day.revenue / maxRevenue) * chartHeight : 0
-              const x = spacing + index * (barWidth + spacing)
-              const y = chartHeight - barHeight
-              
-              return (
-                <g key={day.date}>
-                <rect
-                  x={x}
-                  y={y}
-                  width={barWidth}
-                  height={barHeight}
-                  fill={barColor}
-                  rx="4"
-                />
+      <div style={{ padding: '16px', height: '100%' }}>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? '#fff' : '#333', marginBottom: '16px' }}>
+          Weekly Revenue (Last 7 Days)
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '180px', gap: '4px' }}>
+          {stats.weekly_revenue.map((day, index) => {
+            const barHeight = maxRevenue > 0 ? (day.revenue / maxRevenue) * chartHeight : 0
+            
+            return (
+              <div key={day.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                <div style={{
+                  width: '100%',
+                  height: `${barHeight}px`,
+                  backgroundColor: barColor,
+                  borderRadius: '4px 4px 0 0',
+                  minHeight: barHeight > 0 ? '4px' : '0',
+                  transition: 'height 0.3s ease',
+                  position: 'relative'
+                }}>
+                  {barHeight > 20 && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '-18px',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      fontSize: '9px',
+                      color: revenueLabelColor,
+                      fontWeight: 600,
+                      whiteSpace: 'nowrap'
+                    }}>
+                      ${Math.round(day.revenue)}
+                    </div>
+                  )}
+                </div>
+                <div style={{ fontSize: '10px', color: dayLabelColor, fontWeight: 500 }}>
+                  {day.day}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  const renderMonthlyChart = () => {
+    if (!stats?.monthly_revenue || stats.monthly_revenue.length === 0) {
+      return <div style={{ padding: '20px', textAlign: 'center', color: isDarkMode ? '#999' : '#999' }}>No revenue data</div>
+    }
+
+    const maxRevenue = Math.max(...stats.monthly_revenue.map(d => d.revenue), 1)
+    const chartHeight = 180
+    const chartWidth = 400
+    const pointRadius = 4
+    const lineColor = `rgba(${themeColorRgb}, ${isDarkMode ? '0.8' : '0.7'})`
+    const fillColor = `rgba(${themeColorRgb}, ${isDarkMode ? '0.15' : '0.1'})`
+    const monthLabelColor = isDarkMode ? '#999' : '#666'
+    
+    const points = stats.monthly_revenue.map((month, index) => {
+      const x = (index / (stats.monthly_revenue.length - 1)) * chartWidth
+      const y = chartHeight - (month.revenue / maxRevenue) * chartHeight
+      return { x, y, month, revenue: month.revenue }
+    })
+
+    const pathData = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+    const areaPath = `${pathData} L ${chartWidth} ${chartHeight} L 0 ${chartHeight} Z`
+
+    return (
+      <div style={{ padding: '16px', height: '100%' }}>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? '#fff' : '#333', marginBottom: '16px' }}>
+          Monthly Revenue (Last 12 Months)
+        </div>
+        <div style={{ position: 'relative', height: '180px', marginBottom: '24px' }}>
+          <svg width="100%" height="100%" viewBox={`0 0 ${chartWidth} ${chartHeight + 30}`} preserveAspectRatio="xMidYMid meet" style={{ overflow: 'visible' }}>
+            {/* Area fill */}
+            <path d={areaPath} fill={fillColor} />
+            {/* Line */}
+            <path d={pathData} fill="none" stroke={lineColor} strokeWidth="2" />
+            {/* Points */}
+            {points.map((point, i) => (
+              <g key={i}>
+                <circle cx={point.x} cy={point.y} r={pointRadius} fill={lineColor} />
                 <text
-                  x={x + barWidth / 2}
-                  y={chartHeight + 20}
+                  x={point.x}
+                  y={chartHeight + 16}
                   textAnchor="middle"
                   fontSize="9"
-                  fill={dayLabelColor}
+                  fill={monthLabelColor}
                 >
-                  {day.day}
+                  {point.month.month_name}
                 </text>
-                <text
-                  x={x + barWidth / 2}
-                  y={y - 2}
-                  textAnchor="middle"
-                  fontSize="8"
-                  fill={revenueLabelColor}
-                  fontWeight="500"
-                >
-                  ${day.revenue.toFixed(0)}
-                  </text>
-                </g>
-              )
-            })}
-          
-          {/* Y-axis line */}
-          <line
-            x1={0}
-            y1={0}
-            x2={0}
-            y2={chartHeight}
-            stroke={axisColor}
-            strokeWidth="1"
-          />
-          
-          {/* X-axis line */}
-          <line
-            x1={0}
-            y1={chartHeight}
-            x2={svgWidth}
-            y2={chartHeight}
-            stroke={axisColor}
-            strokeWidth="1"
-          />
+              </g>
+            ))}
           </svg>
+        </div>
+      </div>
+    )
+  }
+
+  const renderOrderStatusBreakdown = () => {
+    if (!stats?.order_status_breakdown) {
+      return <div style={{ padding: '20px', textAlign: 'center', color: isDarkMode ? '#999' : '#999' }}>No data</div>
+    }
+
+    const statuses = Object.entries(stats.order_status_breakdown)
+    const total = statuses.reduce((sum, [, count]) => sum + count, 0)
+    
+    if (total === 0) {
+      return <div style={{ padding: '20px', textAlign: 'center', color: isDarkMode ? '#999' : '#999' }}>No orders</div>
+    }
+
+    const colors = [
+      `rgba(${themeColorRgb}, 0.8)`,
+      `rgba(${themeColorRgb}, 0.6)`,
+      `rgba(${themeColorRgb}, 0.4)`,
+      `rgba(${themeColorRgb}, 0.3)`,
+      `rgba(${themeColorRgb}, 0.2)`
+    ]
+
+    const textColor = isDarkMode ? '#fff' : '#333'
+    const labelColor = isDarkMode ? '#999' : '#666'
+
+    return (
+      <div style={{ padding: '16px', height: '100%' }}>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: textColor, marginBottom: '16px' }}>
+          Order Status Breakdown
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {statuses.map(([status, count], index) => {
+            const percentage = ((count / total) * 100).toFixed(1)
+            const color = colors[index % colors.length]
+            
+            return (
+              <div key={status} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: textColor, textTransform: 'capitalize' }}>
+                    {status.replace('_', ' ')}
+                  </span>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: textColor }}>
+                    {count} ({percentage}%)
+                  </span>
+                </div>
+                <div style={{
+                  width: '100%',
+                  height: '8px',
+                  backgroundColor: isDarkMode ? '#333' : '#f0f0f0',
+                  borderRadius: '4px',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{
+                    width: `${percentage}%`,
+                    height: '100%',
+                    backgroundColor: color,
+                    transition: 'width 0.3s ease'
+                  }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  const renderTopProducts = () => {
+    if (!stats?.top_products || stats.top_products.length === 0) {
+      return <div style={{ padding: '20px', textAlign: 'center', color: isDarkMode ? '#999' : '#999' }}>No product data</div>
+    }
+
+    const textColor = isDarkMode ? '#fff' : '#333'
+    const labelColor = isDarkMode ? '#999' : '#666'
+    const borderColor = isDarkMode ? '#333' : '#e0e0e0'
+
+    return (
+      <div style={{ padding: '16px', height: '100%' }}>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: textColor, marginBottom: '16px' }}>
+          Top Products (Last 30 Days)
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', overflowY: 'auto' }}>
+          {stats.top_products.map((product, index) => (
+            <div key={product.product_id} style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '12px',
+              backgroundColor: isDarkMode ? '#2a2a2a' : '#f9f9f9',
+              borderRadius: '8px',
+              border: `1px solid ${borderColor}`
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: textColor, marginBottom: '4px' }}>
+                  #{index + 1} {product.product_name}
+                </div>
+                <div style={{ fontSize: '11px', color: labelColor }}>
+                  {product.total_quantity} sold • {formatCurrency(product.total_revenue)}
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     )
@@ -171,7 +357,9 @@ function Statistics() {
         justifyContent: 'center',
         color: isDarkMode ? '#fff' : '#999'
       }}>
-        Loading...
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '18px', marginBottom: '8px' }}>Loading statistics...</div>
+        </div>
       </div>
     )
   }
@@ -183,7 +371,7 @@ function Statistics() {
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'center',
-        color: isDarkMode ? '#fff' : '#999'
+        color: isDarkMode ? '#ff4444' : '#cc0000'
       }}>
         {error}
       </div>
@@ -194,216 +382,134 @@ function Statistics() {
     return null
   }
 
-  const renderOverview = () => {
-    const titleColor = isDarkMode ? '#fff' : '#333'
-    const valueColor = isDarkMode ? '#fff' : '#333'
-    const labelColor = isDarkMode ? '#e0e0e0' : '#666'
-    
-    return (
-      <div style={{
-        padding: '8px',
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        minWidth: '100%',
-        flexShrink: 0,
-        boxSizing: 'border-box'
-      }}>
-        <h3 style={{ margin: '0 0 12px 0', fontSize: '12px', fontWeight: 500, color: titleColor }}>
-          Overview
-        </h3>
-        <div style={{ display: 'flex', gap: '20px', justifyContent: 'center' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', fontWeight: 600, color: valueColor, marginBottom: '4px' }}>
-              {stats.total_orders || 0}
-            </div>
-            <div style={{ fontSize: '11px', color: labelColor }}>
-              Total Orders
-            </div>
-          </div>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', fontWeight: 600, color: valueColor, marginBottom: '4px' }}>
-              {stats.total_returns || 0}
-            </div>
-            <div style={{ fontSize: '11px', color: labelColor }}>
-              Total Returns
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  const onTouchStart = (e) => {
-    setTouchEnd(null)
-    setTouchStart(e.targetTouches[0].clientX)
-  }
-
-  const onTouchMove = (e) => {
-    setTouchEnd(e.targetTouches[0].clientX)
-  }
-
-  const onTouchEnd = () => {
-    if (!touchStart || !touchEnd) return
-    
-    const distance = touchStart - touchEnd
-    const isLeftSwipe = distance > minSwipeDistance
-    const isRightSwipe = distance < -minSwipeDistance
-
-    if (isLeftSwipe && activeView < 1) {
-      setIsTransitioning(true)
-      setActiveView(activeView + 1)
-      setTimeout(() => setIsTransitioning(false), 300)
-    }
-    if (isRightSwipe && activeView > 0) {
-      setIsTransitioning(true)
-      setActiveView(activeView - 1)
-      setTimeout(() => setIsTransitioning(false), 300)
-    }
-  }
-
-  // Mouse drag support for desktop
-  const onMouseDown = (e) => {
-    setIsDragging(true)
-    setMouseEnd(null)
-    setMouseStart(e.clientX)
-  }
-
-  const onMouseMove = (e) => {
-    if (!isDragging) return
-    setMouseEnd(e.clientX)
-  }
-
-  const onMouseUp = () => {
-    if (!isDragging) return
-    setIsDragging(false)
-    
-    if (mouseStart && mouseEnd) {
-      const distance = mouseStart - mouseEnd
-      const isLeftSwipe = distance > minSwipeDistance
-      const isRightSwipe = distance < -minSwipeDistance
-
-      if (isLeftSwipe && activeView < 1) {
-        setIsTransitioning(true)
-        setActiveView(activeView + 1)
-        setTimeout(() => setIsTransitioning(false), 300)
-      }
-      if (isRightSwipe && activeView > 0) {
-        setIsTransitioning(true)
-        setActiveView(activeView - 1)
-        setTimeout(() => setIsTransitioning(false), 300)
-      }
-    }
-    
-    setMouseStart(null)
-    setMouseEnd(null)
-  }
+  const cardBg = isDarkMode ? '#2a2a2a' : '#ffffff'
+  const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
 
   return (
     <div style={{
-      height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      position: 'relative'
+      gap: '20px',
+      height: '100%',
+      overflowY: 'auto',
+      padding: '4px'
     }}>
-      {/* Viewer Content with Sliding */}
-      <div 
-        ref={containerRef}
-        style={{
-          flex: 1,
-          overflow: 'hidden',
-          position: 'relative',
-          cursor: isDragging ? 'grabbing' : 'grab',
-          userSelect: 'none'
-        }}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onMouseLeave={onMouseUp}
-      >
-        <div style={{
-          display: 'flex',
-          height: '100%',
-          width: '200%',
-          transform: `translateX(-${activeView * 50}%)`,
-          transition: isTransitioning ? 'transform 0.3s ease-out' : 'none'
-        }}>
-          {/* Weekly Revenue View */}
-          <div style={{
-            width: '50%',
-            height: '100%',
-            overflow: 'auto',
-            flexShrink: 0
-          }}>
-            {renderWeeklyChart()}
-          </div>
+      {/* Revenue Cards Row */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '16px'
+      }}>
+        <StatCard
+          title="Today's Revenue"
+          value={formatCurrency(stats.revenue?.today || 0)}
+          icon="💰"
+          color={`rgba(${themeColorRgb}, 1)`}
+        />
+        <StatCard
+          title="This Week"
+          value={formatCurrency(stats.revenue?.week || 0)}
+          icon="📊"
+          color={`rgba(${themeColorRgb}, 1)`}
+        />
+        <StatCard
+          title="This Month"
+          value={formatCurrency(stats.revenue?.month || 0)}
+          icon="📈"
+          color={`rgba(${themeColorRgb}, 1)`}
+        />
+        <StatCard
+          title="All Time Revenue"
+          value={formatCurrency(stats.revenue?.all_time || 0)}
+          icon="💎"
+          color={`rgba(${themeColorRgb}, 1)`}
+        />
+      </div>
 
-          {/* Overview View */}
-          <div style={{
-            width: '50%',
-            height: '100%',
-            overflow: 'auto',
-            flexShrink: 0
-          }}>
-            {renderOverview()}
-          </div>
+      {/* Order Stats Row */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '16px'
+      }}>
+        <StatCard
+          title="Total Orders"
+          value={stats.total_orders || 0}
+          subtitle={`Avg: ${formatCurrency(stats.avg_order_value || 0)}`}
+          icon="🛒"
+        />
+        <StatCard
+          title="Total Returns"
+          value={stats.total_returns || 0}
+          subtitle={`${stats.returns_rate || 0}% return rate`}
+          icon="↩️"
+        />
+        <StatCard
+          title="Products"
+          value={stats.inventory?.total_products || 0}
+          subtitle={`${stats.inventory?.low_stock || 0} low stock`}
+          icon="📦"
+        />
+        <StatCard
+          title="Inventory Value"
+          value={formatCurrency(stats.inventory?.total_value || 0)}
+          icon="💵"
+        />
+      </div>
+
+      {/* Charts Row */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+        gap: '16px'
+      }}>
+        <div style={{
+          backgroundColor: cardBg,
+          border: `1px solid ${borderColor}`,
+          borderRadius: '12px',
+          boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+          minHeight: '280px'
+        }}>
+          {renderWeeklyChart()}
+        </div>
+        <div style={{
+          backgroundColor: cardBg,
+          border: `1px solid ${borderColor}`,
+          borderRadius: '12px',
+          boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+          minHeight: '280px'
+        }}>
+          {renderMonthlyChart()}
         </div>
       </div>
 
-      {/* Navigation Buttons */}
+      {/* Bottom Row */}
       <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        gap: '12px',
-        padding: '16px',
-        backgroundColor: 'transparent'
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+        gap: '16px'
       }}>
-        <button
-          onClick={() => setActiveView(0)}
-          style={{
-            padding: '6px 12px',
-            border: 'none',
-            backgroundColor: 'transparent',
-            color: activeView === 0 
-              ? (isDarkMode ? '#fff' : '#333') 
-              : (isDarkMode ? '#999' : '#999'),
-            cursor: 'pointer',
-            fontSize: '12px',
-            fontWeight: activeView === 0 ? 600 : 400,
-            transition: 'all 0.2s',
-            textDecoration: activeView === 0 ? 'underline' : 'none'
-          }}
-          aria-label="Chart"
-        >
-          Chart
-        </button>
-        <button
-          onClick={() => setActiveView(1)}
-          style={{
-            padding: '6px 12px',
-            border: 'none',
-            backgroundColor: 'transparent',
-            color: activeView === 1 
-              ? (isDarkMode ? '#fff' : '#333') 
-              : (isDarkMode ? '#999' : '#999'),
-            cursor: 'pointer',
-            fontSize: '12px',
-            fontWeight: activeView === 1 ? 600 : 400,
-            transition: 'all 0.2s',
-            textDecoration: activeView === 1 ? 'underline' : 'none'
-          }}
-          aria-label="Overview"
-        >
-          Overview
-        </button>
+        <div style={{
+          backgroundColor: cardBg,
+          border: `1px solid ${borderColor}`,
+          borderRadius: '12px',
+          boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+          minHeight: '280px'
+        }}>
+          {renderOrderStatusBreakdown()}
+        </div>
+        <div style={{
+          backgroundColor: cardBg,
+          border: `1px solid ${borderColor}`,
+          borderRadius: '12px',
+          boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+          minHeight: '280px'
+        }}>
+          {renderTopProducts()}
+        </div>
       </div>
     </div>
   )
 }
 
 export default Statistics
-

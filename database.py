@@ -1399,7 +1399,8 @@ def update_pending_item_verification(
     quantity_verified: Optional[int] = None,
     product_id: Optional[int] = None,
     discrepancy_notes: Optional[str] = None,
-    employee_id: Optional[int] = None
+    employee_id: Optional[int] = None,
+    verification_photo: Optional[str] = None
 ) -> bool:
     """Update verified quantity and product match for a pending item"""
     import time
@@ -1460,6 +1461,10 @@ def update_pending_item_verification(
             if discrepancy_notes is not None:
                 updates.append("discrepancy_notes = ?")
                 values.append(discrepancy_notes)
+            
+            if verification_photo is not None:
+                updates.append("verification_photo = ?")
+                values.append(verification_photo)
             
             if not updates:
                 conn.close()
@@ -5434,6 +5439,7 @@ def get_verification_progress(pending_shipment_id: int) -> Dict[str, Any]:
         SELECT pending_item_id, product_sku, product_name, 
                quantity_expected, COALESCE(quantity_verified, 0) as quantity_verified,
                unit_cost, product_id, barcode, lot_number, expiration_date,
+               verification_photo,
                (quantity_expected - COALESCE(quantity_verified, 0)) as remaining
         FROM pending_shipment_items
         WHERE pending_shipment_id = ?
