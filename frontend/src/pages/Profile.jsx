@@ -377,6 +377,14 @@ function Profile({ employeeId, employeeName }) {
       // This identifies the employee and clocks them in/out automatically
       const action = clockStatus?.clocked_in ? 'clock_out' : 'clock_in'
       
+      // Get current location
+      let locationData = { latitude: null, longitude: null, address: null }
+      try {
+        locationData = await getCurrentLocation()
+      } catch (locationError) {
+        console.warn('Location error:', locationError)
+      }
+      
       const response = await fetch('/api/face/clock', {
         method: 'POST',
         headers: {
@@ -385,7 +393,10 @@ function Profile({ employeeId, employeeName }) {
         body: JSON.stringify({ 
           face_descriptor: descriptor,
           action: action,
-          threshold: 0.6
+          threshold: 0.6,
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          address: locationData.address
         })
       })
       
@@ -480,24 +491,85 @@ function Profile({ employeeId, employeeName }) {
     }
   }
 
+  const getCurrentLocation = () => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Geolocation is not supported by your browser'))
+        return
+      }
+      
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords
+          
+          // Try to get address from coordinates (reverse geocoding)
+          let address = null
+          try {
+            // Using a free reverse geocoding service
+            const geoResponse = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+            )
+            const geoData = await geoResponse.json()
+            if (geoData && geoData.display_name) {
+              address = geoData.display_name
+            }
+          } catch (err) {
+            console.warn('Could not get address from coordinates:', err)
+          }
+          
+          resolve({ latitude, longitude, address })
+        },
+        (error) => {
+          reject(error)
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        }
+      )
+    })
+  }
+
   const performClockIn = async () => {
     setClockLoading(true)
     setClockMessage(null)
     try {
+      // Get current location
+      let locationData = { latitude: null, longitude: null, address: null }
+      try {
+        locationData = await getCurrentLocation()
+        setClockMessage({ type: 'info', text: 'Location obtained, clocking in...' })
+      } catch (locationError) {
+        console.warn('Location error:', locationError)
+        setClockMessage({ 
+          type: 'warning', 
+          text: 'Could not get location. Clocking in without location verification.' 
+        })
+      }
+      
       const token = localStorage.getItem('sessionToken')
       const response = await fetch('/api/clock/in', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          address: locationData.address
+        })
       })
       const data = await response.json()
       if (data.success) {
         setClockStatus({ clocked_in: true, clock_in_time: data.clock_in_time })
+        const locationMsg = data.location_validation?.message 
+          ? ` ${data.location_validation.message}` 
+          : ''
         setClockMessage({
           type: 'success',
-          text: data.schedule_comparison ? data.schedule_comparison.message : 'Clocked in successfully',
+          text: (data.schedule_comparison ? data.schedule_comparison.message : 'Clocked in successfully') + locationMsg,
           comparison: data.schedule_comparison
         })
         setTimeout(() => setClockMessage(null), 5000)
@@ -521,13 +593,31 @@ function Profile({ employeeId, employeeName }) {
     setClockLoading(true)
     setClockMessage(null)
     try {
+      // Get current location
+      let locationData = { latitude: null, longitude: null, address: null }
+      try {
+        locationData = await getCurrentLocation()
+        setClockMessage({ type: 'info', text: 'Location obtained, clocking out...' })
+      } catch (locationError) {
+        console.warn('Location error:', locationError)
+        setClockMessage({ 
+          type: 'warning', 
+          text: 'Could not get location. Clocking out without location verification.' 
+        })
+      }
+      
       const token = localStorage.getItem('sessionToken')
       const response = await fetch('/api/clock/out', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          address: locationData.address
+        })
       })
       const data = await response.json()
       if (data.success) {

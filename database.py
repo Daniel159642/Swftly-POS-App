@@ -3482,7 +3482,9 @@ def add_schedule(
     
     return schedule_id
 
-def clock_in(employee_id: int, schedule_id: Optional[int] = None, schedule_date: Optional[str] = None) -> Dict[str, Any]:
+def clock_in(employee_id: int, schedule_id: Optional[int] = None, schedule_date: Optional[str] = None,
+             latitude: Optional[float] = None, longitude: Optional[float] = None, 
+             address: Optional[str] = None) -> Dict[str, Any]:
     """
     Clock in an employee
     If schedule_id is provided, updates that schedule. Otherwise creates a new one.
@@ -3491,14 +3493,29 @@ def clock_in(employee_id: int, schedule_id: Optional[int] = None, schedule_date:
     cursor = conn.cursor()
     
     try:
+        # Validate location if provided
+        location_validation = None
+        if latitude is not None and longitude is not None:
+            location_validation = validate_location(latitude, longitude)
+            if not location_validation['valid']:
+                conn.close()
+                return {
+                    'success': False,
+                    'message': location_validation['message'],
+                    'location_validation': location_validation
+                }
+        
         if schedule_id:
             # Update existing schedule
             cursor.execute("""
                 UPDATE employee_schedule
                 SET clock_in_time = CURRENT_TIMESTAMP,
-                    status = 'clocked_in'
+                    status = 'clocked_in',
+                    clock_in_latitude = ?,
+                    clock_in_longitude = ?,
+                    clock_in_address = ?
                 WHERE schedule_id = ? AND employee_id = ?
-            """, (schedule_id, employee_id))
+            """, (latitude, longitude, address, schedule_id, employee_id))
             
             if cursor.rowcount == 0:
                 conn.close()
@@ -3510,9 +3527,10 @@ def clock_in(employee_id: int, schedule_id: Optional[int] = None, schedule_date:
             
             cursor.execute("""
                 INSERT INTO employee_schedule (
-                    employee_id, schedule_date, clock_in_time, status
-                ) VALUES (?, ?, CURRENT_TIMESTAMP, 'clocked_in')
-            """, (employee_id, schedule_date))
+                    employee_id, schedule_date, clock_in_time, status,
+                    clock_in_latitude, clock_in_longitude, clock_in_address
+                ) VALUES (?, ?, CURRENT_TIMESTAMP, 'clocked_in', ?, ?, ?)
+            """, (employee_id, schedule_date, latitude, longitude, address))
             
             schedule_id = cursor.lastrowid
         
@@ -3522,19 +3540,34 @@ def clock_in(employee_id: int, schedule_id: Optional[int] = None, schedule_date:
         return {
             'success': True,
             'schedule_id': schedule_id,
-            'message': 'Clocked in successfully'
+            'message': 'Clocked in successfully',
+            'location_validation': location_validation
         }
     except Exception as e:
         conn.rollback()
         conn.close()
         return {'success': False, 'message': str(e)}
 
-def clock_out(employee_id: int, schedule_id: int) -> Dict[str, Any]:
+def clock_out(employee_id: int, schedule_id: int,
+              latitude: Optional[float] = None, longitude: Optional[float] = None, 
+              address: Optional[str] = None) -> Dict[str, Any]:
     """Clock out an employee and calculate hours worked"""
     conn = get_connection()
     cursor = conn.cursor()
     
     try:
+        # Validate location if provided
+        location_validation = None
+        if latitude is not None and longitude is not None:
+            location_validation = validate_location(latitude, longitude)
+            if not location_validation['valid']:
+                conn.close()
+                return {
+                    'success': False,
+                    'message': location_validation['message'],
+                    'location_validation': location_validation
+                }
+        
         # Get schedule with clock in time
         cursor.execute("""
             SELECT clock_in_time, start_time, end_time, break_duration
@@ -3579,9 +3612,12 @@ def clock_out(employee_id: int, schedule_id: int) -> Dict[str, Any]:
             SET clock_out_time = CURRENT_TIMESTAMP,
                 hours_worked = ?,
                 overtime_hours = ?,
-                status = 'clocked_out'
+                status = 'clocked_out',
+                clock_out_latitude = ?,
+                clock_out_longitude = ?,
+                clock_out_address = ?
             WHERE schedule_id = ? AND employee_id = ?
-        """, (hours_worked, overtime_hours, schedule_id, employee_id))
+        """, (hours_worked, overtime_hours, latitude, longitude, address, schedule_id, employee_id))
         
         conn.commit()
         conn.close()
@@ -3590,7 +3626,8 @@ def clock_out(employee_id: int, schedule_id: int) -> Dict[str, Any]:
             'success': True,
             'hours_worked': hours_worked,
             'overtime_hours': overtime_hours,
-            'message': 'Clocked out successfully'
+            'message': 'Clocked out successfully',
+            'location_validation': location_validation
         }
     except Exception as e:
         conn.rollback()
@@ -6108,3 +6145,168 @@ def create_shipment_from_document(
         'total_cost': float(total_cost)
     }
 
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate the great circle distance between two points on Earth using Haversine formula
+    Returns distance in meters
+    """
+    # Earth radius in meters
+    R = 6371000
+    
+    # Convert to radians
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    
+    # Haversine formula
+    a = math.sin(delta_phi / 2) ** 2 + \
+        math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    distance = R * c
+    return distance
+
+def get_store_location_settings() -> Optional[Dict[str, Any]]:
+    """Get store location settings"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT * FROM store_location_settings 
+        ORDER BY id DESC 
+        LIMIT 1
+    """)
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    
+    return dict(row)
+
+def update_store_location_settings(
+    store_name: Optional[str] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+    address: Optional[str] = None,
+    allowed_radius_meters: Optional[float] = None,
+    require_location: Optional[int] = None
+) -> bool:
+    """Update store location settings"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Check if settings exist
+        cursor.execute("SELECT COUNT(*) FROM store_location_settings")
+        count = cursor.fetchone()[0]
+        
+        if count == 0:
+            # Create new settings
+            cursor.execute("""
+                INSERT INTO store_location_settings (
+                    store_name, latitude, longitude, address, 
+                    allowed_radius_meters, require_location
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                store_name or 'Store',
+                latitude,
+                longitude,
+                address,
+                allowed_radius_meters or 100.0,
+                require_location if require_location is not None else 1
+            ))
+        else:
+            # Update existing settings
+            updates = []
+            params = []
+            
+            if store_name is not None:
+                updates.append("store_name = ?")
+                params.append(store_name)
+            if latitude is not None:
+                updates.append("latitude = ?")
+                params.append(latitude)
+            if longitude is not None:
+                updates.append("longitude = ?")
+                params.append(longitude)
+            if address is not None:
+                updates.append("address = ?")
+                params.append(address)
+            if allowed_radius_meters is not None:
+                updates.append("allowed_radius_meters = ?")
+                params.append(allowed_radius_meters)
+            if require_location is not None:
+                updates.append("require_location = ?")
+                params.append(require_location)
+            
+            if updates:
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                
+                query = f"""
+                    UPDATE store_location_settings 
+                    SET {', '.join(updates)}
+                    WHERE id = (SELECT id FROM store_location_settings ORDER BY id DESC LIMIT 1)
+                """
+                cursor.execute(query, params)
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"Error updating store location settings: {e}")
+        return False
+
+def validate_location(latitude: float, longitude: float) -> Dict[str, Any]:
+    """
+    Validate if a location is within the allowed radius of the store
+    Returns dict with 'valid' (bool), 'message' (str), and 'distance' (float in meters)
+    """
+    settings = get_store_location_settings()
+    
+    if not settings:
+        # No location settings configured, allow all locations
+        return {
+            'valid': True,
+            'message': 'Location settings not configured',
+            'distance': None
+        }
+    
+    # Check if location verification is required
+    if settings.get('require_location', 1) == 0:
+        return {
+            'valid': True,
+            'message': 'Location verification is disabled',
+            'distance': None
+        }
+    
+    store_lat = settings.get('latitude')
+    store_lon = settings.get('longitude')
+    allowed_radius = settings.get('allowed_radius_meters', 100.0)
+    
+    if store_lat is None or store_lon is None:
+        return {
+            'valid': True,
+            'message': 'Store location not set',
+            'distance': None
+        }
+    
+    # Calculate distance
+    distance = haversine_distance(store_lat, store_lon, latitude, longitude)
+    
+    if distance <= allowed_radius:
+        return {
+            'valid': True,
+            'message': f'Location verified (within {distance:.0f}m of store)',
+            'distance': distance
+        }
+    else:
+        return {
+            'valid': False,
+            'message': f'Location too far from store ({distance:.0f}m away, allowed: {allowed_radius:.0f}m)',
+            'distance': distance
+        }

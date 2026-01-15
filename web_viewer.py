@@ -27,7 +27,8 @@ from database import (
     get_verification_progress, complete_verification,
     get_pending_shipments_with_progress, get_shipment_items,
     create_shipment_from_document, update_pending_item_verification, add_vendor,
-    clock_in, clock_out, get_current_clock_status, get_schedule
+    clock_in, clock_out, get_current_clock_status, get_schedule,
+    get_store_location_settings, update_store_location_settings
 )
 from permission_manager import get_permission_manager
 import sqlite3
@@ -1611,16 +1612,25 @@ def api_clock_in():
             schedule_dict = dict(schedule)
             schedule_id = schedule_dict.get('schedule_id') or schedule_dict.get('scheduled_shift_id')
         
-        clock_result = clock_in(employee_id, schedule_id=schedule_id, schedule_date=today)
+        # Get location from request
+        latitude = request.json.get('latitude')
+        longitude = request.json.get('longitude')
+        address = request.json.get('address')
+        
+        clock_result = clock_in(employee_id, schedule_id=schedule_id, schedule_date=today,
+                                latitude=latitude, longitude=longitude, address=address)
         
         if clock_result['success']:
-            return jsonify({
+            response = {
                 'success': True,
                 'message': 'Clocked in successfully',
                 'employee_name': employee_name,
                 'clock_in_time': clock_in_time.isoformat(),
                 'schedule_comparison': comparison_result
-            })
+            }
+            if 'location_validation' in clock_result:
+                response['location_validation'] = clock_result['location_validation']
+            return jsonify(response)
         else:
             return jsonify({
                 'success': False,
@@ -1652,22 +1662,31 @@ def api_clock_out():
         if not schedule_id:
             return jsonify({'success': False, 'message': 'Schedule ID not found'}), 400
         
+        # Get location from request
+        latitude = request.json.get('latitude') if request.is_json else None
+        longitude = request.json.get('longitude') if request.is_json else None
+        address = request.json.get('address') if request.is_json else None
+        
         # Clock out
-        clock_result = clock_out(employee_id, schedule_id)
+        clock_result = clock_out(employee_id, schedule_id,
+                                 latitude=latitude, longitude=longitude, address=address)
         
         if clock_result['success']:
             # Get employee info
             employee = get_employee(employee_id)
             employee_name = f"{employee['first_name']} {employee['last_name']}" if employee else 'Unknown'
             
-            return jsonify({
+            response = {
                 'success': True,
                 'message': 'Clocked out successfully',
                 'employee_name': employee_name,
                 'clock_out_time': datetime.now().isoformat(),
                 'hours_worked': clock_result.get('hours_worked'),
                 'overtime_hours': clock_result.get('overtime_hours')
-            })
+            }
+            if 'location_validation' in clock_result:
+                response['location_validation'] = clock_result['location_validation']
+            return jsonify(response)
         else:
             return jsonify({
                 'success': False,
@@ -2076,7 +2095,13 @@ def api_face_clock():
             conn.close()
             
             # Clock in using the database function
-            result = clock_in(employee_id)
+            # Get location from request
+            latitude = request.json.get('latitude') if request.is_json else None
+            longitude = request.json.get('longitude') if request.is_json else None
+            address = request.json.get('address') if request.is_json else None
+            
+            result = clock_in(employee_id, schedule_id=schedule_id, schedule_date=today,
+                             latitude=latitude, longitude=longitude, address=address)
             
             if not result['success']:
                 return jsonify({
@@ -2144,7 +2169,13 @@ def api_face_clock():
                 return jsonify({'success': False, 'message': 'Schedule ID not found'}), 400
             
             # Clock out using the database function
-            clock_result = clock_out(employee_id, schedule_id)
+            # Get location from request
+            latitude = request.json.get('latitude') if request.is_json else None
+            longitude = request.json.get('longitude') if request.is_json else None
+            address = request.json.get('address') if request.is_json else None
+            
+            clock_result = clock_out(employee_id, schedule_id,
+                                     latitude=latitude, longitude=longitude, address=address)
             
             if clock_result['success']:
                 return jsonify({
@@ -4404,6 +4435,69 @@ def api_add_to_inventory(shipment_id):
         traceback.print_exc()
         if 'conn' in locals():
             conn.close()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/store-location-settings', methods=['GET'])
+def api_get_store_location_settings():
+    """Get store location settings"""
+    try:
+        settings = get_store_location_settings()
+        if settings:
+            return jsonify(settings)
+        else:
+            return jsonify({
+                'store_name': 'Store',
+                'latitude': None,
+                'longitude': None,
+                'address': '',
+                'allowed_radius_meters': 100.0,
+                'require_location': 1
+            })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/store-location-settings', methods=['POST'])
+def api_update_store_location_settings():
+    """Update store location settings (admin only)"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        
+        # Verify session
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        
+        # Check if user has admin permissions
+        pm = get_permission_manager()
+        if not pm.has_permission(employee_id, 'manage_settings'):
+            return jsonify({'success': False, 'message': 'Permission denied'}), 403
+        
+        # Update settings
+        success = update_store_location_settings(
+            store_name=data.get('store_name'),
+            latitude=data.get('latitude'),
+            longitude=data.get('longitude'),
+            address=data.get('address'),
+            allowed_radius_meters=data.get('allowed_radius_meters'),
+            require_location=data.get('require_location')
+        )
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Store location settings updated'})
+        else:
+            return jsonify({'success': False, 'message': 'Failed to update settings'}), 500
+    except Exception as e:
+        traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/customer-display')

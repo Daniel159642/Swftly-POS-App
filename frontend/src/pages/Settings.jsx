@@ -22,7 +22,15 @@ function Settings() {
     show_tax_breakdown: true,
     show_payment_method: true
   })
-  const [activeTab, setActiveTab] = useState('workflow') // 'workflow' or 'receipt'
+  const [activeTab, setActiveTab] = useState('workflow') // 'workflow', 'receipt', or 'location'
+  const [storeLocationSettings, setStoreLocationSettings] = useState({
+    store_name: 'Store',
+    latitude: null,
+    longitude: null,
+    address: '',
+    allowed_radius_meters: 100.0,
+    require_location: true
+  })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState(null)
@@ -39,6 +47,7 @@ function Settings() {
   useEffect(() => {
     loadSettings()
     loadReceiptSettings()
+    loadStoreLocationSettings()
   }, [])
 
   const loadSettings = async () => {
@@ -71,6 +80,111 @@ function Settings() {
       }
     } catch (error) {
       console.error('Error loading receipt settings:', error)
+    }
+  }
+
+  const loadStoreLocationSettings = async () => {
+    try {
+      const response = await fetch('/api/store-location-settings')
+      const data = await response.json()
+      if (data.success && data.settings) {
+        setStoreLocationSettings({
+          ...data.settings,
+          require_location: data.settings.require_location === 1
+        })
+      }
+    } catch (error) {
+      console.error('Error loading store location settings:', error)
+    }
+  }
+
+  const saveStoreLocationSettings = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      const token = localStorage.getItem('sessionToken')
+      const response = await fetch('/api/store-location-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': token
+        },
+        body: JSON.stringify({
+          session_token: token,
+          ...storeLocationSettings,
+          require_location: storeLocationSettings.require_location ? 1 : 0
+        })
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: 'Store location settings saved successfully!' })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to save store location settings' })
+      }
+    } catch (error) {
+      console.error('Error saving store location settings:', error)
+      setMessage({ type: 'error', text: 'Failed to save store location settings' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const getCurrentLocation = () => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Geolocation is not supported by your browser'))
+        return
+      }
+      
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords
+          
+          // Try to get address from coordinates (reverse geocoding)
+          let address = null
+          try {
+            const geoResponse = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+            )
+            const geoData = await geoResponse.json()
+            if (geoData && geoData.display_name) {
+              address = geoData.display_name
+            }
+          } catch (err) {
+            console.warn('Could not get address from coordinates:', err)
+          }
+          
+          resolve({ latitude, longitude, address })
+        },
+        (error) => {
+          reject(error)
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        }
+      )
+    })
+  }
+
+  const handleSetCurrentLocation = async () => {
+    try {
+      setMessage({ type: 'info', text: 'Getting your current location...' })
+      const location = await getCurrentLocation()
+      setStoreLocationSettings({
+        ...storeLocationSettings,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        address: location.address || storeLocationSettings.address
+      })
+      setMessage({ type: 'success', text: 'Location set successfully!' })
+      setTimeout(() => setMessage(null), 3000)
+    } catch (error) {
+      setMessage({ type: 'error', text: `Failed to get location: ${error.message}` })
+      setTimeout(() => setMessage(null), 5000)
     }
   }
 
@@ -195,6 +309,24 @@ function Settings() {
           }}
         >
           Receipt Settings
+        </button>
+        <button
+          onClick={() => setActiveTab('location')}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'location' ? `3px solid rgba(${themeColorRgb}, 0.7)` : '3px solid transparent',
+            color: activeTab === 'location' 
+              ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333')
+              : (isDarkMode ? 'var(--text-tertiary, #999)' : '#666'),
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: activeTab === 'location' ? 600 : 400,
+            transition: 'all 0.2s ease'
+          }}
+        >
+          Store Location
         </button>
       </div>
 
@@ -382,7 +514,11 @@ function Settings() {
         {/* Save Button */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
           <button
-            onClick={activeTab === 'workflow' ? saveSettings : saveReceiptSettings}
+            onClick={
+              activeTab === 'workflow' ? saveSettings :
+              activeTab === 'receipt' ? saveReceiptSettings :
+              saveStoreLocationSettings
+            }
             disabled={saving}
             style={{
               padding: '12px 24px',
@@ -757,6 +893,263 @@ function Settings() {
                   </span>
                 </label>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Store Location Settings Tab */}
+      {activeTab === 'location' && (
+        <div style={{
+          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+          borderRadius: '8px',
+          padding: '24px',
+          boxShadow: isDarkMode ? '0 2px 4px rgba(0,0,0,0.3)' : '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <h2 style={{
+            marginBottom: '24px',
+            fontSize: '20px',
+            fontWeight: 600,
+            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+          }}>
+            Store Location Settings
+          </h2>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div>
+              <p style={{
+                marginBottom: '16px',
+                fontSize: '14px',
+                color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666',
+                lineHeight: '1.6'
+              }}>
+                Set your store's GPS location and allowed radius. When employees clock in or out, 
+                the system will collect their location and verify they are within the specified radius 
+                of the store. This prevents employees from clocking in from home or other unauthorized locations.
+              </p>
+            </div>
+
+            <div>
+              <label style={{
+                display: 'block',
+                marginBottom: '6px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Store Name
+              </label>
+              <input
+                type="text"
+                value={storeLocationSettings.store_name}
+                onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_name: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{
+                display: 'block',
+                marginBottom: '6px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Store Address
+              </label>
+              <input
+                type="text"
+                value={storeLocationSettings.address}
+                onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, address: e.target.value })}
+                placeholder="Enter store address"
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <label style={{
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  GPS Coordinates
+                </label>
+                <button
+                  onClick={handleSetCurrentLocation}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 500
+                  }}
+                >
+                  📍 Use Current Location
+                </button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '6px',
+                    fontSize: '12px',
+                    color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666'
+                  }}>
+                    Latitude
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={storeLocationSettings.latitude || ''}
+                    onChange={(e) => setStoreLocationSettings({ 
+                      ...storeLocationSettings, 
+                      latitude: e.target.value ? parseFloat(e.target.value) : null 
+                    })}
+                    placeholder="e.g., 40.7128"
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '6px',
+                    fontSize: '12px',
+                    color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666'
+                  }}>
+                    Longitude
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={storeLocationSettings.longitude || ''}
+                    onChange={(e) => setStoreLocationSettings({ 
+                      ...storeLocationSettings, 
+                      longitude: e.target.value ? parseFloat(e.target.value) : null 
+                    })}
+                    placeholder="e.g., -74.0060"
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+              </div>
+              {storeLocationSettings.latitude && storeLocationSettings.longitude && (
+                <p style={{
+                  marginTop: '8px',
+                  fontSize: '12px',
+                  color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                  fontStyle: 'italic'
+                }}>
+                  Location set: {storeLocationSettings.latitude.toFixed(6)}, {storeLocationSettings.longitude.toFixed(6)}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label style={{
+                display: 'block',
+                marginBottom: '6px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Allowed Radius (meters)
+              </label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                value={storeLocationSettings.allowed_radius_meters}
+                onChange={(e) => setStoreLocationSettings({ 
+                  ...storeLocationSettings, 
+                  allowed_radius_meters: parseFloat(e.target.value) || 100.0 
+                })}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px'
+                }}
+              />
+              <p style={{
+                marginTop: '6px',
+                fontSize: '12px',
+                color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
+              }}>
+                Employees must be within this distance (in meters) from the store to clock in/out.
+                Default: 100 meters (~328 feet)
+              </p>
+            </div>
+
+            <div>
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                cursor: 'pointer'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={storeLocationSettings.require_location}
+                  onChange={(e) => setStoreLocationSettings({ 
+                    ...storeLocationSettings, 
+                    require_location: e.target.checked 
+                  })}
+                />
+                <span style={{
+                  fontSize: '14px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Require location verification for clock in/out
+                </span>
+              </label>
+              <p style={{
+                marginTop: '6px',
+                marginLeft: '32px',
+                fontSize: '12px',
+                color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                fontStyle: 'italic'
+              }}>
+                When enabled, employees must be within the allowed radius to clock in/out. 
+                When disabled, location is still recorded but not validated.
+              </p>
             </div>
           </div>
         </div>
