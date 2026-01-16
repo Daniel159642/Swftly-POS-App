@@ -2,6 +2,26 @@
 
 A comprehensive inventory management database for a Point of Sale (POS) system with shipment tracking and vendor management.
 
+## 👥 Working Together
+
+**Multiple developers?** See our collaboration guides:
+- **[QUICK_SYNC.md](QUICK_SYNC.md)** - Quick reference for daily sync workflow
+- **[COLLABORATION_GUIDE.md](COLLABORATION_GUIDE.md)** - Complete collaboration guide
+
+**Quick start for team members:**
+```bash
+# Start your day
+git checkout develop && git pull origin develop
+git checkout -b feature/your-feature-name
+
+# Sync throughout the day (avoid conflicts!)
+./sync.sh
+
+# Push your work
+git add . && git commit -m "Your message"
+git push origin feature/your-feature-name
+```
+
 ## Database Schema
 
 ### Inventory Table
