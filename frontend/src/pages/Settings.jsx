@@ -23,7 +23,7 @@ function Settings() {
     show_payment_method: true,
     show_signature: false
   })
-  const [activeTab, setActiveTab] = useState('workflow') // 'workflow', 'receipt', or 'location'
+  const [activeTab, setActiveTab] = useState('workflow') // 'workflow', 'receipt', 'location', or 'display'
   const [storeLocationSettings, setStoreLocationSettings] = useState({
     store_name: 'Store',
     latitude: null,
@@ -31,6 +31,11 @@ function Settings() {
     address: '',
     allowed_radius_meters: 100.0,
     require_location: true
+  })
+  const [displaySettings, setDisplaySettings] = useState({
+    tip_enabled: false,
+    tip_after_payment: false,
+    tip_suggestions: [15, 18, 20, 25]
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -49,6 +54,7 @@ function Settings() {
     loadSettings()
     loadReceiptSettings()
     loadStoreLocationSettings()
+    loadDisplaySettings()
   }, [])
 
   const loadSettings = async () => {
@@ -97,6 +103,55 @@ function Settings() {
       }
     } catch (error) {
       console.error('Error loading store location settings:', error)
+    }
+  }
+
+  const loadDisplaySettings = async () => {
+    try {
+      const response = await fetch('/api/customer-display/settings')
+      const data = await response.json()
+      if (data.success) {
+        setDisplaySettings({
+          tip_enabled: data.data.tip_enabled === 1 || data.data.tip_enabled === true,
+          tip_after_payment: data.data.tip_after_payment === 1 || data.data.tip_after_payment === true,
+          tip_suggestions: data.data.tip_suggestions || [15, 18, 20, 25]
+        })
+      }
+    } catch (error) {
+      console.error('Error loading display settings:', error)
+    }
+  }
+
+  const saveDisplaySettings = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      const response = await fetch('/api/customer-display/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({
+          tip_enabled: displaySettings.tip_enabled ? 1 : 0,
+          tip_after_payment: displaySettings.tip_after_payment ? 1 : 0,
+          tip_suggestions: displaySettings.tip_suggestions
+        })
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: 'Display settings saved successfully!' })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to save display settings' })
+      }
+    } catch (error) {
+      console.error('Error saving display settings:', error)
+      setMessage({ type: 'error', text: 'Failed to save display settings' })
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -331,6 +386,24 @@ function Settings() {
         >
           Store Location
         </button>
+        <button
+          onClick={() => setActiveTab('display')}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'display' ? `3px solid rgba(${themeColorRgb}, 0.7)` : '3px solid transparent',
+            color: activeTab === 'display' 
+              ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333')
+              : (isDarkMode ? 'var(--text-tertiary, #999)' : '#666'),
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: activeTab === 'display' ? 600 : 400,
+            transition: 'all 0.2s ease'
+          }}
+        >
+          Display Settings
+        </button>
       </div>
 
       {message && (
@@ -520,7 +593,8 @@ function Settings() {
             onClick={
               activeTab === 'workflow' ? saveSettings :
               activeTab === 'receipt' ? saveReceiptSettings :
-              saveStoreLocationSettings
+              activeTab === 'location' ? saveStoreLocationSettings :
+              saveDisplaySettings
             }
             disabled={saving}
             style={{
@@ -539,7 +613,10 @@ function Settings() {
               opacity: saving ? 0.6 : 1
             }}
           >
-            {saving ? 'Saving...' : 'Save Settings'}
+            {saving 
+              ? (activeTab === 'workflow' ? 'Saving...' : activeTab === 'receipt' ? 'Saving Receipt Settings...' : activeTab === 'location' ? 'Saving Location Settings...' : 'Saving Display Settings...')
+              : (activeTab === 'workflow' ? 'Save Settings' : activeTab === 'receipt' ? 'Save Receipt Settings' : activeTab === 'location' ? 'Save Location Settings' : 'Save Display Settings')
+            }
           </button>
         </div>
       </div>
@@ -1230,6 +1307,106 @@ function Settings() {
                 }}
               >
                 {saving ? 'Saving...' : 'Save Location Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'display' && (
+        <div style={{
+          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+          borderRadius: '8px',
+          padding: '24px',
+          boxShadow: isDarkMode ? '0 2px 4px rgba(0,0,0,0.3)' : '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <h2 style={{
+            marginBottom: '20px',
+            fontSize: '18px',
+            fontWeight: 600,
+            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+          }}>
+            Customer Display Settings
+          </h2>
+          
+          <div style={{ marginTop: '20px' }}>
+            <label style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '12px', 
+              marginBottom: '20px',
+              cursor: 'pointer'
+            }}>
+              <input
+                type="checkbox"
+                checked={displaySettings.tip_enabled}
+                onChange={(e) => setDisplaySettings({ ...displaySettings, tip_enabled: e.target.checked })}
+                style={{
+                  width: '18px',
+                  height: '18px',
+                  cursor: 'pointer'
+                }}
+              />
+              <span style={{ 
+                fontSize: '14px',
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Enable tip prompts before payment
+              </span>
+            </label>
+
+            <label style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '12px', 
+              marginBottom: '20px',
+              cursor: 'pointer'
+            }}>
+              <input
+                type="checkbox"
+                checked={displaySettings.tip_after_payment}
+                onChange={(e) => setDisplaySettings({ ...displaySettings, tip_after_payment: e.target.checked })}
+                style={{
+                  width: '18px',
+                  height: '18px',
+                  cursor: 'pointer'
+                }}
+              />
+              <span style={{ 
+                fontSize: '14px',
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Enable tip option after payment completion
+              </span>
+            </label>
+
+            {/* Save Button */}
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'flex-end', 
+              marginTop: '32px',
+              paddingTop: '24px',
+              borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
+            }}>
+              <button
+                onClick={saveDisplaySettings}
+                disabled={saving}
+                style={{
+                  padding: '12px 32px',
+                  backgroundColor: saving ? (isDarkMode ? '#3a3a3a' : '#ccc') : `rgba(${themeColorRgb}, 0.7)`,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  boxShadow: saving ? 'none' : `0 4px 15px rgba(${themeColorRgb}, 0.3)`,
+                  transition: 'all 0.3s ease',
+                  opacity: saving ? 0.6 : 1,
+                  minWidth: '150px'
+                }}
+              >
+                {saving ? 'Saving...' : 'Save Display Settings'}
               </button>
             </div>
           </div>

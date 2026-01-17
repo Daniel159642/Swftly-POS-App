@@ -274,6 +274,39 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
     
     story.append(Paragraph(f"Order: {order_data['order_number']}", normal_style))
     story.append(Paragraph(f"Date: {formatted_date}", normal_style))
+    
+    # Show order type and customer info if available
+    order_type = order_data.get('order_type')
+    customer_name = order_data.get('customer_name')
+    if order_type or customer_name:
+        story.append(Spacer(1, 0.05*inch))
+        if order_type:
+            story.append(Paragraph(f"Order Type: {order_type.title()}", normal_style))
+        if customer_name:
+            story.append(Paragraph(f"Customer: {customer_name}", normal_style))
+            # Get customer phone and address from database if available
+            try:
+                conn = sqlite3.connect(DB_NAME)
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # Try to get customer details from order
+                customer_id = order_data.get('customer_id')
+                if customer_id:
+                    cursor.execute("SELECT phone, address FROM customers WHERE customer_id = ?", (customer_id,))
+                    customer_row = cursor.fetchone()
+                    if customer_row:
+                        customer_phone = customer_row.get('phone')
+                        customer_address = customer_row.get('address')
+                        if customer_phone:
+                            story.append(Paragraph(f"Phone: {customer_phone}", small_style))
+                        if customer_address and order_type == 'delivery':
+                            story.append(Paragraph(f"Delivery Address: {customer_address}", small_style))
+                
+                conn.close()
+            except Exception as e:
+                print(f"Note: Could not get customer details: {e}")
+    
     story.append(Spacer(1, 0.05*inch))
     story.append(Paragraph("-" * 40, header_style))
     story.append(Spacer(1, 0.05*inch))
@@ -510,7 +543,8 @@ def generate_receipt_with_barcode(order_id: int) -> Optional[bytes]:
         cursor.execute("""
             SELECT o.*, 
                    e.first_name || ' ' || e.last_name as employee_name,
-                   c.customer_name
+                   c.customer_name,
+                   c.customer_id
             FROM orders o
             LEFT JOIN employees e ON o.employee_id = e.employee_id
             LEFT JOIN customers c ON o.customer_id = c.customer_id
