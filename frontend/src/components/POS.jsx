@@ -798,15 +798,7 @@ function POS({ employeeId, employeeName }) {
               }
             }
             
-            // Automatically generate receipt - prefer order-based receipt if available
-            if (foundOrderId && foundOrderNumber) {
-              // Use order-based receipt
-              generateReceipt(foundOrderId, foundOrderNumber)
-            } else if (transactionId) {
-              // Fall back to transaction-based receipt
-              generateReceiptFromTransaction(transactionId, transactionNumber)
-            }
-            
+            // Don't automatically generate receipt - let user choose in customer display popup
             // Trigger customer display to show receipt screen
             setPaymentCompleted(true)
             
@@ -856,7 +848,7 @@ function POS({ employeeId, employeeName }) {
             if (result.order_id) {
               setCurrentOrderId(result.order_id)
               setCurrentOrderNumber(result.order_number)
-              generateReceipt(result.order_id, result.order_number)
+              // Don't automatically generate receipt - let user choose in customer display popup
             }
             
             // Payment completed - show customer display for receipt selection
