@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../contexts/ThemeContext'
 import Table from '../components/Table'
@@ -96,6 +96,13 @@ function RecentOrders() {
       if (ordersResult.data) {
         console.log('Checking', ordersResult.data.length, 'orders for receipt barcode match')
         
+        // Extract numeric part from order numbers (e.g., "ORD-20260115-0004" -> "202601150004")
+        // This handles cases where barcode might encode just the numeric part
+        const extractNumericPart = (orderNum) => {
+          if (!orderNum) return ''
+          return orderNum.toString().replace(/[^0-9]/g, '')
+        }
+        
         // Try exact match first
         let matchingOrder = ordersResult.data.find(o => {
           if (!o.order_number) return false
@@ -110,6 +117,18 @@ function RecentOrders() {
             const orderNum = o.order_number.toString().trim().toLowerCase()
             return orderNum === scannedBarcode.toLowerCase()
           })
+        }
+        
+        // If not found, try matching numeric part only (for barcodes that encode just numbers)
+        if (!matchingOrder) {
+          matchingOrder = ordersResult.data.find(o => {
+            if (!o.order_number) return false
+            const numericPart = extractNumericPart(o.order_number)
+            return numericPart === scannedBarcode || scannedBarcode.includes(numericPart) || numericPart.includes(scannedBarcode)
+          })
+          if (matchingOrder) {
+            console.log('Found order by numeric part match:', matchingOrder.order_number)
+          }
         }
         
         // If not found, try matching order_id (in case barcode is the order_id)
@@ -130,6 +149,24 @@ function RecentOrders() {
             const orderNum = o.order_number.toString().trim()
             return orderNum.includes(scannedBarcode) || scannedBarcode.includes(orderNum)
           })
+        }
+        
+        // If still not found, try matching just the suffix part (e.g., "0004" from "ORD-20260115-0004")
+        if (!matchingOrder && scannedBarcode.length <= 6) {
+          matchingOrder = ordersResult.data.find(o => {
+            if (!o.order_number) return false
+            const orderNum = o.order_number.toString().trim()
+            // Extract the suffix part (last digits after last hyphen or dash)
+            const parts = orderNum.split(/[-_]/)
+            if (parts.length > 0) {
+              const suffix = parts[parts.length - 1]
+              return suffix === scannedBarcode || suffix.includes(scannedBarcode) || scannedBarcode.includes(suffix)
+            }
+            return false
+          })
+          if (matchingOrder) {
+            console.log('Found order by suffix match:', matchingOrder.order_number)
+          }
         }
         
         if (matchingOrder) {
@@ -553,9 +590,8 @@ function RecentOrders() {
                     const isLoading = loadingDetails[orderId]
 
                     return (
-                      <>
+                      <React.Fragment key={`order-${orderId || idx}`}>
                         <tr 
-                          key={idx} 
                           onClick={() => handleRowClick(row)}
                           style={{ 
                             backgroundColor: idx % 2 === 0 ? (isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff') : (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#fafafa'),
@@ -757,7 +793,7 @@ function RecentOrders() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </React.Fragment>
                     )
                   })}
                 </tbody>
