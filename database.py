@@ -2256,8 +2256,16 @@ def create_order(
         has_tip = 'tip' in columns
         has_order_type = 'order_type' in columns
         
-        # Get current datetime (use Python datetime for accurate current time)
-        current_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # Get current datetime using local timezone (ensure accurate time)
+        # datetime.now() uses system local timezone automatically
+        now = datetime.now()
+        current_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Debug: Verify the time being set (can be removed later)
+        import time
+        local_time = time.localtime()
+        print(f"Order date being set: {current_datetime}")
+        print(f"System local time: {local_time.tm_year}-{local_time.tm_mon:02d}-{local_time.tm_mday:02d} {local_time.tm_hour:02d}:{local_time.tm_min:02d}:{local_time.tm_sec:02d}")
         
         if has_tip and has_order_type:
             cursor.execute("""

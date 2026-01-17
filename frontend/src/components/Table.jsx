@@ -87,7 +87,29 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
     if (column.includes('date') || column.includes('time') || column.includes('timestamp')) {
       if (value) {
         try {
-          const date = new Date(value)
+          // Handle SQLite datetime format (YYYY-MM-DD HH:MM:SS) as local time
+          // If it's already a Date object, use it directly
+          let date
+          if (value instanceof Date) {
+            date = value
+          } else if (typeof value === 'string') {
+            // SQLite datetime format: "YYYY-MM-DD HH:MM:SS"
+            // Parse as local time (not UTC) to avoid timezone conversion issues
+            const dateStr = value.trim()
+            if (dateStr.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)) {
+              // Parse as local time components
+              const [datePart, timePart] = dateStr.split(' ')
+              const [year, month, day] = datePart.split('-').map(Number)
+              const [hour, minute, second] = timePart.split(':').map(Number)
+              date = new Date(year, month - 1, day, hour, minute, second || 0)
+            } else {
+              // Try standard Date parsing
+              date = new Date(value)
+            }
+          } else {
+            date = new Date(value)
+          }
+          
           if (!isNaN(date.getTime())) {
             return date.toLocaleString()
           }
