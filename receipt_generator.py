@@ -4,6 +4,7 @@ Receipt generation module with PDF and barcode support
 """
 
 import sqlite3
+import re
 from typing import Dict, Any, Optional
 from datetime import datetime
 import io
@@ -265,13 +266,60 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
     # Order information
     try:
         order_date_str = order_data['order_date']
-        if 'T' in order_date_str:
-            order_date = datetime.fromisoformat(order_date_str.replace('Z', '+00:00'))
+        if isinstance(order_date_str, str):
+            # Parse SQLite datetime format (YYYY-MM-DD HH:MM:SS) as local time
+            # Use regex to extract just the date and time parts, ignoring timezone info
+            # Pattern to match YYYY-MM-DD HH:MM:SS format (with optional microseconds/timezone)
+            # This will match: "2026-01-16 23:19:00" or "2026-01-16T23:19:00" or "2026-01-16 23:19:00.123" or "2026-01-16 23:19:00+05:00"
+            match = re.match(r'(\d{4}-\d{2}-\d{2})[T\s]+(\d{2}:\d{2}:\d{2})', order_date_str)
+            if match:
+                date_part = match.group(1)  # YYYY-MM-DD
+                time_part = match.group(2)  # HH:MM:SS
+                
+                # Parse components
+                year, month, day = map(int, date_part.split('-'))
+                hour, minute, second = map(int, time_part.split(':'))
+                
+                # Create datetime explicitly with local time components (naive datetime = local time)
+                # This avoids any timezone conversion - we treat the stored date/time as-is
+                order_date = datetime(year, month, day, hour, minute, second)
+                formatted_date = order_date.strftime('%m/%d/%Y %I:%M %p')
+            else:
+                # Fallback to manual parsing
+                # Clean the string: remove T, microseconds, Z, timezone offset
+                clean_str = order_date_str.replace('T', ' ').split('.')[0].replace('Z', '')
+                # Remove timezone offset if present
+                if '+' in clean_str:
+                    clean_str = clean_str.split('+')[0].strip()
+                # Handle negative timezone offset (e.g., "-05:00")
+                if ' ' in clean_str:
+                    parts = clean_str.split(' ')
+                    if len(parts) >= 2:
+                        date_part = parts[0]
+                        time_part = parts[1]
+                        # Check if time part has timezone offset (e.g., "23:19:00-05:00")
+                        if '-' in time_part:
+                            # Split by dash and check if last part looks like timezone (has colon and 2 parts)
+                            time_parts = time_part.rsplit('-', 1)
+                            if len(time_parts) == 2:
+                                last_part = time_parts[1]
+                                if ':' in last_part and len(last_part.split(':')) == 2:
+                                    # It's a timezone offset, remove it
+                                    time_part = time_parts[0]
+                        clean_str = date_part + ' ' + time_part
+                
+                try:
+                    order_date = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
+                    formatted_date = order_date.strftime('%m/%d/%Y %I:%M %p')
+                except:
+                    formatted_date = str(order_date_str)
         else:
-            order_date = datetime.strptime(order_date_str, '%Y-%m-%d %H:%M:%S')
-        formatted_date = order_date.strftime('%m/%d/%Y %I:%M %p')
-    except:
-        formatted_date = order_data.get('order_date', '')
+            formatted_date = str(order_date_str) if order_date_str else ''
+    except Exception as e:
+        print(f"Error parsing order_date '{order_data.get('order_date')}': {e}")
+        import traceback
+        traceback.print_exc()
+        formatted_date = str(order_data.get('order_date', ''))
     
     story.append(Paragraph(f"Order: {order_data['order_number']}", normal_style))
     story.append(Paragraph(f"Date: {formatted_date}", normal_style))
