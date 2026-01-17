@@ -10,6 +10,7 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff' }
   const scannerRef = useRef(null)
   const modalRef = useRef(null)
   const scanCooldownRef = useRef(false)
+  const resumeTimeoutRef = useRef(null)
 
   // Convert hex to RGB for rgba usage
   const hexToRgb = (hex) => {
@@ -31,21 +32,16 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff' }
     // Set cooldown FIRST - before anything else - to block all subsequent scans
     scanCooldownRef.current = true
     
-    // Temporarily pause scanner to prevent rapid callbacks
-    if (scannerRef.current) {
-      try {
-        await scannerRef.current.pause()
-      } catch (e) {
-        // If pause not available, that's okay
-      }
-    }
-    
     // Show green (accepted) status
     setScanStatus('accepted')
     
-    // Call the scan handler
+    // Call the scan handler - don't wait for it, let it process asynchronously
+    // This ensures the scanner keeps running and doesn't get stuck
     if (onScan) {
-      onScan(barcode)
+      // Fire and forget - don't block scanner resume
+      Promise.resolve(onScan(barcode)).catch(err => {
+        console.error('Error in scan handler:', err)
+      })
     }
     
     // Switch to red (cooldown) after brief green flash
@@ -54,30 +50,27 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff' }
     }, 200)
     
     // Reset cooldown after 0.8 seconds - ready for next scan
-    setTimeout(async () => {
+    setTimeout(() => {
       scanCooldownRef.current = false
       // Switch back to white (ready)
       setScanStatus('ready')
-      
-      // Resume scanner
-      if (scannerRef.current) {
-        try {
-          await scannerRef.current.resume()
-        } catch (e) {
-          // If resume not available, restart scanner
-          if (isScanning) {
-            startCameraScan()
-          }
-        }
-      }
+      console.log('Scanner ready for next scan')
     }, 800)
   }
 
-  const stopCameraScan = () => {
+  const stopCameraScan = async () => {
+    // Clear any pending resume timeouts
+    if (resumeTimeoutRef.current) {
+      clearTimeout(resumeTimeoutRef.current)
+      resumeTimeoutRef.current = null
+    }
+    
     if (scannerRef.current) {
-      scannerRef.current.stop().catch(err => {
+      try {
+        await scannerRef.current.stop()
+      } catch (err) {
         console.error('Error stopping scanner:', err)
-      })
+      }
       scannerRef.current = null
     }
     setIsScanning(false)
