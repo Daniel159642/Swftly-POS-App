@@ -49,6 +49,25 @@ function RecentOrders() {
 
   useEffect(() => {
     loadData()
+    
+    // Refresh data when window gains focus (user switches back to this tab)
+    const handleFocus = () => {
+      loadData()
+    }
+    
+    window.addEventListener('focus', handleFocus)
+    
+    // Poll for new orders every 5 seconds if tab is active
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        loadData()
+      }
+    }, 5000)
+    
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      clearInterval(interval)
+    }
   }, [])
 
   // Load all order items when products are scanned (for filtering)
@@ -171,12 +190,45 @@ function RecentOrders() {
         
         if (matchingOrder) {
           console.log('Found matching order:', matchingOrder.order_number, 'ID:', matchingOrder.order_id)
-          // Found order by receipt barcode - scroll to it or filter to show it
+          // Found order by receipt barcode - refresh data and scroll to it or filter to show it
+          loadData() // Refresh to get latest order data
           setSearchQuery(matchingOrder.order_number || matchingOrder.order_id.toString())
           setShowBarcodeScanner(false)
           return
         } else {
           console.log('No matching order found for barcode:', scannedBarcode)
+          // If no match found, refresh data to check for new orders
+          // This handles the case where a new order was just created
+          console.log('Refreshing data to check for new orders...')
+          await loadData()
+          
+          // Check again after refresh
+          const refreshedResponse = await fetch('/api/orders')
+          const refreshedResult = await refreshedResponse.json()
+          
+          if (refreshedResult.data) {
+            let newMatch = refreshedResult.data.find(o => {
+              if (!o.order_number) return false
+              const orderNum = o.order_number.toString().trim()
+              return orderNum === scannedBarcode || orderNum.toLowerCase() === scannedBarcode.toLowerCase()
+            })
+            
+            if (!newMatch) {
+              const numericPart = scannedBarcode.replace(/[^0-9]/g, '')
+              newMatch = refreshedResult.data.find(o => {
+                if (!o.order_number) return false
+                const oNumeric = o.order_number.toString().replace(/[^0-9]/g, '')
+                return oNumeric === numericPart || numericPart.includes(oNumeric) || oNumeric.includes(numericPart)
+              })
+            }
+            
+            if (newMatch) {
+              console.log('Found matching order after refresh:', newMatch.order_number, 'ID:', newMatch.order_id)
+              setSearchQuery(newMatch.order_number || newMatch.order_id.toString())
+              setShowBarcodeScanner(false)
+              return
+            }
+          }
         }
       }
       
