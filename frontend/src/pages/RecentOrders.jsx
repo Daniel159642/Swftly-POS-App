@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../contexts/ThemeContext'
 import Table from '../components/Table'
+import BarcodeScanner from '../components/BarcodeScanner'
 
 function RecentOrders() {
   const navigate = useNavigate()
@@ -21,6 +22,9 @@ function RecentOrders() {
   const [orderDetails, setOrderDetails] = useState({})
   const [loadingDetails, setLoadingDetails] = useState({})
   const [searchQuery, setSearchQuery] = useState('')
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
+  const [scannedProducts, setScannedProducts] = useState([]) // Array of {product_id, product_name, sku, barcode}
+  const [orderItemsMap, setOrderItemsMap] = useState({}) // Map of order_id -> order items
   
   // Determine if dark mode is active
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -46,6 +50,168 @@ function RecentOrders() {
   useEffect(() => {
     loadData()
   }, [])
+
+  // Load all order items when products are scanned (for filtering)
+  const loadAllOrderItems = async () => {
+    try {
+      const itemsResponse = await fetch('/api/order_items')
+      const itemsResult = await itemsResponse.json()
+      const items = itemsResult.data || []
+      
+      // Group items by order_id
+      const itemsByOrder = {}
+      items.forEach(item => {
+        const orderId = item.order_id || item.orderId
+        if (orderId) {
+          if (!itemsByOrder[orderId]) {
+            itemsByOrder[orderId] = []
+          }
+          itemsByOrder[orderId].push(item)
+        }
+      })
+      
+      setOrderItemsMap(itemsByOrder)
+    } catch (err) {
+      console.error('Error loading order items:', err)
+    }
+  }
+
+  // Load order items when products are scanned
+  useEffect(() => {
+    if (scannedProducts.length > 0) {
+      loadAllOrderItems()
+    }
+  }, [scannedProducts.length])
+
+  const handleBarcodeScan = async (barcode) => {
+    try {
+      const scannedBarcode = barcode.toString().trim()
+      console.log('Scanned barcode:', scannedBarcode, 'Length:', scannedBarcode.length)
+      
+      // First, check if barcode matches an order number (receipt barcode)
+      // Fetch all orders (not just first 50) to find receipt barcodes
+      const ordersResponse = await fetch('/api/orders')
+      const ordersResult = await ordersResponse.json()
+      
+      if (ordersResult.data) {
+        console.log('Checking', ordersResult.data.length, 'orders for receipt barcode match')
+        
+        // Try exact match first
+        let matchingOrder = ordersResult.data.find(o => {
+          if (!o.order_number) return false
+          const orderNum = o.order_number.toString().trim()
+          return orderNum === scannedBarcode
+        })
+        
+        // If not found, try case-insensitive match
+        if (!matchingOrder) {
+          matchingOrder = ordersResult.data.find(o => {
+            if (!o.order_number) return false
+            const orderNum = o.order_number.toString().trim().toLowerCase()
+            return orderNum === scannedBarcode.toLowerCase()
+          })
+        }
+        
+        // If not found, try matching order_id (in case barcode is the order_id)
+        if (!matchingOrder) {
+          const orderIdMatch = parseInt(scannedBarcode)
+          if (!isNaN(orderIdMatch)) {
+            matchingOrder = ordersResult.data.find(o => o.order_id === orderIdMatch)
+            if (matchingOrder) {
+              console.log('Found order by order_id:', matchingOrder.order_id)
+            }
+          }
+        }
+        
+        // If not found, try partial match (order number contains barcode or vice versa)
+        if (!matchingOrder) {
+          matchingOrder = ordersResult.data.find(o => {
+            if (!o.order_number) return false
+            const orderNum = o.order_number.toString().trim()
+            return orderNum.includes(scannedBarcode) || scannedBarcode.includes(orderNum)
+          })
+        }
+        
+        if (matchingOrder) {
+          console.log('Found matching order:', matchingOrder.order_number, 'ID:', matchingOrder.order_id)
+          // Found order by receipt barcode - scroll to it or filter to show it
+          setSearchQuery(matchingOrder.order_number || matchingOrder.order_id.toString())
+          setShowBarcodeScanner(false)
+          return
+        } else {
+          console.log('No matching order found for barcode:', scannedBarcode)
+        }
+      }
+      
+      // If not an order number, try to find product by barcode
+      const inventoryResponse = await fetch('/api/inventory')
+      const inventoryResult = await inventoryResponse.json()
+      
+      if (inventoryResult.data) {
+        // Try to find by barcode first (exact match)
+        let product = inventoryResult.data.find(p => 
+          p.barcode && p.barcode.toString().trim() === barcode.toString().trim()
+        )
+        
+        // If not found and barcode is 13 digits (EAN13), try without leading 0 (12 digits)
+        if (!product && barcode.length === 13 && barcode.startsWith('0')) {
+          const barcode12 = barcode.substring(1)
+          product = inventoryResult.data.find(p => 
+            p.barcode && p.barcode.toString().trim() === barcode12
+          )
+        }
+        
+        // If not found and barcode is 12 digits, try with leading 0 (13 digits)
+        if (!product && barcode.length === 12) {
+          const barcode13 = '0' + barcode
+          product = inventoryResult.data.find(p => 
+            p.barcode && (p.barcode.toString().trim() === barcode13 || p.barcode.toString().trim() === barcode)
+          )
+        }
+        
+        // If not found by barcode, try by SKU
+        if (!product) {
+          product = inventoryResult.data.find(p => 
+            p.sku && p.sku.toString().trim() === barcode.toString().trim()
+          )
+        }
+        
+        if (product) {
+          // Check if product is already scanned
+          const alreadyScanned = scannedProducts.some(sp => 
+            sp.product_id === product.product_id || sp.sku === product.sku
+          )
+          
+          if (!alreadyScanned) {
+            setScannedProducts(prev => [...prev, {
+              product_id: product.product_id,
+              product_name: product.product_name,
+              sku: product.sku,
+              barcode: product.barcode
+            }])
+            // Keep scanner open for continuous scanning
+            return
+          }
+          // Keep scanner open for continuous scanning
+          return
+        }
+      }
+      
+      // Product not found - keep scanner open for retry
+      console.error(`Product with barcode "${barcode}" not found`)
+      
+    } catch (err) {
+      console.error('Barcode scan error:', err)
+    }
+  }
+
+  const removeScannedProduct = (productId) => {
+    setScannedProducts(prev => prev.filter(sp => sp.product_id !== productId))
+  }
+
+  const clearScannedProducts = () => {
+    setScannedProducts([])
+  }
 
   const loadData = async () => {
     setLoading(true)
@@ -102,6 +268,12 @@ function RecentOrders() {
         (item.order_id || item.orderId) === orderId
       )
 
+      // Update orderItemsMap for filtering
+      setOrderItemsMap(prev => ({
+        ...prev,
+        [orderId]: orderItems
+      }))
+
       // Get order details from the row data
       const details = {
         employee_id: row.employee_id || row.employeeId || null,
@@ -138,13 +310,48 @@ function RecentOrders() {
   })) : []
 
   // Filter data based on search query
-  const filteredData = searchQuery ? processedData.filter(row => {
+  const filteredBySearch = searchQuery ? processedData.filter(row => {
     const query = searchQuery.toLowerCase()
     return Object.values(row).some(value => {
       if (value === null || value === undefined) return false
       return String(value).toLowerCase().includes(query)
     })
   }) : processedData
+
+  // Filter by scanned products (orders that contain any of the scanned products)
+  const filteredData = scannedProducts.length > 0 
+    ? filteredBySearch.filter(row => {
+        const orderId = row.order_id || row.orderId
+        if (!orderId) return false
+        
+        // Check order items map first
+        const items = orderItemsMap[orderId]
+        if (items && items.length > 0) {
+          return scannedProducts.some(scanned => 
+            items.some(item => 
+              item.product_id === scanned.product_id || 
+              item.sku === scanned.sku ||
+              (item.barcode && item.barcode === scanned.barcode)
+            )
+          )
+        }
+        
+        // Check order details if available
+        if (orderDetails[orderId] && orderDetails[orderId].items) {
+          const items = orderDetails[orderId].items
+          return scannedProducts.some(scanned => 
+            items.some(item => 
+              item.product_id === scanned.product_id || 
+              item.sku === scanned.sku ||
+              (item.barcode && item.barcode === scanned.barcode)
+            )
+          )
+        }
+        
+        // If we don't have items loaded yet, include it (will be filtered when items load)
+        return true
+      })
+    : filteredBySearch
 
   // Fields to hide from main table (shown in dropdown)
   const hiddenFields = ['order_id', 'orderId', 'employee_id', 'employeeId', 'customer_id', 'customerId', 'subtotal', 'tax_rate', 'tax_amount', 'tax', 'discount', 'transaction_fee', 'notes', 'tip', 'payment_method_id', 'paymentMethodId', 'customer_name', 'customerName', 'receipt_type', 'receiptType', 'receipt_email', 'receiptEmail', 'receipt_phone', 'receiptPhone', 'receipt_sent', 'receiptSent', 'receipt_sent_at', 'receiptSentAt']
@@ -156,25 +363,152 @@ function RecentOrders() {
   return (
     <div style={{ padding: '40px', maxWidth: '1400px', margin: '0 auto' }}>
       <div style={{ marginBottom: '20px' }}>
-        <input
-          type="text"
-          placeholder="Search orders..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '8px 0',
-            border: 'none',
-            borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #ddd',
-            borderRadius: '0',
-            backgroundColor: 'transparent',
-            outline: 'none',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            fontFamily: '"Product Sans", sans-serif',
-            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-          }}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: scannedProducts.length > 0 ? '12px' : '0' }}>
+          <input
+            type="text"
+            placeholder="Search orders..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              flex: 1,
+              padding: '8px 0',
+              border: 'none',
+              borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #ddd',
+              borderRadius: '0',
+              backgroundColor: 'transparent',
+              outline: 'none',
+              fontSize: '14px',
+              boxSizing: 'border-box',
+              fontFamily: '"Product Sans", sans-serif',
+              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+            }}
+          />
+          <button
+            onClick={() => setShowBarcodeScanner(true)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              color: '#fff',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: 600,
+              boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.8)`
+              e.target.style.boxShadow = `0 4px 20px rgba(${themeColorRgb}, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+              e.target.style.boxShadow = `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+            }}
+            title="Scan barcode to filter by product or find order by receipt"
+          >
+            <span>📷</span>
+            <span>Scan</span>
+          </button>
+        </div>
+        
+        {/* Scanned Products Chips */}
+        {scannedProducts.length > 0 && (
+          <div style={{ 
+            display: 'flex', 
+            flexWrap: 'wrap', 
+            gap: '8px', 
+            alignItems: 'center',
+            padding: '12px',
+            backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa',
+            borderRadius: '8px',
+            border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd'
+          }}>
+            <span style={{ 
+              fontSize: '12px', 
+              fontWeight: 600, 
+              color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666',
+              marginRight: '4px'
+            }}>
+              Filtering by:
+            </span>
+            {scannedProducts.map((product) => (
+              <div
+                key={product.product_id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  backgroundColor: `rgba(${themeColorRgb}, 0.2)`,
+                  border: `1px solid rgba(${themeColorRgb}, 0.4)`,
+                  borderRadius: '20px',
+                  fontSize: '13px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}
+              >
+                <span>{product.product_name || product.sku}</span>
+                <button
+                  onClick={() => removeScannedProduct(product.product_id)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    cursor: 'pointer',
+                    padding: '0',
+                    marginLeft: '4px',
+                    fontSize: '16px',
+                    lineHeight: '1',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '50%',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.3)`
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'transparent'
+                  }}
+                  title="Remove filter"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={clearScannedProducts}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: 'transparent',
+                border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
+                borderRadius: '20px',
+                fontSize: '12px',
+                color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666',
+                cursor: 'pointer',
+                marginLeft: 'auto',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#e9ecef'
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = 'transparent'
+              }}
+            >
+              Clear All
+            </button>
+          </div>
+        )}
       </div>
       <div style={{ overflowX: 'auto' }}>
         {loading && <div style={{ padding: '40px', textAlign: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999' }}>Loading...</div>}
@@ -434,6 +768,15 @@ function RecentOrders() {
           )
         )}
       </div>
+
+      {/* Barcode Scanner Modal */}
+      {showBarcodeScanner && (
+        <BarcodeScanner
+          onScan={handleBarcodeScan}
+          onClose={() => setShowBarcodeScanner(false)}
+          themeColor={themeColor}
+        />
+      )}
     </div>
   )
 }
