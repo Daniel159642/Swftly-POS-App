@@ -41,9 +41,20 @@ function POS({ employeeId, employeeName }) {
   const [showCustomerInfoModal, setShowCustomerInfoModal] = useState(false) // Show customer info modal
   const [customerInfo, setCustomerInfo] = useState({
     name: '',
+    email: '',
     phone: '',
     address: ''
   })
+  const [rewardsSettings, setRewardsSettings] = useState({
+    enabled: false,
+    require_email: false,
+    require_phone: false,
+    require_both: false
+  })
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('')
+  const [customerSearchResults, setCustomerSearchResults] = useState([])
+  const [selectedCustomer, setSelectedCustomer] = useState(null)
+  const [showCreateCustomer, setShowCreateCustomer] = useState(false)
   
   // Check if user can process sales
   const canProcessSale = hasPermission('process_sale')
@@ -53,6 +64,7 @@ function POS({ employeeId, employeeName }) {
   // Fetch all products and categories on mount and when window gains focus
   useEffect(() => {
     fetchAllProducts()
+    loadRewardsSettings()
     
     // Refresh products when window gains focus (user switches back to POS tab)
     const handleFocus = () => {
@@ -62,6 +74,23 @@ function POS({ employeeId, employeeName }) {
     window.addEventListener('focus', handleFocus)
     return () => window.removeEventListener('focus', handleFocus)
   }, [])
+
+  const loadRewardsSettings = async () => {
+    try {
+      const response = await fetch('/api/customer-rewards-settings')
+      const data = await response.json()
+      if (data.success && data.settings) {
+        setRewardsSettings({
+          enabled: data.settings.enabled === 1 || data.settings.enabled === true,
+          require_email: data.settings.require_email === 1 || data.settings.require_email === true,
+          require_phone: data.settings.require_phone === 1 || data.settings.require_phone === true,
+          require_both: data.settings.require_both === 1 || data.settings.require_both === true
+        })
+      }
+    } catch (error) {
+      console.error('Error loading rewards settings:', error)
+    }
+  }
 
   // Search products
   useEffect(() => {
@@ -555,10 +584,77 @@ function POS({ employeeId, employeeName }) {
         setPaymentCompleted(false)
         setSelectedTip(0) // Reset tip
         setOrderType(null) // Reset order type
-        setCustomerInfo({ name: '', phone: '', address: '' }) // Reset customer info
+        setCustomerInfo({ name: '', email: '', phone: '', address: '' }) // Reset customer info
         setShowCustomerDisplay(false)
         setShowPaymentForm(false)
       }
+  }
+
+  const checkCustomerInfoRequirements = () => {
+    // Check rewards settings requirements
+    if (rewardsSettings.enabled) {
+      if (rewardsSettings.require_both) {
+        return customerInfo.name && customerInfo.email && customerInfo.phone
+      } else if (rewardsSettings.require_email) {
+        return customerInfo.name && customerInfo.email
+      } else if (rewardsSettings.require_phone) {
+        return customerInfo.name && customerInfo.phone
+      }
+    }
+    // If rewards not enabled or no requirements, return true
+    return true
+  }
+
+  const searchCustomers = async (term) => {
+    if (term.length < 2) {
+      setCustomerSearchResults([])
+      return
+    }
+    
+    try {
+      const response = await fetch(`/api/customers`)
+      const data = await response.json()
+      
+      if (data.data) {
+        const termLower = term.toLowerCase()
+        const filtered = data.data.filter(customer => {
+          const name = (customer.customer_name || '').toLowerCase()
+          const email = (customer.email || '').toLowerCase()
+          const phone = (customer.phone || '').toLowerCase()
+          return name.includes(termLower) || email.includes(termLower) || phone.includes(termLower)
+        })
+        setCustomerSearchResults(filtered.slice(0, 10))
+      }
+    } catch (error) {
+      console.error('Error searching customers:', error)
+    }
+  }
+
+  const handleCustomerSelect = (customer) => {
+    setSelectedCustomer(customer)
+    setCustomerInfo({
+      name: customer.customer_name || '',
+      email: customer.email || '',
+      phone: customer.phone || '',
+      address: customer.address || ''
+    })
+    setCustomerSearchTerm('')
+    setCustomerSearchResults([])
+  }
+
+  const handleCreateCustomer = () => {
+    setShowCreateCustomer(true)
+    setShowCustomerInfoModal(true)
+    // Clear any existing customer selection
+    setSelectedCustomer(null)
+    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+  }
+
+  const handleClearCustomer = () => {
+    setSelectedCustomer(null)
+    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+    setCustomerSearchTerm('')
+    setCustomerSearchResults([])
   }
 
   const handleCalculatorInput = (value) => {
@@ -608,7 +704,11 @@ function POS({ employeeId, employeeName }) {
       // Prepare customer info and order type for order creation
       let customerId = null
       const orderTypeToSave = orderType || null
-      const customerInfoToSave = orderType ? customerInfo : null
+      // Include customer info if customer is selected/entered (optional for rewards)
+      let customerInfoToSave = null
+      if (selectedCustomer || customerInfo.name) {
+        customerInfoToSave = customerInfo.name ? customerInfo : null
+      }
 
       // Start transaction for customer display
       let transactionId = null
@@ -1226,7 +1326,8 @@ function POS({ employeeId, employeeName }) {
                 onClick={() => {
                   if (orderType === 'pickup') {
                     setOrderType(null)
-                    setCustomerInfo({ name: '', phone: '', address: '' })
+                    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                    setSelectedCustomer(null)
                   } else {
                     setOrderType('pickup')
                     setShowCustomerInfoModal(true)
@@ -1251,7 +1352,8 @@ function POS({ employeeId, employeeName }) {
                 onClick={() => {
                   if (orderType === 'delivery') {
                     setOrderType(null)
-                    setCustomerInfo({ name: '', phone: '', address: '' })
+                    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                    setSelectedCustomer(null)
                   } else {
                     setOrderType('delivery')
                     setShowCustomerInfoModal(true)
@@ -1279,6 +1381,132 @@ function POS({ employeeId, employeeName }) {
                 {orderType === 'delivery' && customerInfo.address && (
                   <div style={{ marginTop: '4px' }}><strong>Address:</strong> {customerInfo.address}</div>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* Customer Lookup (Optional) */}
+          <div style={{ marginBottom: '16px' }}>
+            <div style={{ marginBottom: '8px', fontSize: '14px', color: '#666', fontWeight: 500 }}>
+              Customer (Optional):
+            </div>
+            {!selectedCustomer ? (
+              <div style={{ position: 'relative' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    value={customerSearchTerm}
+                    onChange={(e) => {
+                      setCustomerSearchTerm(e.target.value)
+                      searchCustomers(e.target.value)
+                    }}
+                    placeholder="Search by name, email, or phone..."
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      fontSize: '14px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                  <button
+                    onClick={handleCreateCustomer}
+                    style={{
+                      padding: '10px 16px',
+                      backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    Create
+                  </button>
+                </div>
+                {customerSearchResults.length > 0 && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    marginTop: '4px',
+                    backgroundColor: '#fff',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                    zIndex: 1000,
+                    maxHeight: '200px',
+                    overflowY: 'auto'
+                  }}>
+                    {customerSearchResults.map(customer => (
+                      <div
+                        key={customer.customer_id}
+                        onClick={() => handleCustomerSelect(customer)}
+                        style={{
+                          padding: '12px',
+                          cursor: 'pointer',
+                          borderBottom: '1px solid #eee',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = '#fff'}
+                      >
+                        <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>
+                          {customer.customer_name || 'No name'}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#666' }}>
+                          {customer.email && <span>{customer.email}</span>}
+                          {customer.email && customer.phone && <span> • </span>}
+                          {customer.phone && <span>{customer.phone}</span>}
+                          {customer.loyalty_points !== undefined && customer.loyalty_points > 0 && (
+                            <span> • {customer.loyalty_points} points</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{
+                padding: '12px',
+                backgroundColor: '#f5f5f5',
+                borderRadius: '4px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>
+                    {selectedCustomer.customer_name || 'No name'}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#666' }}>
+                    {selectedCustomer.email && <span>{selectedCustomer.email}</span>}
+                    {selectedCustomer.email && selectedCustomer.phone && <span> • </span>}
+                    {selectedCustomer.phone && <span>{selectedCustomer.phone}</span>}
+                    {selectedCustomer.loyalty_points !== undefined && selectedCustomer.loyalty_points > 0 && (
+                      <span> • {selectedCustomer.loyalty_points} points</span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={handleClearCustomer}
+                  style={{
+                    padding: '6px 12px',
+                    backgroundColor: 'transparent',
+                    color: '#666',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Clear
+                </button>
               </div>
             )}
           </div>
@@ -1340,6 +1568,12 @@ function POS({ employeeId, employeeName }) {
             }>
               <button
                 onClick={() => {
+                  // Only check requirements if rewards are enabled AND customer is selected/entered
+                  // Customer lookup is optional, so we don't force it
+                  if (rewardsSettings.enabled && (selectedCustomer || customerInfo.name) && !checkCustomerInfoRequirements()) {
+                    setShowCustomerInfoModal(true)
+                    return
+                  }
                   setShowSummary(true)
                   setShowCustomerDisplay(true)
                 }}
@@ -2065,7 +2299,7 @@ function POS({ employeeId, employeeName }) {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif' }}>
-                {orderType === 'pickup' ? 'Pickup' : 'Delivery'} Information
+                {orderType ? (orderType === 'pickup' ? 'Pickup' : 'Delivery') : 'Customer'} Information
               </h3>
               <button
                 onClick={() => {
@@ -2111,25 +2345,49 @@ function POS({ employeeId, employeeName }) {
               />
             </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 500, color: '#666' }}>
-                Phone Number *
-              </label>
-              <input
-                type="tel"
-                value={customerInfo.phone}
-                onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value })}
-                placeholder="Phone number"
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
+            {(rewardsSettings.enabled && (rewardsSettings.require_email || rewardsSettings.require_both)) || orderType ? (
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 500, color: '#666' }}>
+                  Email {((rewardsSettings.enabled && rewardsSettings.require_email) || rewardsSettings.require_both) ? '*' : ''}
+                </label>
+                <input
+                  type="email"
+                  value={customerInfo.email}
+                  onChange={(e) => setCustomerInfo({ ...customerInfo, email: e.target.value })}
+                  placeholder="Email address"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+            ) : null}
+
+            {(rewardsSettings.enabled && (rewardsSettings.require_phone || rewardsSettings.require_both)) || orderType ? (
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: 500, color: '#666' }}>
+                  Phone Number {orderType || (rewardsSettings.enabled && (rewardsSettings.require_phone || rewardsSettings.require_both)) ? '*' : ''}
+                </label>
+                <input
+                  type="tel"
+                  value={customerInfo.phone}
+                  onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value })}
+                  placeholder="Phone number"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+            ) : null}
 
             {orderType === 'delivery' && (
               <div style={{ marginBottom: '16px' }}>
@@ -2159,8 +2417,13 @@ function POS({ employeeId, employeeName }) {
               <button
                 onClick={() => {
                   setShowCustomerInfoModal(false)
-                  setOrderType(null)
-                  setCustomerInfo({ name: '', phone: '', address: '' })
+                  if (!orderType) {
+                    // Only reset if not from rewards (rewards modal can be opened without order type)
+                    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                  } else {
+                    setOrderType(null)
+                    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                  }
                 }}
                 style={{
                   flex: 1,
@@ -2178,14 +2441,46 @@ function POS({ employeeId, employeeName }) {
               </button>
               <button
                 onClick={() => {
-                  const requiredFields = orderType === 'pickup' 
-                    ? customerInfo.name && customerInfo.phone
-                    : customerInfo.name && customerInfo.phone && customerInfo.address
+                  // Check requirements based on order type and rewards settings
+                  let requiredFields = false
+                  let errorMessage = ''
+                  
+                  if (orderType === 'pickup') {
+                    requiredFields = customerInfo.name && customerInfo.phone
+                    errorMessage = 'Please fill in name and phone'
+                  } else if (orderType === 'delivery') {
+                    requiredFields = customerInfo.name && customerInfo.phone && customerInfo.address
+                    errorMessage = 'Please fill in name, phone, and address'
+                  } else if (rewardsSettings.enabled) {
+                    // Check rewards requirements
+                    if (rewardsSettings.require_both) {
+                      requiredFields = customerInfo.name && customerInfo.email && customerInfo.phone
+                      errorMessage = 'Please fill in name, email, and phone'
+                    } else if (rewardsSettings.require_email) {
+                      requiredFields = customerInfo.name && customerInfo.email
+                      errorMessage = 'Please fill in name and email'
+                    } else if (rewardsSettings.require_phone) {
+                      requiredFields = customerInfo.name && customerInfo.phone
+                      errorMessage = 'Please fill in name and phone'
+                    } else {
+                      requiredFields = customerInfo.name
+                      errorMessage = 'Please fill in name'
+                    }
+                  } else {
+                    // Just require name
+                    requiredFields = customerInfo.name
+                    errorMessage = 'Please fill in name'
+                  }
                   
                   if (requiredFields) {
                     setShowCustomerInfoModal(false)
+                    // If closing from rewards requirement, show summary
+                    if (rewardsSettings.enabled && !orderType) {
+                      setShowSummary(true)
+                      setShowCustomerDisplay(true)
+                    }
                   } else {
-                    alert(`Please fill in all required fields${orderType === 'delivery' ? ' (name, phone, and address)' : ' (name and phone)'}`)
+                    alert(errorMessage)
                   }
                 }}
                 style={{

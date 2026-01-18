@@ -23,7 +23,7 @@ function Settings() {
     show_payment_method: true,
     show_signature: false
   })
-  const [activeTab, setActiveTab] = useState('workflow') // 'workflow', 'receipt', 'location', or 'display'
+  const [activeTab, setActiveTab] = useState('workflow') // 'workflow', 'receipt', 'location', 'display', 'rewards', or 'sms'
   const [storeLocationSettings, setStoreLocationSettings] = useState({
     store_name: 'Store',
     latitude: null,
@@ -37,6 +37,37 @@ function Settings() {
     tip_after_payment: false,
     tip_suggestions: [15, 18, 20, 25]
   })
+  const [rewardsSettings, setRewardsSettings] = useState({
+    enabled: false,
+    require_email: false,
+    require_phone: false,
+    require_both: false,
+    reward_type: 'points',
+    points_per_dollar: 1.0,
+    percentage_discount: 0.0,
+    fixed_discount: 0.0,
+    minimum_spend: 0.0
+  })
+  const [smsSettings, setSmsSettings] = useState({
+    sms_provider: 'email',
+    smtp_server: 'smtp.gmail.com',
+    smtp_port: 587,
+    smtp_user: '',
+    smtp_password: '',
+    smtp_use_tls: 1,
+    aws_access_key_id: '',
+    aws_secret_access_key: '',
+    aws_region: 'us-east-1',
+    business_name: '',
+    auto_send_rewards_earned: 1,
+    auto_send_rewards_redeemed: 1
+  })
+  const [smsMessages, setSmsMessages] = useState([])
+  const [smsTemplates, setSmsTemplates] = useState([])
+  const [smsStores, setSmsStores] = useState([])
+  const [selectedSmsStore, setSelectedSmsStore] = useState(1)
+  const [showSendSmsModal, setShowSendSmsModal] = useState(false)
+  const [sendSmsForm, setSendSmsForm] = useState({ phone_number: '', message_text: '' })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState(null)
@@ -55,7 +86,18 @@ function Settings() {
     loadReceiptSettings()
     loadStoreLocationSettings()
     loadDisplaySettings()
+    loadRewardsSettings()
+    loadSmsSettings()
+    loadSmsStores()
   }, [])
+
+  useEffect(() => {
+    if (activeTab === 'sms') {
+      loadSmsSettings()
+      loadSmsMessages()
+      loadSmsTemplates()
+    }
+  }, [activeTab, selectedSmsStore])
 
   const loadSettings = async () => {
     try {
@@ -119,6 +161,196 @@ function Settings() {
       }
     } catch (error) {
       console.error('Error loading display settings:', error)
+    }
+  }
+
+  const loadRewardsSettings = async () => {
+    try {
+      const response = await fetch('/api/customer-rewards-settings')
+      const data = await response.json()
+      if (data.success && data.settings) {
+        setRewardsSettings({
+          enabled: data.settings.enabled === 1 || data.settings.enabled === true,
+          require_email: data.settings.require_email === 1 || data.settings.require_email === true,
+          require_phone: data.settings.require_phone === 1 || data.settings.require_phone === true,
+          require_both: data.settings.require_both === 1 || data.settings.require_both === true,
+          reward_type: data.settings.reward_type || 'points',
+          points_per_dollar: data.settings.points_per_dollar || 1.0,
+          percentage_discount: data.settings.percentage_discount || 0.0,
+          fixed_discount: data.settings.fixed_discount || 0.0,
+          minimum_spend: data.settings.minimum_spend || 0.0
+        })
+      }
+    } catch (error) {
+      console.error('Error loading rewards settings:', error)
+    }
+  }
+
+  const loadSmsSettings = async () => {
+    try {
+      const response = await fetch(`/api/sms/settings/${selectedSmsStore}`)
+      const data = await response.json()
+      setSmsSettings({
+        sms_provider: data.sms_provider || 'email',
+        smtp_server: data.smtp_server || 'smtp.gmail.com',
+        smtp_port: data.smtp_port || 587,
+        smtp_user: data.smtp_user || '',
+        smtp_password: data.smtp_password === '***' ? '' : (data.smtp_password || ''),
+        smtp_use_tls: data.smtp_use_tls !== undefined ? data.smtp_use_tls : 1,
+        aws_access_key_id: data.aws_access_key_id || '',
+        aws_secret_access_key: data.aws_secret_access_key === '***' ? '' : (data.aws_secret_access_key || ''),
+        aws_region: data.aws_region || 'us-east-1',
+        business_name: data.business_name || '',
+        auto_send_rewards_earned: data.auto_send_rewards_earned !== undefined ? data.auto_send_rewards_earned : 1,
+        auto_send_rewards_redeemed: data.auto_send_rewards_redeemed !== undefined ? data.auto_send_rewards_redeemed : 1
+      })
+    } catch (error) {
+      console.error('Error loading SMS settings:', error)
+    }
+  }
+
+  const loadSmsStores = async () => {
+    try {
+      const response = await fetch('/api/sms/stores')
+      const data = await response.json()
+      if (Array.isArray(data) && data.length > 0) {
+        setSmsStores(data)
+        setSelectedSmsStore(data[0].store_id)
+      }
+    } catch (error) {
+      console.error('Error loading SMS stores:', error)
+    }
+  }
+
+  const loadSmsMessages = async () => {
+    try {
+      const response = await fetch(`/api/sms/messages?store_id=${selectedSmsStore}&limit=50`)
+      const data = await response.json()
+      if (Array.isArray(data)) {
+        setSmsMessages(data)
+      }
+    } catch (error) {
+      console.error('Error loading SMS messages:', error)
+    }
+  }
+
+  const loadSmsTemplates = async () => {
+    try {
+      const response = await fetch(`/api/sms/templates?store_id=${selectedSmsStore}`)
+      const data = await response.json()
+      if (Array.isArray(data)) {
+        setSmsTemplates(data)
+      }
+    } catch (error) {
+      console.error('Error loading SMS templates:', error)
+    }
+  }
+
+  const saveSmsSettings = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      const response = await fetch(`/api/sms/settings/${selectedSmsStore}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken
+        },
+        body: JSON.stringify({
+          ...smsSettings,
+          session_token: sessionToken
+        })
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: 'SMS settings saved successfully!' })
+        setTimeout(() => setMessage(null), 3000)
+        loadSmsSettings()
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to save SMS settings' })
+      }
+    } catch (error) {
+      console.error('Error saving SMS settings:', error)
+      setMessage({ type: 'error', text: 'Failed to save SMS settings' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSendSms = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    setMessage(null)
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      const response = await fetch('/api/sms/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken
+        },
+        body: JSON.stringify({
+          ...sendSmsForm,
+          store_id: selectedSmsStore,
+          session_token: sessionToken
+        })
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: 'SMS sent successfully!' })
+        setShowSendSmsModal(false)
+        setSendSmsForm({ phone_number: '', message_text: '' })
+        loadSmsMessages()
+      } else {
+        setMessage({ type: 'error', text: data.message || data.error || 'Failed to send SMS' })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Error sending SMS: ' + error.message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const saveRewardsSettings = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      const response = await fetch('/api/customer-rewards-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken
+        },
+        body: JSON.stringify({
+          session_token: sessionToken,
+          enabled: rewardsSettings.enabled ? 1 : 0,
+          require_email: rewardsSettings.require_email ? 1 : 0,
+          require_phone: rewardsSettings.require_phone ? 1 : 0,
+          require_both: rewardsSettings.require_both ? 1 : 0,
+          reward_type: rewardsSettings.reward_type,
+          points_per_dollar: parseFloat(rewardsSettings.points_per_dollar) || 1.0,
+          percentage_discount: parseFloat(rewardsSettings.percentage_discount) || 0.0,
+          fixed_discount: parseFloat(rewardsSettings.fixed_discount) || 0.0,
+          minimum_spend: parseFloat(rewardsSettings.minimum_spend) || 0.0
+        })
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: 'Customer rewards settings saved successfully!' })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to save rewards settings' })
+      }
+    } catch (error) {
+      console.error('Error saving rewards settings:', error)
+      setMessage({ type: 'error', text: 'Failed to save rewards settings' })
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -404,6 +636,42 @@ function Settings() {
         >
           Display Settings
         </button>
+        <button
+          onClick={() => setActiveTab('rewards')}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'rewards' ? `3px solid rgba(${themeColorRgb}, 0.7)` : '3px solid transparent',
+            color: activeTab === 'rewards' 
+              ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333')
+              : (isDarkMode ? 'var(--text-tertiary, #999)' : '#666'),
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: activeTab === 'rewards' ? 600 : 400,
+            transition: 'all 0.2s ease'
+          }}
+        >
+          Customer Rewards
+        </button>
+        <button
+          onClick={() => setActiveTab('sms')}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'sms' ? `3px solid rgba(${themeColorRgb}, 0.7)` : '3px solid transparent',
+            color: activeTab === 'sms' 
+              ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333')
+              : (isDarkMode ? 'var(--text-tertiary, #999)' : '#666'),
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: activeTab === 'sms' ? 600 : 400,
+            transition: 'all 0.2s ease'
+          }}
+        >
+          SMS
+        </button>
       </div>
 
       {message && (
@@ -594,6 +862,7 @@ function Settings() {
               activeTab === 'workflow' ? saveSettings :
               activeTab === 'receipt' ? saveReceiptSettings :
               activeTab === 'location' ? saveStoreLocationSettings :
+              activeTab === 'rewards' ? saveRewardsSettings :
               saveDisplaySettings
             }
             disabled={saving}
@@ -614,8 +883,8 @@ function Settings() {
             }}
           >
             {saving 
-              ? (activeTab === 'workflow' ? 'Saving...' : activeTab === 'receipt' ? 'Saving Receipt Settings...' : activeTab === 'location' ? 'Saving Location Settings...' : 'Saving Display Settings...')
-              : (activeTab === 'workflow' ? 'Save Settings' : activeTab === 'receipt' ? 'Save Receipt Settings' : activeTab === 'location' ? 'Save Location Settings' : 'Save Display Settings')
+              ? (activeTab === 'workflow' ? 'Saving...' : activeTab === 'receipt' ? 'Saving Receipt Settings...' : activeTab === 'location' ? 'Saving Location Settings...' : activeTab === 'rewards' ? 'Saving Rewards Settings...' : 'Saving Display Settings...')
+              : (activeTab === 'workflow' ? 'Save Settings' : activeTab === 'receipt' ? 'Save Receipt Settings' : activeTab === 'location' ? 'Save Location Settings' : activeTab === 'rewards' ? 'Save Rewards Settings' : 'Save Display Settings')
             }
           </button>
         </div>
@@ -1409,6 +1678,965 @@ function Settings() {
                 {saving ? 'Saving...' : 'Save Display Settings'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Customer Rewards Settings Tab */}
+      {activeTab === 'rewards' && (
+        <div style={{
+          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+          borderRadius: '8px',
+          padding: '24px',
+          boxShadow: isDarkMode ? '0 2px 4px rgba(0,0,0,0.3)' : '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <h2 style={{
+            marginBottom: '24px',
+            fontSize: '20px',
+            fontWeight: 600,
+            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+          }}>
+            Customer Rewards Program
+          </h2>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {/* Enable Rewards */}
+            <div>
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                cursor: 'pointer'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={rewardsSettings.enabled}
+                  onChange={(e) => setRewardsSettings({ ...rewardsSettings, enabled: e.target.checked })}
+                />
+                <span style={{
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Enable Customer Rewards Program
+                </span>
+              </label>
+            </div>
+
+            {rewardsSettings.enabled && (
+              <>
+                {/* Customer Info Requirements */}
+                <div>
+                  <h3 style={{
+                    marginBottom: '12px',
+                    fontSize: '16px',
+                    fontWeight: 600,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    Customer Information Requirements
+                  </h3>
+                  <p style={{
+                    marginBottom: '16px',
+                    fontSize: '14px',
+                    color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
+                  }}>
+                    Choose what customer information is required to participate in the rewards program:
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      cursor: 'pointer'
+                    }}>
+                      <input
+                        type="radio"
+                        name="customer_info_requirement"
+                        checked={!rewardsSettings.require_email && !rewardsSettings.require_phone && !rewardsSettings.require_both}
+                        onChange={() => setRewardsSettings({
+                          ...rewardsSettings,
+                          require_email: false,
+                          require_phone: false,
+                          require_both: false
+                        })}
+                      />
+                      <span style={{
+                        fontSize: '14px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                      }}>
+                        No requirements (optional)
+                      </span>
+                    </label>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      cursor: 'pointer'
+                    }}>
+                      <input
+                        type="radio"
+                        name="customer_info_requirement"
+                        checked={rewardsSettings.require_email && !rewardsSettings.require_both}
+                        onChange={() => setRewardsSettings({
+                          ...rewardsSettings,
+                          require_email: true,
+                          require_phone: false,
+                          require_both: false
+                        })}
+                      />
+                      <span style={{
+                        fontSize: '14px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                      }}>
+                        Require email
+                      </span>
+                    </label>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      cursor: 'pointer'
+                    }}>
+                      <input
+                        type="radio"
+                        name="customer_info_requirement"
+                        checked={rewardsSettings.require_phone && !rewardsSettings.require_both}
+                        onChange={() => setRewardsSettings({
+                          ...rewardsSettings,
+                          require_email: false,
+                          require_phone: true,
+                          require_both: false
+                        })}
+                      />
+                      <span style={{
+                        fontSize: '14px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                      }}>
+                        Require phone number
+                      </span>
+                    </label>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      cursor: 'pointer'
+                    }}>
+                      <input
+                        type="radio"
+                        name="customer_info_requirement"
+                        checked={rewardsSettings.require_both}
+                        onChange={() => setRewardsSettings({
+                          ...rewardsSettings,
+                          require_email: true,
+                          require_phone: true,
+                          require_both: true
+                        })}
+                      />
+                      <span style={{
+                        fontSize: '14px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                      }}>
+                        Require both email and phone number
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Reward Type */}
+                <div>
+                  <h3 style={{
+                    marginBottom: '12px',
+                    fontSize: '16px',
+                    fontWeight: 600,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    Reward Type
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      cursor: 'pointer'
+                    }}>
+                      <input
+                        type="radio"
+                        name="reward_type"
+                        value="points"
+                        checked={rewardsSettings.reward_type === 'points'}
+                        onChange={(e) => setRewardsSettings({ ...rewardsSettings, reward_type: e.target.value })}
+                      />
+                      <span style={{
+                        fontSize: '14px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                      }}>
+                        Points (earn points per dollar spent)
+                      </span>
+                    </label>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      cursor: 'pointer'
+                    }}>
+                      <input
+                        type="radio"
+                        name="reward_type"
+                        value="percentage"
+                        checked={rewardsSettings.reward_type === 'percentage'}
+                        onChange={(e) => setRewardsSettings({ ...rewardsSettings, reward_type: e.target.value })}
+                      />
+                      <span style={{
+                        fontSize: '14px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                      }}>
+                        Percentage discount
+                      </span>
+                    </label>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      cursor: 'pointer'
+                    }}>
+                      <input
+                        type="radio"
+                        name="reward_type"
+                        value="fixed"
+                        checked={rewardsSettings.reward_type === 'fixed'}
+                        onChange={(e) => setRewardsSettings({ ...rewardsSettings, reward_type: e.target.value })}
+                      />
+                      <span style={{
+                        fontSize: '14px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                      }}>
+                        Fixed discount amount
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Reward Configuration */}
+                {rewardsSettings.reward_type === 'points' && (
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '6px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                    }}>
+                      Points per Dollar Spent
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={rewardsSettings.points_per_dollar}
+                      onChange={(e) => setRewardsSettings({
+                        ...rewardsSettings,
+                        points_per_dollar: parseFloat(e.target.value) || 1.0
+                      })}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                        borderRadius: '6px',
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                        fontSize: '14px'
+                      }}
+                    />
+                  </div>
+                )}
+
+                {rewardsSettings.reward_type === 'percentage' && (
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '6px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                    }}>
+                      Percentage Discount (%)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      value={rewardsSettings.percentage_discount}
+                      onChange={(e) => setRewardsSettings({
+                        ...rewardsSettings,
+                        percentage_discount: parseFloat(e.target.value) || 0.0
+                      })}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                        borderRadius: '6px',
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                        fontSize: '14px'
+                      }}
+                    />
+                  </div>
+                )}
+
+                {rewardsSettings.reward_type === 'fixed' && (
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '6px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                    }}>
+                      Fixed Discount Amount ($)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={rewardsSettings.fixed_discount}
+                      onChange={(e) => setRewardsSettings({
+                        ...rewardsSettings,
+                        fixed_discount: parseFloat(e.target.value) || 0.0
+                      })}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                        borderRadius: '6px',
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                        fontSize: '14px'
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Minimum Spend */}
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '6px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    Minimum Spend to Earn Rewards ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={rewardsSettings.minimum_spend}
+                    onChange={(e) => setRewardsSettings({
+                      ...rewardsSettings,
+                      minimum_spend: parseFloat(e.target.value) || 0.0
+                    })}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      fontSize: '14px'
+                    }}
+                  />
+                  <p style={{
+                    marginTop: '6px',
+                    fontSize: '12px',
+                    color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
+                  }}>
+                    Customers must spend this amount or more to earn rewards (0 = no minimum)
+                  </p>
+                </div>
+
+                {/* Save Button */}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  marginTop: '24px',
+                  paddingTop: '24px',
+                  borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
+                }}>
+                  <button
+                    onClick={saveRewardsSettings}
+                    disabled={saving}
+                    style={{
+                      padding: '12px 32px',
+                      backgroundColor: saving ? (isDarkMode ? '#3a3a3a' : '#ccc') : `rgba(${themeColorRgb}, 0.7)`,
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: saving ? 'not-allowed' : 'pointer',
+                      fontSize: '16px',
+                      fontWeight: 600,
+                      boxShadow: saving ? 'none' : `0 4px 15px rgba(${themeColorRgb}, 0.3)`,
+                      transition: 'all 0.3s ease',
+                      opacity: saving ? 0.6 : 1,
+                      minWidth: '150px'
+                    }}
+                  >
+                    {saving ? 'Saving...' : 'Save Rewards Settings'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SMS Settings Tab */}
+      {activeTab === 'sms' && (
+        <div style={{
+          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+          borderRadius: '8px',
+          padding: '24px',
+          boxShadow: isDarkMode ? '0 2px 4px rgba(0,0,0,0.3)' : '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h2 style={{
+              marginBottom: 0,
+              fontSize: '20px',
+              fontWeight: 600,
+              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+            }}>
+              SMS CRM Settings
+            </h2>
+            {smsStores.length > 0 && (
+              <select
+                value={selectedSmsStore}
+                onChange={(e) => {
+                  setSelectedSmsStore(parseInt(e.target.value))
+                  loadSmsSettings()
+                }}
+                style={{
+                  padding: '8px 12px',
+                  fontSize: '14px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}
+              >
+                {smsStores.map(store => (
+                  <option key={store.store_id} value={store.store_id}>
+                    {store.store_name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {/* SMS Provider Selection */}
+            <div>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '16px',
+                fontWeight: 600,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                SMS Provider
+              </label>
+              <select
+                value={smsSettings.sms_provider || 'email'}
+                onChange={(e) => setSmsSettings({...smsSettings, sms_provider: e.target.value})}
+                style={{
+                  padding: '10px',
+                  width: '100%',
+                  maxWidth: '300px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px'
+                }}
+              >
+                <option value="email">Email-to-SMS (FREE)</option>
+                <option value="aws_sns">AWS SNS (~$0.006/SMS)</option>
+              </select>
+              <p style={{
+                marginTop: '8px',
+                fontSize: '13px',
+                color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
+              }}>
+                {smsSettings.sms_provider === 'email' 
+                  ? 'Free but limited reliability. Good for testing.'
+                  : 'Low cost, high reliability. Recommended for production.'}
+              </p>
+            </div>
+
+            {/* Email Settings */}
+            {smsSettings.sms_provider === 'email' && (
+              <>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    SMTP Server
+                  </label>
+                  <input
+                    type="text"
+                    value={smsSettings.smtp_server || 'smtp.gmail.com'}
+                    onChange={(e) => setSmsSettings({...smsSettings, smtp_server: e.target.value})}
+                    style={{
+                      padding: '10px',
+                      width: '100%',
+                      maxWidth: '400px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    SMTP Port
+                  </label>
+                  <input
+                    type="number"
+                    value={smsSettings.smtp_port || 587}
+                    onChange={(e) => setSmsSettings({...smsSettings, smtp_port: parseInt(e.target.value)})}
+                    style={{
+                      padding: '10px',
+                      width: '100%',
+                      maxWidth: '200px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    Email Address (Gmail)
+                  </label>
+                  <input
+                    type="email"
+                    value={smsSettings.smtp_user || ''}
+                    onChange={(e) => setSmsSettings({...smsSettings, smtp_user: e.target.value})}
+                    placeholder="yourstore@gmail.com"
+                    style={{
+                      padding: '10px',
+                      width: '100%',
+                      maxWidth: '400px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      fontSize: '14px'
+                    }}
+                  />
+                  <p style={{
+                    marginTop: '4px',
+                    fontSize: '12px',
+                    color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
+                  }}>
+                    For Gmail: Enable 2FA and create an App Password
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    App Password
+                  </label>
+                  <input
+                    type="password"
+                    value={smsSettings.smtp_password || ''}
+                    onChange={(e) => setSmsSettings({...smsSettings, smtp_password: e.target.value})}
+                    placeholder="Enter app password"
+                    style={{
+                      padding: '10px',
+                      width: '100%',
+                      maxWidth: '400px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* AWS Settings */}
+            {smsSettings.sms_provider === 'aws_sns' && (
+              <>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    AWS Access Key ID
+                  </label>
+                  <input
+                    type="text"
+                    value={smsSettings.aws_access_key_id || ''}
+                    onChange={(e) => setSmsSettings({...smsSettings, aws_access_key_id: e.target.value})}
+                    placeholder="AKIA..."
+                    style={{
+                      padding: '10px',
+                      width: '100%',
+                      maxWidth: '400px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    AWS Secret Access Key
+                  </label>
+                  <input
+                    type="password"
+                    value={smsSettings.aws_secret_access_key || ''}
+                    onChange={(e) => setSmsSettings({...smsSettings, aws_secret_access_key: e.target.value})}
+                    placeholder="Enter secret key"
+                    style={{
+                      padding: '10px',
+                      width: '100%',
+                      maxWidth: '400px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    AWS Region
+                  </label>
+                  <input
+                    type="text"
+                    value={smsSettings.aws_region || 'us-east-1'}
+                    onChange={(e) => setSmsSettings({...smsSettings, aws_region: e.target.value})}
+                    placeholder="us-east-1"
+                    style={{
+                      padding: '10px',
+                      width: '100%',
+                      maxWidth: '200px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Business Name */}
+            <div>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Business Name
+              </label>
+              <input
+                type="text"
+                value={smsSettings.business_name || ''}
+                onChange={(e) => setSmsSettings({...smsSettings, business_name: e.target.value})}
+                placeholder="Your Store Name"
+                style={{
+                  padding: '10px',
+                  width: '100%',
+                  maxWidth: '400px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+
+            {/* Auto-send Options */}
+            <div>
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                cursor: 'pointer'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={smsSettings.auto_send_rewards_earned || false}
+                  onChange={(e) => setSmsSettings({...smsSettings, auto_send_rewards_earned: e.target.checked ? 1 : 0})}
+                />
+                <span style={{
+                  fontSize: '14px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Auto-send SMS when customers earn rewards
+                </span>
+              </label>
+            </div>
+
+            <div>
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                cursor: 'pointer'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={smsSettings.auto_send_rewards_redeemed || false}
+                  onChange={(e) => setSmsSettings({...smsSettings, auto_send_rewards_redeemed: e.target.checked ? 1 : 0})}
+                />
+                <span style={{
+                  fontSize: '14px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Auto-send SMS when customers redeem rewards
+                </span>
+              </label>
+            </div>
+
+            {/* Quick Actions */}
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              marginTop: '20px',
+              paddingTop: '20px',
+              borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
+            }}>
+              <button
+                onClick={() => setShowSendSmsModal(true)}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#28a745',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 500
+                }}
+              >
+                Send Test SMS
+              </button>
+            </div>
+
+            {/* Save Button */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              marginTop: '24px',
+              paddingTop: '24px',
+              borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
+            }}>
+              <button
+                onClick={saveSmsSettings}
+                disabled={saving}
+                style={{
+                  padding: '12px 32px',
+                  backgroundColor: saving ? (isDarkMode ? '#3a3a3a' : '#ccc') : `rgba(${themeColorRgb}, 0.7)`,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  boxShadow: saving ? 'none' : `0 4px 15px rgba(${themeColorRgb}, 0.3)`,
+                  transition: 'all 0.3s ease',
+                  opacity: saving ? 0.6 : 1,
+                  minWidth: '150px'
+                }}
+              >
+                {saving ? 'Saving...' : 'Save SMS Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send SMS Modal */}
+      {showSendSmsModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+            padding: '30px',
+            borderRadius: '8px',
+            width: '90%',
+            maxWidth: '500px'
+          }}>
+            <h2 style={{
+              marginTop: 0,
+              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+            }}>
+              Send Test SMS
+            </h2>
+            <form onSubmit={handleSendSms}>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontWeight: 'bold',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Phone Number:
+                </label>
+                <input
+                  type="tel"
+                  value={sendSmsForm.phone_number}
+                  onChange={(e) => setSendSmsForm({...sendSmsForm, phone_number: e.target.value})}
+                  placeholder="(555) 123-4567"
+                  required
+                  style={{
+                    padding: '10px',
+                    width: '100%',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                    borderRadius: '6px',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontWeight: 'bold',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Message:
+                </label>
+                <textarea
+                  value={sendSmsForm.message_text}
+                  onChange={(e) => setSendSmsForm({...sendSmsForm, message_text: e.target.value})}
+                  rows={5}
+                  required
+                  style={{
+                    padding: '10px',
+                    width: '100%',
+                    resize: 'vertical',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                    borderRadius: '6px',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    fontSize: '14px'
+                  }}
+                />
+                <p style={{
+                  fontSize: '12px',
+                  color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                  marginTop: '4px'
+                }}>
+                  {sendSmsForm.message_text.length}/160 characters
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: '#28a745',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                    opacity: saving ? 0.6 : 1,
+                    fontSize: '14px',
+                    fontWeight: 500
+                  }}
+                >
+                  {saving ? 'Sending...' : 'Send'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSendSmsModal(false)}
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: '#6c757d',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 500
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

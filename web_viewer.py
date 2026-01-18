@@ -29,12 +29,21 @@ from database import (
     create_shipment_from_document, update_pending_item_verification, add_vendor,
     clock_in, clock_out, get_current_clock_status, get_schedule,
     get_store_location_settings, update_store_location_settings,
+    get_customer_rewards_settings, update_customer_rewards_settings, calculate_rewards,
     # Accounting functions
     generate_balance_sheet, generate_income_statement,
     generate_trial_balance,
-    add_product, create_or_get_category_with_hierarchy
+    add_product, create_or_get_category_with_hierarchy,
+    # Stripe integration functions
+    get_payment_settings, update_payment_settings,
+    create_stripe_connect_account, update_stripe_connect_account, get_stripe_connect_account,
+    create_stripe_credentials, update_stripe_credentials, get_stripe_credentials, get_stripe_config,
+    # Onboarding functions
+    get_onboarding_status, update_onboarding_step, complete_onboarding,
+    save_onboarding_progress, get_onboarding_progress
 )
 from permission_manager import get_permission_manager
+from sms_service_email_to_aws import EmailToAWSSMSService
 import sqlite3
 import os
 import json
@@ -83,6 +92,9 @@ def get_barcode_scanner():
 
 app = Flask(__name__)
 DB_NAME = 'inventory.db'
+
+# Initialize SMS service
+sms_service = EmailToAWSSMSService()
 
 # Initialize Socket.IO
 if SOCKETIO_AVAILABLE:
@@ -4696,6 +4708,529 @@ def api_update_store_location_settings():
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
+# ============================================================================
+# STRIPE INTEGRATION API ENDPOINTS
+# ============================================================================
+
+@app.route('/api/payment-settings', methods=['GET'])
+def api_get_payment_settings():
+    """Get payment settings"""
+    try:
+        settings = get_payment_settings()
+        if settings:
+            # Don't expose encrypted keys in GET request
+            safe_settings = {k: v for k, v in settings.items() 
+                           if 'encrypted' not in k.lower() and 'secret' not in k.lower()}
+            return jsonify({'success': True, 'settings': safe_settings})
+        else:
+            return jsonify({
+                'success': True,
+                'settings': {
+                    'payment_processor': 'cash_only',
+                    'enabled_payment_methods': '["cash"]'
+                }
+            })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/payment-settings', methods=['POST'])
+def api_update_payment_settings():
+    """Update payment settings"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        
+        # Verify session (optional for onboarding, required for settings updates)
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        if session_token:
+            session_result = verify_session(session_token)
+            if not session_result.get('valid'):
+                return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        # Parse enabled_payment_methods if it's a string
+        enabled_methods = data.get('enabled_payment_methods')
+        if isinstance(enabled_methods, str):
+            try:
+                enabled_methods = json.loads(enabled_methods)
+            except:
+                enabled_methods = ['cash']
+        if isinstance(enabled_methods, list):
+            enabled_methods = json.dumps(enabled_methods)
+        
+        success = update_payment_settings(
+            payment_processor=data.get('payment_processor'),
+            stripe_account_id=data.get('stripe_account_id'),
+            stripe_credential_id=data.get('stripe_credential_id'),
+            default_currency=data.get('default_currency'),
+            transaction_fee_rate=data.get('transaction_fee_rate'),
+            transaction_fee_fixed=data.get('transaction_fee_fixed'),
+            enabled_payment_methods=enabled_methods,
+            require_cvv=data.get('require_cvv'),
+            require_zip=data.get('require_zip'),
+            auto_capture=data.get('auto_capture')
+        )
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Payment settings updated'})
+        else:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': 'Failed to update settings. Check server logs for details.'}), 500
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/connect/create', methods=['POST'])
+def api_create_stripe_connect_account():
+    """Create Stripe Connect account and return onboarding link"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        email = data.get('email')
+        country = data.get('country', 'US')
+        account_type = data.get('account_type', 'express')
+        
+        # Check if Stripe is configured
+        stripe_secret_key = os.getenv('STRIPE_SECRET_KEY')
+        if not stripe_secret_key:
+            return jsonify({
+                'success': False,
+                'message': 'Stripe not configured. Please set STRIPE_SECRET_KEY environment variable.'
+            }), 500
+        
+        try:
+            import stripe
+            stripe.api_key = stripe_secret_key
+            
+            # Create connected account
+            account = stripe.Account.create(
+                type=account_type,
+                country=country.upper(),
+                email=email,
+                capabilities={
+                    'card_payments': {'requested': True},
+                    'transfers': {'requested': True},
+                },
+            )
+            
+            # Create account link for onboarding
+            account_link = stripe.AccountLink.create(
+                account=account.id,
+                refresh_url=f"{request.host_url}onboarding/stripe/refresh",
+                return_url=f"{request.host_url}onboarding/stripe/complete",
+                type='account_onboarding',
+            )
+            
+            # Save to database
+            account_record = create_stripe_connect_account(
+                account_type=account_type,
+                email=email,
+                country=country
+            )
+            
+            if account_record:
+                update_stripe_connect_account(
+                    stripe_account_id=account_record['stripe_account_id'],
+                    stripe_connected_account_id=account.id,
+                    onboarding_link=account_link.url,
+                    onboarding_link_expires_at=None  # Stripe handles expiration
+                )
+                
+                # Update payment settings to use this account
+                update_payment_settings(
+                    payment_processor='stripe_connect',
+                    stripe_account_id=account_record['stripe_account_id']
+                )
+                
+                return jsonify({
+                    'success': True,
+                    'onboarding_url': account_link.url,
+                    'account_id': account.id,
+                    'stripe_account_id': account_record['stripe_account_id']
+                })
+            else:
+                return jsonify({'success': False, 'message': 'Failed to save account'}), 500
+                
+        except Exception as stripe_error:
+            return jsonify({
+                'success': False,
+                'message': f'Stripe error: {str(stripe_error)}'
+            }), 500
+            
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/connect/status', methods=['POST'])
+def api_check_stripe_connect_status():
+    """Check Stripe Connect account onboarding status"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        stripe_account_id = data.get('stripe_account_id')
+        connected_account_id = data.get('connected_account_id')
+        
+        if not stripe_account_id and not connected_account_id:
+            return jsonify({'success': False, 'message': 'stripe_account_id or connected_account_id required'}), 400
+        
+        stripe_secret_key = os.getenv('STRIPE_SECRET_KEY')
+        if not stripe_secret_key:
+            return jsonify({'success': False, 'message': 'Stripe not configured'}), 500
+        
+        try:
+            import stripe
+            stripe.api_key = stripe_secret_key
+            
+            # Get account from database if we have stripe_account_id
+            if stripe_account_id:
+                account_record = get_stripe_connect_account(stripe_account_id)
+                if account_record:
+                    connected_account_id = account_record.get('stripe_connected_account_id')
+            
+            if not connected_account_id:
+                return jsonify({'success': False, 'message': 'Account not found'}), 404
+            
+            # Fetch account from Stripe
+            account = stripe.Account.retrieve(connected_account_id)
+            
+            # Update database with latest status
+            if stripe_account_id:
+                update_stripe_connect_account(
+                    stripe_account_id=stripe_account_id,
+                    charges_enabled=1 if account.charges_enabled else 0,
+                    payouts_enabled=1 if account.payouts_enabled else 0,
+                    onboarding_completed=1 if (account.charges_enabled and account.payouts_enabled) else 0,
+                    country=account.country,
+                    email=account.email
+                )
+            
+            return jsonify({
+                'success': True,
+                'charges_enabled': account.charges_enabled,
+                'payouts_enabled': account.payouts_enabled,
+                'onboarding_completed': account.charges_enabled and account.payouts_enabled,
+                'country': account.country,
+                'email': account.email
+            })
+            
+        except Exception as stripe_error:
+            return jsonify({
+                'success': False,
+                'message': f'Stripe error: {str(stripe_error)}'
+            }), 500
+            
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/credentials/validate', methods=['POST'])
+def api_validate_stripe_credentials():
+    """Validate Stripe API keys (for direct mode)"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        publishable_key = data.get('publishable_key', '').strip()
+        secret_key = data.get('secret_key', '').strip()
+        
+        if not publishable_key or not secret_key:
+            return jsonify({'success': False, 'message': 'Both publishable and secret keys are required'}), 400
+        
+        # Validate key format
+        if not publishable_key.startswith('pk_'):
+            return jsonify({'success': False, 'message': 'Invalid publishable key format'}), 400
+        
+        if not (secret_key.startswith('sk_test_') or secret_key.startswith('sk_live_')):
+            return jsonify({'success': False, 'message': 'Invalid secret key format'}), 400
+        
+        # Test the keys with Stripe API
+        try:
+            import stripe
+            stripe.api_key = secret_key
+            
+            # Make a test API call
+            account = stripe.Account.retrieve()
+            
+            # Determine if test or live mode
+            test_mode = 1 if secret_key.startswith('sk_test_') else 0
+            
+            # Encrypt and save credentials
+            from encryption_utils import encrypt
+            
+            credential_record = create_stripe_credentials(
+                stripe_publishable_key=publishable_key,
+                stripe_secret_key_encrypted=encrypt(secret_key),
+                test_mode=test_mode
+            )
+            
+            if credential_record:
+                # Mark as verified
+                update_stripe_credentials(
+                    credential_id=credential_record['credential_id'],
+                    verified=1
+                )
+                
+                # Update payment settings to use these credentials
+                update_payment_settings(
+                    payment_processor='stripe_direct',
+                    stripe_credential_id=credential_record['credential_id']
+                )
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Stripe credentials validated and saved',
+                    'credential_id': credential_record['credential_id'],
+                    'test_mode': test_mode,
+                    'account_id': account.id
+                })
+            else:
+                return jsonify({'success': False, 'message': 'Failed to save credentials'}), 500
+                
+        except stripe.error.AuthenticationError:
+            return jsonify({'success': False, 'message': 'Invalid API keys. Please check your credentials.'}), 400
+        except Exception as stripe_error:
+            return jsonify({
+                'success': False,
+                'message': f'Stripe error: {str(stripe_error)}'
+            }), 500
+            
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/config', methods=['GET'])
+def api_get_stripe_config():
+    """Get complete Stripe configuration (for payment processing)"""
+    try:
+        config = get_stripe_config()
+        if config:
+            # Don't expose decrypted keys in API response
+            safe_config = config.copy()
+            if 'stripe_connect' in safe_config:
+                safe_config['stripe_connect'] = {k: v for k, v in safe_config['stripe_connect'].items() 
+                                                 if k != 'access_token'}
+            if 'stripe_direct' in safe_config:
+                safe_config['stripe_direct'] = {k: v for k, v in safe_config['stripe_direct'].items() 
+                                               if k != 'secret_key'}
+            return jsonify({'success': True, 'config': safe_config})
+        else:
+            return jsonify({'success': True, 'config': {'payment_processor': 'cash_only'}})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================================
+# ONBOARDING API ENDPOINTS
+# ============================================================================
+
+@app.route('/api/onboarding/status', methods=['GET'])
+def api_get_onboarding_status():
+    """Get onboarding status"""
+    try:
+        status = get_onboarding_status()
+        return jsonify({
+            'success': True,
+            'setup_completed': status.get('setup_completed', False),
+            'setup_step': status.get('setup_step', 1)
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/onboarding/update-step', methods=['POST'])
+def api_update_onboarding_step():
+    """Update current onboarding step"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        step = data.get('step', 1)
+        
+        success = update_onboarding_step(step)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Step updated'})
+        else:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': 'Failed to update step. Check server logs for details.'}), 500
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/onboarding/step', methods=['POST'])
+def api_save_onboarding_step():
+    """Save onboarding step progress"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        step_name = data.get('step_name')
+        step_data = data.get('data')
+        
+        if not step_name:
+            return jsonify({'success': False, 'message': 'step_name is required'}), 400
+        
+        success = save_onboarding_progress(step_name, step_data)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Progress saved'})
+        else:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': 'Failed to save progress. Check server logs for details.'}), 500
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/onboarding/complete', methods=['POST'])
+def api_complete_onboarding():
+    """Complete onboarding process"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        
+        # Save all settings from onboarding data if provided
+        if request.is_json:
+            data = request.json
+            onboarding_data = data.get('data', {})
+            
+            # Save store info to receipt settings
+            if onboarding_data.get('storeInfo'):
+                store_info = onboarding_data['storeInfo']
+                
+                # Update receipt settings
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE receipt_settings SET
+                        store_name = ?,
+                        store_address = ?,
+                        store_city = ?,
+                        store_state = ?,
+                        store_zip = ?,
+                        store_phone = ?,
+                        store_email = ?,
+                        store_website = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = (SELECT id FROM receipt_settings ORDER BY id DESC LIMIT 1)
+                """, (
+                    store_info.get('store_name', ''),
+                    store_info.get('store_address', ''),
+                    store_info.get('store_city', ''),
+                    store_info.get('store_state', ''),
+                    store_info.get('store_zip', ''),
+                    store_info.get('store_phone', ''),
+                    store_info.get('store_email', ''),
+                    store_info.get('store_website', '')
+                ))
+                conn.commit()
+            
+            # Save preferences if provided
+            if onboarding_data.get('preferences'):
+                prefs = onboarding_data['preferences']
+                if prefs.get('receipt_footer_message'):
+                    cursor.execute("""
+                        UPDATE receipt_settings SET
+                            footer_message = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = (SELECT id FROM receipt_settings ORDER BY id DESC LIMIT 1)
+                    """, (prefs.get('receipt_footer_message'),))
+                    conn.commit()
+        
+        conn.close()
+        
+        # Mark onboarding as complete
+        success = complete_onboarding()
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Onboarding completed'})
+        else:
+            return jsonify({'success': False, 'message': 'Failed to complete onboarding'}), 500
+    except Exception as e:
+        traceback.print_exc()
+        if 'conn' in locals():
+            conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/customer-rewards-settings', methods=['GET'])
+def api_get_customer_rewards_settings():
+    """Get customer rewards settings"""
+    try:
+        settings = get_customer_rewards_settings()
+        return jsonify({'success': True, 'settings': settings})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/customer-rewards-settings', methods=['POST'])
+def api_update_customer_rewards_settings():
+    """Update customer rewards settings (admin only)"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        
+        # Verify session
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        
+        # Check if user is admin or has manage_settings permission
+        employee = get_employee(employee_id)
+        is_admin = employee and employee.get('position', '').lower() == 'admin'
+        
+        pm = get_permission_manager()
+        has_permission = pm.has_permission(employee_id, 'manage_settings')
+        
+        if not is_admin and not has_permission:
+            return jsonify({'success': False, 'message': 'Permission denied. Admin access or manage_settings permission required.'}), 403
+        
+        # Update settings
+        update_fields = {
+            'enabled': data.get('enabled'),
+            'require_email': data.get('require_email'),
+            'require_phone': data.get('require_phone'),
+            'require_both': data.get('require_both'),
+            'reward_type': data.get('reward_type'),
+            'points_per_dollar': data.get('points_per_dollar'),
+            'percentage_discount': data.get('percentage_discount'),
+            'fixed_discount': data.get('fixed_discount'),
+            'minimum_spend': data.get('minimum_spend')
+        }
+        
+        # Remove None values
+        update_fields = {k: v for k, v in update_fields.items() if v is not None}
+        
+        if update_fields:
+            success = update_customer_rewards_settings(**update_fields)
+            if success:
+                return jsonify({'success': True, 'message': 'Customer rewards settings updated successfully'})
+            else:
+                return jsonify({'success': False, 'message': 'Failed to update settings'}), 500
+        else:
+            return jsonify({'success': False, 'message': 'No fields to update'}), 400
+            
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/customer-display')
 def customer_display():
     """Render customer display page"""
@@ -4709,6 +5244,376 @@ def serve_upload(filename):
     except Exception as e:
         print(f"Error serving file {filename}: {e}")
         return jsonify({'error': 'File not found'}), 404
+
+# ============================================================================
+# SMS CRM API ENDPOINTS
+# ============================================================================
+
+@app.route('/api/sms/settings/<int:store_id>', methods=['GET', 'POST'])
+def api_sms_settings(store_id):
+    """Get or update SMS settings for a store"""
+    try:
+        if request.method == 'GET':
+            settings = sms_service.get_store_sms_settings(store_id)
+            if settings:
+                # Hide sensitive data
+                if settings.get('smtp_password'):
+                    settings['smtp_password'] = '***'
+                if settings.get('aws_secret_access_key'):
+                    settings['aws_secret_access_key'] = '***'
+                if settings.get('twilio_auth_token'):
+                    settings['twilio_auth_token'] = '***'
+            return jsonify(settings or {})
+        
+        # POST - Update settings
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        
+        # Verify session
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        employee = get_employee(employee_id)
+        is_admin = employee and employee.get('position', '').lower() == 'admin'
+        
+        pm = get_permission_manager()
+        has_permission = pm.has_permission(employee_id, 'manage_settings')
+        
+        if not is_admin and not has_permission:
+            return jsonify({'success': False, 'message': 'Permission denied'}), 403
+        
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT setting_id FROM sms_settings WHERE store_id = ?", (store_id,))
+        exists = cursor.fetchone()
+        
+        provider = data.get('sms_provider', 'email')
+        
+        if exists:
+            if provider == 'email':
+                cursor.execute("""
+                    UPDATE sms_settings SET
+                        sms_provider = ?,
+                        smtp_server = ?,
+                        smtp_port = ?,
+                        smtp_user = ?,
+                        smtp_password = ?,
+                        smtp_use_tls = ?,
+                        business_name = ?,
+                        store_phone_number = ?,
+                        auto_send_rewards_earned = ?,
+                        auto_send_rewards_redeemed = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE store_id = ?
+                """, (
+                    provider,
+                    data.get('smtp_server', 'smtp.gmail.com'),
+                    data.get('smtp_port', 587),
+                    data.get('smtp_user'),
+                    data.get('smtp_password'),
+                    data.get('smtp_use_tls', 1),
+                    data.get('business_name'),
+                    data.get('store_phone_number'),
+                    data.get('auto_send_rewards_earned', 1),
+                    data.get('auto_send_rewards_redeemed', 1),
+                    store_id
+                ))
+            elif provider == 'aws_sns':
+                cursor.execute("""
+                    UPDATE sms_settings SET
+                        sms_provider = ?,
+                        aws_access_key_id = ?,
+                        aws_secret_access_key = ?,
+                        aws_region = ?,
+                        business_name = ?,
+                        auto_send_rewards_earned = ?,
+                        auto_send_rewards_redeemed = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE store_id = ?
+                """, (
+                    provider,
+                    data.get('aws_access_key_id'),
+                    data.get('aws_secret_access_key'),
+                    data.get('aws_region', 'us-east-1'),
+                    data.get('business_name'),
+                    data.get('auto_send_rewards_earned', 1),
+                    data.get('auto_send_rewards_redeemed', 1),
+                    store_id
+                ))
+        else:
+            # Insert new settings
+            if provider == 'email':
+                cursor.execute("""
+                    INSERT INTO sms_settings (
+                        store_id, sms_provider, smtp_server, smtp_port,
+                        smtp_user, smtp_password, smtp_use_tls, business_name,
+                        auto_send_rewards_earned, auto_send_rewards_redeemed
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    store_id, provider,
+                    data.get('smtp_server', 'smtp.gmail.com'),
+                    data.get('smtp_port', 587),
+                    data.get('smtp_user'),
+                    data.get('smtp_password'),
+                    data.get('smtp_use_tls', 1),
+                    data.get('business_name'),
+                    data.get('auto_send_rewards_earned', 1),
+                    data.get('auto_send_rewards_redeemed', 1)
+                ))
+            elif provider == 'aws_sns':
+                cursor.execute("""
+                    INSERT INTO sms_settings (
+                        store_id, sms_provider, aws_access_key_id,
+                        aws_secret_access_key, aws_region, business_name,
+                        auto_send_rewards_earned, auto_send_rewards_redeemed
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    store_id, provider,
+                    data.get('aws_access_key_id'),
+                    data.get('aws_secret_access_key'),
+                    data.get('aws_region', 'us-east-1'),
+                    data.get('business_name'),
+                    data.get('auto_send_rewards_earned', 1),
+                    data.get('auto_send_rewards_redeemed', 1)
+                ))
+        
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sms/migrate-to-aws/<int:store_id>', methods=['POST'])
+def api_migrate_to_aws(store_id):
+    """Migrate store from email to AWS SNS"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        
+        # Verify session
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        result = sms_service.migrate_to_aws(
+            store_id=store_id,
+            aws_access_key=data.get('aws_access_key_id'),
+            aws_secret=data.get('aws_secret_access_key'),
+            region=data.get('aws_region', 'us-east-1')
+        )
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sms/send', methods=['POST'])
+def api_sms_send():
+    """Send SMS message"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        store_id = data.get('store_id', 1)
+        phone_number = data.get('phone_number')
+        message_text = data.get('message_text')
+        customer_id = data.get('customer_id')
+        
+        if not phone_number or not message_text:
+            return jsonify({'success': False, 'message': 'Phone number and message text required'}), 400
+        
+        # Verify session
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        employee_id = None
+        if session_token:
+            session_result = verify_session(session_token)
+            if session_result.get('valid'):
+                employee_id = session_result.get('employee_id')
+        
+        result = sms_service.send_sms(
+            store_id=store_id,
+            phone_number=phone_number,
+            message=message_text,
+            customer_id=customer_id,
+            employee_id=employee_id
+        )
+        
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sms/rewards/earned', methods=['POST'])
+def api_sms_rewards_earned():
+    """Automatically send rewards earned message"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        store_id = data.get('store_id', 1)
+        customer_id = data.get('customer_id')
+        points_earned = data.get('points_earned')
+        total_points = data.get('total_points')
+        
+        if not customer_id or points_earned is None or total_points is None:
+            return jsonify({'success': False, 'message': 'Missing required fields'}), 400
+        
+        result = sms_service.send_rewards_earned_message(
+            store_id=store_id,
+            customer_id=customer_id,
+            points_earned=points_earned,
+            total_points=total_points
+        )
+        
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sms/messages', methods=['GET'])
+def api_sms_messages():
+    """Get SMS messages"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        store_id = request.args.get('store_id')
+        customer_id = request.args.get('customer_id')
+        phone_number = request.args.get('phone_number')
+        status = request.args.get('status')
+        limit = int(request.args.get('limit', 100))
+        
+        query = """
+            SELECT 
+                sm.*,
+                c.customer_name,
+                e.first_name || ' ' || e.last_name as employee_name,
+                s.store_name
+            FROM sms_messages sm
+            LEFT JOIN customers c ON sm.customer_id = c.customer_id
+            LEFT JOIN employees e ON sm.created_by = e.employee_id
+            LEFT JOIN stores s ON sm.store_id = s.store_id
+            WHERE 1=1
+        """
+        params = []
+        
+        if store_id:
+            query += " AND sm.store_id = ?"
+            params.append(store_id)
+        
+        if customer_id:
+            query += " AND sm.customer_id = ?"
+            params.append(customer_id)
+        
+        if phone_number:
+            query += " AND sm.phone_number = ?"
+            params.append(phone_number)
+        
+        if status:
+            query += " AND sm.status = ?"
+            params.append(status)
+        
+        query += " ORDER BY sm.created_at DESC LIMIT ?"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return jsonify([dict(row) for row in rows])
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sms/templates', methods=['GET', 'POST'])
+def api_sms_templates():
+    """Get or create SMS templates"""
+    try:
+        if request.method == 'GET':
+            conn = sqlite3.connect(DB_NAME)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            store_id = request.args.get('store_id')
+            if store_id:
+                cursor.execute("SELECT * FROM sms_templates WHERE store_id = ? AND is_active = 1 ORDER BY template_name", (store_id,))
+            else:
+                cursor.execute("SELECT * FROM sms_templates WHERE is_active = 1 ORDER BY template_name")
+            
+            rows = cursor.fetchall()
+            conn.close()
+            return jsonify([dict(row) for row in rows])
+        
+        # POST - Create template
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        
+        # Verify session
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO sms_templates (store_id, template_name, template_text, category, variables, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            data.get('store_id', 1),
+            data.get('template_name'),
+            data.get('template_text'),
+            data.get('category', 'rewards'),
+            json.dumps(data.get('variables', [])),
+            employee_id
+        ))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/sms/stores', methods=['GET'])
+def api_sms_stores():
+    """Get all stores"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM stores WHERE is_active = 1 ORDER BY store_name")
+        rows = cursor.fetchall()
+        conn.close()
+        return jsonify([dict(row) for row in rows])
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 if __name__ == '__main__':
     print("Starting web viewer...")

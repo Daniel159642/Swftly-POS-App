@@ -2177,49 +2177,54 @@ def create_order(
                     'success': False,
                     'message': f'Insufficient inventory for product_id {product_id}. Available: {available_qty}, Requested: {quantity}',
                     'order_id': None
-                }        # Handle customer info if provided (for pickup/delivery orders)
+                }        # Handle customer info if provided (for pickup/delivery orders or rewards program)
         if customer_info and customer_info.get('name'):
             # Create or get customer
             customer_name = customer_info.get('name', '')
             customer_phone = customer_info.get('phone', '')
+            customer_email = customer_info.get('email', '')
             customer_address = customer_info.get('address', '') if order_type == 'delivery' else None
             
-            # Try to find existing customer by phone if phone is provided
+            # Try to find existing customer by phone or email
             if customer_phone:
                 cursor.execute("SELECT customer_id FROM customers WHERE phone = ?", (customer_phone,))
                 existing_customer = cursor.fetchone()
-                if existing_customer:
-                    customer_id = existing_customer['customer_id']
-                    # Update customer info if provided
-                    if customer_name or customer_address:
-                        update_fields = []
-                        update_values = []
-                        if customer_name:
-                            update_fields.append("customer_name = ?")
-                            update_values.append(customer_name)
-                        if customer_address:
-                            update_fields.append("address = ?")
-                            update_values.append(customer_address)
-                        if update_fields:
-                            update_values.append(customer_id)
-                            cursor.execute(f"""
-                                UPDATE customers 
-                                SET {', '.join(update_fields)}
-                                WHERE customer_id = ?
-                            """, update_values)
-                else:
-                    # Create new customer
-                    cursor.execute("""
-                        INSERT INTO customers (customer_name, phone, address)
-                        VALUES (?, ?, ?)
-                    """, (customer_name, customer_phone, customer_address))
-                    customer_id = cursor.lastrowid
+            elif customer_email:
+                cursor.execute("SELECT customer_id FROM customers WHERE email = ?", (customer_email,))
+                existing_customer = cursor.fetchone()
             else:
-                # No phone provided, create customer with just name
+                existing_customer = None
+            
+            if existing_customer:
+                customer_id = existing_customer['customer_id']
+                # Update customer info if provided
+                update_fields = []
+                update_values = []
+                if customer_name:
+                    update_fields.append("customer_name = ?")
+                    update_values.append(customer_name)
+                if customer_email:
+                    update_fields.append("email = ?")
+                    update_values.append(customer_email)
+                if customer_phone:
+                    update_fields.append("phone = ?")
+                    update_values.append(customer_phone)
+                if customer_address:
+                    update_fields.append("address = ?")
+                    update_values.append(customer_address)
+                if update_fields:
+                    update_values.append(customer_id)
+                    cursor.execute(f"""
+                        UPDATE customers 
+                        SET {', '.join(update_fields)}
+                        WHERE customer_id = ?
+                    """, update_values)
+            else:
+                # Create new customer
                 cursor.execute("""
-                    INSERT INTO customers (customer_name, address)
-                    VALUES (?, ?)
-                """, (customer_name, customer_address))
+                    INSERT INTO customers (customer_name, email, phone, address)
+                    VALUES (?, ?, ?, ?)
+                """, (customer_name, customer_email, customer_phone, customer_address))
                 customer_id = cursor.lastrowid
         
 
@@ -2341,6 +2346,43 @@ def create_order(
                     ) VALUES (?, ?, ?, ?, ?)
                 """, (employee_id, order_id, transaction_id, tip, payment_method))
         
+        # Track customer spending and award rewards if customer_id exists
+        rewards_info = {'points_earned': 0, 'discount_amount': 0.0, 'reward_type': 'points'}
+        if customer_id:
+            try:
+                # Get rewards settings
+                rewards_settings = get_customer_rewards_settings()
+                
+                if rewards_settings.get('enabled'):
+                    # Calculate rewards based on total (subtotal + tax, before discount and fees)
+                    amount_for_rewards = subtotal + total_tax
+                    rewards_info = calculate_rewards(amount_for_rewards, rewards_settings)
+                    
+                    # Update customer total_spent
+                    cursor.execute("""
+                        UPDATE customers 
+                        SET total_spent = COALESCE(total_spent, 0) + ?
+                        WHERE customer_id = ?
+                    """, (amount_for_rewards, customer_id))
+                    
+                    # Award rewards based on type
+                    if rewards_info['reward_type'] == 'points' and rewards_info['points_earned'] > 0:
+                        # Add points to customer
+                        cursor.execute("""
+                            UPDATE customers 
+                            SET loyalty_points = COALESCE(loyalty_points, 0) + ?
+                            WHERE customer_id = ?
+                        """, (rewards_info['points_earned'], customer_id))
+                    elif rewards_info['discount_amount'] > 0:
+                        # Apply discount to order if reward type is percentage or fixed
+                        # Note: This is for future use - currently discount is handled separately
+                        pass
+            except Exception as e:
+                # Don't fail the order if rewards calculation fails
+                print(f"Error calculating rewards: {e}")
+                import traceback
+                traceback.print_exc()
+        
         conn.commit()
         conn.close()
         
@@ -2352,6 +2394,7 @@ def create_order(
             'tax_amount': total_tax,
             'transaction_fee': transaction_fee,
             'total': total,
+            'rewards': rewards_info,
             'message': f'Order {order_number} processed successfully'
         }
         
@@ -6237,3 +6280,740 @@ def validate_location(latitude: float, longitude: float) -> Dict[str, Any]:
             'message': f'Location too far from store ({distance:.0f}m away, allowed: {allowed_radius:.0f}m)',
             'distance': distance
         }
+
+def get_customer_rewards_settings() -> Optional[Dict[str, Any]]:
+    """Get customer rewards settings"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT * FROM customer_rewards_settings 
+        ORDER BY id DESC 
+        LIMIT 1
+    """)
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        # Return defaults if no settings exist
+        return {
+            'enabled': 0,
+            'require_email': 0,
+            'require_phone': 0,
+            'require_both': 0,
+            'reward_type': 'points',
+            'points_per_dollar': 1.0,
+            'percentage_discount': 0.0,
+            'fixed_discount': 0.0,
+            'minimum_spend': 0.0
+        }
+    
+    return dict(row)
+
+def update_customer_rewards_settings(**kwargs) -> bool:
+    """Update customer rewards settings"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Check if settings exist
+        cursor.execute("SELECT COUNT(*) FROM customer_rewards_settings")
+        count = cursor.fetchone()[0]
+        
+        allowed_fields = [
+            'enabled', 'require_email', 'require_phone', 'require_both',
+            'reward_type', 'points_per_dollar', 'percentage_discount',
+            'fixed_discount', 'minimum_spend'
+        ]
+        
+        if count == 0:
+            # Create new settings with defaults
+            insert_fields = []
+            insert_placeholders = []
+            insert_values = []
+            
+            defaults = {
+                'enabled': 0,
+                'require_email': 0,
+                'require_phone': 0,
+                'require_both': 0,
+                'reward_type': 'points',
+                'points_per_dollar': 1.0,
+                'percentage_discount': 0.0,
+                'fixed_discount': 0.0,
+                'minimum_spend': 0.0
+            }
+            
+            for field in allowed_fields:
+                insert_fields.append(field)
+                insert_placeholders.append('?')
+                insert_values.append(kwargs.get(field, defaults.get(field)))
+            
+            cursor.execute(f"""
+                INSERT INTO customer_rewards_settings ({', '.join(insert_fields)})
+                VALUES ({', '.join(insert_placeholders)})
+            """, insert_values)
+        else:
+            # Update existing settings
+            updates = []
+            params = []
+            
+            for field in allowed_fields:
+                if field in kwargs:
+                    updates.append(f"{field} = ?")
+                    params.append(kwargs[field])
+            
+            if updates:
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                cursor.execute(f"""
+                    UPDATE customer_rewards_settings 
+                    SET {', '.join(updates)}
+                    WHERE id = (SELECT id FROM customer_rewards_settings ORDER BY id DESC LIMIT 1)
+                """, params)
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating customer rewards settings: {e}")
+        import traceback
+        traceback.print_exc()
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+def calculate_rewards(amount_spent: float, settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Calculate rewards based on amount spent and settings
+    
+    Returns: dict with 'points_earned', 'discount_amount', 'reward_type'
+    """
+    if settings is None:
+        settings = get_customer_rewards_settings()
+    
+    if not settings.get('enabled'):
+        return {'points_earned': 0, 'discount_amount': 0.0, 'reward_type': settings.get('reward_type', 'points')}
+    
+    minimum_spend = settings.get('minimum_spend', 0.0)
+    if amount_spent < minimum_spend:
+        return {'points_earned': 0, 'discount_amount': 0.0, 'reward_type': settings.get('reward_type', 'points')}
+    
+    reward_type = settings.get('reward_type', 'points')
+    
+    if reward_type == 'points':
+        points_per_dollar = settings.get('points_per_dollar', 1.0)
+        points_earned = int(amount_spent * points_per_dollar)
+        return {'points_earned': points_earned, 'discount_amount': 0.0, 'reward_type': 'points'}
+    elif reward_type == 'percentage':
+        percentage = settings.get('percentage_discount', 0.0)
+        discount_amount = amount_spent * (percentage / 100.0)
+        return {'points_earned': 0, 'discount_amount': discount_amount, 'reward_type': 'percentage'}
+    elif reward_type == 'fixed':
+        fixed_discount = settings.get('fixed_discount', 0.0)
+        return {'points_earned': 0, 'discount_amount': fixed_discount, 'reward_type': 'fixed'}
+    
+    return {'points_earned': 0, 'discount_amount': 0.0, 'reward_type': reward_type}
+
+# ============================================================================
+# STRIPE INTEGRATION FUNCTIONS
+# ============================================================================
+
+def get_payment_settings(store_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Get payment settings for store (or default if single store)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    if store_id:
+        cursor.execute("""
+            SELECT * FROM payment_settings 
+            WHERE store_id = ?
+            ORDER BY setting_id DESC 
+            LIMIT 1
+        """, (store_id,))
+    else:
+        cursor.execute("""
+            SELECT * FROM payment_settings 
+            ORDER BY setting_id DESC 
+            LIMIT 1
+        """)
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    
+    return dict(row)
+
+def update_payment_settings(
+    store_id: Optional[int] = None,
+    payment_processor: Optional[str] = None,
+    stripe_account_id: Optional[int] = None,
+    stripe_credential_id: Optional[int] = None,
+    default_currency: Optional[str] = None,
+    transaction_fee_rate: Optional[float] = None,
+    transaction_fee_fixed: Optional[float] = None,
+    enabled_payment_methods: Optional[str] = None,
+    require_cvv: Optional[int] = None,
+    require_zip: Optional[int] = None,
+    auto_capture: Optional[int] = None
+) -> bool:
+    """Update payment settings"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Check if settings exist
+        if store_id:
+            cursor.execute("SELECT COUNT(*) FROM payment_settings WHERE store_id = ?", (store_id,))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM payment_settings")
+        count = cursor.fetchone()[0]
+        
+        if count == 0:
+            # Create new settings
+            cursor.execute("""
+                INSERT INTO payment_settings (
+                    store_id, payment_processor, stripe_account_id, stripe_credential_id,
+                    default_currency, transaction_fee_rate, transaction_fee_fixed,
+                    enabled_payment_methods, require_cvv, require_zip, auto_capture
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                store_id,
+                payment_processor or 'cash_only',
+                stripe_account_id,
+                stripe_credential_id,
+                default_currency or 'usd',
+                transaction_fee_rate or 0.029,
+                transaction_fee_fixed or 0.30,
+                enabled_payment_methods or '["cash"]',
+                require_cvv if require_cvv is not None else 1,
+                require_zip if require_zip is not None else 0,
+                auto_capture if auto_capture is not None else 1
+            ))
+        else:
+            # Update existing settings
+            updates = []
+            params = []
+            
+            if payment_processor is not None:
+                updates.append("payment_processor = ?")
+                params.append(payment_processor)
+            if stripe_account_id is not None:
+                updates.append("stripe_account_id = ?")
+                params.append(stripe_account_id)
+            if stripe_credential_id is not None:
+                updates.append("stripe_credential_id = ?")
+                params.append(stripe_credential_id)
+            if default_currency is not None:
+                updates.append("default_currency = ?")
+                params.append(default_currency)
+            if transaction_fee_rate is not None:
+                updates.append("transaction_fee_rate = ?")
+                params.append(transaction_fee_rate)
+            if transaction_fee_fixed is not None:
+                updates.append("transaction_fee_fixed = ?")
+                params.append(transaction_fee_fixed)
+            if enabled_payment_methods is not None:
+                updates.append("enabled_payment_methods = ?")
+                params.append(enabled_payment_methods)
+            if require_cvv is not None:
+                updates.append("require_cvv = ?")
+                params.append(require_cvv)
+            if require_zip is not None:
+                updates.append("require_zip = ?")
+                params.append(require_zip)
+            if auto_capture is not None:
+                updates.append("auto_capture = ?")
+                params.append(auto_capture)
+            
+            if updates:
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                
+                if store_id:
+                    query = f"""
+                        UPDATE payment_settings 
+                        SET {', '.join(updates)}
+                        WHERE store_id = ?
+                    """
+                    params.append(store_id)
+                else:
+                    query = f"""
+                        UPDATE payment_settings 
+                        SET {', '.join(updates)}
+                        WHERE setting_id = (SELECT setting_id FROM payment_settings ORDER BY setting_id DESC LIMIT 1)
+                    """
+                
+                cursor.execute(query, params)
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        import traceback
+        traceback.print_exc()
+        print(f"Error updating payment settings: {e}")
+        return False
+
+def create_stripe_connect_account(
+    store_id: Optional[int] = None,
+    account_type: str = 'express',
+    email: Optional[str] = None,
+    country: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Create a Stripe Connect account record"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO stripe_accounts (
+                store_id, stripe_account_type, email, country
+            ) VALUES (?, ?, ?, ?)
+        """, (store_id, account_type, email, country))
+        
+        account_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return {'stripe_account_id': account_id, 'success': True}
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"Error creating Stripe Connect account: {e}")
+        return None
+
+def update_stripe_connect_account(
+    stripe_account_id: int,
+    stripe_connected_account_id: Optional[str] = None,
+    stripe_publishable_key: Optional[str] = None,
+    stripe_access_token_encrypted: Optional[str] = None,
+    stripe_refresh_token_encrypted: Optional[str] = None,
+    onboarding_completed: Optional[int] = None,
+    onboarding_link: Optional[str] = None,
+    onboarding_link_expires_at: Optional[str] = None,
+    charges_enabled: Optional[int] = None,
+    payouts_enabled: Optional[int] = None,
+    country: Optional[str] = None,
+    email: Optional[str] = None,
+    business_type: Optional[str] = None
+) -> bool:
+    """Update Stripe Connect account"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        updates = []
+        params = []
+        
+        if stripe_connected_account_id is not None:
+            updates.append("stripe_connected_account_id = ?")
+            params.append(stripe_connected_account_id)
+        if stripe_publishable_key is not None:
+            updates.append("stripe_publishable_key = ?")
+            params.append(stripe_publishable_key)
+        if stripe_access_token_encrypted is not None:
+            updates.append("stripe_access_token_encrypted = ?")
+            params.append(stripe_access_token_encrypted)
+        if stripe_refresh_token_encrypted is not None:
+            updates.append("stripe_refresh_token_encrypted = ?")
+            params.append(stripe_refresh_token_encrypted)
+        if onboarding_completed is not None:
+            updates.append("onboarding_completed = ?")
+            params.append(onboarding_completed)
+        if onboarding_link is not None:
+            updates.append("onboarding_link = ?")
+            params.append(onboarding_link)
+        if onboarding_link_expires_at is not None:
+            updates.append("onboarding_link_expires_at = ?")
+            params.append(onboarding_link_expires_at)
+        if charges_enabled is not None:
+            updates.append("charges_enabled = ?")
+            params.append(charges_enabled)
+        if payouts_enabled is not None:
+            updates.append("payouts_enabled = ?")
+            params.append(payouts_enabled)
+        if country is not None:
+            updates.append("country = ?")
+            params.append(country)
+        if email is not None:
+            updates.append("email = ?")
+            params.append(email)
+        if business_type is not None:
+            updates.append("business_type = ?")
+            params.append(business_type)
+        
+        if updates:
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(stripe_account_id)
+            
+            query = f"""
+                UPDATE stripe_accounts 
+                SET {', '.join(updates)}
+                WHERE stripe_account_id = ?
+            """
+            cursor.execute(query, params)
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"Error updating Stripe Connect account: {e}")
+        return False
+
+def get_stripe_connect_account(stripe_account_id: int) -> Optional[Dict[str, Any]]:
+    """Get Stripe Connect account by ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT * FROM stripe_accounts 
+        WHERE stripe_account_id = ?
+    """, (stripe_account_id,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    
+    return dict(row)
+
+def create_stripe_credentials(
+    store_id: Optional[int] = None,
+    stripe_publishable_key: str = '',
+    stripe_secret_key_encrypted: str = '',
+    webhook_secret_encrypted: Optional[str] = None,
+    test_mode: int = 0
+) -> Optional[Dict[str, Any]]:
+    """Create Stripe credentials record (for direct API keys)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO stripe_credentials (
+                store_id, stripe_publishable_key, stripe_secret_key_encrypted,
+                webhook_secret_encrypted, test_mode
+            ) VALUES (?, ?, ?, ?, ?)
+        """, (store_id, stripe_publishable_key, stripe_secret_key_encrypted, 
+              webhook_secret_encrypted, test_mode))
+        
+        credential_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return {'credential_id': credential_id, 'success': True}
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"Error creating Stripe credentials: {e}")
+        return None
+
+def update_stripe_credentials(
+    credential_id: int,
+    stripe_publishable_key: Optional[str] = None,
+    stripe_secret_key_encrypted: Optional[str] = None,
+    webhook_secret_encrypted: Optional[str] = None,
+    test_mode: Optional[int] = None,
+    verified: Optional[int] = None
+) -> bool:
+    """Update Stripe credentials"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        updates = []
+        params = []
+        
+        if stripe_publishable_key is not None:
+            updates.append("stripe_publishable_key = ?")
+            params.append(stripe_publishable_key)
+        if stripe_secret_key_encrypted is not None:
+            updates.append("stripe_secret_key_encrypted = ?")
+            params.append(stripe_secret_key_encrypted)
+        if webhook_secret_encrypted is not None:
+            updates.append("webhook_secret_encrypted = ?")
+            params.append(webhook_secret_encrypted)
+        if test_mode is not None:
+            updates.append("test_mode = ?")
+            params.append(test_mode)
+        if verified is not None:
+            updates.append("verified = ?")
+            params.append(verified)
+            updates.append("last_verified_at = CURRENT_TIMESTAMP")
+        
+        if updates:
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(credential_id)
+            
+            query = f"""
+                UPDATE stripe_credentials 
+                SET {', '.join(updates)}
+                WHERE credential_id = ?
+            """
+            cursor.execute(query, params)
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"Error updating Stripe credentials: {e}")
+        return False
+
+def get_stripe_credentials(credential_id: int) -> Optional[Dict[str, Any]]:
+    """Get Stripe credentials by ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT * FROM stripe_credentials 
+        WHERE credential_id = ?
+    """, (credential_id,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return None
+    
+    return dict(row)
+
+def get_stripe_config(store_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """
+    Get complete Stripe configuration for store
+    Returns decrypted keys and all relevant settings
+    """
+    from encryption_utils import decrypt
+    
+    payment_settings = get_payment_settings(store_id)
+    if not payment_settings:
+        return None
+    
+    config = {
+        'payment_processor': payment_settings.get('payment_processor', 'cash_only'),
+        'default_currency': payment_settings.get('default_currency', 'usd'),
+        'transaction_fee_rate': payment_settings.get('transaction_fee_rate', 0.029),
+        'transaction_fee_fixed': payment_settings.get('transaction_fee_fixed', 0.30),
+        'enabled_payment_methods': json.loads(payment_settings.get('enabled_payment_methods', '["cash"]')),
+        'require_cvv': payment_settings.get('require_cvv', 1),
+        'require_zip': payment_settings.get('require_zip', 0),
+        'auto_capture': payment_settings.get('auto_capture', 1)
+    }
+    
+    # Get Stripe Connect account if configured
+    if payment_settings.get('stripe_account_id'):
+        connect_account = get_stripe_connect_account(payment_settings['stripe_account_id'])
+        if connect_account:
+            config['stripe_connect'] = {
+                'account_id': connect_account['stripe_connected_account_id'],
+                'publishable_key': connect_account.get('stripe_publishable_key'),
+                'charges_enabled': connect_account.get('charges_enabled', 0),
+                'payouts_enabled': connect_account.get('payouts_enabled', 0),
+                'onboarding_completed': connect_account.get('onboarding_completed', 0)
+            }
+            # Decrypt tokens if present
+            if connect_account.get('stripe_access_token_encrypted'):
+                try:
+                    config['stripe_connect']['access_token'] = decrypt(connect_account['stripe_access_token_encrypted'])
+                except:
+                    pass
+    
+    # Get Direct API keys if configured
+    if payment_settings.get('stripe_credential_id'):
+        credentials = get_stripe_credentials(payment_settings['stripe_credential_id'])
+        if credentials:
+            config['stripe_direct'] = {
+                'publishable_key': credentials.get('stripe_publishable_key'),
+                'test_mode': credentials.get('test_mode', 0),
+                'verified': credentials.get('verified', 0)
+            }
+            # Decrypt secret key
+            if credentials.get('stripe_secret_key_encrypted'):
+                try:
+                    config['stripe_direct']['secret_key'] = decrypt(credentials['stripe_secret_key_encrypted'])
+                except:
+                    pass
+    
+    return config
+
+# ============================================================================
+# ONBOARDING SYSTEM FUNCTIONS
+# ============================================================================
+
+def get_onboarding_status() -> Dict[str, Any]:
+    """Get current onboarding status"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT * FROM store_setup 
+        ORDER BY setup_id DESC 
+        LIMIT 1
+    """)
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return {
+            'setup_completed': False,
+            'setup_step': 1,
+            'completed_at': None
+        }
+    
+    return {
+        'setup_completed': bool(dict(row).get('setup_completed', 0)),
+        'setup_step': dict(row).get('setup_step', 1),
+        'completed_at': dict(row).get('completed_at')
+    }
+
+def update_onboarding_step(step: int) -> bool:
+    """Update current onboarding step"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("SELECT COUNT(*) FROM store_setup")
+        count = cursor.fetchone()[0]
+        
+        if count == 0:
+            cursor.execute("""
+                INSERT INTO store_setup (setup_step)
+                VALUES (?)
+            """, (step,))
+        else:
+            cursor.execute("""
+                UPDATE store_setup 
+                SET setup_step = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE setup_id = (SELECT setup_id FROM store_setup ORDER BY setup_id DESC LIMIT 1)
+            """, (step,))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        import traceback
+        traceback.print_exc()
+        print(f"Error updating onboarding step: {e}")
+        return False
+
+def complete_onboarding() -> bool:
+    """Mark onboarding as complete"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            UPDATE store_setup 
+            SET setup_completed = 1, 
+                setup_step = 6,
+                completed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE setup_id = (SELECT setup_id FROM store_setup ORDER BY setup_id DESC LIMIT 1)
+        """)
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"Error completing onboarding: {e}")
+        return False
+
+def save_onboarding_progress(step_name: str, data: Optional[Dict[str, Any]] = None) -> bool:
+    """Save progress for a specific onboarding step"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Check if progress exists
+        cursor.execute("""
+            SELECT progress_id FROM onboarding_progress 
+            WHERE step_name = ?
+        """, (step_name,))
+        
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing
+            cursor.execute("""
+                UPDATE onboarding_progress 
+                SET completed = 1,
+                    completed_at = CURRENT_TIMESTAMP,
+                    data = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE step_name = ?
+            """, (json.dumps(data) if data else None, step_name))
+        else:
+            # Create new
+            cursor.execute("""
+                INSERT INTO onboarding_progress (step_name, completed, data)
+                VALUES (?, 1, ?)
+            """, (step_name, json.dumps(data) if data else None))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        import traceback
+        traceback.print_exc()
+        print(f"Error saving onboarding progress: {e}")
+        return False
+
+def get_onboarding_progress(step_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Get onboarding progress for a specific step or all steps"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        if step_name:
+            cursor.execute("""
+                SELECT * FROM onboarding_progress 
+                WHERE step_name = ?
+            """, (step_name,))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if not row:
+                return None
+            
+            result = dict(row)
+            if result.get('data'):
+                result['data'] = json.loads(result['data'])
+            return result
+        else:
+            cursor.execute("""
+                SELECT * FROM onboarding_progress 
+                ORDER BY created_at
+            """)
+            rows = cursor.fetchall()
+            conn.close()
+            
+            progress = {}
+            for row in rows:
+                step = dict(row)
+                if step.get('data'):
+                    step['data'] = json.loads(step['data'])
+                progress[step['step_name']] = step
+            
+            return progress
+    except Exception as e:
+        conn.close()
+        print(f"Error getting onboarding progress: {e}")
+        return None

@@ -17,6 +17,7 @@ import ShipmentVerification from './pages/ShipmentVerification'
 import StatisticsPage from './pages/Statistics'
 import Settings from './pages/Settings'
 import Accounting from './pages/Accounting'
+import Onboarding from './pages/Onboarding'
 import './index.css'
 
 function ProtectedRoute({ children, sessionToken, employee, onLogout }) {
@@ -28,6 +29,8 @@ function ProtectedRoute({ children, sessionToken, employee, onLogout }) {
 
 function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLogout }) {
   const { fetchPermissions, setEmployee: setPermissionEmployee } = usePermissions()
+  const [onboardingChecked, setOnboardingChecked] = useState(false)
+  const [onboardingRequired, setOnboardingRequired] = useState(false)
   
   useEffect(() => {
     if (employee?.employee_id) {
@@ -36,9 +39,66 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
     }
   }, [employee?.employee_id])
   
+  useEffect(() => {
+    // Check onboarding status on mount
+    checkOnboardingStatus()
+  }, [])
+  
+  const checkOnboardingStatus = async () => {
+    try {
+      const response = await fetch('/api/onboarding/status')
+      const data = await response.json()
+      
+      if (!data.setup_completed) {
+        setOnboardingRequired(true)
+      }
+      setOnboardingChecked(true)
+    } catch (err) {
+      console.error('Error checking onboarding status:', err)
+      setOnboardingChecked(true)
+    }
+  }
+  
+  if (!onboardingChecked) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        backgroundColor: 'var(--bg-secondary, #f5f5f5)'
+      }}>
+        <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>
+          Loading...
+        </div>
+      </div>
+    )
+  }
+  
   return (
     <Routes>
+      <Route path="/onboarding" element={<Onboarding />} />
       <Route path="/login" element={
+        onboardingRequired && !sessionToken ? (
+          <Navigate to="/onboarding" replace />
+        ) : (
+          sessionToken && employee ? <Navigate to="/dashboard" replace /> : <Login onLogin={(result) => {
+            if (result.success) {
+              setSessionToken(result.session_token)
+              setEmployee({
+                employee_id: result.employee_id,
+                employee_name: result.employee_name,
+                position: result.position
+              })
+              localStorage.setItem('sessionToken', result.session_token)
+            }
+          }} />
+        )
+      } />
+      {onboardingRequired && !sessionToken && (
+        <Route path="*" element={<Navigate to="/onboarding" replace />} />
+      )}
+      <Route path="/dashboard" element={
         sessionToken && employee ? <Navigate to="/dashboard" replace /> : <Login onLogin={(result) => {
           if (result.success) {
             setSessionToken(result.session_token)
@@ -156,7 +216,13 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
           </Layout>
         </ProtectedRoute>
       } />
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/" element={
+        onboardingRequired && !sessionToken ? (
+          <Navigate to="/onboarding" replace />
+        ) : (
+          <Navigate to="/dashboard" replace />
+        )
+      } />
     </Routes>
   )
 }
