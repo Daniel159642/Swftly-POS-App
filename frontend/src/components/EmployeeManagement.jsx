@@ -162,6 +162,24 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
   const [roles, setRoles] = useState([]);
   const [availability, setAvailability] = useState({});
   const [expandedRow, setExpandedRow] = useState(null);
+  const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
+  const [newEmployee, setNewEmployee] = useState({
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone: '',
+    position: 'cashier',
+    date_started: new Date().toISOString().split('T')[0],
+    account_type: 'pin_only', // 'pin_only' or 'clerk_master'
+    pin_code: '',
+    role_id: null,
+    department: '',
+    hourly_rate: '',
+    employment_type: 'part_time'
+  });
+  const [creatingEmployee, setCreatingEmployee] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [createSuccess, setCreateSuccess] = useState(null);
   
   // Determine if dark mode is active
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -271,8 +289,624 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
     );
   }
 
+  const handleGeneratePin = () => {
+    // Generate a 6-digit PIN
+    const pin = Math.floor(100000 + Math.random() * 900000).toString()
+    setNewEmployee({...newEmployee, pin_code: pin})
+  }
+
+  const handleAddEmployee = async (e) => {
+    e.preventDefault()
+    setCreatingEmployee(true)
+    setCreateError('')
+    setCreateSuccess(null)
+
+    try {
+      const employeeData = {
+        ...newEmployee,
+        hourly_rate: newEmployee.hourly_rate ? parseFloat(newEmployee.hourly_rate) : null,
+        role_id: newEmployee.role_id || null
+      }
+
+      // Remove empty optional fields
+      Object.keys(employeeData).forEach(key => {
+        if (employeeData[key] === '' || employeeData[key] === null) {
+          delete employeeData[key]
+        }
+      })
+
+      const response = await fetch('/api/admin/employees', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(employeeData)
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create employee')
+      }
+
+      // Show success message with PIN if generated
+      setCreateSuccess({
+        message: data.account_type === 'clerk_master' 
+          ? `Employee created! Invitation email sent to ${newEmployee.email}`
+          : `Employee created! PIN: ${data.generated_pin || newEmployee.pin_code}`,
+        employee: data.employee,
+        account_type: data.account_type,
+        generated_pin: data.generated_pin,
+        invitation_sent: data.invitation_sent
+      })
+
+      // Reset form
+      setNewEmployee({
+        first_name: '',
+        last_name: '',
+        email: '',
+        phone: '',
+        position: 'cashier',
+        date_started: new Date().toISOString().split('T')[0],
+        account_type: 'pin_only',
+        pin_code: '',
+        role_id: null,
+        department: '',
+        hourly_rate: '',
+        employment_type: 'part_time'
+      })
+
+      // Reload employees list
+      setTimeout(() => {
+        onRefresh()
+        setShowAddEmployeeModal(false)
+        setCreateSuccess(null)
+      }, 3000)
+
+    } catch (err) {
+      setCreateError(err.message || 'Failed to create employee')
+    } finally {
+      setCreatingEmployee(false)
+    }
+  }
+
   return (
     <div>
+      {/* Add Employee Button */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: '20px' 
+      }}>
+        <h2 style={{ 
+          margin: 0, 
+          fontSize: '24px', 
+          fontWeight: 600,
+          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+        }}>
+          Employees
+        </h2>
+        <button
+          onClick={() => setShowAddEmployeeModal(true)}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            color: '#fff',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            borderRadius: '8px',
+            fontSize: '16px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+            transition: 'all 0.3s ease'
+          }}
+          onMouseEnter={(e) => {
+            e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.85)`
+            e.target.style.boxShadow = `0 6px 20px rgba(${themeColorRgb}, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25)`
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+            e.target.style.boxShadow = `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+          }}
+        >
+          + Add Employee
+        </button>
+      </div>
+
+      {/* Add Employee Modal */}
+      {showAddEmployeeModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '20px'
+        }}>
+          <div style={{
+            backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+            borderRadius: '12px',
+            padding: '32px',
+            width: '100%',
+            maxWidth: '600px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '24px'
+            }}>
+              <h2 style={{
+                margin: 0,
+                fontSize: '24px',
+                fontWeight: 600,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Add New Employee
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAddEmployeeModal(false)
+                  setCreateError('')
+                  setCreateSuccess(null)
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
+                  padding: '4px 8px'
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleAddEmployee}>
+              {/* Basic Information */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  marginBottom: '8px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  First Name *
+                </label>
+                <input
+                  type="text"
+                  value={newEmployee.first_name}
+                  onChange={(e) => setNewEmployee({...newEmployee, first_name: e.target.value})}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  marginBottom: '8px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Last Name *
+                </label>
+                <input
+                  type="text"
+                  value={newEmployee.last_name}
+                  onChange={(e) => setNewEmployee({...newEmployee, last_name: e.target.value})}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Account Type Selection */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  marginBottom: '12px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Account Type *
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '12px',
+                    border: `2px solid ${
+                      newEmployee.account_type === 'pin_only' 
+                        ? `rgba(${themeColorRgb}, 0.7)` 
+                        : (isDarkMode ? 'var(--border-light, #404040)' : '#ddd')
+                    }`,
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    backgroundColor: newEmployee.account_type === 'pin_only' 
+                      ? `rgba(${themeColorRgb}, 0.1)` 
+                      : 'transparent'
+                  }}>
+                    <input
+                      type="radio"
+                      value="pin_only"
+                      checked={newEmployee.account_type === 'pin_only'}
+                      onChange={(e) => setNewEmployee({...newEmployee, account_type: e.target.value, email: ''})}
+                      style={{ marginRight: '12px' }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 600, marginBottom: '4px' }}>PIN Only</div>
+                      <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>
+                        Employee can only access when admin logs in through master login
+                      </div>
+                    </div>
+                  </label>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '12px',
+                    border: `2px solid ${
+                      newEmployee.account_type === 'clerk_master' 
+                        ? `rgba(${themeColorRgb}, 0.7)` 
+                        : (isDarkMode ? 'var(--border-light, #404040)' : '#ddd')
+                    }`,
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    backgroundColor: newEmployee.account_type === 'clerk_master' 
+                      ? `rgba(${themeColorRgb}, 0.1)` 
+                      : 'transparent'
+                  }}>
+                    <input
+                      type="radio"
+                      value="clerk_master"
+                      checked={newEmployee.account_type === 'clerk_master'}
+                      onChange={(e) => setNewEmployee({...newEmployee, account_type: e.target.value})}
+                      style={{ marginRight: '12px' }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 600, marginBottom: '4px' }}>Master Login</div>
+                      <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>
+                        Employee gets their own Clerk account and onboarding link via email
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Email - required for Clerk master login */}
+              {newEmployee.account_type === 'clerk_master' && (
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{
+                    display: 'block',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    marginBottom: '8px',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    Email Address * <span style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>(For Clerk account invitation)</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={newEmployee.email}
+                    onChange={(e) => setNewEmployee({...newEmployee, email: e.target.value})}
+                    required={newEmployee.account_type === 'clerk_master'}
+                    placeholder="employee@example.com"
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* PIN Section for PIN-only accounts */}
+              {newEmployee.account_type === 'pin_only' && (
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{
+                    display: 'block',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    marginBottom: '8px',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    PIN Code
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      value={newEmployee.pin_code}
+                      onChange={(e) => setNewEmployee({...newEmployee, pin_code: e.target.value.replace(/\D/g, '').slice(0, 6)})}
+                      placeholder="Leave empty to auto-generate"
+                      maxLength="6"
+                      style={{
+                        flex: 1,
+                        padding: '12px',
+                        border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                        borderRadius: '8px',
+                        fontSize: '14px',
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleGeneratePin}
+                      style={{
+                        padding: '12px 20px',
+                        backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      Generate
+                    </button>
+                  </div>
+                  <div style={{
+                    fontSize: '12px',
+                    color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
+                    marginTop: '4px'
+                  }}>
+                    {newEmployee.pin_code ? `PIN: ${newEmployee.pin_code}` : 'A 6-digit PIN will be generated automatically'}
+                  </div>
+                </div>
+              )}
+
+              {/* Position */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  marginBottom: '8px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Position *
+                </label>
+                <select
+                  value={newEmployee.position}
+                  onChange={(e) => setNewEmployee({...newEmployee, position: e.target.value})}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="cashier">Cashier</option>
+                  <option value="stock_clerk">Stock Clerk</option>
+                  <option value="manager">Manager</option>
+                  <option value="supervisor">Supervisor</option>
+                  <option value="assistant_manager">Assistant Manager</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+
+              {/* Date Started */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  marginBottom: '8px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Date Started *
+                </label>
+                <input
+                  type="date"
+                  value={newEmployee.date_started}
+                  onChange={(e) => setNewEmployee({...newEmployee, date_started: e.target.value})}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Phone (optional) */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  marginBottom: '8px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Phone (Optional)
+                </label>
+                <input
+                  type="tel"
+                  value={newEmployee.phone}
+                  onChange={(e) => setNewEmployee({...newEmployee, phone: e.target.value})}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Role Selection */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  marginBottom: '8px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Role (Optional)
+                </label>
+                <select
+                  value={newEmployee.role_id || ''}
+                  onChange={(e) => setNewEmployee({...newEmployee, role_id: e.target.value ? parseInt(e.target.value) : null})}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="">No Role</option>
+                  {roles.map(role => (
+                    <option key={role.role_id} value={role.role_id}>{role.role_name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Error Message */}
+              {createError && (
+                <div style={{
+                  padding: '12px',
+                  backgroundColor: '#ffebee',
+                  color: '#d32f2f',
+                  borderRadius: '8px',
+                  marginBottom: '20px',
+                  fontSize: '14px'
+                }}>
+                  {createError}
+                </div>
+              )}
+
+              {/* Success Message */}
+              {createSuccess && (
+                <div style={{
+                  padding: '12px',
+                  backgroundColor: '#e8f5e9',
+                  color: '#2e7d32',
+                  borderRadius: '8px',
+                  marginBottom: '20px',
+                  fontSize: '14px'
+                }}>
+                  {createSuccess.message}
+                  {createSuccess.generated_pin && (
+                    <div style={{ marginTop: '8px', fontWeight: 600 }}>
+                      PIN: {createSuccess.generated_pin}
+                    </div>
+                  )}
+                  {createSuccess.invitation_sent && (
+                    <div style={{ marginTop: '8px', fontSize: '12px' }}>
+                      Employee will receive an email with onboarding instructions.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Form Actions */}
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddEmployeeModal(false)
+                    setCreateError('')
+                    setCreateSuccess(null)
+                  }}
+                  style={{
+                    padding: '12px 24px',
+                    backgroundColor: 'transparent',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                    borderRadius: '8px',
+                    fontSize: '16px',
+                    fontWeight: 500,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingEmployee}
+                  style={{
+                    padding: '12px 24px',
+                    backgroundColor: creatingEmployee 
+                      ? `rgba(${themeColorRgb}, 0.4)` 
+                      : `rgba(${themeColorRgb}, 0.7)`,
+                    backdropFilter: 'blur(10px)',
+                    WebkitBackdropFilter: 'blur(10px)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '16px',
+                    fontWeight: 600,
+                    cursor: creatingEmployee ? 'not-allowed' : 'pointer',
+                    boxShadow: creatingEmployee 
+                      ? 'none'
+                      : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                    transition: 'all 0.3s ease'
+                  }}
+                >
+                  {creatingEmployee ? 'Creating...' : 'Create Employee'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div style={{ overflowX: 'auto' }}>
         <div style={{ 
           backgroundColor: 'var(--bg-primary, #fff)', 

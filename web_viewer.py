@@ -19,6 +19,8 @@ from database import (
     get_shipment_items, get_shipment_details,
     employee_login, verify_session, employee_logout,
     list_employees, get_employee, add_employee, update_employee, delete_employee, list_orders,
+    get_employee_by_clerk_user_id, link_clerk_user_to_employee, verify_pin_login, generate_pin,
+    get_connection,
     get_discrepancies, get_audit_trail,
     create_pending_return, approve_pending_return, reject_pending_return,
     get_pending_return, list_pending_returns,
@@ -914,6 +916,191 @@ def api_upload_shipment():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 # Authentication endpoints
+@app.route('/api/clerk/link', methods=['POST'])
+def api_link_clerk_user():
+    """Link a Clerk user ID to an employee and optionally set PIN"""
+    try:
+        if not request.json:
+            return jsonify({'success': False, 'message': 'Invalid request'}), 400
+        
+        clerk_user_id = request.json.get('clerk_user_id')
+        employee_id = request.json.get('employee_id')
+        pin_code = request.json.get('pin_code')
+        
+        # If employee_id is provided, use it
+        if employee_id and clerk_user_id:
+            success = link_clerk_user_to_employee(employee_id, clerk_user_id)
+            
+            if success and pin_code:
+                # Update PIN if provided
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE employees
+                    SET pin_code = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE employee_id = ?
+                """, (pin_code, employee_id))
+                conn.commit()
+                conn.close()
+            
+            if success:
+                employee = get_employee(employee_id)
+                return jsonify({
+                    'success': True,
+                    'employee': employee,
+                    'message': 'Clerk user linked successfully'
+                })
+            else:
+                return jsonify({'success': False, 'message': 'Failed to link Clerk user'}), 500
+        
+        # If only clerk_user_id and pin_code, find employee by email or create link
+        elif clerk_user_id and pin_code:
+            # Try to find employee by Clerk user ID first
+            employee = get_employee_by_clerk_user_id(clerk_user_id)
+            
+            if employee:
+                # Employee already linked, just update PIN
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE employees
+                    SET pin_code = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE employee_id = ?
+                """, (pin_code, employee['employee_id']))
+                conn.commit()
+                conn.close()
+                
+                employee = get_employee(employee['employee_id'])
+                return jsonify({
+                    'success': True,
+                    'employee': employee,
+                    'message': 'PIN updated successfully'
+                })
+            else:
+                # Try to find by email from Clerk user metadata
+                # This requires getting user info from Clerk, but for now we'll return an error
+                # The employee should have been created by admin with clerk_user_id
+                return jsonify({
+                    'success': False, 
+                    'message': 'Employee not found. Please contact your administrator to create your account first.'
+                }), 404
+        else:
+            return jsonify({
+                'success': False, 
+                'message': 'clerk_user_id and either employee_id or pin_code are required'
+            }), 400
+            
+    except Exception as e:
+        print(f"Error linking Clerk user: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/clerk/pin-login', methods=['POST'])
+def api_pin_login():
+    """Login with PIN after Clerk authentication"""
+    try:
+        if not request.json:
+            return jsonify({'success': False, 'message': 'Invalid request'}), 400
+        
+        clerk_user_id = request.json.get('clerk_user_id')
+        pin_code = request.json.get('pin_code')
+        
+        if not clerk_user_id or not pin_code:
+            return jsonify({'success': False, 'message': 'clerk_user_id and pin_code are required'}), 400
+        
+        employee = verify_pin_login(clerk_user_id, pin_code)
+        
+        if not employee:
+            return jsonify({'success': False, 'message': 'Invalid PIN'}), 401
+        
+        # Create session token similar to employee_login
+        import secrets
+        from database import log_audit_action, get_connection
+        
+        session_token = secrets.token_urlsafe(32)
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Create session record
+        cursor.execute("""
+            INSERT INTO employee_sessions (
+                employee_id, session_token, ip_address, device_info
+            ) VALUES (?, ?, ?, ?)
+        """, (employee['employee_id'], session_token, request.remote_addr or '127.0.0.1', request.headers.get('User-Agent', 'Unknown')))
+        
+        # Update last login
+        cursor.execute("""
+            UPDATE employees
+            SET last_login = CURRENT_TIMESTAMP
+            WHERE employee_id = ?
+        """, (employee['employee_id'],))
+        
+        conn.commit()
+        conn.close()
+        
+        # Log audit action
+        try:
+            log_audit_action(
+                table_name='employees',
+                record_id=employee['employee_id'],
+                action_type='LOGIN',
+                employee_id=employee['employee_id'],
+                ip_address=request.remote_addr or '127.0.0.1',
+                notes=f'Employee {employee.get("first_name", "")} {employee.get("last_name", "")} logged in via PIN'
+            )
+        except Exception:
+            pass  # Don't fail login if audit logging fails
+        
+        return jsonify({
+            'success': True,
+            'session_token': session_token,
+            'employee_id': employee['employee_id'],
+            'employee_name': f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            'position': employee.get('position', ''),
+            'message': 'PIN login successful'
+        })
+    except Exception as e:
+        print(f"Error in PIN login: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/clerk/employee', methods=['GET'])
+def api_get_employee_by_clerk():
+    """Get employee by Clerk user ID"""
+    try:
+        clerk_user_id = request.args.get('clerk_user_id')
+        
+        if not clerk_user_id:
+            return jsonify({'success': False, 'message': 'clerk_user_id is required'}), 400
+        
+        employee = get_employee_by_clerk_user_id(clerk_user_id)
+        
+        if not employee:
+            return jsonify({'success': False, 'message': 'Employee not found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'employee': employee
+        })
+    except Exception as e:
+        print(f"Error getting employee by Clerk user ID: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/generate-pin', methods=['POST'])
+def api_generate_pin():
+    """Generate a random PIN"""
+    try:
+        pin = generate_pin()
+        return jsonify({
+            'success': True,
+            'pin': pin
+        })
+    except Exception as e:
+        print(f"Error generating PIN: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/login', methods=['POST'])
 def api_login():
     """Employee login"""
@@ -3437,7 +3624,86 @@ def api_create_employee():
             if field not in data:
                 return jsonify({'error': f'{field} is required'}), 400
         
-        # Create employee
+        account_type = data.get('account_type', 'pin_only')  # 'pin_only' or 'clerk_master'
+        clerk_user_id = None
+        pin_code = data.get('pin_code')
+        invitation_sent = False
+        
+        # Handle Clerk master login account type
+        if account_type == 'clerk_master':
+            # Email is required for Clerk master login
+            if not data.get('email'):
+                return jsonify({'error': 'Email is required for Clerk master login'}), 400
+            
+            try:
+                # Import Clerk Backend SDK
+                from clerk_backend_api import Clerk
+                import os
+                
+                # Get Clerk secret key from environment
+                clerk_secret_key = os.getenv('CLERK_SECRET_KEY')
+                if not clerk_secret_key:
+                    return jsonify({
+                        'error': 'CLERK_SECRET_KEY environment variable not set. Please configure Clerk secret key.'
+                    }), 500
+                
+                # Initialize Clerk client
+                clerk = Clerk(bearer_auth=clerk_secret_key)
+                
+                # Create user in Clerk
+                try:
+                    clerk_response = clerk.users.create_user({
+                        'email_address': [data['email']],
+                        'first_name': data['first_name'],
+                        'last_name': data['last_name'],
+                        'skip_password_requirement': False,
+                        'skip_password_checks': False,
+                        'public_metadata': {
+                            'employee_account': True,
+                            'position': data['position']
+                        }
+                    })
+                    
+                    clerk_user_id = clerk_response.id
+                    
+                    # Send invitation email
+                    try:
+                        invitation = clerk.users.create_user_invitation({
+                            'user_id': clerk_user_id
+                        })
+                        invitation_sent = True
+                    except Exception as invite_err:
+                        print(f"Warning: Failed to send invitation email: {invite_err}")
+                        # User is created but invitation failed - they can still sign up manually
+                        invitation_sent = False
+                    
+                    # Generate PIN for Clerk master login accounts too
+                    if not pin_code:
+                        pin_code = generate_pin()
+                        
+                except Exception as clerk_err:
+                    print(f"Error creating Clerk user: {clerk_err}")
+                    return jsonify({
+                        'error': f'Failed to create Clerk user: {str(clerk_err)}'
+                    }), 500
+                    
+            except ImportError:
+                return jsonify({
+                    'error': 'Clerk Backend SDK not installed. Please install: pip install clerk-backend-api'
+                }), 500
+            except Exception as e:
+                print(f"Error with Clerk integration: {e}")
+                traceback.print_exc()
+                return jsonify({
+                    'error': f'Failed to create Clerk account: {str(e)}'
+                }), 500
+        
+        else:
+            # PIN-only account - generate PIN if not provided
+            if not pin_code:
+                pin_code = generate_pin()
+        
+        # Create employee record
         employee_id = add_employee(
             username=data.get('username') or data.get('employee_code'),
             first_name=data['first_name'],
@@ -3456,7 +3722,8 @@ def api_create_employee():
             emergency_contact_phone=data.get('emergency_contact_phone'),
             notes=data.get('notes'),
             role_id=data.get('role_id'),
-            pin_code=data.get('pin_code')
+            pin_code=pin_code,
+            clerk_user_id=clerk_user_id
         )
         
         # Assign role if provided
@@ -3465,11 +3732,25 @@ def api_create_employee():
         
         employee = get_employee(employee_id)
         
-        return jsonify({
+        # Prepare response
+        response_data = {
             'success': True,
             'employee_id': employee_id,
-            'employee': employee
-        })
+            'employee': employee,
+            'account_type': account_type,
+            'invitation_sent': invitation_sent
+        }
+        
+        # Include PIN for PIN-only accounts, or if explicitly generated
+        if account_type == 'pin_only' or (pin_code and not data.get('pin_code')):
+            response_data['generated_pin'] = pin_code
+        
+        # Include Clerk user ID if created
+        if clerk_user_id:
+            response_data['clerk_user_id'] = clerk_user_id
+            response_data['clerk_signup_url'] = '/employee-onboarding'
+        
+        return jsonify(response_data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
@@ -5292,8 +5573,11 @@ def api_save_onboarding_step():
             traceback.print_exc()
             return jsonify({'success': False, 'error': f'Failed to save progress: {str(save_err)}'}), 500
         
-        # If saving store_info (step 1), create an admin account
-        print(f"[DEBUG] Checking if should create admin: step_name={step_name}, success={success}, step_data={bool(step_data)}")
+        # If saving admin_account (step 1), store it for later use
+        # If saving store_info (step 2), create an admin account using the saved admin_account data
+        print(f"[DEBUG] Checking step: step_name={step_name}, success={success}, step_data={bool(step_data)}")
+        
+        # Create admin account when store_info is saved (after admin_account has been saved)
         if success and step_name == 'store_info' and step_data:
             # Extract storeInfo from step_data - it's nested inside the data object
             if isinstance(step_data, dict):
@@ -5334,7 +5618,56 @@ def api_save_onboarding_step():
                         
                         print(f"[DEBUG] Creating admin with: code={employee_code}, name={first_name} {last_name}, email={store_email}")
                         
-                        # Create admin account with default password (admin can change it later)
+                        # Get admin account info from saved onboarding progress (Clerk user ID and PIN)
+                        admin_account_data = get_onboarding_progress('admin_account')
+                        admin_account = {}
+                        
+                        if admin_account_data:
+                            # Handle different data formats
+                            if isinstance(admin_account_data, dict):
+                                # The data field contains the actual admin account info
+                                if 'data' in admin_account_data:
+                                    data_field = admin_account_data.get('data')
+                                    if isinstance(data_field, dict):
+                                        # Check if adminAccount is nested inside data
+                                        if 'adminAccount' in data_field:
+                                            admin_account = data_field.get('adminAccount', {})
+                                        elif 'clerk_user_id' in data_field or 'pin' in data_field:
+                                            # The data itself is the admin account (when saved directly in step 1)
+                                            admin_account = data_field
+                                        else:
+                                            admin_account = {}
+                                    else:
+                                        admin_account = {}
+                                elif 'clerk_user_id' in admin_account_data or 'pin' in admin_account_data:
+                                    # The admin_account_data itself is the admin account data
+                                    admin_account = admin_account_data
+                                elif 'adminAccount' in admin_account_data:
+                                    # Check if adminAccount is at the top level
+                                    admin_account = admin_account_data.get('adminAccount', {})
+                                else:
+                                    admin_account = {}
+                        
+                        clerk_user_id = admin_account.get('clerk_user_id') if admin_account else None
+                        pin_code = admin_account.get('pin') if admin_account else None
+                        
+                        print(f"[DEBUG] Admin account data retrieved: clerk_user_id={clerk_user_id}, pin_code={'***' if pin_code else None}")
+                        print(f"[DEBUG] Full admin_account_data keys: {list(admin_account_data.keys()) if admin_account_data else 'None'}")
+                        if admin_account_data and 'data' in admin_account_data:
+                            data_field = admin_account_data.get('data')
+                            if isinstance(data_field, dict):
+                                print(f"[DEBUG] Data field keys: {list(data_field.keys())}")
+                        print(f"[DEBUG] Extracted admin_account: {admin_account}")
+                        
+                        # Get Admin role_id
+                        conn = sqlite3.connect(DB_NAME)
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT role_id FROM roles WHERE role_name = 'Admin'")
+                        admin_role = cursor.fetchone()
+                        admin_role_id = admin_role[0] if admin_role else None
+                        conn.close()
+                        
+                        # Create admin account with Clerk user ID and PIN
                         try:
                             admin_id = add_employee(
                                 employee_code=employee_code,
@@ -5344,8 +5677,12 @@ def api_save_onboarding_step():
                                 phone=store_info.get('store_phone', ''),
                                 position='admin',
                                 date_started=datetime.now().strftime('%Y-%m-%d'),
-                                password='123456'  # Default password - admin should change this
+                                password=None,  # No password needed - using Clerk authentication
+                                clerk_user_id=clerk_user_id,
+                                pin_code=pin_code,
+                                role_id=admin_role_id
                             )
+                            print(f"[DEBUG] ✓ Admin account created successfully: ID {admin_id}, Email: {store_email}, Code: {employee_code}, Clerk ID: {clerk_user_id}")
                             print(f"[DEBUG] ✓ Admin account created successfully: ID {admin_id}, Email: {store_email}, Code: {employee_code}")
                         except ValueError as ve:
                             print(f"[DEBUG] ✗ ValueError creating admin: {ve}")
@@ -5494,6 +5831,86 @@ def api_complete_onboarding():
         
         if conn:
             conn.close()
+        
+        # Create admin account if it doesn't exist, using saved onboarding data
+        try:
+            # Check if admin account already exists
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM employees WHERE position = 'admin'")
+            admin_count = cursor.fetchone()[0]
+            conn.close()
+            
+            if admin_count == 0:
+                print("[DEBUG] No admin account found, creating from onboarding data...")
+                
+                # Get saved onboarding data
+                store_info_data = get_onboarding_progress('store_info')
+                admin_account_data = get_onboarding_progress('admin_account')
+                
+                # Extract store info
+                store_info = {}
+                if store_info_data and isinstance(store_info_data, dict):
+                    if 'data' in store_info_data:
+                        data_field = store_info_data.get('data')
+                        if isinstance(data_field, dict):
+                            if 'storeInfo' in data_field:
+                                store_info = data_field.get('storeInfo', {})
+                            elif 'store_name' in data_field:
+                                store_info = data_field
+                
+                # Extract admin account info
+                admin_account = {}
+                if admin_account_data and isinstance(admin_account_data, dict):
+                    if 'data' in admin_account_data:
+                        data_field = admin_account_data.get('data')
+                        if isinstance(data_field, dict):
+                            if 'adminAccount' in data_field:
+                                admin_account = data_field.get('adminAccount', {})
+                            elif 'clerk_user_id' in data_field or 'pin' in data_field:
+                                admin_account = data_field
+                
+                clerk_user_id = admin_account.get('clerk_user_id') if admin_account else None
+                pin_code = admin_account.get('pin') if admin_account else None
+                
+                if store_info and store_info.get('store_email'):
+                    store_email = store_info.get('store_email', '')
+                    store_name = store_info.get('store_name', 'Store')
+                    
+                    name_parts = store_name.split()
+                    first_name = name_parts[0] if name_parts else 'Admin'
+                    last_name = 'User' if len(name_parts) <= 1 else ' '.join(name_parts[1:])
+                    employee_code = 'ADMIN001'
+                    
+                    # Get Admin role_id
+                    conn = sqlite3.connect(DB_NAME)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT role_id FROM roles WHERE role_name = 'Admin'")
+                    admin_role = cursor.fetchone()
+                    admin_role_id = admin_role[0] if admin_role else None
+                    conn.close()
+                    
+                    print(f"[DEBUG] Creating admin account: email={store_email}, clerk_user_id={clerk_user_id}, pin={'***' if pin_code else None}, role_id={admin_role_id}")
+                    
+                    admin_id = add_employee(
+                        employee_code=employee_code,
+                        first_name=first_name,
+                        last_name=last_name,
+                        email=store_email,
+                        phone=store_info.get('store_phone', ''),
+                        position='admin',
+                        date_started=datetime.now().strftime('%Y-%m-%d'),
+                        password=None,
+                        clerk_user_id=clerk_user_id,
+                        pin_code=pin_code,
+                        role_id=admin_role_id
+                    )
+                    print(f"[DEBUG] ✓ Admin account created successfully during onboarding completion: ID {admin_id}")
+        except Exception as admin_err:
+            print(f"[DEBUG] Warning: Failed to create admin account during onboarding completion: {admin_err}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail onboarding completion if admin creation fails
         
         # Mark onboarding as complete
         success = complete_onboarding()

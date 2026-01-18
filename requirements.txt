@@ -48,3 +48,6 @@ Pillow>=9.0.0       # Image processing (already listed above, but needed for qrc
 # Payment processing dependencies:
 stripe>=7.0.0       # Stripe API for payment processing
 cryptography>=41.0.0  # Encryption for storing sensitive API keys
+
+# Clerk authentication dependencies:
+clerk-backend-api>=1.0.0  # Clerk Backend SDK for user creation and invitations

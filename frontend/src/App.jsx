@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { useAuth, useUser } from '@clerk/clerk-react'
 import { PermissionProvider, usePermissions } from './contexts/PermissionContext'
 import { ThemeProvider } from './contexts/ThemeContext'
+import MasterLogin from './components/MasterLogin'
+import SignUpPage from './components/SignUp'
 import Login from './components/Login'
 import Dashboard from './components/Dashboard'
 import POS from './components/POS'
@@ -18,6 +21,7 @@ import StatisticsPage from './pages/Statistics'
 import Settings from './pages/Settings'
 import Accounting from './pages/Accounting'
 import Onboarding from './pages/Onboarding'
+import EmployeeOnboarding from './pages/EmployeeOnboarding'
 import './index.css'
 
 function ProtectedRoute({ children, sessionToken, employee, onLogout }) {
@@ -28,6 +32,8 @@ function ProtectedRoute({ children, sessionToken, employee, onLogout }) {
 }
 
 function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLogout }) {
+  const { isSignedIn, isLoaded: clerkLoaded } = useAuth()
+  const { user } = useUser()
   const { fetchPermissions, setEmployee: setPermissionEmployee } = usePermissions()
   const [onboardingChecked, setOnboardingChecked] = useState(false)
   const [onboardingRequired, setOnboardingRequired] = useState(false)
@@ -65,6 +71,59 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
     }
   }
   
+  // Wait for Clerk to load
+  if (!clerkLoaded) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        backgroundColor: 'var(--bg-secondary, #f5f5f5)'
+      }}>
+        <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>
+          Loading...
+        </div>
+      </div>
+    )
+  }
+
+  // If not signed in with Clerk, allow onboarding and master login
+  if (!isSignedIn) {
+    // Check onboarding status first
+    if (!onboardingChecked) {
+      return (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '100vh',
+          backgroundColor: 'var(--bg-secondary, #f5f5f5)'
+        }}>
+          <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>
+            Loading...
+          </div>
+        </div>
+      )
+    }
+    
+    return (
+      <Routes>
+        <Route path="/onboarding/*" element={<Onboarding />} />
+        <Route path="/employee-onboarding" element={<EmployeeOnboarding />} />
+        <Route path="/master-login" element={<MasterLogin onMasterLoginSuccess={() => {}} />} />
+        <Route path="/sign-up" element={<SignUpPage />} />
+        <Route path="*" element={
+          onboardingRequired ? (
+            <Navigate to="/onboarding" replace />
+          ) : (
+            <Navigate to="/master-login" replace />
+          )
+        } />
+      </Routes>
+    )
+  }
+
   if (!onboardingChecked) {
     return (
       <div style={{
@@ -84,6 +143,8 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
   return (
     <Routes>
       <Route path="/onboarding" element={<Onboarding />} />
+      <Route path="/employee-onboarding" element={<EmployeeOnboarding />} />
+      <Route path="/master-login" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={
         onboardingRequired && !sessionToken ? (
           <Navigate to="/onboarding" replace />
@@ -231,8 +292,10 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
           <Navigate to="/onboarding" replace />
         ) : sessionToken && employee ? (
           <Navigate to="/dashboard" replace />
-        ) : (
+        ) : isSignedIn ? (
           <Navigate to="/login" replace />
+        ) : (
+          <Navigate to="/master-login" replace />
         )
       } />
     </Routes>

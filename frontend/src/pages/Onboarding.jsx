@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../contexts/ThemeContext'
+import OnboardingStepAdminAccount from '../components/OnboardingStepAdminAccount'
 import OnboardingStep1 from '../components/OnboardingStep1'
 import OnboardingStep2 from '../components/OnboardingStep2'
 import OnboardingStepPayment from '../components/OnboardingStepPayment'
@@ -20,6 +21,7 @@ function Onboarding() {
   
   // Store all onboarding data
   const [onboardingData, setOnboardingData] = useState({
+    adminAccount: null,
     storeInfo: null,
     taxSettings: null,
     paymentSettings: null,
@@ -29,7 +31,12 @@ function Onboarding() {
   })
   const [completedItems, setCompletedItems] = useState([])
   
-  const totalSteps = 7
+  const totalSteps = 8
+  
+  // Memoize setAdminAccount to prevent infinite re-renders
+  const setAdminAccount = useCallback((data) => {
+    setOnboardingData(prev => ({ ...prev, adminAccount: data }))
+  }, [])
   
   useEffect(() => {
     // Check if onboarding is already completed
@@ -106,51 +113,63 @@ function Onboarding() {
   
   const getStepName = (step) => {
     const stepNames = {
-      1: 'store_info',
-      2: 'tax_settings',
-      3: 'payment',
-      4: 'inventory',
-      5: 'employees',
-      6: 'preferences',
-      7: 'review',
-      8: 'pos',
-      9: 'rewards'
+      1: 'admin_account',
+      2: 'store_info',
+      3: 'tax_settings',
+      4: 'payment',
+      5: 'inventory',
+      6: 'employees',
+      7: 'preferences',
+      8: 'review',
+      9: 'pos',
+      10: 'rewards'
     }
     return stepNames[step] || 'unknown'
   }
   
   const handleNext = async (stepData) => {
-    // If stepData is provided (from step 1), update onboardingData first
+    // If stepData is provided, update onboardingData first
     let dataToSave = onboardingData
     if (stepData && currentStep === 1) {
-      // For step 1, we receive storeInfo directly
-      dataToSave = { ...onboardingData, storeInfo: stepData }
-      setOnboardingData(dataToSave)
+      // For step 1 (admin account), we receive adminAccount directly
+      const updatedData = { ...onboardingData, adminAccount: stepData }
+      dataToSave = updatedData
+      setOnboardingData(updatedData)
+    } else if (stepData && currentStep === 2) {
+      // For step 2 (store info), we receive storeInfo directly
+      const updatedData = { ...onboardingData, storeInfo: stepData }
+      dataToSave = updatedData
+      setOnboardingData(updatedData)
     }
     
-    // Save current step with the updated data
-    await saveStep(currentStep, dataToSave)
+    // For step 1, save the adminAccount directly instead of the full object
+    if (currentStep === 1 && stepData) {
+      await saveStep(currentStep, stepData)
+    } else {
+      // Save current step with the updated data
+      await saveStep(currentStep, dataToSave)
+    }
     
     // Mark items as completed based on step
     markItemCompleted(currentStep)
     
-    // If on step 2 (to-do list) and all items are completed, go to step 7 (review/confirmation)
-    if (currentStep === 2) {
+    // If on step 3 (to-do list) and all items are completed, go to step 8 (review/confirmation)
+    if (currentStep === 3) {
       // All required items: payment, employees, pos, rewards, inventory
       const requiredItems = ['payment', 'employees', 'pos', 'rewards', 'inventory']
       const allItemsCompleted = requiredItems.every(itemId => completedItems.includes(itemId))
       if (allItemsCompleted) {
         setDirection('forward')
-        setCurrentStep(7) // Go to review/confirmation page
+        setCurrentStep(8) // Go to review/confirmation page
         return
       }
     }
     
-    // If on step 3 (Payment), 4 (Inventory), 5 (Employees), 8 (POS), or 9 (Customer Rewards), 
-    // go back to step 2 (to-do list) instead of incrementing
-    if ([3, 4, 5, 8, 9].includes(currentStep)) {
+    // If on step 4 (Payment), 5 (Inventory), 6 (Employees), 9 (POS), or 10 (Customer Rewards), 
+    // go back to step 3 (to-do list) instead of incrementing
+    if ([4, 5, 6, 9, 10].includes(currentStep)) {
       setDirection('forward')
-      setCurrentStep(2)
+      setCurrentStep(3)
       return
     }
     
@@ -165,17 +184,20 @@ function Onboarding() {
     await saveStep(currentStep, onboardingData)
     markItemCompleted(currentStep)
     setDirection('forward')
-    setCurrentStep(2)
+    setCurrentStep(3) // Go back to to-do list (step 3)
   }
   
   const handleBack = () => {
     if (currentStep > 1) {
       setDirection('backward')
-      // If going back from a sub-step (3, 4, 5, 8, 9), go to step 2 (to-do list)
-      if ([3, 4, 5, 8, 9].includes(currentStep)) {
+      // If going back from a sub-step (4, 5, 6, 9, 10), go to step 3 (to-do list)
+      if ([4, 5, 6, 9, 10].includes(currentStep)) {
+        setCurrentStep(3)
+      } else if (currentStep === 3) {
+        // If on to-do list, go back to step 2 (store info)
         setCurrentStep(2)
       } else if (currentStep === 2) {
-        // If on to-do list, go back to step 1
+        // If on store info, go back to step 1 (admin account)
         setCurrentStep(1)
       } else {
         setCurrentStep(currentStep - 1)
@@ -190,11 +212,12 @@ function Onboarding() {
   
   const markItemCompleted = (step) => {
     const stepToItemMap = {
-      3: 'payment',
-      4: 'inventory',
-      5: 'employees',
-      8: 'pos',
-      9: 'rewards'
+      1: 'admin_account',
+      4: 'payment',
+      5: 'inventory',
+      6: 'employees',
+      9: 'pos',
+      10: 'rewards'
     }
     const itemId = stepToItemMap[step]
     if (itemId && !completedItems.includes(itemId)) {
@@ -209,10 +232,10 @@ function Onboarding() {
     // Mark items as completed when skipped (treat skip as completion for to-do list)
     markItemCompleted(currentStep)
     
-    // If on step 5 (Employees), go back to step 2 (to-do list) instead of incrementing
-    if (currentStep === 5) {
+    // If on step 6 (Employees), go back to step 3 (to-do list) instead of incrementing
+    if (currentStep === 6) {
       setDirection('forward')
-      setCurrentStep(2)
+      setCurrentStep(3)
       return
     }
     
@@ -280,6 +303,16 @@ function Onboarding() {
       {/* Step Content */}
       <div>
         {currentStep === 1 && (
+          <OnboardingStepAdminAccount
+            onNext={handleNext}
+            onBack={() => {}}
+            adminAccount={onboardingData.adminAccount}
+            setAdminAccount={setAdminAccount}
+            direction={direction}
+          />
+        )}
+        
+        {currentStep === 2 && (
           <OnboardingStep1
             onNext={handleNext}
             storeInfo={onboardingData.storeInfo}
@@ -288,7 +321,7 @@ function Onboarding() {
           />
         )}
         
-        {currentStep === 2 && (
+        {currentStep === 3 && (
           <OnboardingStep2
             onNext={handleNext}
             onBack={handleBack}
@@ -298,7 +331,7 @@ function Onboarding() {
           />
         )}
         
-        {currentStep === 3 && (
+        {currentStep === 4 && (
           <OnboardingStepPayment
             onNext={handleNavigateBackToTodo}
             onBack={handleBack}
@@ -309,7 +342,7 @@ function Onboarding() {
           />
         )}
         
-        {currentStep === 4 && (
+        {currentStep === 5 && (
           <OnboardingStep4
             onNext={handleNavigateBackToTodo}
             onBack={handleBack}
@@ -318,7 +351,7 @@ function Onboarding() {
           />
         )}
         
-        {currentStep === 5 && (
+        {currentStep === 6 && (
           <OnboardingStep5
             onNext={handleNavigateBackToTodo}
             onBack={handleBack}
@@ -327,7 +360,7 @@ function Onboarding() {
           />
         )}
         
-        {currentStep === 6 && (
+        {currentStep === 7 && (
           <OnboardingStep6
             onNext={handleNext}
             onBack={handleBack}
@@ -337,7 +370,7 @@ function Onboarding() {
           />
         )}
         
-        {currentStep === 7 && (
+        {currentStep === 8 && (
           <OnboardingStep7
             onComplete={handleComplete}
             onBack={handleBack}
@@ -346,7 +379,7 @@ function Onboarding() {
           />
         )}
         
-        {currentStep === 8 && (
+        {currentStep === 9 && (
           <OnboardingStepPOS
             onNext={handleNavigateBackToTodo}
             onBack={handleBack}
@@ -354,7 +387,7 @@ function Onboarding() {
           />
         )}
         
-        {currentStep === 9 && (
+        {currentStep === 10 && (
           <OnboardingStepRewards
             onNext={handleNavigateBackToTodo}
             onBack={handleBack}

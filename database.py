@@ -1732,6 +1732,10 @@ def auto_match_pending_items(pending_shipment_id: int) -> Dict[str, Any]:
 # EMPLOYEE MANAGEMENT FUNCTIONS
 # ============================================================================
 
+def generate_pin() -> str:
+    """Generate a random 6-digit PIN"""
+    return ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+
 def hash_password(password: str) -> str:
     """Hash password using SHA-256"""
     return hashlib.sha256(password.encode()).hexdigest()
@@ -1780,7 +1784,8 @@ def add_employee(
     emergency_contact_phone: Optional[str] = None,
     notes: Optional[str] = None,
     role_id: Optional[int] = None,
-    pin_code: Optional[str] = None
+    pin_code: Optional[str] = None,
+    clerk_user_id: Optional[str] = None
 ) -> int:
     """Add a new employee"""
     conn = get_connection()
@@ -1818,10 +1823,25 @@ def add_employee(
         has_username = 'username' in columns
         has_role_id = 'role_id' in columns
         has_pin_code = 'pin_code' in columns
+        has_clerk_user_id = 'clerk_user_id' in columns
+        
+        # Generate PIN if not provided
+        if not pin_code:
+            pin_code = generate_pin()
         
         if has_username:
             # Use username column
-            if has_role_id and has_pin_code:
+            if has_role_id and has_pin_code and has_clerk_user_id:
+                cursor.execute("""
+                    INSERT INTO employees (
+                        username, first_name, last_name, email, phone, position, department,
+                        date_started, password_hash, hourly_rate, salary, employment_type, address,
+                        emergency_contact_name, emergency_contact_phone, notes, role_id, pin_code, clerk_user_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (login_identifier, first_name, last_name, email, phone, position, department,
+                      date_started, password_hash, hourly_rate, salary, employment_type, address,
+                      emergency_contact_name, emergency_contact_phone, notes, role_id, pin_code, clerk_user_id))
+            elif has_role_id and has_pin_code:
                 cursor.execute("""
                     INSERT INTO employees (
                         username, first_name, last_name, email, phone, position, department,
@@ -1861,6 +1881,88 @@ def add_employee(
         conn.rollback()
         conn.close()
         raise ValueError(f"Employee identifier '{login_identifier}' already exists") from e
+
+def get_employee_by_clerk_user_id(clerk_user_id: str) -> Optional[Dict[str, Any]]:
+    """Get employee by Clerk user ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("PRAGMA table_info(employees)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'clerk_user_id' not in columns:
+            conn.close()
+            return None
+        
+        cursor.execute("SELECT * FROM employees WHERE clerk_user_id = ?", (clerk_user_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            return None
+        
+        employee = dict(row)
+        conn.close()
+        return employee
+    except Exception as e:
+        conn.close()
+        print(f"Error getting employee by Clerk user ID: {e}")
+        return None
+
+def link_clerk_user_to_employee(employee_id: int, clerk_user_id: str) -> bool:
+    """Link a Clerk user ID to an employee"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("PRAGMA table_info(employees)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'clerk_user_id' not in columns:
+            # Add column if it doesn't exist
+            cursor.execute("ALTER TABLE employees ADD COLUMN clerk_user_id TEXT UNIQUE")
+        
+        cursor.execute("UPDATE employees SET clerk_user_id = ? WHERE employee_id = ?", (clerk_user_id, employee_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"Error linking Clerk user to employee: {e}")
+        return False
+
+def verify_pin_login(clerk_user_id: str, pin_code: str) -> Optional[Dict[str, Any]]:
+    """Verify PIN login for a Clerk-authenticated user"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("PRAGMA table_info(employees)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'clerk_user_id' not in columns or 'pin_code' not in columns:
+            conn.close()
+            return None
+        
+        cursor.execute("""
+            SELECT * FROM employees 
+            WHERE clerk_user_id = ? AND pin_code = ?
+        """, (clerk_user_id, pin_code))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        employee = dict(row)
+        return employee
+    except Exception as e:
+        conn.close()
+        print(f"Error verifying PIN login: {e}")
+        return None
 
 def get_employee(employee_id: int) -> Optional[Dict[str, Any]]:
     """Get employee by ID with tip summary"""

@@ -23,7 +23,11 @@ function Settings() {
     show_payment_method: true,
     show_signature: false
   })
-  const [activeTab, setActiveTab] = useState('workflow') // 'workflow', 'receipt', 'location', 'display', 'rewards', or 'sms'
+  const [activeTab, setActiveTab] = useState('workflow') // 'workflow', 'receipt', 'location', 'display', 'rewards', 'pos', or 'sms'
+  const [posSettings, setPosSettings] = useState({
+    num_registers: 1,
+    register_type: 'one_screen'
+  })
   const [storeLocationSettings, setStoreLocationSettings] = useState({
     store_name: 'Store',
     latitude: null,
@@ -87,6 +91,7 @@ function Settings() {
     loadStoreLocationSettings()
     loadDisplaySettings()
     loadRewardsSettings()
+    loadPosSettings()
     loadSmsSettings()
     loadSmsStores()
   }, [])
@@ -183,6 +188,21 @@ function Settings() {
       }
     } catch (error) {
       console.error('Error loading rewards settings:', error)
+    }
+  }
+
+  const loadPosSettings = async () => {
+    try {
+      const response = await fetch('/api/pos-settings')
+      const data = await response.json()
+      if (data.success && data.settings) {
+        setPosSettings({
+          num_registers: data.settings.num_registers || 1,
+          register_type: data.settings.register_type || 'one_screen'
+        })
+      }
+    } catch (error) {
+      console.error('Error loading POS settings:', error)
     }
   }
 
@@ -349,6 +369,36 @@ function Settings() {
     } catch (error) {
       console.error('Error saving rewards settings:', error)
       setMessage({ type: 'error', text: 'Failed to save rewards settings' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const savePosSettings = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      const response = await fetch('/api/pos-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          num_registers: parseInt(posSettings.num_registers) || 1,
+          register_type: posSettings.register_type || 'one_screen'
+        })
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: 'POS settings saved successfully!' })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to save POS settings' })
+      }
+    } catch (error) {
+      console.error('Error saving POS settings:', error)
+      setMessage({ type: 'error', text: 'Failed to save POS settings' })
     } finally {
       setSaving(false)
     }
@@ -655,6 +705,24 @@ function Settings() {
           Customer Rewards
         </button>
         <button
+          onClick={() => setActiveTab('pos')}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'pos' ? `3px solid rgba(${themeColorRgb}, 0.7)` : '3px solid transparent',
+            color: activeTab === 'pos' 
+              ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333')
+              : (isDarkMode ? 'var(--text-tertiary, #999)' : '#666'),
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: activeTab === 'pos' ? 600 : 400,
+            transition: 'all 0.2s ease'
+          }}
+        >
+          POS Settings
+        </button>
+        <button
           onClick={() => setActiveTab('sms')}
           style={{
             padding: '12px 24px',
@@ -863,6 +931,7 @@ function Settings() {
               activeTab === 'receipt' ? saveReceiptSettings :
               activeTab === 'location' ? saveStoreLocationSettings :
               activeTab === 'rewards' ? saveRewardsSettings :
+              activeTab === 'pos' ? savePosSettings :
               saveDisplaySettings
             }
             disabled={saving}
@@ -883,8 +952,8 @@ function Settings() {
             }}
           >
             {saving 
-              ? (activeTab === 'workflow' ? 'Saving...' : activeTab === 'receipt' ? 'Saving Receipt Settings...' : activeTab === 'location' ? 'Saving Location Settings...' : activeTab === 'rewards' ? 'Saving Rewards Settings...' : 'Saving Display Settings...')
-              : (activeTab === 'workflow' ? 'Save Settings' : activeTab === 'receipt' ? 'Save Receipt Settings' : activeTab === 'location' ? 'Save Location Settings' : activeTab === 'rewards' ? 'Save Rewards Settings' : 'Save Display Settings')
+              ? (activeTab === 'workflow' ? 'Saving...' : activeTab === 'receipt' ? 'Saving Receipt Settings...' : activeTab === 'location' ? 'Saving Location Settings...' : activeTab === 'rewards' ? 'Saving Rewards Settings...' : activeTab === 'pos' ? 'Saving POS Settings...' : 'Saving Display Settings...')
+              : (activeTab === 'workflow' ? 'Save Settings' : activeTab === 'receipt' ? 'Save Receipt Settings' : activeTab === 'location' ? 'Save Location Settings' : activeTab === 'rewards' ? 'Save Rewards Settings' : activeTab === 'pos' ? 'Save POS Settings' : 'Save Display Settings')
             }
           </button>
         </div>
@@ -2087,6 +2156,166 @@ function Settings() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* POS Settings Tab */}
+      {activeTab === 'pos' && (
+        <div style={{
+          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+          borderRadius: '8px',
+          padding: '24px',
+          boxShadow: isDarkMode ? '0 2px 4px rgba(0,0,0,0.3)' : '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <h2 style={{
+            marginBottom: '24px',
+            fontSize: '20px',
+            fontWeight: 600,
+            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+          }}>
+            POS Setup
+          </h2>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {/* Number of Registers */}
+            <div>
+              <label style={{
+                display: 'block',
+                marginBottom: '6px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Number of Registers
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="50"
+                value={posSettings.num_registers}
+                onChange={(e) => setPosSettings({
+                  ...posSettings,
+                  num_registers: parseInt(e.target.value) || 1
+                })}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px'
+                }}
+              />
+              <p style={{
+                marginTop: '6px',
+                fontSize: '12px',
+                color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
+              }}>
+                How many registers or checkout stations do you have?
+              </p>
+            </div>
+
+            {/* Register Type */}
+            <div>
+              <h3 style={{
+                marginBottom: '12px',
+                fontSize: '16px',
+                fontWeight: 600,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Register Type
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  cursor: 'pointer'
+                }}>
+                  <input
+                    type="radio"
+                    name="register_type"
+                    value="one_screen"
+                    checked={posSettings.register_type === 'one_screen'}
+                    onChange={(e) => setPosSettings({ ...posSettings, register_type: e.target.value })}
+                  />
+                  <span style={{
+                    fontSize: '14px',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    One Screen Register
+                  </span>
+                </label>
+                <p style={{
+                  marginLeft: '24px',
+                  fontSize: '12px',
+                  color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                  marginTop: '-8px'
+                }}>
+                  Single display screen for both cashier and customer view.
+                </p>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  cursor: 'pointer'
+                }}>
+                  <input
+                    type="radio"
+                    name="register_type"
+                    value="two_screen"
+                    checked={posSettings.register_type === 'two_screen'}
+                    onChange={(e) => setPosSettings({ ...posSettings, register_type: e.target.value })}
+                  />
+                  <span style={{
+                    fontSize: '14px',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    Two Screen Register
+                  </span>
+                </label>
+                <p style={{
+                  marginLeft: '24px',
+                  fontSize: '12px',
+                  color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                  marginTop: '-8px'
+                }}>
+                  Separate displays for cashier and customer.
+                </p>
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              marginTop: '24px',
+              paddingTop: '24px',
+              borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
+            }}>
+              <button
+                onClick={savePosSettings}
+                disabled={saving}
+                style={{
+                  padding: '12px 32px',
+                  backgroundColor: saving ? (isDarkMode ? '#3a3a3a' : '#ccc') : `rgba(${themeColorRgb}, 0.7)`,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  boxShadow: saving ? 'none' : `0 4px 15px rgba(${themeColorRgb}, 0.3)`,
+                  transition: 'all 0.3s ease',
+                  opacity: saving ? 0.6 : 1,
+                  minWidth: '150px'
+                }}
+              >
+                {saving ? 'Saving...' : 'Save POS Settings'}
+              </button>
+            </div>
           </div>
         </div>
       )}
