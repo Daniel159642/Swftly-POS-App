@@ -284,7 +284,7 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
                 # This avoids any timezone conversion - we treat the stored date/time as-is
                 order_date = datetime(year, month, day, hour, minute, second)
                 formatted_date = order_date.strftime('%m/%d/%Y %I:%M %p')
-            else:
+        else:
                 # Fallback to manual parsing
                 # Clean the string: remove T, microseconds, Z, timezone offset
                 clean_str = order_date_str.replace('T', ' ').split('.')[0].replace('Z', '')
@@ -310,8 +310,8 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
                 
                 try:
                     order_date = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
-                    formatted_date = order_date.strftime('%m/%d/%Y %I:%M %p')
-                except:
+        formatted_date = order_date.strftime('%m/%d/%Y %I:%M %p')
+    except:
                     formatted_date = str(order_date_str)
         else:
             formatted_date = str(order_date_str) if order_date_str else ''
@@ -532,22 +532,30 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
         else:
             print(f"Signature setting is enabled but no signature data found in order_data")
     
-    # Footer
+    # Footer - Custom Footer Message
     story.append(Spacer(1, 0.1*inch))
-    footer_text = settings.get('footer_message', 'Thank you for your business!')
+    story.append(Paragraph("-" * 40, header_style))
+    story.append(Spacer(1, 0.05*inch))
+    
+    # Get footer message - ensure it always has content
+    footer_text = settings.get('footer_message', '').strip()
+    if not footer_text:
+        footer_text = 'Thank you for your business!'
+    
     footer_style = ParagraphStyle(
         'CustomFooter',
         parent=styles['Normal'],
-        fontSize=7,
+        fontSize=8,
         textColor=colors.black,
         alignment=TA_CENTER,
         spaceBefore=6,
+        spaceAfter=4,
         fontName='Helvetica'
     )
     story.append(Paragraph(footer_text, footer_style))
     
-    # Return Policy (if set)
-    return_policy = settings.get('return_policy', '')
+    # Return Policy - Display if set
+    return_policy = settings.get('return_policy', '').strip()
     if return_policy:
         story.append(Spacer(1, 0.05*inch))
         story.append(Paragraph("-" * 40, header_style))
@@ -559,6 +567,7 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
             textColor=colors.black,
             alignment=TA_CENTER,
             spaceBefore=4,
+            spaceAfter=4,
             fontName='Helvetica'
         )
         story.append(Paragraph(f"Return Policy: {return_policy}", return_policy_style))

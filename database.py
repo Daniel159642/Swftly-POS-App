@@ -6298,6 +6298,25 @@ def get_customer_rewards_settings() -> Optional[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
+    # Create table if it doesn't exist
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS customer_rewards_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            enabled INTEGER DEFAULT 0 CHECK(enabled IN (0, 1)),
+            require_email INTEGER DEFAULT 0 CHECK(require_email IN (0, 1)),
+            require_phone INTEGER DEFAULT 0 CHECK(require_phone IN (0, 1)),
+            require_both INTEGER DEFAULT 0 CHECK(require_both IN (0, 1)),
+            reward_type TEXT DEFAULT 'points' CHECK(reward_type IN ('points', 'percentage', 'fixed')),
+            points_per_dollar REAL DEFAULT 1.0 CHECK(points_per_dollar >= 0),
+            percentage_discount REAL DEFAULT 0.0 CHECK(percentage_discount >= 0 AND percentage_discount <= 100),
+            fixed_discount REAL DEFAULT 0.0 CHECK(fixed_discount >= 0),
+            minimum_spend REAL DEFAULT 0.0 CHECK(minimum_spend >= 0),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    
     cursor.execute("""
         SELECT * FROM customer_rewards_settings 
         ORDER BY id DESC 
@@ -6329,6 +6348,25 @@ def update_customer_rewards_settings(**kwargs) -> bool:
     cursor = conn.cursor()
     
     try:
+        # Create table if it doesn't exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS customer_rewards_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                enabled INTEGER DEFAULT 0 CHECK(enabled IN (0, 1)),
+                require_email INTEGER DEFAULT 0 CHECK(require_email IN (0, 1)),
+                require_phone INTEGER DEFAULT 0 CHECK(require_phone IN (0, 1)),
+                require_both INTEGER DEFAULT 0 CHECK(require_both IN (0, 1)),
+                reward_type TEXT DEFAULT 'points' CHECK(reward_type IN ('points', 'percentage', 'fixed')),
+                points_per_dollar REAL DEFAULT 1.0 CHECK(points_per_dollar >= 0),
+                percentage_discount REAL DEFAULT 0.0 CHECK(percentage_discount >= 0 AND percentage_discount <= 100),
+                fixed_discount REAL DEFAULT 0.0 CHECK(fixed_discount >= 0),
+                minimum_spend REAL DEFAULT 0.0 CHECK(minimum_spend >= 0),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        
         # Check if settings exist
         cursor.execute("SELECT COUNT(*) FROM customer_rewards_settings")
         count = cursor.fetchone()[0]

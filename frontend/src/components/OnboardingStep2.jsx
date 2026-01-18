@@ -7,7 +7,7 @@ const TODO_ITEMS = [
   { id: 'payment', label: 'Payment processing', step: 3, icon: CreditCard },
   { id: 'employees', label: 'Employees', step: 5, icon: Users },
   { id: 'pos', label: 'POS', step: 8, icon: ShoppingCart }, // New step for POS setup
-  { id: 'rewards', label: 'Rewards', step: 9, icon: Gift }, // New step for Rewards setup
+  { id: 'rewards', label: 'Customer Rewards', step: 9, icon: Gift }, // New step for Customer Rewards setup
   { id: 'inventory', label: 'Inventory', step: 4, icon: Package }
 ]
 

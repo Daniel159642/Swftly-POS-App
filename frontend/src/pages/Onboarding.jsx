@@ -8,6 +8,8 @@ import OnboardingStep4 from '../components/OnboardingStep4'
 import OnboardingStep5 from '../components/OnboardingStep5'
 import OnboardingStep6 from '../components/OnboardingStep6'
 import OnboardingStep7 from '../components/OnboardingStep7'
+import OnboardingStepPOS from '../components/OnboardingStepPOS'
+import OnboardingStepRewards from '../components/OnboardingStepRewards'
 
 function Onboarding() {
   const navigate = useNavigate()
@@ -99,7 +101,9 @@ function Onboarding() {
       4: 'inventory',
       5: 'employees',
       6: 'preferences',
-      7: 'review'
+      7: 'review',
+      8: 'pos',
+      9: 'rewards'
     }
     return stepNames[step] || 'unknown'
   }
@@ -110,6 +114,13 @@ function Onboarding() {
     
     // Mark items as completed based on step
     markItemCompleted(currentStep)
+    
+    // If on step 8 (POS) or step 9 (Customer Rewards), go back to step 2 (to-do list) instead of incrementing
+    if (currentStep === 8 || currentStep === 9) {
+      setDirection('forward')
+      setCurrentStep(2)
+      return
+    }
     
     if (currentStep < totalSteps) {
       setDirection('forward')
@@ -280,6 +291,22 @@ function Onboarding() {
             onComplete={handleComplete}
             onBack={handleBack}
             allData={onboardingData}
+            direction={direction}
+          />
+        )}
+        
+        {currentStep === 8 && (
+          <OnboardingStepPOS
+            onNext={handleNext}
+            onBack={handleBack}
+            direction={direction}
+          />
+        )}
+        
+        {currentStep === 9 && (
+          <OnboardingStepRewards
+            onNext={handleNext}
+            onBack={handleBack}
             direction={direction}
           />
         )}

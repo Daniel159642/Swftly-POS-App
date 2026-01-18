@@ -1028,14 +1028,20 @@ def api_update_receipt_settings():
         cursor.execute("SELECT COUNT(*) FROM receipt_settings")
         count = cursor.fetchone()[0]
         
+        # Add return_policy column if it doesn't exist
+        try:
+            cursor.execute("ALTER TABLE receipt_settings ADD COLUMN return_policy TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
         if count == 0:
             # Insert new settings
             cursor.execute("""
                 INSERT INTO receipt_settings (
                     store_name, store_address, store_city, store_state, store_zip,
-                    store_phone, store_email, store_website, footer_message,
+                    store_phone, store_email, store_website, footer_message, return_policy,
                     show_tax_breakdown, show_payment_method, show_signature
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 data.get('store_name', 'Store'),
                 data.get('store_address', ''),
@@ -1046,6 +1052,7 @@ def api_update_receipt_settings():
                 data.get('store_email', ''),
                 data.get('store_website', ''),
                 data.get('footer_message', 'Thank you for your business!'),
+                data.get('return_policy', ''),
                 data.get('show_tax_breakdown', 1),
                 data.get('show_payment_method', 1),
                 data.get('show_signature', 0)
@@ -1063,6 +1070,7 @@ def api_update_receipt_settings():
                     store_email = ?,
                     store_website = ?,
                     footer_message = ?,
+                    return_policy = ?,
                     show_tax_breakdown = ?,
                     show_payment_method = ?,
                     show_signature = ?,
@@ -1078,6 +1086,7 @@ def api_update_receipt_settings():
                 data.get('store_email', ''),
                 data.get('store_website', ''),
                 data.get('footer_message', 'Thank you for your business!'),
+                data.get('return_policy', ''),
                 data.get('show_tax_breakdown', 1),
                 data.get('show_payment_method', 1),
                 data.get('show_signature', 0)
@@ -1087,6 +1096,114 @@ def api_update_receipt_settings():
         conn.close()
         
         return jsonify({'success': True, 'message': 'Receipt settings updated successfully'})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/pos-settings', methods=['GET'])
+def api_get_pos_settings():
+    """Get POS settings"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Create pos_settings table if it doesn't exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pos_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                num_registers INTEGER DEFAULT 1,
+                register_type TEXT DEFAULT 'one_screen',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        
+        # Get settings
+        cursor.execute("SELECT * FROM pos_settings ORDER BY id DESC LIMIT 1")
+        row = cursor.fetchone()
+        
+        if row:
+            settings = {
+                'num_registers': row[1],
+                'register_type': row[2]
+            }
+        else:
+            # Return defaults if no settings exist
+            settings = {
+                'num_registers': 1,
+                'register_type': 'one_screen'
+            }
+        
+        conn.close()
+        return jsonify({'success': True, 'settings': settings})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/pos-settings', methods=['POST'])
+def api_update_pos_settings():
+    """Update POS settings"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        
+        data = request.json
+        
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Create pos_settings table if it doesn't exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pos_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                num_registers INTEGER DEFAULT 1,
+                register_type TEXT DEFAULT 'one_screen',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        
+        # Check if settings exist
+        cursor.execute("SELECT COUNT(*) FROM pos_settings")
+        count = cursor.fetchone()[0]
+        
+        num_registers = data.get('num_registers', 1)
+        register_type = data.get('register_type', 'one_screen')
+        
+        # Validate register_type
+        if register_type not in ['one_screen', 'two_screen']:
+            register_type = 'one_screen'
+        
+        # Validate num_registers
+        try:
+            num_registers = int(num_registers)
+            if num_registers < 1:
+                num_registers = 1
+        except (ValueError, TypeError):
+            num_registers = 1
+        
+        if count == 0:
+            # Insert new settings
+            cursor.execute("""
+                INSERT INTO pos_settings (num_registers, register_type)
+                VALUES (?, ?)
+            """, (num_registers, register_type))
+        else:
+            # Update existing settings
+            cursor.execute("""
+                UPDATE pos_settings SET
+                    num_registers = ?,
+                    register_type = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = (SELECT id FROM pos_settings ORDER BY id DESC LIMIT 1)
+            """, (num_registers, register_type))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'POS settings updated successfully'})
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -5174,33 +5291,49 @@ def api_get_customer_rewards_settings():
 
 @app.route('/api/customer-rewards-settings', methods=['POST'])
 def api_update_customer_rewards_settings():
-    """Update customer rewards settings (admin only)"""
+    """Update customer rewards settings (admin only, or during onboarding)"""
     try:
         if not request.is_json:
             return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
         
         data = request.json
         
-        # Verify session
-        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
-        if not session_token:
-            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        # Check if settings exist in database (allow initial setup without strict auth)
+        import sqlite3
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT COUNT(*) FROM customer_rewards_settings")
+            count = cursor.fetchone()[0]
+            is_initial_setup = count == 0
+        except sqlite3.OperationalError:
+            # Table doesn't exist yet, allow initial setup
+            is_initial_setup = True
+        finally:
+            conn.close()
         
-        session_result = verify_session(session_token)
-        if not session_result.get('valid'):
-            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        # Verify session if not initial setup
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token') or request.cookies.get('session_token')
         
-        employee_id = session_result.get('employee_id')
-        
-        # Check if user is admin or has manage_settings permission
-        employee = get_employee(employee_id)
-        is_admin = employee and employee.get('position', '').lower() == 'admin'
-        
-        pm = get_permission_manager()
-        has_permission = pm.has_permission(employee_id, 'manage_settings')
-        
-        if not is_admin and not has_permission:
-            return jsonify({'success': False, 'message': 'Permission denied. Admin access or manage_settings permission required.'}), 403
+        if not is_initial_setup:
+            if not session_token:
+                return jsonify({'success': False, 'message': 'Session token required'}), 401
+            
+            session_result = verify_session(session_token)
+            if not session_result or not session_result.get('valid'):
+                return jsonify({'success': False, 'message': 'Invalid session'}), 401
+            
+            employee_id = session_result.get('employee_id')
+            
+            # Check if user is admin or has manage_settings permission
+            employee = get_employee(employee_id)
+            is_admin = employee and employee.get('position', '').lower() == 'admin'
+            
+            pm = get_permission_manager()
+            has_permission = pm.has_permission(employee_id, 'manage_settings')
+            
+            if not is_admin and not has_permission:
+                return jsonify({'success': False, 'message': 'Permission denied. Admin access or manage_settings permission required.'}), 403
         
         # Update settings
         update_fields = {
