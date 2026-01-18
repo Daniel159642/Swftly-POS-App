@@ -2260,30 +2260,42 @@ def create_order(
         columns = [col[1] for col in cursor.fetchall()]
         has_tip = 'tip' in columns
         has_order_type = 'order_type' in columns
+        
+        # Get current datetime using local timezone (ensure accurate time)
+        # datetime.now() uses system local timezone automatically
+        now = datetime.now()
+        current_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Debug: Verify the time being set (can be removed later)
+        import time
+        local_time = time.localtime()
+        print(f"Order date being set: {current_datetime}")
+        print(f"System local time: {local_time.tm_year}-{local_time.tm_mon:02d}-{local_time.tm_mday:02d} {local_time.tm_hour:02d}:{local_time.tm_min:02d}:{local_time.tm_sec:02d}")
+        
         if has_tip and has_order_type:
             cursor.execute("""
                 INSERT INTO orders (
-                    order_number, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
+                    order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
                     discount, transaction_fee, tip, total, payment_method, payment_status, order_status, order_type, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'completed', ?, ?)
-            """, (order_number, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'completed', ?, ?)
+            """, (order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
                   discount, transaction_fee, tip, total, payment_method, order_type, notes))
         elif has_tip:
             cursor.execute("""
                 INSERT INTO orders (
-                    order_number, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
+                    order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
                     discount, transaction_fee, tip, total, payment_method, payment_status, order_status, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'completed', ?)
-            """, (order_number, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'completed', ?)
+            """, (order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
                   discount, transaction_fee, tip, total, payment_method, notes))
         else:
             # Fallback for older schema
             cursor.execute("""
                 INSERT INTO orders (
-                    order_number, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
+                    order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
                     discount, transaction_fee, total, payment_method, payment_status, order_status, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'completed', ?)
-            """, (order_number, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'completed', ?)
+            """, (order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
                   discount, transaction_fee, total, payment_method, notes))
         
         order_id = cursor.lastrowid

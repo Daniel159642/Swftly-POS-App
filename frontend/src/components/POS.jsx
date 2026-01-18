@@ -34,6 +34,8 @@ function POS({ employeeId, employeeName }) {
   const [changeAmount, setChangeAmount] = useState(0)
   const [paymentCompleted, setPaymentCompleted] = useState(false)
   const [currentTransactionId, setCurrentTransactionId] = useState(null)
+  const [currentOrderId, setCurrentOrderId] = useState(null)
+  const [currentOrderNumber, setCurrentOrderNumber] = useState(null)
   const [showCustomerDisplay, setShowCustomerDisplay] = useState(false)
   const [showSummary, setShowSummary] = useState(false) // Show transaction summary before payment
   const [selectedTip, setSelectedTip] = useState(0) // Tip amount selected by customer
@@ -557,21 +559,109 @@ function POS({ employeeId, employeeName }) {
   const generateReceipt = async (orderId, orderNumber) => {
     try {
       const response = await fetch(`/api/receipt/${orderId}`)
+      
+      // Check if response is OK and is a PDF
       if (response.ok) {
-        const blob = await response.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `receipt_${orderNumber}.pdf`
-        document.body.appendChild(a)
-        a.click()
-        window.URL.revokeObjectURL(url)
-        document.body.removeChild(a)
+        const contentType = response.headers.get('content-type') || ''
+        
+        // Verify it's actually a PDF
+        if (contentType.includes('application/pdf')) {
+          const blob = await response.blob()
+          
+          // Double-check blob type or size
+          if (blob.type === 'application/pdf' || blob.size > 0) {
+            const url = window.URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `receipt_${orderNumber}.pdf`
+            a.style.display = 'none' // Hide the link
+            document.body.appendChild(a)
+            
+            // Use setTimeout to ensure the link is fully added to DOM
+            setTimeout(() => {
+              a.click()
+              // Clean up after a delay to ensure download starts
+              setTimeout(() => {
+                window.URL.revokeObjectURL(url)
+                document.body.removeChild(a)
+              }, 100)
+            }, 10)
+            return true
+          } else {
+            console.error('Invalid blob type received:', blob.type, 'Size:', blob.size)
+            return false
+          }
+        } else {
+          // If not PDF, read error message
+          const text = await response.text()
+          console.error('Response was not a PDF. Content-Type:', contentType, 'Response:', text)
+          return false
+        }
       } else {
-        console.error('Failed to generate receipt')
+        // Try to read error message
+        const errorText = await response.text()
+        console.error('Failed to generate receipt. Status:', response.status, 'Error:', errorText)
+        return false
       }
     } catch (err) {
       console.error('Error generating receipt:', err)
+      return false
+    }
+  }
+
+  const generateReceiptFromTransaction = async (transactionId, transactionNumber) => {
+    try {
+      const response = await fetch(`/api/receipt/transaction/${transactionId}`)
+      
+      // Check if response is OK and is a PDF
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || ''
+        
+        // Verify it's actually a PDF
+        if (contentType.includes('application/pdf')) {
+          const blob = await response.blob()
+          
+          // Double-check blob type or size
+          if (blob.type === 'application/pdf' || blob.size > 0) {
+            const url = window.URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            const filename = transactionNumber 
+              ? `receipt_transaction_${transactionNumber}.pdf`
+              : `receipt_transaction_${transactionId}.pdf`
+            a.download = filename
+            a.style.display = 'none' // Hide the link
+            document.body.appendChild(a)
+            
+            // Use setTimeout to ensure the link is fully added to DOM
+            setTimeout(() => {
+              a.click()
+              // Clean up after a delay to ensure download starts
+              setTimeout(() => {
+                window.URL.revokeObjectURL(url)
+                document.body.removeChild(a)
+              }, 100)
+            }, 10)
+            return true
+          } else {
+            console.error('Invalid blob type received:', blob.type, 'Size:', blob.size)
+            return false
+          }
+        } else {
+          // If not PDF, read error message
+          const text = await response.text()
+          console.error('Response was not a PDF. Content-Type:', contentType, 'Response:', text)
+          return false
+        }
+      } else {
+        // Try to read error message
+        const errorText = await response.text()
+        console.error('Failed to generate receipt. Status:', response.status, 'Error:', errorText)
+        return false
+      }
+    } catch (err) {
+      console.error('Error generating receipt:', err)
+      return false
     }
   }
 
@@ -782,6 +872,33 @@ function POS({ employeeId, employeeName }) {
               : 'Transaction processed successfully!'
             setMessage({ type: 'success', text: successMessage })
             
+            // Try to get order_id from payment_transactions if not already available
+            let foundOrderId = currentOrderId
+            let foundOrderNumber = currentOrderNumber
+            if (transactionId && !currentOrderId) {
+              try {
+                const orderLookupResponse = await fetch(`/api/payment_transactions`)
+                const orderLookupResult = await orderLookupResponse.json()
+                if (orderLookupResult.data && orderLookupResult.data.length > 0) {
+                  // Find payment_transaction with matching transaction_id
+                  const paymentTx = orderLookupResult.data.find(pt => 
+                    pt.transaction_id === transactionId || pt.transaction_id === parseInt(transactionId)
+                  )
+                  if (paymentTx && paymentTx.order_id) {
+                    foundOrderId = paymentTx.order_id
+                    foundOrderNumber = paymentTx.order_number
+                    setCurrentOrderId(paymentTx.order_id)
+                    if (paymentTx.order_number) {
+                      setCurrentOrderNumber(paymentTx.order_number)
+                    }
+                  }
+                }
+              } catch (err) {
+                console.error('Error looking up order_id:', err)
+              }
+            }
+            
+            // Don't automatically generate receipt - let user choose in customer display popup
             // Trigger customer display to show receipt screen
             setPaymentCompleted(true)
             
@@ -827,9 +944,11 @@ function POS({ employeeId, employeeName }) {
             setMessage({ type: 'success', text: `Order ${result.order_number} processed successfully!` })
             setPaymentCompleted(true)
             
-            // Automatically generate and download receipt
+            // Store order information for receipt generation
             if (result.order_id) {
-              generateReceipt(result.order_id, result.order_number)
+              setCurrentOrderId(result.order_id)
+              setCurrentOrderNumber(result.order_number)
+              // Don't automatically generate receipt - let user choose in customer display popup
             }
             
             // Payment completed - show customer display for receipt selection
@@ -870,10 +989,16 @@ function POS({ employeeId, employeeName }) {
         })
         result = await response.json()
         
-        if (result.success) {
-          setMessage({ type: 'success', text: `Order ${result.order_number} processed successfully!` })
-          
-          if (paymentMethod === 'cash') {
+          if (result.success) {
+            setMessage({ type: 'success', text: `Order ${result.order_number} processed successfully!` })
+            
+            // Store order information for receipt generation
+            if (result.order_id) {
+              setCurrentOrderId(result.order_id)
+              setCurrentOrderNumber(result.order_number)
+            }
+            
+            if (paymentMethod === 'cash') {
             const change = calculateChange()
             setChangeAmount(change)
             setShowChangeScreen(true)
@@ -1194,6 +1319,8 @@ function POS({ employeeId, employeeName }) {
                 employeeId={employeeId}
                 paymentCompleted={paymentCompleted}
                 transactionId={currentTransactionId}
+                orderId={currentOrderId}
+                orderNumber={currentOrderNumber}
               />
             </div>
           </div>

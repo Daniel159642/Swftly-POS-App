@@ -3,7 +3,7 @@ import { io } from 'socket.io-client'
 import { useTheme } from '../contexts/ThemeContext'
 import './CustomerDisplay.css'
 
-function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymentMethod, amountPaid, onClose, onPaymentMethodSelect, onTipSelect, onReceiptSelect, onProceedToPayment, showSummary, employeeId, paymentCompleted, transactionId: propTransactionId }) {
+function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymentMethod, amountPaid, onClose, onPaymentMethodSelect, onTipSelect, onReceiptSelect, onProceedToPayment, showSummary, employeeId, paymentCompleted, transactionId: propTransactionId, orderId: propOrderId, orderNumber: propOrderNumber }) {
   const { themeColor, themeMode } = useTheme()
   
   // Convert hex to RGB for rgba usage
@@ -37,6 +37,8 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
   const [receiptContact, setReceiptContact] = useState('')
   const [socket, setSocket] = useState(null)
   const [transactionId, setTransactionId] = useState(propTransactionId || null)
+  const [orderId, setOrderId] = useState(propOrderId || null)
+  const [orderNumber, setOrderNumber] = useState(propOrderNumber || null)
   const [showCustomTip, setShowCustomTip] = useState(false)
   const [customTipAmount, setCustomTipAmount] = useState('')
   const [signatureData, setSignatureData] = useState(null)
@@ -171,7 +173,13 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
     if (propTransactionId) {
       setTransactionId(propTransactionId)
     }
-  }, [propTransactionId])
+    if (propOrderId) {
+      setOrderId(propOrderId)
+    }
+    if (propOrderNumber) {
+      setOrderNumber(propOrderNumber)
+    }
+  }, [propTransactionId, propOrderId, propOrderNumber])
 
   // Initialize signature canvas when receipt screen is shown
   useEffect(() => {
@@ -520,33 +528,93 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
     
     if (type === 'printed') {
       // Generate and download receipt PDF
-      if (transactionId) {
+      // Try transaction_id first, then fall back to order_id
+      const generateReceiptForId = async (id, isOrder = false) => {
         try {
-          const response = await fetch(`/api/receipt/transaction/${transactionId}`)
+          const endpoint = isOrder ? `/api/receipt/${id}` : `/api/receipt/transaction/${id}`
+          const response = await fetch(endpoint)
+          
+          // Check if response is OK and is a PDF
           if (response.ok) {
-            const blob = await response.blob()
-            const url = window.URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = `receipt_transaction_${transactionId}.pdf`
-            document.body.appendChild(a)
-            a.click()
-            window.URL.revokeObjectURL(url)
-            document.body.removeChild(a)
-            // After download, save preference and show success
-            await submitReceiptPreference(type)
+            const contentType = response.headers.get('content-type') || ''
+            
+            // Verify it's actually a PDF
+            if (contentType.includes('application/pdf')) {
+              const blob = await response.blob()
+              
+              // Double-check blob type or size
+              if (blob.type === 'application/pdf' || blob.size > 0) {
+                const url = window.URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                const filename = isOrder 
+                  ? `receipt_${orderNumber || id}.pdf`
+                  : `receipt_transaction_${id}.pdf`
+                a.download = filename
+                a.style.display = 'none' // Hide the link
+                document.body.appendChild(a)
+                
+                // Use setTimeout to ensure the link is fully added to DOM
+                setTimeout(() => {
+                  a.click()
+                  // Clean up after a delay to ensure download starts
+                  setTimeout(() => {
+                    window.URL.revokeObjectURL(url)
+                    document.body.removeChild(a)
+                  }, 100)
+                }, 10)
+                
+                return true
+              } else {
+                console.error('Invalid blob type received:', blob.type, 'Size:', blob.size)
+                return false
+              }
+            } else {
+              // If not PDF, read error message
+              const text = await response.text()
+              console.error('Response was not a PDF. Content-Type:', contentType, 'Response:', text)
+              return false
+            }
           } else {
-            console.error('Failed to generate receipt')
-            // Still save preference even if download fails
-            await submitReceiptPreference(type)
+            // Try to read error message
+            const errorText = await response.text()
+            console.error('Failed to generate receipt. Status:', response.status, 'Error:', errorText)
+            return false
           }
         } catch (err) {
           console.error('Error generating receipt:', err)
-          // Still save preference even if download fails
+          return false
+        }
+      }
+      
+      // Try transaction_id first if available
+      if (transactionId) {
+        const success = await generateReceiptForId(transactionId, false)
+        if (success) {
+          await submitReceiptPreference(type)
+          return
+        }
+        // If transaction_id failed, try order_id as fallback
+        if (orderId) {
+          const success2 = await generateReceiptForId(orderId, true)
+          if (success2) {
+            await submitReceiptPreference(type)
+            return
+          }
+        }
+        // Both failed, still save preference
+        await submitReceiptPreference(type)
+      } else if (orderId) {
+        // No transaction_id, try order_id directly
+        const success = await generateReceiptForId(orderId, true)
+        if (success) {
+          await submitReceiptPreference(type)
+        } else {
+          // Failed, still save preference
           await submitReceiptPreference(type)
         }
       } else {
-        // No transaction ID, just save preference
+        // No transaction ID or order ID, just save preference
         submitReceiptPreference(type)
       }
     } else if (type === 'email' || type === 'sms') {
