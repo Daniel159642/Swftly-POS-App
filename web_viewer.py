@@ -98,6 +98,143 @@ DB_NAME = 'inventory.db'
 # Initialize SMS service
 sms_service = EmailToAWSSMSService()
 
+# ============================================================================
+# SUPABASE SUPPORT (optional) - Initialize after database import
+# ============================================================================
+
+# Check if Supabase should be used
+if os.getenv('USE_SUPABASE', 'false').lower() == 'true':
+    try:
+        from database_supabase import (
+            get_connection as get_supabase_connection,
+            set_current_establishment as _set_establishment,
+            get_current_establishment as _get_establishment,
+            get_supabase_client
+        )
+        # Override get_connection in database module
+        from database import set_connection_override
+        set_connection_override(get_supabase_connection)
+        set_current_establishment = _set_establishment
+        get_current_establishment = _get_establishment
+        USE_SUPABASE = True
+        print("✓ Using Supabase database")
+    except ImportError as e:
+        print(f"Warning: Supabase configured but module not found: {e}")
+        print("Falling back to SQLite. Install: pip install supabase psycopg2-binary")
+        USE_SUPABASE = False
+    except Exception as e:
+        print(f"Warning: Could not initialize Supabase: {e}")
+        print("Falling back to SQLite")
+        USE_SUPABASE = False
+
+# ============================================================================
+# ESTABLISHMENT CONTEXT HANDLING (for multi-tenant Supabase)
+# ============================================================================
+
+def get_establishment_from_request():
+    """
+    Extract establishment ID from request
+    Tries multiple methods: subdomain, header, session, query param, default
+    """
+    if not USE_SUPABASE:
+        return None
+    
+    try:
+        # Option 1: Subdomain (store1.yourdomain.com)
+        host = request.host
+        if '.' in host:
+            subdomain = host.split('.')[0]
+            # Query establishments table
+            try:
+                conn = get_connection()
+                cursor = conn.cursor()
+                if USE_SUPABASE:
+                    cursor.execute(
+                        "SELECT establishment_id FROM establishments WHERE subdomain = %s AND is_active = TRUE",
+                        (subdomain,)
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT establishment_id FROM establishments WHERE subdomain = ? AND is_active = 1",
+                        (subdomain,)
+                    )
+                row = cursor.fetchone()
+                if row:
+                    return row[0] if isinstance(row, tuple) else (row['establishment_id'] if hasattr(row, 'keys') else row[0])
+            except Exception as e:
+                # If query fails, continue to other methods
+                pass
+        
+        # Option 2: Header
+        est_id = request.headers.get('X-Establishment-ID')
+        if est_id:
+            try:
+                return int(est_id)
+            except ValueError:
+                pass
+        
+        # Option 3: From employee session
+        session_token = request.headers.get('X-Session-Token') or (request.json and request.json.get('session_token'))
+        if session_token:
+            try:
+                conn = get_connection()
+                cursor = conn.cursor()
+                # Use parameterized query
+                if USE_SUPABASE:
+                    cursor.execute("""
+                        SELECT e.establishment_id 
+                        FROM employee_sessions es
+                        JOIN employees e ON es.employee_id = e.employee_id
+                        WHERE es.session_token = %s AND es.is_active = 1
+                    """, (session_token,))
+                else:
+                    cursor.execute("""
+                        SELECT e.establishment_id 
+                        FROM employee_sessions es
+                        JOIN employees e ON es.employee_id = e.employee_id
+                        WHERE es.session_token = ? AND es.is_active = 1
+                    """, (session_token,))
+                row = cursor.fetchone()
+                if row:
+                    return row[0] if isinstance(row, tuple) else row['establishment_id']
+            except Exception as e:
+                # If query fails, continue
+                pass
+        
+        # Option 4: Query parameter
+        est_id = request.args.get('establishment_id')
+        if est_id:
+            try:
+                return int(est_id)
+            except ValueError:
+                pass
+        
+        # Option 5: Default (for testing/development)
+        default_id = os.getenv('DEFAULT_ESTABLISHMENT_ID')
+        if default_id:
+            try:
+                return int(default_id)
+            except ValueError:
+                pass
+        
+        return None
+    except Exception as e:
+        print(f"Error getting establishment from request: {e}")
+        return None
+
+@app.before_request
+def set_establishment_context():
+    """Set establishment context before each request (for Supabase)"""
+    if USE_SUPABASE and set_current_establishment:
+        establishment_id = get_establishment_from_request()
+        if establishment_id:
+            try:
+                set_current_establishment(establishment_id)
+            except Exception as e:
+                print(f"Warning: Could not set establishment context: {e}")
+        # Don't block requests if establishment_id is missing
+        # Some endpoints might handle it themselves (like login)
+
 # Initialize Socket.IO
 if SOCKETIO_AVAILABLE:
     # Use threading mode instead of eventlet to avoid blocking issues
@@ -6404,6 +6541,399 @@ def api_sms_stores():
         conn.close()
         return jsonify([dict(row) for row in rows])
     except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ============================================================================
+# CASH REGISTER CONTROL API ENDPOINTS
+# ============================================================================
+
+@app.route('/api/register/open', methods=['POST'])
+def api_open_register():
+    """Open a cash register session"""
+    try:
+        if not request.json:
+            return jsonify({'success': False, 'message': 'Invalid request data'}), 400
+        
+        data = request.json
+        
+        # Verify session
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
+        
+        from database import open_cash_register
+        
+        result = open_cash_register(
+            employee_id=employee_id,
+            register_id=data.get('register_id', 1),
+            starting_cash=data.get('starting_cash', 0.0),
+            notes=data.get('notes')
+        )
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        print(f"Error opening register: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/register/close', methods=['POST'])
+def api_close_register():
+    """Close a cash register session"""
+    try:
+        if not request.json:
+            return jsonify({'success': False, 'message': 'Invalid request data'}), 400
+        
+        data = request.json
+        
+        # Verify session
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
+        
+        session_id = data.get('session_id')
+        if not session_id:
+            return jsonify({'success': False, 'message': 'session_id is required'}), 400
+        
+        ending_cash = data.get('ending_cash')
+        if ending_cash is None:
+            return jsonify({'success': False, 'message': 'ending_cash is required'}), 400
+        
+        from database import close_cash_register
+        
+        result = close_cash_register(
+            session_id=session_id,
+            employee_id=employee_id,
+            ending_cash=float(ending_cash),
+            notes=data.get('notes')
+        )
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        print(f"Error closing register: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/register/transaction', methods=['POST'])
+def api_add_cash_transaction():
+    """Add a cash transaction (cash in/out)"""
+    try:
+        if not request.json:
+            return jsonify({'success': False, 'message': 'Invalid request data'}), 400
+        
+        data = request.json
+        
+        # Verify session
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
+        
+        from database import add_cash_transaction
+        
+        result = add_cash_transaction(
+            session_id=data.get('session_id'),
+            employee_id=employee_id,
+            transaction_type=data.get('transaction_type'),
+            amount=float(data.get('amount', 0)),
+            reason=data.get('reason'),
+            notes=data.get('notes')
+        )
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        print(f"Error adding cash transaction: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/register/session', methods=['GET'])
+def api_get_register_session():
+    """Get register session(s)"""
+    try:
+        # Verify session
+        session_token = request.headers.get('X-Session-Token') or request.args.get('session_token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        from database import get_register_session
+        
+        session_id = request.args.get('session_id')
+        register_id = request.args.get('register_id')
+        status = request.args.get('status')
+        
+        if session_id:
+            result = get_register_session(session_id=int(session_id))
+        else:
+            result = get_register_session(
+                register_id=int(register_id) if register_id else None,
+                status=status
+            )
+        
+        if result:
+            return jsonify({'success': True, 'data': result}), 200
+        else:
+            return jsonify({'success': False, 'message': 'Session not found'}), 404
+            
+    except Exception as e:
+        print(f"Error getting register session: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/register/summary', methods=['GET'])
+def api_get_register_summary():
+    """Get detailed register session summary"""
+    try:
+        # Verify session
+        session_token = request.headers.get('X-Session-Token') or request.args.get('session_token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        session_id = request.args.get('session_id')
+        if not session_id:
+            return jsonify({'success': False, 'message': 'session_id is required'}), 400
+        
+        from database import get_register_summary
+        
+        result = get_register_summary(int(session_id))
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 404
+            
+    except Exception as e:
+        print(f"Error getting register summary: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/register/reconcile', methods=['POST'])
+def api_reconcile_register():
+    """Reconcile a closed register session (manager approval)"""
+    try:
+        if not request.json:
+            return jsonify({'success': False, 'message': 'Invalid request data'}), 400
+        
+        data = request.json
+        
+        # Verify session
+        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
+        
+        session_id = data.get('session_id')
+        if not session_id:
+            return jsonify({'success': False, 'message': 'session_id is required'}), 400
+        
+        from database import reconcile_register_session
+        
+        result = reconcile_register_session(
+            session_id=session_id,
+            employee_id=employee_id,
+            notes=data.get('notes')
+        )
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        print(f"Error reconciling register: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ============================================================================
+# REGISTER CASH SETTINGS AND DAILY COUNTS API ENDPOINTS
+# ============================================================================
+
+@app.route('/api/register/cash-settings', methods=['GET', 'POST'])
+def api_register_cash_settings():
+    """Get or save register cash settings"""
+    try:
+        # Verify session
+        session_token = request.headers.get('X-Session-Token') or request.args.get('session_token') or (request.json and request.json.get('session_token'))
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
+        
+        from database import get_register_cash_settings, save_register_cash_settings
+        
+        if request.method == 'GET':
+            register_id = request.args.get('register_id')
+            if register_id:
+                result = get_register_cash_settings(int(register_id))
+            else:
+                result = get_register_cash_settings()
+            
+            if result is not None:
+                return jsonify({'success': True, 'data': result}), 200
+            else:
+                return jsonify({'success': True, 'data': []}), 200
+        else:
+            # POST - save settings
+            if not request.json:
+                return jsonify({'success': False, 'message': 'Invalid request data'}), 400
+            
+            data = request.json
+            register_id = data.get('register_id', 1)
+            cash_mode = data.get('cash_mode', 'total')
+            total_amount = data.get('total_amount')
+            denominations = data.get('denominations')
+            
+            result = save_register_cash_settings(
+                register_id=register_id,
+                cash_mode=cash_mode,
+                total_amount=total_amount,
+                denominations=denominations,
+                employee_id=employee_id
+            )
+            
+            if result.get('success'):
+                return jsonify(result), 200
+            else:
+                return jsonify(result), 400
+                
+    except Exception as e:
+        print(f"Error with register cash settings: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/register/daily-count', methods=['GET', 'POST'])
+def api_daily_cash_count():
+    """Get or save daily cash counts"""
+    try:
+        # Verify session
+        session_token = request.headers.get('X-Session-Token') or request.args.get('session_token') or (request.json and request.json.get('session_token'))
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
+        
+        from database import get_daily_cash_counts, save_daily_cash_count
+        
+        if request.method == 'GET':
+            register_id = request.args.get('register_id')
+            count_date = request.args.get('count_date')
+            count_type = request.args.get('count_type')
+            start_date = request.args.get('start_date')
+            end_date = request.args.get('end_date')
+            
+            result = get_daily_cash_counts(
+                register_id=int(register_id) if register_id else None,
+                count_date=count_date,
+                count_type=count_type,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            return jsonify({'success': True, 'data': result}), 200
+        else:
+            # POST - save count
+            if not request.json:
+                return jsonify({'success': False, 'message': 'Invalid request data'}), 400
+            
+            data = request.json
+            register_id = data.get('register_id', 1)
+            count_date = data.get('count_date')
+            count_type = data.get('count_type', 'drop')
+            total_amount = data.get('total_amount', 0.0)
+            denominations = data.get('denominations')
+            notes = data.get('notes')
+            
+            if not count_date:
+                # Use today's date if not provided
+                from datetime import datetime
+                count_date = datetime.now().strftime('%Y-%m-%d')
+            
+            result = save_daily_cash_count(
+                register_id=register_id,
+                count_date=count_date,
+                count_type=count_type,
+                total_amount=float(total_amount),
+                employee_id=employee_id,
+                denominations=denominations,
+                notes=notes
+            )
+            
+            if result.get('success'):
+                return jsonify(result), 200
+            else:
+                return jsonify(result), 400
+                
+    except Exception as e:
+        print(f"Error with daily cash count: {e}")
+        import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 

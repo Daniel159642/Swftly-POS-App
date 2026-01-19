@@ -68,8 +68,21 @@ def generate_unique_barcode(pending_shipment_id: int, line_number: int, product_
     
     return barcode
 
+# Allow Supabase to override get_connection
+_connection_override = None
+
+def set_connection_override(connection_func):
+    """Allow Supabase to override the connection function"""
+    global _connection_override
+    _connection_override = connection_func
+
 def get_connection():
     """Get database connection with timeout to handle locks"""
+    # If Supabase override is set, use it
+    if _connection_override:
+        return _connection_override()
+    
+    # Otherwise use SQLite
     try:
         conn = sqlite3.connect(DB_NAME, timeout=20.0)  # Increased timeout for better lock handling
         conn.row_factory = sqlite3.Row  # Enable column access by name
@@ -7256,3 +7269,839 @@ def get_onboarding_progress(step_name: Optional[str] = None) -> Optional[Dict[st
         conn.close()
         print(f"Error getting onboarding progress: {e}")
         return None
+
+# ============================================================================
+# CASH REGISTER CONTROL FUNCTIONS
+# ============================================================================
+
+def open_cash_register(employee_id: int, register_id: int = 1, starting_cash: float = 0.0, notes: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Open a new cash register session
+    
+    Args:
+        employee_id: Employee opening the register
+        register_id: Register number (default 1)
+        starting_cash: Starting cash amount
+        notes: Optional notes
+    
+    Returns:
+        Dict with session_id and status
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Check if there's an open session for this register
+        cursor.execute("""
+            SELECT session_id FROM cash_register_sessions
+            WHERE register_id = ? AND status = 'open'
+        """, (register_id,))
+        
+        existing = cursor.fetchone()
+        if existing:
+            conn.close()
+            return {
+                'success': False,
+                'message': f'Register {register_id} is already open',
+                'session_id': existing[0]
+            }
+        
+        # Create new session
+        cursor.execute("""
+            INSERT INTO cash_register_sessions
+            (register_id, employee_id, starting_cash, notes, status)
+            VALUES (?, ?, ?, ?, 'open')
+        """, (register_id, employee_id, starting_cash, notes))
+        
+        session_id = cursor.lastrowid
+        
+        # Log audit
+        try:
+            log_audit_action(
+                table_name='cash_register_sessions',
+                record_id=session_id,
+                action_type='INSERT',
+                employee_id=employee_id,
+                new_values={'register_id': register_id, 'starting_cash': starting_cash, 'status': 'open'}
+            )
+        except:
+            pass  # Don't fail if audit logging fails
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            'success': True,
+            'session_id': session_id,
+            'message': f'Register {register_id} opened successfully'
+        }
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        print(f"Error opening cash register: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+
+def close_cash_register(session_id: int, employee_id: int, ending_cash: float, notes: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Close a cash register session and calculate reconciliation
+    
+    Args:
+        session_id: Session to close
+        employee_id: Employee closing the register
+        ending_cash: Actual cash count
+        notes: Optional notes
+    
+    Returns:
+        Dict with reconciliation details
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Get session details
+        cursor.execute("""
+            SELECT register_id, employee_id, starting_cash, opened_at, status
+            FROM cash_register_sessions
+            WHERE session_id = ?
+        """, (session_id,))
+        
+        session = cursor.fetchone()
+        if not session:
+            conn.close()
+            return {'success': False, 'message': 'Session not found'}
+        
+        session = dict(zip(['register_id', 'employee_id', 'starting_cash', 'opened_at', 'status'], session))
+        
+        if session['status'] != 'open':
+            conn.close()
+            return {'success': False, 'message': f"Session is already {session['status']}"}
+        
+        # Calculate cash sales and refunds from orders
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(CASE WHEN o.payment_method = 'cash' THEN o.total ELSE 0 END), 0) as cash_sales,
+                COALESCE(SUM(CASE WHEN o.payment_method = 'cash' AND o.order_status = 'returned' THEN o.total ELSE 0 END), 0) as cash_refunds
+            FROM orders o
+            WHERE o.order_date >= ? AND o.order_date <= datetime('now')
+            AND o.payment_method = 'cash'
+        """, (session['opened_at'],))
+        
+        sales_data = cursor.fetchone()
+        cash_sales = sales_data[0] if sales_data else 0.0
+        cash_refunds = sales_data[1] if sales_data else 0.0
+        
+        # Calculate cash in/out transactions
+        cursor.execute("""
+            SELECT 
+                COALESCE(SUM(CASE WHEN transaction_type IN ('cash_in', 'deposit') THEN amount ELSE 0 END), 0) as cash_in,
+                COALESCE(SUM(CASE WHEN transaction_type IN ('cash_out', 'withdrawal') THEN amount ELSE 0 END), 0) as cash_out
+            FROM cash_transactions
+            WHERE session_id = ?
+        """, (session_id,))
+        
+        trans_data = cursor.fetchone()
+        cash_in = trans_data[0] if trans_data else 0.0
+        cash_out = trans_data[1] if trans_data else 0.0
+        
+        # Calculate expected cash
+        expected_cash = session['starting_cash'] + cash_sales - cash_refunds + cash_in - cash_out
+        
+        # Calculate discrepancy
+        discrepancy = ending_cash - expected_cash
+        
+        # Update session
+        cursor.execute("""
+            UPDATE cash_register_sessions
+            SET closed_at = CURRENT_TIMESTAMP,
+                closed_by = ?,
+                ending_cash = ?,
+                expected_cash = ?,
+                cash_sales = ?,
+                cash_refunds = ?,
+                cash_in = ?,
+                cash_out = ?,
+                discrepancy = ?,
+                status = 'closed',
+                notes = COALESCE(notes, '') || CASE WHEN ? IS NOT NULL THEN '\n' || ? ELSE '' END
+            WHERE session_id = ?
+        """, (employee_id, ending_cash, expected_cash, cash_sales, cash_refunds, 
+              cash_in, cash_out, discrepancy, notes, notes, session_id))
+        
+        # Log audit
+        try:
+            log_audit_action(
+                table_name='cash_register_sessions',
+                record_id=session_id,
+                action_type='UPDATE',
+                employee_id=employee_id,
+                new_values={
+                    'status': 'closed',
+                    'ending_cash': ending_cash,
+                    'expected_cash': expected_cash,
+                    'discrepancy': discrepancy
+                }
+            )
+        except:
+            pass
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            'success': True,
+            'session_id': session_id,
+            'starting_cash': session['starting_cash'],
+            'ending_cash': ending_cash,
+            'expected_cash': expected_cash,
+            'cash_sales': cash_sales,
+            'cash_refunds': cash_refunds,
+            'cash_in': cash_in,
+            'cash_out': cash_out,
+            'discrepancy': discrepancy,
+            'message': 'Register closed successfully'
+        }
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        print(f"Error closing cash register: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+
+def add_cash_transaction(session_id: int, employee_id: int, transaction_type: str, amount: float, reason: Optional[str] = None, notes: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Add a cash transaction (cash in/out, deposit, withdrawal, adjustment)
+    
+    Args:
+        session_id: Register session ID
+        employee_id: Employee making the transaction
+        transaction_type: 'cash_in', 'cash_out', 'deposit', 'withdrawal', 'adjustment'
+        amount: Transaction amount
+        reason: Reason for transaction
+        notes: Optional notes
+    
+    Returns:
+        Dict with transaction_id and status
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Verify session is open
+        cursor.execute("""
+            SELECT status FROM cash_register_sessions WHERE session_id = ?
+        """, (session_id,))
+        
+        session = cursor.fetchone()
+        if not session:
+            conn.close()
+            return {'success': False, 'message': 'Session not found'}
+        
+        if session[0] != 'open':
+            conn.close()
+            return {'success': False, 'message': f'Session is {session[0]}, cannot add transactions'}
+        
+        # Insert transaction
+        cursor.execute("""
+            INSERT INTO cash_transactions
+            (session_id, employee_id, transaction_type, amount, reason, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (session_id, employee_id, transaction_type, amount, reason, notes))
+        
+        transaction_id = cursor.lastrowid
+        
+        # Log audit
+        try:
+            log_audit_action(
+                table_name='cash_transactions',
+                record_id=transaction_id,
+                action_type='INSERT',
+                employee_id=employee_id,
+                new_values={
+                    'transaction_type': transaction_type,
+                    'amount': amount,
+                    'reason': reason
+                }
+            )
+        except:
+            pass
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            'success': True,
+            'transaction_id': transaction_id,
+            'message': 'Cash transaction recorded successfully'
+        }
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        print(f"Error adding cash transaction: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+
+def get_register_session(session_id: Optional[int] = None, register_id: Optional[int] = None, status: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Get cash register session(s)
+    
+    Args:
+        session_id: Specific session ID
+        register_id: Filter by register ID
+        status: Filter by status ('open', 'closed', 'reconciled')
+    
+    Returns:
+        Session dict or list of sessions
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.row_factory = sqlite3.Row
+    
+    try:
+        if session_id:
+            cursor.execute("""
+                SELECT crs.*,
+                       e1.first_name || ' ' || e1.last_name as opened_by_name,
+                       e2.first_name || ' ' || e2.last_name as closed_by_name,
+                       e3.first_name || ' ' || e3.last_name as reconciled_by_name
+                FROM cash_register_sessions crs
+                LEFT JOIN employees e1 ON crs.employee_id = e1.employee_id
+                LEFT JOIN employees e2 ON crs.closed_by = e2.employee_id
+                LEFT JOIN employees e3 ON crs.reconciled_by = e3.employee_id
+                WHERE crs.session_id = ?
+            """, (session_id,))
+            
+            row = cursor.fetchone()
+            conn.close()
+            return dict(row) if row else None
+        else:
+            query = """
+                SELECT crs.*,
+                       e1.first_name || ' ' || e1.last_name as opened_by_name,
+                       e2.first_name || ' ' || e2.last_name as closed_by_name,
+                       e3.first_name || ' ' || e3.last_name as reconciled_by_name
+                FROM cash_register_sessions crs
+                LEFT JOIN employees e1 ON crs.employee_id = e1.employee_id
+                LEFT JOIN employees e2 ON crs.closed_by = e2.employee_id
+                LEFT JOIN employees e3 ON crs.reconciled_by = e3.employee_id
+                WHERE 1=1
+            """
+            params = []
+            
+            if register_id:
+                query += " AND crs.register_id = ?"
+                params.append(register_id)
+            
+            if status:
+                query += " AND crs.status = ?"
+                params.append(status)
+            
+            query += " ORDER BY crs.opened_at DESC"
+            
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            conn.close()
+            return [dict(row) for row in rows]
+            
+    except Exception as e:
+        conn.close()
+        print(f"Error getting register session: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def get_register_summary(session_id: int) -> Dict[str, Any]:
+    """
+    Get detailed summary of a register session including all transactions
+    
+    Args:
+        session_id: Session ID
+    
+    Returns:
+        Dict with session details and transactions
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.row_factory = sqlite3.Row
+    
+    try:
+        # Get session
+        session = get_register_session(session_id=session_id)
+        if not session:
+            return {'success': False, 'message': 'Session not found'}
+        
+        # Get cash transactions
+        cursor.execute("""
+            SELECT ct.*,
+                   e.first_name || ' ' || e.last_name as employee_name
+            FROM cash_transactions ct
+            JOIN employees e ON ct.employee_id = e.employee_id
+            WHERE ct.session_id = ?
+            ORDER BY ct.transaction_date
+        """, (session_id,))
+        
+        transactions = [dict(row) for row in cursor.fetchall()]
+        
+        # Get cash sales from orders
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as transaction_count,
+                COALESCE(SUM(CASE WHEN o.order_status != 'voided' THEN o.total ELSE 0 END), 0) as total_sales,
+                COALESCE(SUM(CASE WHEN o.order_status = 'voided' THEN o.total ELSE 0 END), 0) as voided_amount
+            FROM orders o
+            WHERE o.payment_method = 'cash'
+            AND o.order_date >= ? AND o.order_date <= COALESCE(?, datetime('now'))
+        """, (session['opened_at'], session.get('closed_at')))
+        
+        sales_data = dict(cursor.fetchone())
+        
+        conn.close()
+        
+        return {
+            'success': True,
+            'session': session,
+            'transactions': transactions,
+            'sales': sales_data
+        }
+        
+    except Exception as e:
+        conn.close()
+        print(f"Error getting register summary: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+
+def reconcile_register_session(session_id: int, employee_id: int, notes: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Mark a register session as reconciled (manager approval)
+    
+    Args:
+        session_id: Session to reconcile
+        employee_id: Employee reconciling (should be manager)
+        notes: Optional reconciliation notes
+    
+    Returns:
+        Dict with status
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Check session exists and is closed
+        cursor.execute("""
+            SELECT status FROM cash_register_sessions WHERE session_id = ?
+        """, (session_id,))
+        
+        session = cursor.fetchone()
+        if not session:
+            conn.close()
+            return {'success': False, 'message': 'Session not found'}
+        
+        if session[0] != 'closed':
+            conn.close()
+            return {'success': False, 'message': f'Session must be closed before reconciliation (current: {session[0]})'}
+        
+        # Update to reconciled
+        cursor.execute("""
+            UPDATE cash_register_sessions
+            SET status = 'reconciled',
+                reconciled_by = ?,
+                reconciled_at = CURRENT_TIMESTAMP,
+                notes = COALESCE(notes, '') || CASE WHEN ? IS NOT NULL THEN '\nReconciled: ' || ? ELSE '' END
+            WHERE session_id = ?
+        """, (employee_id, notes, notes, session_id))
+        
+        # Log audit
+        try:
+            log_audit_action(
+                table_name='cash_register_sessions',
+                record_id=session_id,
+                action_type='APPROVE',
+                employee_id=employee_id,
+                new_values={'status': 'reconciled'}
+            )
+        except:
+            pass
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            'success': True,
+            'message': 'Session reconciled successfully'
+        }
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        print(f"Error reconciling register: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+
+# ============================================================================
+# REGISTER CASH SETTINGS AND DAILY COUNTS
+# ============================================================================
+
+def save_register_cash_settings(
+    register_id: int,
+    cash_mode: str,
+    total_amount: Optional[float] = None,
+    denominations: Optional[Dict[str, int]] = None,
+    employee_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Save register cash settings (total amount or denomination breakdown)
+    
+    Args:
+        register_id: Register number
+        cash_mode: 'total' or 'denominations'
+        total_amount: Total cash amount (if cash_mode is 'total')
+        denominations: Dict of denominations (if cash_mode is 'denominations')
+                       e.g., {'100': 2, '50': 1, '20': 5, '10': 10, '5': 20, '1': 50, '0.25': 40, '0.10': 50, '0.05': 40, '0.01': 100}
+        employee_id: Employee saving the settings
+    
+    Returns:
+        Dict with success status
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        if cash_mode not in ['total', 'denominations']:
+            conn.close()
+            return {'success': False, 'message': 'cash_mode must be "total" or "denominations"'}
+        
+        if cash_mode == 'total' and (total_amount is None or total_amount < 0):
+            conn.close()
+            return {'success': False, 'message': 'total_amount is required and must be >= 0'}
+        
+        if cash_mode == 'denominations':
+            if not denominations:
+                conn.close()
+                return {'success': False, 'message': 'denominations dict is required'}
+            
+            # Calculate total from denominations
+            total = 0.0
+            for denom, count in denominations.items():
+                try:
+                    total += float(denom) * int(count)
+                except (ValueError, TypeError):
+                    pass
+            
+            total_amount = total
+            denominations_json = json.dumps(denominations)
+        else:
+            denominations_json = None
+        
+        # Check if setting exists
+        cursor.execute("""
+            SELECT setting_id FROM register_cash_settings
+            WHERE register_id = ?
+        """, (register_id,))
+        
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing
+            cursor.execute("""
+                UPDATE register_cash_settings
+                SET cash_mode = ?,
+                    total_amount = ?,
+                    denominations = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE register_id = ?
+            """, (cash_mode, total_amount, denominations_json, register_id))
+        else:
+            # Insert new
+            cursor.execute("""
+                INSERT INTO register_cash_settings
+                (register_id, cash_mode, total_amount, denominations, is_active)
+                VALUES (?, ?, ?, ?, 1)
+            """, (register_id, cash_mode, total_amount, denominations_json))
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            'success': True,
+            'message': 'Register cash settings saved successfully',
+            'total_amount': total_amount
+        }
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        print(f"Error saving register cash settings: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+
+def get_register_cash_settings(register_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """
+    Get register cash settings
+    
+    Args:
+        register_id: Specific register ID, or None for all
+    
+    Returns:
+        Settings dict or list of settings
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.row_factory = sqlite3.Row
+    
+    try:
+        if register_id:
+            cursor.execute("""
+                SELECT * FROM register_cash_settings
+                WHERE register_id = ? AND is_active = 1
+            """, (register_id,))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                result = dict(row)
+                if result.get('denominations'):
+                    try:
+                        result['denominations'] = json.loads(result['denominations'])
+                    except:
+                        result['denominations'] = {}
+                return result
+            return None
+        else:
+            cursor.execute("""
+                SELECT * FROM register_cash_settings
+                WHERE is_active = 1
+                ORDER BY register_id
+            """)
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            results = []
+            for row in rows:
+                result = dict(row)
+                if result.get('denominations'):
+                    try:
+                        result['denominations'] = json.loads(result['denominations'])
+                    except:
+                        result['denominations'] = {}
+                results.append(result)
+            
+            return results
+            
+    except Exception as e:
+        conn.close()
+        print(f"Error getting register cash settings: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def save_daily_cash_count(
+    register_id: int,
+    count_date: str,
+    count_type: str,
+    total_amount: float,
+    employee_id: int,
+    denominations: Optional[Dict[str, int]] = None,
+    notes: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Save a daily cash count (drop, opening, or closing)
+    
+    Args:
+        register_id: Register number
+        count_date: Date of count (YYYY-MM-DD)
+        count_type: 'drop', 'opening', or 'closing'
+        total_amount: Total cash amount
+        employee_id: Employee who counted
+        denominations: Optional denomination breakdown
+        notes: Optional notes
+    
+    Returns:
+        Dict with success status and count_id
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        if count_type not in ['drop', 'opening', 'closing']:
+            conn.close()
+            return {'success': False, 'message': 'count_type must be "drop", "opening", or "closing"'}
+        
+        if total_amount < 0:
+            conn.close()
+            return {'success': False, 'message': 'total_amount must be >= 0'}
+        
+        denominations_json = None
+        if denominations:
+            # Calculate total from denominations if provided
+            calculated_total = 0.0
+            for denom, count in denominations.items():
+                try:
+                    calculated_total += float(denom) * int(count)
+                except (ValueError, TypeError):
+                    pass
+            
+            # Use calculated total if provided total is 0 or doesn't match
+            if total_amount == 0 or abs(total_amount - calculated_total) < 0.01:
+                total_amount = calculated_total
+            
+            denominations_json = json.dumps(denominations)
+        
+        # Check if count already exists for this date/type
+        cursor.execute("""
+            SELECT count_id FROM daily_cash_counts
+            WHERE register_id = ? AND count_date = ? AND count_type = ?
+        """, (register_id, count_date, count_type))
+        
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing
+            cursor.execute("""
+                UPDATE daily_cash_counts
+                SET total_amount = ?,
+                    denominations = ?,
+                    counted_by = ?,
+                    counted_at = CURRENT_TIMESTAMP,
+                    notes = ?
+                WHERE count_id = ?
+            """, (total_amount, denominations_json, employee_id, notes, existing[0]))
+            count_id = existing[0]
+        else:
+            # Insert new
+            cursor.execute("""
+                INSERT INTO daily_cash_counts
+                (register_id, count_date, count_type, total_amount, denominations, counted_by, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (register_id, count_date, count_type, total_amount, denominations_json, employee_id, notes))
+            count_id = cursor.lastrowid
+        
+        # Log audit
+        try:
+            log_audit_action(
+                table_name='daily_cash_counts',
+                record_id=count_id,
+                action_type='INSERT' if not existing else 'UPDATE',
+                employee_id=employee_id,
+                new_values={
+                    'register_id': register_id,
+                    'count_date': count_date,
+                    'count_type': count_type,
+                    'total_amount': total_amount
+                }
+            )
+        except:
+            pass
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            'success': True,
+            'count_id': count_id,
+            'message': f'Daily cash count saved successfully',
+            'total_amount': total_amount
+        }
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        print(f"Error saving daily cash count: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+
+def get_daily_cash_counts(
+    register_id: Optional[int] = None,
+    count_date: Optional[str] = None,
+    count_type: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Get daily cash counts
+    
+    Args:
+        register_id: Filter by register ID
+        count_date: Filter by specific date
+        count_type: Filter by type ('drop', 'opening', 'closing')
+        start_date: Filter from date
+        end_date: Filter to date
+    
+    Returns:
+        List of count dicts
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.row_factory = sqlite3.Row
+    
+    try:
+        query = """
+            SELECT dc.*,
+                   e.first_name || ' ' || e.last_name as counted_by_name
+            FROM daily_cash_counts dc
+            JOIN employees e ON dc.counted_by = e.employee_id
+            WHERE 1=1
+        """
+        params = []
+        
+        if register_id:
+            query += " AND dc.register_id = ?"
+            params.append(register_id)
+        
+        if count_date:
+            query += " AND dc.count_date = ?"
+            params.append(count_date)
+        
+        if count_type:
+            query += " AND dc.count_type = ?"
+            params.append(count_type)
+        
+        if start_date:
+            query += " AND dc.count_date >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND dc.count_date <= ?"
+            params.append(end_date)
+        
+        query += " ORDER BY dc.count_date DESC, dc.counted_at DESC"
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+        
+        results = []
+        for row in rows:
+            result = dict(row)
+            if result.get('denominations'):
+                try:
+                    result['denominations'] = json.loads(result['denominations'])
+                except:
+                    result['denominations'] = {}
+            results.append(result)
+        
+        return results
+        
+    except Exception as e:
+        conn.close()
+        print(f"Error getting daily cash counts: {e}")
+        import traceback
+        traceback.print_exc()
+        return []

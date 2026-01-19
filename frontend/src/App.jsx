@@ -22,6 +22,7 @@ import Settings from './pages/Settings'
 import Accounting from './pages/Accounting'
 import Onboarding from './pages/Onboarding'
 import EmployeeOnboarding from './pages/EmployeeOnboarding'
+import CashRegister from './pages/CashRegister'
 import './index.css'
 
 function ProtectedRoute({ children, sessionToken, employee, onLogout }) {
@@ -284,6 +285,13 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
         <ProtectedRoute sessionToken={sessionToken} employee={employee} onLogout={onLogout}>
           <Layout employee={employee} onLogout={onLogout}>
             <Accounting />
+          </Layout>
+        </ProtectedRoute>
+      } />
+      <Route path="/cash-register" element={
+        <ProtectedRoute sessionToken={sessionToken} employee={employee} onLogout={onLogout}>
+          <Layout employee={employee} onLogout={onLogout}>
+            <CashRegister />
           </Layout>
         </ProtectedRoute>
       } />

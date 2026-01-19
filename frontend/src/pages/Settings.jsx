@@ -23,7 +23,7 @@ function Settings() {
     show_payment_method: true,
     show_signature: false
   })
-  const [activeTab, setActiveTab] = useState('workflow') // 'workflow', 'receipt', 'location', 'display', 'rewards', 'pos', or 'sms'
+  const [activeTab, setActiveTab] = useState('workflow') // 'workflow', 'receipt', 'location', 'display', 'rewards', 'pos', 'sms', or 'cash'
   const [posSettings, setPosSettings] = useState({
     num_registers: 1,
     register_type: 'one_screen'
@@ -72,6 +72,27 @@ function Settings() {
   const [selectedSmsStore, setSelectedSmsStore] = useState(1)
   const [showSendSmsModal, setShowSendSmsModal] = useState(false)
   const [sendSmsForm, setSendSmsForm] = useState({ phone_number: '', message_text: '' })
+  const [cashSettings, setCashSettings] = useState({
+    register_id: 1,
+    cash_mode: 'total',
+    total_amount: 200.00,
+    denominations: {
+      '100': 0, '50': 0, '20': 0, '10': 0, '5': 0, '1': 0,
+      '0.25': 0, '0.10': 0, '0.05': 0, '0.01': 0
+    }
+  })
+  const [dailyCount, setDailyCount] = useState({
+    register_id: 1,
+    count_date: new Date().toISOString().split('T')[0],
+    count_type: 'drop',
+    total_amount: 0,
+    denominations: {
+      '100': 0, '50': 0, '20': 0, '10': 0, '5': 0, '1': 0,
+      '0.25': 0, '0.10': 0, '0.05': 0, '0.01': 0
+    },
+    notes: ''
+  })
+  const [dailyCounts, setDailyCounts] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState(null)
@@ -94,6 +115,8 @@ function Settings() {
     loadPosSettings()
     loadSmsSettings()
     loadSmsStores()
+    loadCashSettings()
+    loadDailyCounts()
   }, [])
 
   useEffect(() => {
@@ -332,6 +355,161 @@ function Settings() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const loadCashSettings = async () => {
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      const response = await fetch(`/api/register/cash-settings?register_id=${cashSettings.register_id}&session_token=${sessionToken}`)
+      const data = await response.json()
+      if (data.success && data.data) {
+        if (Array.isArray(data.data) && data.data.length > 0) {
+          setCashSettings({
+            register_id: data.data[0].register_id || 1,
+            cash_mode: data.data[0].cash_mode || 'total',
+            total_amount: data.data[0].total_amount || 200.00,
+            denominations: data.data[0].denominations || {
+              '100': 0, '50': 0, '20': 0, '10': 0, '5': 0, '1': 0,
+              '0.25': 0, '0.10': 0, '0.05': 0, '0.01': 0
+            }
+          })
+        } else if (!Array.isArray(data.data)) {
+          setCashSettings({
+            register_id: data.data.register_id || 1,
+            cash_mode: data.data.cash_mode || 'total',
+            total_amount: data.data.total_amount || 200.00,
+            denominations: data.data.denominations || {
+              '100': 0, '50': 0, '20': 0, '10': 0, '5': 0, '1': 0,
+              '0.25': 0, '0.10': 0, '0.05': 0, '0.01': 0
+            }
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Error loading cash settings:', error)
+    }
+  }
+
+  const saveCashSettings = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      const payload = {
+        session_token: sessionToken,
+        register_id: cashSettings.register_id,
+        cash_mode: cashSettings.cash_mode,
+        total_amount: cashSettings.cash_mode === 'total' ? parseFloat(cashSettings.total_amount) : null,
+        denominations: cashSettings.cash_mode === 'denominations' ? cashSettings.denominations : null
+      }
+
+      const response = await fetch('/api/register/cash-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken
+        },
+        body: JSON.stringify(payload)
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: 'Cash settings saved successfully!' })
+        setTimeout(() => setMessage(null), 3000)
+        loadCashSettings()
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to save cash settings' })
+      }
+    } catch (error) {
+      console.error('Error saving cash settings:', error)
+      setMessage({ type: 'error', text: 'Failed to save cash settings' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const loadDailyCounts = async () => {
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      const today = new Date().toISOString().split('T')[0]
+      const response = await fetch(`/api/register/daily-count?count_date=${today}&session_token=${sessionToken}`)
+      const data = await response.json()
+      if (data.success && data.data) {
+        setDailyCounts(data.data)
+      }
+    } catch (error) {
+      console.error('Error loading daily counts:', error)
+    }
+  }
+
+  const saveDailyCount = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      const sessionToken = localStorage.getItem('sessionToken')
+      
+      // Calculate total from denominations if in denominations mode
+      let total = parseFloat(dailyCount.total_amount) || 0
+      if (dailyCount.denominations) {
+        const calculated = Object.entries(dailyCount.denominations).reduce((sum, [denom, count]) => {
+          return sum + (parseFloat(denom) * parseInt(count || 0))
+        }, 0)
+        if (calculated > 0) {
+          total = calculated
+        }
+      }
+
+      const payload = {
+        session_token: sessionToken,
+        register_id: dailyCount.register_id,
+        count_date: dailyCount.count_date,
+        count_type: dailyCount.count_type,
+        total_amount: total,
+        denominations: dailyCount.denominations,
+        notes: dailyCount.notes
+      }
+
+      const response = await fetch('/api/register/daily-count', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': sessionToken
+        },
+        body: JSON.stringify(payload)
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: 'Daily cash count saved successfully!' })
+        setTimeout(() => setMessage(null), 3000)
+        loadDailyCounts()
+        // Reset form
+        setDailyCount({
+          register_id: 1,
+          count_date: new Date().toISOString().split('T')[0],
+          count_type: 'drop',
+          total_amount: 0,
+          denominations: {
+            '100': 0, '50': 0, '20': 0, '10': 0, '5': 0, '1': 0,
+            '0.25': 0, '0.10': 0, '0.05': 0, '0.01': 0
+          },
+          notes: ''
+        })
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to save daily count' })
+      }
+    } catch (error) {
+      console.error('Error saving daily count:', error)
+      setMessage({ type: 'error', text: 'Failed to save daily count' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const calculateTotalFromDenominations = (denoms) => {
+    return Object.entries(denoms).reduce((sum, [denom, count]) => {
+      return sum + (parseFloat(denom) * parseInt(count || 0))
+    }, 0)
   }
 
   const saveRewardsSettings = async () => {
@@ -739,6 +917,24 @@ function Settings() {
           }}
         >
           SMS
+        </button>
+        <button
+          onClick={() => setActiveTab('cash')}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'cash' ? `3px solid rgba(${themeColorRgb}, 0.7)` : '3px solid transparent',
+            color: activeTab === 'cash' 
+              ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333')
+              : (isDarkMode ? 'var(--text-tertiary, #999)' : '#666'),
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: activeTab === 'cash' ? 600 : 400,
+            transition: 'all 0.2s ease'
+          }}
+        >
+          Cash Register
         </button>
       </div>
 
@@ -2866,6 +3062,460 @@ function Settings() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'cash' && (
+        <div style={{
+          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+          borderRadius: '8px',
+          padding: '24px',
+          boxShadow: isDarkMode ? '0 2px 4px rgba(0,0,0,0.3)' : '0 2px 4px rgba(0,0,0,0.1)'
+        }}>
+          <h2 style={{
+            marginBottom: '24px',
+            fontSize: '20px',
+            fontWeight: 600,
+            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+          }}>
+            Cash Register Settings
+          </h2>
+
+          {/* Register Cash Configuration */}
+          <div style={{ marginBottom: '32px' }}>
+            <h3 style={{
+              marginBottom: '16px',
+              fontSize: '16px',
+              fontWeight: 500,
+              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+            }}>
+              Base Cash Configuration
+            </h3>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Register ID
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={cashSettings.register_id}
+                onChange={(e) => setCashSettings({...cashSettings, register_id: parseInt(e.target.value) || 1})}
+                style={{
+                  padding: '10px',
+                  width: '100%',
+                  maxWidth: '200px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Cash Mode
+              </label>
+              <div style={{ display: 'flex', gap: '20px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="cash_mode"
+                    value="total"
+                    checked={cashSettings.cash_mode === 'total'}
+                    onChange={(e) => setCashSettings({...cashSettings, cash_mode: e.target.value})}
+                  />
+                  <span style={{ color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Total Amount</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="cash_mode"
+                    value="denominations"
+                    checked={cashSettings.cash_mode === 'denominations'}
+                    onChange={(e) => setCashSettings({...cashSettings, cash_mode: e.target.value})}
+                  />
+                  <span style={{ color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Denominations</span>
+                </label>
+              </div>
+            </div>
+
+            {cashSettings.cash_mode === 'total' ? (
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Total Amount ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={cashSettings.total_amount}
+                  onChange={(e) => setCashSettings({...cashSettings, total_amount: parseFloat(e.target.value) || 0})}
+                  style={{
+                    padding: '10px',
+                    width: '100%',
+                    maxWidth: '200px',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                    borderRadius: '6px',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+            ) : (
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '12px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Bill and Coin Counts
+                </label>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                  gap: '12px'
+                }}>
+                  {Object.entries(cashSettings.denominations).map(([denom, count]) => (
+                    <div key={denom}>
+                      <label style={{
+                        display: 'block',
+                        marginBottom: '4px',
+                        fontSize: '12px',
+                        color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666'
+                      }}>
+                        ${denom}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={count}
+                        onChange={(e) => setCashSettings({
+                          ...cashSettings,
+                          denominations: {
+                            ...cashSettings.denominations,
+                            [denom]: parseInt(e.target.value) || 0
+                          }
+                        })}
+                        style={{
+                          padding: '8px',
+                          width: '100%',
+                          border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                          borderRadius: '6px',
+                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                          fontSize: '14px'
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div style={{
+                  marginTop: '12px',
+                  padding: '12px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#f5f5f5',
+                  borderRadius: '6px'
+                }}>
+                  <strong style={{ color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                    Total: ${calculateTotalFromDenominations(cashSettings.denominations).toFixed(2)}
+                  </strong>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={saveCashSettings}
+              disabled={saving}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: themeColor,
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                fontSize: '14px',
+                fontWeight: 500
+              }}
+            >
+              {saving ? 'Saving...' : 'Save Cash Settings'}
+            </button>
+          </div>
+
+          {/* Daily Cash Count */}
+          <div style={{
+            marginTop: '32px',
+            paddingTop: '32px',
+            borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
+          }}>
+            <h3 style={{
+              marginBottom: '16px',
+              fontSize: '16px',
+              fontWeight: 500,
+              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+            }}>
+              Daily Cash Count / Drop
+            </h3>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Count Type
+              </label>
+              <select
+                value={dailyCount.count_type}
+                onChange={(e) => setDailyCount({...dailyCount, count_type: e.target.value})}
+                style={{
+                  padding: '10px',
+                  width: '100%',
+                  maxWidth: '200px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px'
+                }}
+              >
+                <option value="drop">Drop</option>
+                <option value="opening">Opening</option>
+                <option value="closing">Closing</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Date
+              </label>
+              <input
+                type="date"
+                value={dailyCount.count_date}
+                onChange={(e) => setDailyCount({...dailyCount, count_date: e.target.value})}
+                style={{
+                  padding: '10px',
+                  width: '100%',
+                  maxWidth: '200px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Total Amount ($) - or count denominations below
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={dailyCount.total_amount}
+                onChange={(e) => setDailyCount({...dailyCount, total_amount: parseFloat(e.target.value) || 0})}
+                style={{
+                  padding: '10px',
+                  width: '100%',
+                  maxWidth: '200px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '12px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Bill and Coin Counts
+              </label>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                gap: '12px'
+              }}>
+                {Object.entries(dailyCount.denominations).map(([denom, count]) => (
+                  <div key={denom}>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '4px',
+                      fontSize: '12px',
+                      color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666'
+                    }}>
+                      ${denom}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={count}
+                      onChange={(e) => {
+                        const newDenoms = {
+                          ...dailyCount.denominations,
+                          [denom]: parseInt(e.target.value) || 0
+                        }
+                        setDailyCount({
+                          ...dailyCount,
+                          denominations: newDenoms,
+                          total_amount: calculateTotalFromDenominations(newDenoms)
+                        })
+                      }}
+                      style={{
+                        padding: '8px',
+                        width: '100%',
+                        border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                        borderRadius: '6px',
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                        fontSize: '14px'
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div style={{
+                marginTop: '12px',
+                padding: '12px',
+                backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#f5f5f5',
+                borderRadius: '6px'
+              }}>
+                <strong style={{ color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                  Calculated Total: ${calculateTotalFromDenominations(dailyCount.denominations).toFixed(2)}
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Notes (optional)
+              </label>
+              <textarea
+                value={dailyCount.notes}
+                onChange={(e) => setDailyCount({...dailyCount, notes: e.target.value})}
+                style={{
+                  padding: '10px',
+                  width: '100%',
+                  minHeight: '80px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '6px',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : 'white',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px',
+                  resize: 'vertical'
+                }}
+                placeholder="Additional notes about this count..."
+              />
+            </div>
+
+            <button
+              onClick={saveDailyCount}
+              disabled={saving}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: themeColor,
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                fontSize: '14px',
+                fontWeight: 500
+              }}
+            >
+              {saving ? 'Saving...' : 'Save Daily Count'}
+            </button>
+
+            {/* Recent Counts */}
+            {dailyCounts.length > 0 && (
+              <div style={{ marginTop: '32px' }}>
+                <h4 style={{
+                  marginBottom: '12px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Recent Counts
+                </h4>
+                <div style={{
+                  display: 'grid',
+                  gap: '8px'
+                }}>
+                  {dailyCounts.slice(0, 5).map((count, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        padding: '12px',
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#f5f5f5',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span><strong>{count.count_type}</strong> - {count.count_date}</span>
+                        <span>${parseFloat(count.total_amount || 0).toFixed(2)}</span>
+                      </div>
+                      {count.counted_by_name && (
+                        <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666', marginTop: '4px' }}>
+                          Counted by: {count.counted_by_name}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
