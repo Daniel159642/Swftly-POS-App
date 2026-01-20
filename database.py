@@ -7019,27 +7019,46 @@ def get_onboarding_status() -> Dict[str, Any]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("""
-        SELECT * FROM store_setup 
-        ORDER BY setup_id DESC 
-        LIMIT 1
-    """)
-    
-    row = cursor.fetchone()
-    conn.close()
-    
-    if not row:
+    try:
+        cursor.execute("""
+            SELECT * FROM store_setup 
+            ORDER BY setup_id DESC 
+            LIMIT 1
+        """)
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            return {
+                'setup_completed': False,
+                'setup_step': 1,
+                'completed_at': None
+            }
+        
+        # Handle both Row objects (SQLite) and tuple/dict (PostgreSQL)
+        if hasattr(row, 'keys'):
+            # SQLite Row object or dict-like
+            row_dict = dict(row)
+        else:
+            # Tuple or list - need to get column names
+            try:
+                column_names = [desc[0] for desc in cursor.description]
+                row_dict = dict(zip(column_names, row))
+            except:
+                # Fallback: assume order matches schema
+                row_dict = {
+                    'setup_completed': row[0] if len(row) > 0 else 0,
+                    'setup_step': row[1] if len(row) > 1 else 1,
+                    'completed_at': row[2] if len(row) > 2 else None
+                }
+        
         return {
-            'setup_completed': False,
-            'setup_step': 1,
-            'completed_at': None
+            'setup_completed': bool(row_dict.get('setup_completed', 0)),
+            'setup_step': row_dict.get('setup_step', 1),
+            'completed_at': row_dict.get('completed_at')
         }
-    
-    return {
-        'setup_completed': bool(dict(row).get('setup_completed', 0)),
-        'setup_step': dict(row).get('setup_step', 1),
-        'completed_at': dict(row).get('completed_at')
-    }
+    finally:
+        conn.close()
 
 def update_onboarding_step(step: int) -> bool:
     """Update current onboarding step"""

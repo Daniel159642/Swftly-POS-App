@@ -147,8 +147,9 @@ function OnboardingStep1({ onNext, storeInfo, setStoreInfo, direction = 'forward
         }
         
         // Load Google Maps API key from environment variable
-        // Set REACT_APP_GOOGLE_MAPS_API_KEY in your .env file or environment
-        const API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || ''
+        // Set VITE_GOOGLE_MAPS_API_KEY in your .env file or environment
+        // Vite uses import.meta.env instead of process.env
+        const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
         
         if (!API_KEY) {
           console.warn('Google Maps API key not found. Address autocomplete will not work.')

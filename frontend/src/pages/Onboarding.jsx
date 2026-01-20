@@ -78,8 +78,8 @@ function Onboarding() {
       }
       
       // Load saved step or start from step 1
-      setCurrentStep(data.setup_step || 1)
-      setLoading(false)
+        setCurrentStep(data.setup_step || 1)
+        setLoading(false)
     } catch (err) {
       console.error('Error checking onboarding status:', err)
       // On error, just start from step 1

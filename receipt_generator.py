@@ -284,7 +284,7 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
                 # This avoids any timezone conversion - we treat the stored date/time as-is
                 order_date = datetime(year, month, day, hour, minute, second)
                 formatted_date = order_date.strftime('%m/%d/%Y %I:%M %p')
-        else:
+            else:
                 # Fallback to manual parsing
                 # Clean the string: remove T, microseconds, Z, timezone offset
                 clean_str = order_date_str.replace('T', ' ').split('.')[0].replace('Z', '')
@@ -310,8 +310,8 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
                 
                 try:
                     order_date = datetime.strptime(clean_str, '%Y-%m-%d %H:%M:%S')
-        formatted_date = order_date.strftime('%m/%d/%Y %I:%M %p')
-    except:
+                    formatted_date = order_date.strftime('%m/%d/%Y %I:%M %p')
+                except:
                     formatted_date = str(order_date_str)
         else:
             formatted_date = str(order_date_str) if order_date_str else ''

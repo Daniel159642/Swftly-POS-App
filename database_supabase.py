@@ -45,8 +45,13 @@ def get_connection():
         if _pg_connection is None or _pg_connection.closed:
             if not SUPABASE_DB_URL:
                 raise ValueError("SUPABASE_DB_URL must be set in environment")
-            _pg_connection = psycopg2.connect(SUPABASE_DB_URL)
-            _pg_connection.set_session(autocommit=False)
+            try:
+                _pg_connection = psycopg2.connect(SUPABASE_DB_URL)
+                _pg_connection.set_session(autocommit=False)
+            except Exception as e:
+                # If connection fails, reset and raise
+                _pg_connection = None
+                raise ConnectionError(f"Failed to connect to Supabase: {str(e)}. Check your SUPABASE_DB_URL.") from e
         
         # Set establishment context for RLS
         establishment_id = get_current_establishment()

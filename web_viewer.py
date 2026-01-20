@@ -102,6 +102,11 @@ sms_service = EmailToAWSSMSService()
 # SUPABASE SUPPORT (optional) - Initialize after database import
 # ============================================================================
 
+# Initialize Supabase flag and functions (default to False/None)
+USE_SUPABASE = False
+set_current_establishment = None
+get_current_establishment = None
+
 # Check if Supabase should be used
 if os.getenv('USE_SUPABASE', 'false').lower() == 'true':
     try:
@@ -111,20 +116,30 @@ if os.getenv('USE_SUPABASE', 'false').lower() == 'true':
             get_current_establishment as _get_establishment,
             get_supabase_client
         )
-        # Override get_connection in database module
-        from database import set_connection_override
-        set_connection_override(get_supabase_connection)
-        set_current_establishment = _set_establishment
-        get_current_establishment = _get_establishment
-        USE_SUPABASE = True
-        print("✓ Using Supabase database")
+        # Test connection first before enabling
+        try:
+            test_conn = get_supabase_connection()
+            test_conn.close()
+        except Exception as conn_err:
+            print(f"⚠ Warning: Supabase connection test failed: {conn_err}")
+            print("⚠ Falling back to SQLite. Check your SUPABASE_DB_URL in .env file.")
+            print("⚠ To disable Supabase, set USE_SUPABASE=false in .env")
+            USE_SUPABASE = False
+        else:
+            # Override get_connection in database module
+            from database import set_connection_override
+            set_connection_override(get_supabase_connection)
+            set_current_establishment = _set_establishment
+            get_current_establishment = _get_establishment
+            USE_SUPABASE = True
+            print("✓ Using Supabase database")
     except ImportError as e:
-        print(f"Warning: Supabase configured but module not found: {e}")
-        print("Falling back to SQLite. Install: pip install supabase psycopg2-binary")
+        print(f"⚠ Warning: Supabase configured but module not found: {e}")
+        print("⚠ Falling back to SQLite. Install: pip3 install supabase psycopg2-binary")
         USE_SUPABASE = False
     except Exception as e:
-        print(f"Warning: Could not initialize Supabase: {e}")
-        print("Falling back to SQLite")
+        print(f"⚠ Warning: Could not initialize Supabase: {e}")
+        print("⚠ Falling back to SQLite")
         USE_SUPABASE = False
 
 # ============================================================================
@@ -1235,8 +1250,10 @@ def api_generate_pin():
             'pin': pin
         })
     except Exception as e:
-        print(f"Error generating PIN: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error in api_generate_pin: {error_trace}")
+        return jsonify({'success': False, 'error': str(e), 'trace': error_trace}), 500
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
@@ -5637,8 +5654,10 @@ def api_get_onboarding_status():
             'setup_step': status.get('setup_step', 1)
         })
     except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error in api_get_onboarding_status: {error_trace}")
+        return jsonify({'success': False, 'error': str(e), 'trace': error_trace}), 500
 
 @app.route('/api/onboarding/update-step', methods=['POST'])
 def api_update_onboarding_step():
@@ -6060,7 +6079,10 @@ def api_complete_onboarding():
         import sys
         error_msg = str(e)
         exc_type, exc_value, exc_traceback = sys.exc_info()
-        traceback.print_exception(exc_type, exc_value, exc_traceback)
+        if exc_type:
+            traceback.print_exception(exc_type, exc_value, exc_traceback)
+        else:
+            traceback.print_exc()
         
         if conn:
             try:

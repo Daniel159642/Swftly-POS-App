@@ -545,24 +545,83 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
               // Double-check blob type or size
               if (blob.type === 'application/pdf' || blob.size > 0) {
                 const url = window.URL.createObjectURL(blob)
-                const a = document.createElement('a')
-                a.href = url
-                const filename = isOrder 
-                  ? `receipt_${orderNumber || id}.pdf`
-                  : `receipt_transaction_${id}.pdf`
-                a.download = filename
-                a.style.display = 'none' // Hide the link
-                document.body.appendChild(a)
                 
-                // Use setTimeout to ensure the link is fully added to DOM
-                setTimeout(() => {
-                  a.click()
-                  // Clean up after a delay to ensure download starts
+                // Create a hidden iframe to load and print the PDF
+                const iframe = document.createElement('iframe')
+                iframe.style.position = 'fixed'
+                iframe.style.right = '0'
+                iframe.style.bottom = '0'
+                iframe.style.width = '0'
+                iframe.style.height = '0'
+                iframe.style.border = 'none'
+                iframe.src = url
+                
+                document.body.appendChild(iframe)
+                
+                // Wait for PDF to load, then trigger print dialog
+                iframe.onload = () => {
                   setTimeout(() => {
-                    window.URL.revokeObjectURL(url)
-                    document.body.removeChild(a)
-                  }, 100)
-                }, 10)
+                    try {
+                      // Focus the iframe and trigger print
+                      iframe.contentWindow.focus()
+                      iframe.contentWindow.print()
+                      
+                      // Clean up after printing
+                      setTimeout(() => {
+                        document.body.removeChild(iframe)
+                        window.URL.revokeObjectURL(url)
+                      }, 1000)
+                    } catch (e) {
+                      console.error('Error printing from iframe:', e)
+                      // Fallback: open in new window
+                      const printWindow = window.open(url, '_blank')
+                      if (printWindow) {
+                        setTimeout(() => {
+                          try {
+                            printWindow.print()
+                          } catch (printErr) {
+                            console.error('Error printing in new window:', printErr)
+                          }
+                        }, 500)
+                      }
+                      document.body.removeChild(iframe)
+                      setTimeout(() => window.URL.revokeObjectURL(url), 2000)
+                    }
+                  }, 500)
+                }
+                
+                // Fallback: if onload doesn't fire, try after delay
+                setTimeout(() => {
+                  if (iframe.parentNode) {
+                    try {
+                      iframe.contentWindow.focus()
+                      iframe.contentWindow.print()
+                      setTimeout(() => {
+                        if (iframe.parentNode) {
+                          document.body.removeChild(iframe)
+                        }
+                        window.URL.revokeObjectURL(url)
+                      }, 1000)
+                    } catch (e) {
+                      console.error('Fallback print error:', e)
+                      // If iframe print fails, open in new window
+                      const printWindow = window.open(url, '_blank')
+                      if (iframe.parentNode) {
+                        document.body.removeChild(iframe)
+                      }
+                      if (printWindow) {
+                        setTimeout(() => {
+                          try {
+                            printWindow.print()
+                          } catch (printErr) {
+                            console.error('Error printing in fallback window:', printErr)
+                          }
+                        }, 500)
+                      }
+                      setTimeout(() => window.URL.revokeObjectURL(url), 2000)
+                    }
+                  }
+                }, 1500)
                 
                 return true
               } else {

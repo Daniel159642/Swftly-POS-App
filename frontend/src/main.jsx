@@ -18,7 +18,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       publishableKey={PUBLISHABLE_KEY}
       routing="path"
     >
-      <App />
+    <App />
     </ClerkProvider>
   </React.StrictMode>
 )
