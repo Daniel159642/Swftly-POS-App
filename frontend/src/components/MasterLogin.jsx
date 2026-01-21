@@ -273,13 +273,23 @@ function MasterLogin({ onMasterLoginSuccess }) {
             fontSize: '14px',
             color: 'var(--text-secondary)'
           }}>
-            Don't have an account?{' '}
-            <a
-              href="/sign-up"
+            New to the system?{' '}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                navigate('/onboarding')
+              }}
               style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
                 color: themeColor,
                 textDecoration: 'none',
-                fontWeight: 500
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontFamily: 'inherit'
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.textDecoration = 'underline'
@@ -288,8 +298,8 @@ function MasterLogin({ onMasterLoginSuccess }) {
                 e.currentTarget.style.textDecoration = 'none'
               }}
             >
-              Sign up
-            </a>
+              Start Setup
+            </button>
           </div>
         </form>
       </div>

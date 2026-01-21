@@ -1174,19 +1174,51 @@ def api_pin_login():
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Create session record
-        cursor.execute("""
-            INSERT INTO employee_sessions (
-                employee_id, session_token, ip_address, device_info
-            ) VALUES (?, ?, ?, ?)
-        """, (employee['employee_id'], session_token, request.remote_addr or '127.0.0.1', request.headers.get('User-Agent', 'Unknown')))
+        # Create session record - use appropriate placeholders for Supabase vs SQLite
+        USE_SUPABASE = os.getenv('USE_SUPABASE', 'false').lower() == 'true'
         
-        # Update last login
-        cursor.execute("""
-            UPDATE employees
-            SET last_login = CURRENT_TIMESTAMP
-            WHERE employee_id = ?
-        """, (employee['employee_id'],))
+        # Check if establishment_id column exists in employee_sessions
+        if USE_SUPABASE:
+            cursor.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'employee_sessions' AND table_schema = 'public'
+                AND column_name = 'establishment_id'
+            """)
+            has_establishment_id = cursor.fetchone() is not None
+            
+            if has_establishment_id and employee.get('establishment_id'):
+                cursor.execute("""
+                    INSERT INTO employee_sessions (
+                        employee_id, session_token, ip_address, device_info, establishment_id
+                    ) VALUES (%s, %s, %s, %s, %s)
+                """, (employee['employee_id'], session_token, request.remote_addr or '127.0.0.1', request.headers.get('User-Agent', 'Unknown'), employee.get('establishment_id')))
+            else:
+                cursor.execute("""
+                    INSERT INTO employee_sessions (
+                        employee_id, session_token, ip_address, device_info
+                    ) VALUES (%s, %s, %s, %s)
+                """, (employee['employee_id'], session_token, request.remote_addr or '127.0.0.1', request.headers.get('User-Agent', 'Unknown')))
+            
+            # Update last login
+            cursor.execute("""
+                UPDATE employees
+                SET last_login = NOW()
+                WHERE employee_id = %s
+            """, (employee['employee_id'],))
+        else:
+            cursor.execute("""
+                INSERT INTO employee_sessions (
+                    employee_id, session_token, ip_address, device_info
+                ) VALUES (?, ?, ?, ?)
+            """, (employee['employee_id'], session_token, request.remote_addr or '127.0.0.1', request.headers.get('User-Agent', 'Unknown')))
+            
+            # Update last login
+            cursor.execute("""
+                UPDATE employees
+                SET last_login = CURRENT_TIMESTAMP
+                WHERE employee_id = ?
+            """, (employee['employee_id'],))
         
         conn.commit()
         conn.close()
@@ -5657,7 +5689,13 @@ def api_get_onboarding_status():
         import traceback
         error_trace = traceback.format_exc()
         print(f"Error in api_get_onboarding_status: {error_trace}")
-        return jsonify({'success': False, 'error': str(e), 'trace': error_trace}), 500
+        # On error, return default status (onboarding not completed)
+        # This ensures users can always access onboarding even if database has issues
+        return jsonify({
+            'success': True,
+            'setup_completed': False,
+            'setup_step': 1
+        })
 
 @app.route('/api/onboarding/update-step', methods=['POST'])
 def api_update_onboarding_step():
@@ -5988,48 +6026,103 @@ def api_complete_onboarding():
         if conn:
             conn.close()
         
-        # Create admin account if it doesn't exist, using saved onboarding data
+        # Create establishment and admin account if they don't exist, using saved onboarding data
         try:
+            # Get saved onboarding data first
+            store_info_data = get_onboarding_progress('store_info')
+            admin_account_data = get_onboarding_progress('admin_account')
+            
+            # Extract store info
+            store_info = {}
+            if store_info_data and isinstance(store_info_data, dict):
+                if 'data' in store_info_data:
+                    data_field = store_info_data.get('data')
+                    if isinstance(data_field, dict):
+                        if 'storeInfo' in data_field:
+                            store_info = data_field.get('storeInfo', {})
+                        elif 'store_name' in data_field:
+                            store_info = data_field
+            # Also check onboarding_data directly
+            if onboarding_data.get('storeInfo'):
+                store_info = onboarding_data.get('storeInfo', {})
+            
+            # Extract admin account info
+            admin_account = {}
+            if admin_account_data and isinstance(admin_account_data, dict):
+                if 'data' in admin_account_data:
+                    data_field = admin_account_data.get('data')
+                    if isinstance(data_field, dict):
+                        if 'adminAccount' in data_field:
+                            admin_account = data_field.get('adminAccount', {})
+                        elif 'clerk_user_id' in data_field or 'pin' in data_field:
+                            admin_account = data_field
+            
+            clerk_user_id = admin_account.get('clerk_user_id') if admin_account else None
+            pin_code = admin_account.get('pin') if admin_account else None
+            
+            # Create establishment if using Supabase and Clerk account exists
+            establishment_id = None
+            if USE_SUPABASE and clerk_user_id and store_info:
+                try:
+                    from database_supabase import get_connection, set_current_establishment
+                    
+                    # Check if establishment already exists for this Clerk user
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    
+                    # Check if there's already an establishment
+                    cursor.execute("SELECT COUNT(*) FROM establishments")
+                    existing_count = cursor.fetchone()[0]
+                    
+                    if existing_count == 0 or not store_info.get('store_name'):
+                        # Create new establishment from store info
+                        store_name = store_info.get('store_name', 'Store')
+                        store_code = store_info.get('store_code') or store_name.lower().replace(' ', '').replace('-', '')[:20]
+                        subdomain = store_info.get('subdomain') or store_code
+                        
+                        cursor.execute("""
+                            INSERT INTO establishments (establishment_name, establishment_code, subdomain)
+                            VALUES (%s, %s, %s)
+                            RETURNING establishment_id
+                        """, (store_name, store_code, subdomain))
+                        
+                        establishment_id = cursor.fetchone()[0]
+                        conn.commit()
+                        
+                        print(f"[DEBUG] ✓ Created establishment during onboarding: ID {establishment_id}, Name: {store_name}")
+                        
+                        # Set establishment context
+                        set_current_establishment(establishment_id)
+                    else:
+                        # Use existing establishment
+                        cursor.execute("SELECT establishment_id FROM establishments LIMIT 1")
+                        result = cursor.fetchone()
+                        establishment_id = result[0] if result else None
+                        if establishment_id:
+                            set_current_establishment(establishment_id)
+                    
+                    cursor.close()
+                    conn.close()
+                except Exception as est_err:
+                    print(f"[DEBUG] Warning: Failed to create establishment: {est_err}")
+                    import traceback
+                    traceback.print_exc()
+            
             # Check if admin account already exists
-            conn = sqlite3.connect(DB_NAME)
+            conn = sqlite3.connect(DB_NAME) if not USE_SUPABASE else get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM employees WHERE position = 'admin'")
+            
+            if USE_SUPABASE:
+                cursor.execute("SELECT COUNT(*) FROM employees WHERE position = 'admin' AND establishment_id = %s", (establishment_id,))
+            else:
+                cursor.execute("SELECT COUNT(*) FROM employees WHERE position = 'admin'")
             admin_count = cursor.fetchone()[0]
             conn.close()
             
             if admin_count == 0:
                 print("[DEBUG] No admin account found, creating from onboarding data...")
                 
-                # Get saved onboarding data
-                store_info_data = get_onboarding_progress('store_info')
-                admin_account_data = get_onboarding_progress('admin_account')
-                
-                # Extract store info
-                store_info = {}
-                if store_info_data and isinstance(store_info_data, dict):
-                    if 'data' in store_info_data:
-                        data_field = store_info_data.get('data')
-                        if isinstance(data_field, dict):
-                            if 'storeInfo' in data_field:
-                                store_info = data_field.get('storeInfo', {})
-                            elif 'store_name' in data_field:
-                                store_info = data_field
-                
-                # Extract admin account info
-                admin_account = {}
-                if admin_account_data and isinstance(admin_account_data, dict):
-                    if 'data' in admin_account_data:
-                        data_field = admin_account_data.get('data')
-                        if isinstance(data_field, dict):
-                            if 'adminAccount' in data_field:
-                                admin_account = data_field.get('adminAccount', {})
-                            elif 'clerk_user_id' in data_field or 'pin' in data_field:
-                                admin_account = data_field
-                
-                clerk_user_id = admin_account.get('clerk_user_id') if admin_account else None
-                pin_code = admin_account.get('pin') if admin_account else None
-                
-                if store_info and store_info.get('store_email'):
+                if store_info and (store_info.get('store_email') or clerk_user_id):
                     store_email = store_info.get('store_email', '')
                     store_name = store_info.get('store_name', 'Store')
                     
@@ -6039,14 +6132,21 @@ def api_complete_onboarding():
                     employee_code = 'ADMIN001'
                     
                     # Get Admin role_id
-                    conn = sqlite3.connect(DB_NAME)
+                    conn = sqlite3.connect(DB_NAME) if not USE_SUPABASE else get_connection()
                     cursor = conn.cursor()
-                    cursor.execute("SELECT role_id FROM roles WHERE role_name = 'Admin'")
+                    if USE_SUPABASE:
+                        cursor.execute("SELECT role_id FROM roles WHERE role_name = 'Admin' LIMIT 1")
+                    else:
+                        cursor.execute("SELECT role_id FROM roles WHERE role_name = 'Admin'")
                     admin_role = cursor.fetchone()
                     admin_role_id = admin_role[0] if admin_role else None
                     conn.close()
                     
-                    print(f"[DEBUG] Creating admin account: email={store_email}, clerk_user_id={clerk_user_id}, pin={'***' if pin_code else None}, role_id={admin_role_id}")
+                    print(f"[DEBUG] Creating admin account: email={store_email}, clerk_user_id={clerk_user_id}, pin={'***' if pin_code else None}, role_id={admin_role_id}, establishment_id={establishment_id}")
+                    
+                    # Set establishment context before creating employee
+                    if USE_SUPABASE and establishment_id:
+                        set_current_establishment(establishment_id)
                     
                     admin_id = add_employee(
                         employee_code=employee_code,

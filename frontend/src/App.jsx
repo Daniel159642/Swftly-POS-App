@@ -54,6 +54,15 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
   const checkOnboardingStatus = async () => {
     try {
       const response = await fetch('/api/onboarding/status')
+      
+      // Handle non-OK responses
+      if (!response.ok) {
+        console.log('Onboarding status check failed, assuming onboarding required')
+        setOnboardingRequired(true)
+        setOnboardingChecked(true)
+        return
+      }
+      
       const data = await response.json()
       
       // If onboarding is completed, don't require it (allow normal login flow)
@@ -66,7 +75,7 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
       setOnboardingChecked(true)
     } catch (err) {
       console.error('Error checking onboarding status:', err)
-      // On error, assume onboarding is required
+      // On error, assume onboarding is required (safer default)
       setOnboardingRequired(true)
       setOnboardingChecked(true)
     }
@@ -110,10 +119,15 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
     
     return (
       <Routes>
+        {/* Onboarding route - always accessible when not signed in */}
+        {/* Match both /onboarding and /onboarding/* - MUST be before catch-all */}
+        <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/onboarding/*" element={<Onboarding />} />
         <Route path="/employee-onboarding" element={<EmployeeOnboarding />} />
         <Route path="/master-login" element={<MasterLogin onMasterLoginSuccess={() => {}} />} />
-        <Route path="/sign-up" element={<SignUpPage />} />
+        {/* Redirect /sign-up to onboarding - signup is now built into onboarding */}
+        <Route path="/sign-up" element={<Navigate to="/onboarding" replace />} />
+        {/* Default redirect based on onboarding status - only for unmatched routes */}
         <Route path="*" element={
           onboardingRequired ? (
             <Navigate to="/onboarding" replace />

@@ -1,17 +1,29 @@
 #!/usr/bin/env python3
 """
 Database utility functions for inventory management
+SUPABASE ONLY - All SQLite code has been removed
 """
 
-import sqlite3
 import hashlib
 import secrets
 import json
 import re
+import os
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-DB_NAME = 'inventory.db'
+# Import Supabase connection - this is the ONLY database backend
+try:
+    from database_supabase import (
+        get_connection as get_supabase_connection,
+        get_current_establishment,
+        set_current_establishment
+    )
+except ImportError:
+    raise ImportError(
+        "database_supabase module not found. "
+        "This system now requires Supabase. Install: pip3 install supabase psycopg2-binary"
+    )
 
 def generate_unique_barcode(pending_shipment_id: int, line_number: int, product_sku: str = '') -> str:
     """
@@ -49,12 +61,12 @@ def generate_unique_barcode(pending_shipment_id: int, line_number: int, product_
     cursor = conn.cursor()
     
     # Check in pending_shipment_items
-    cursor.execute("SELECT COUNT(*) as count FROM pending_shipment_items WHERE barcode = ?", (barcode,))
-    pending_count = cursor.fetchone()['count']
+    cursor.execute("SELECT COUNT(*) FROM pending_shipment_items WHERE barcode = %s", (barcode,))
+    pending_count = cursor.fetchone()[0] or 0
     
     # Check in inventory
-    cursor.execute("SELECT COUNT(*) as count FROM inventory WHERE barcode = ?", (barcode,))
-    inventory_count = cursor.fetchone()['count']
+    cursor.execute("SELECT COUNT(*) FROM inventory WHERE barcode = %s", (barcode,))
+    inventory_count = cursor.fetchone()[0] or 0
     
     conn.close()
     
@@ -68,34 +80,12 @@ def generate_unique_barcode(pending_shipment_id: int, line_number: int, product_
     
     return barcode
 
-# Allow Supabase to override get_connection
-_connection_override = None
-
-def set_connection_override(connection_func):
-    """Allow Supabase to override the connection function"""
-    global _connection_override
-    _connection_override = connection_func
-
 def get_connection():
-    """Get database connection with timeout to handle locks"""
-    # If Supabase override is set, use it
-    if _connection_override:
-        return _connection_override()
-    
-    # Otherwise use SQLite
-    try:
-        conn = sqlite3.connect(DB_NAME, timeout=20.0)  # Increased timeout for better lock handling
-        conn.row_factory = sqlite3.Row  # Enable column access by name
-        # Enable WAL mode for better concurrency (if not already enabled)
-        try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            # Also set busy timeout at connection level
-            conn.execute("PRAGMA busy_timeout = 20000")
-        except:
-            pass
-        return conn
-    except sqlite3.Error as e:
-        raise ConnectionError(f"Database connection failed: {str(e)}") from e
+    """
+    Get Supabase PostgreSQL connection
+    This system now uses Supabase exclusively - no SQLite support
+    """
+    return get_supabase_connection()
 
 def create_or_get_category_with_hierarchy(category_path: str, conn=None) -> Optional[int]:
     """
@@ -136,12 +126,12 @@ def create_or_get_category_with_hierarchy(category_path: str, conn=None) -> Opti
             if parent_id:
                 cursor.execute("""
                     SELECT category_id FROM categories
-                    WHERE category_name = ? AND parent_category_id = ?
+                    WHERE category_name = %s AND parent_category_id = %s
                 """, (category_name, parent_id))
             else:
                 cursor.execute("""
                     SELECT category_id FROM categories
-                    WHERE category_name = ? AND parent_category_id IS NULL
+                    WHERE category_name = %s AND parent_category_id IS NULL
                 """, (category_name,))
             
             result = cursor.fetchone()
@@ -152,7 +142,7 @@ def create_or_get_category_with_hierarchy(category_path: str, conn=None) -> Opti
                 # Create new category
                 cursor.execute("""
                     INSERT INTO categories (category_name, parent_category_id, is_auto_generated)
-                    VALUES (?, ?, 1)
+                    VALUES (%s, %s, 1)
                 """, (category_name, parent_id))
                 category_id = cursor.lastrowid
             
@@ -226,8 +216,8 @@ def extract_metadata_for_product(product_id: int, auto_sync_category: bool = Tru
                         if product.get('category') != most_specific:
                             cursor.execute("""
                                 UPDATE inventory 
-                                SET category = ?, updated_at = CURRENT_TIMESTAMP
-                                WHERE product_id = ?
+                                SET category = %s, updated_at = NOW()
+                                WHERE product_id = %s
                             """, (most_specific, product_id))
                         
                         conn.commit()
@@ -268,7 +258,7 @@ def add_product(
         cursor.execute("""
             INSERT INTO inventory 
             (product_name, sku, product_price, product_cost, vendor, vendor_id, photo, current_quantity, category, barcode)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (product_name, sku, product_price, product_cost, vendor, vendor_id, photo, current_quantity, category, barcode))
         
         conn.commit()
@@ -283,7 +273,9 @@ def add_product(
                 pass  # Don't fail product creation if metadata extraction fails
         
         return product_id
-    except sqlite3.IntegrityError as e:
+    except Exception as e:
+        import psycopg2
+        if isinstance(e, psycopg2.IntegrityError):
         conn.rollback()
         conn.close()
         raise ValueError(f"SKU '{sku}' already exists in database") from e
@@ -293,7 +285,7 @@ def get_product(product_id: int) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM inventory WHERE product_id = ?", (product_id,))
+    cursor.execute("SELECT * FROM inventory WHERE product_id = %s", (product_id,))
     row = cursor.fetchone()
     conn.close()
     
@@ -304,7 +296,7 @@ def get_product_by_sku(sku: str) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM inventory WHERE sku = ?", (sku,))
+    cursor.execute("SELECT * FROM inventory WHERE sku = %s", (sku,))
     row = cursor.fetchone()
     conn.close()
     
@@ -315,7 +307,7 @@ def get_product_by_barcode(barcode: str) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM inventory WHERE barcode = ?", (barcode,))
+    cursor.execute("SELECT * FROM inventory WHERE barcode = %s", (barcode,))
     row = cursor.fetchone()
     conn.close()
     
@@ -347,7 +339,7 @@ def update_product(product_id: int, employee_id: Optional[int] = None, auto_extr
     
     for field, value in kwargs.items():
         if field in allowed_fields:
-            updates.append(f"{field} = ?")
+            updates.append(f"{field} = %s")
             values.append(value)
             new_values[field] = value
     
@@ -356,11 +348,11 @@ def update_product(product_id: int, employee_id: Optional[int] = None, auto_extr
         return False
     
     # Add updated_at timestamp
-    updates.append("updated_at = ?")
+    updates.append("updated_at = NOW()")
     values.append(datetime.now().isoformat())
     values.append(product_id)
     
-    query = f"UPDATE inventory SET {', '.join(updates)} WHERE product_id = ?"
+    query = f"UPDATE inventory SET {', '.join(updates)} WHERE product_id = %s"
     
     try:
         cursor.execute(query, values)
@@ -370,7 +362,7 @@ def update_product(product_id: int, employee_id: Optional[int] = None, auto_extr
         # Log to audit log if employee_id is provided
         if success and employee_id:
             # Get new values for audit log using the same connection
-            cursor.execute("SELECT * FROM inventory WHERE product_id = ?", (product_id,))
+            cursor.execute("SELECT * FROM inventory WHERE product_id = %s", (product_id,))
             updated_row = cursor.fetchone()
             if updated_row:
                 updated_product = {col: updated_row[col] for col in updated_row.keys()}
@@ -403,17 +395,20 @@ def update_product(product_id: int, employee_id: Optional[int] = None, auto_extr
                 pass  # Don't fail update if metadata extraction fails
         
         return success
-    except sqlite3.IntegrityError as e:
+    except Exception as e:
+        import psycopg2
         conn.rollback()
         conn.close()
-        raise ValueError(f"SKU already exists in database") from e
+        if isinstance(e, psycopg2.IntegrityError):
+            raise ValueError(f"SKU already exists in database") from e
+        raise
 
 def delete_product(product_id: int) -> bool:
     """Delete a product from inventory"""
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("DELETE FROM inventory WHERE product_id = ?", (product_id,))
+    cursor.execute("DELETE FROM inventory WHERE product_id = %s", (product_id,))
     conn.commit()
     success = cursor.rowcount > 0
     conn.close()
@@ -433,15 +428,15 @@ def list_products(
     params = []
     
     if category:
-        query += " AND category = ?"
+        query += " AND category = %s"
         params.append(category)
     
     if vendor:
-        query += " AND vendor = ?"
+        query += " AND vendor = %s"
         params.append(vendor)
     
     if min_quantity is not None:
-        query += " AND current_quantity >= ?"
+        query += " AND current_quantity >= %s"
         params.append(min_quantity)
     
     query += " ORDER BY product_name"
@@ -458,7 +453,7 @@ def update_quantity(product_id: int, quantity_change: int) -> bool:
     cursor = conn.cursor()
     
     # Get current quantity
-    cursor.execute("SELECT current_quantity FROM inventory WHERE product_id = ?", (product_id,))
+    cursor.execute("SELECT current_quantity FROM inventory WHERE product_id = %s", (product_id,))
     row = cursor.fetchone()
     
     if not row:
@@ -473,8 +468,8 @@ def update_quantity(product_id: int, quantity_change: int) -> bool:
     
     cursor.execute("""
         UPDATE inventory 
-        SET current_quantity = ?, updated_at = ?
-        WHERE product_id = ?
+        SET current_quantity = %s, updated_at = NOW()
+        WHERE product_id = %s
     """, (new_quantity, datetime.now().isoformat(), product_id))
     
     conn.commit()
@@ -500,7 +495,7 @@ def add_vendor(
     
     cursor.execute("""
         INSERT INTO vendors (vendor_name, contact_person, email, phone, address)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s)
     """, (vendor_name, contact_person, email, phone, address))
     
     conn.commit()
@@ -514,7 +509,7 @@ def get_vendor(vendor_id: int) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM vendors WHERE vendor_id = ?", (vendor_id,))
+    cursor.execute("SELECT * FROM vendors WHERE vendor_id = %s", (vendor_id,))
     row = cursor.fetchone()
     conn.close()
     
@@ -542,7 +537,7 @@ def update_vendor(vendor_id: int, **kwargs) -> bool:
     
     for field, value in kwargs.items():
         if field in allowed_fields:
-            updates.append(f"{field} = ?")
+            updates.append(f"{field} = %s")
             values.append(value)
     
     if not updates:
@@ -550,7 +545,7 @@ def update_vendor(vendor_id: int, **kwargs) -> bool:
         return False
     
     values.append(vendor_id)
-    query = f"UPDATE vendors SET {', '.join(updates)} WHERE vendor_id = ?"
+    query = f"UPDATE vendors SET {', '.join(updates)} WHERE vendor_id = %s"
     
     cursor.execute(query, values)
     conn.commit()
@@ -564,7 +559,7 @@ def delete_vendor(vendor_id: int) -> bool:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("DELETE FROM vendors WHERE vendor_id = ?", (vendor_id,))
+    cursor.execute("DELETE FROM vendors WHERE vendor_id = %s", (vendor_id,))
     conn.commit()
     success = cursor.rowcount > 0
     conn.close()
@@ -597,7 +592,7 @@ def create_shipment(
         INSERT INTO shipments 
         (vendor_id, shipment_date, received_date, purchase_order_number, 
          tracking_number, total_cost, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     """, (vendor_id, shipment_date, received_date, purchase_order_number, 
           tracking_number, total_cost, notes))
     
@@ -612,7 +607,7 @@ def get_shipment(shipment_id: int) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM shipments WHERE shipment_id = ?", (shipment_id,))
+    cursor.execute("SELECT * FROM shipments WHERE shipment_id = %s", (shipment_id,))
     row = cursor.fetchone()
     conn.close()
     
@@ -631,15 +626,15 @@ def list_shipments(
     params = []
     
     if vendor_id:
-        query += " AND vendor_id = ?"
+        query += " AND vendor_id = %s"
         params.append(vendor_id)
     
     if start_date:
-        query += " AND shipment_date >= ?"
+        query += " AND shipment_date >= %s"
         params.append(start_date)
     
     if end_date:
-        query += " AND shipment_date <= ?"
+        query += " AND shipment_date <= %s"
         params.append(end_date)
     
     query += " ORDER BY shipment_date DESC"
@@ -662,7 +657,7 @@ def update_shipment(shipment_id: int, **kwargs) -> bool:
     
     for field, value in kwargs.items():
         if field in allowed_fields:
-            updates.append(f"{field} = ?")
+            updates.append(f"{field} = %s")
             values.append(value)
     
     if not updates:
@@ -670,7 +665,7 @@ def update_shipment(shipment_id: int, **kwargs) -> bool:
         return False
     
     values.append(shipment_id)
-    query = f"UPDATE shipments SET {', '.join(updates)} WHERE shipment_id = ?"
+    query = f"UPDATE shipments SET {', '.join(updates)} WHERE shipment_id = %s"
     
     cursor.execute(query, values)
     conn.commit()
@@ -699,16 +694,20 @@ def add_shipment_item(
         cursor.execute("""
             INSERT INTO shipment_items 
             (shipment_id, product_id, quantity_received, unit_cost, lot_number, expiration_date)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """, (shipment_id, product_id, quantity_received, unit_cost, lot_number, expiration_date))
         
         conn.commit()
-        shipment_item_id = cursor.lastrowid
+        # For PostgreSQL, use RETURNING or fetch the ID from cursor
+        shipment_item_id = cursor.lastrowid if hasattr(cursor, 'lastrowid') else None
         conn.close()
         
         return shipment_item_id
-    except sqlite3.IntegrityError as e:
+    except Exception as e:
+        import psycopg2
         conn.rollback()
+        if isinstance(e, psycopg2.IntegrityError):
+            pass  # Handle integrity error
         conn.close()
         raise ValueError(f"Invalid shipment_id or product_id") from e
 
@@ -735,7 +734,7 @@ def get_shipment_item(shipment_item_id: int) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM shipment_items WHERE shipment_item_id = ?", (shipment_item_id,))
+    cursor.execute("SELECT * FROM shipment_items WHERE shipment_item_id = %s", (shipment_item_id,))
     row = cursor.fetchone()
     conn.close()
     
@@ -771,7 +770,7 @@ def trace_product_to_vendors(product_id: int) -> List[Dict[str, Any]]:
         JOIN shipment_items si ON i.product_id = si.product_id
         JOIN shipments s ON si.shipment_id = s.shipment_id
         JOIN vendors v ON s.vendor_id = v.vendor_id
-        WHERE i.product_id = ?
+        WHERE i.product_id = %s
         ORDER BY s.shipment_date DESC, si.received_timestamp DESC
     """, (product_id,))
     
@@ -822,7 +821,7 @@ def record_sale(
     cursor = conn.cursor()
     
     # Check if enough inventory exists
-    cursor.execute("SELECT current_quantity FROM inventory WHERE product_id = ?", (product_id,))
+    cursor.execute("SELECT current_quantity FROM inventory WHERE product_id = %s", (product_id,))
     row = cursor.fetchone()
     
     if not row:
@@ -837,15 +836,18 @@ def record_sale(
     try:
         cursor.execute("""
             INSERT INTO sales (product_id, quantity_sold, sale_price, notes)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
         """, (product_id, quantity_sold, sale_price, notes))
         
         conn.commit()
-        sale_id = cursor.lastrowid
+        # For PostgreSQL, need to use RETURNING or fetch differently
+        sale_id = cursor.lastrowid if hasattr(cursor, 'lastrowid') else None
         conn.close()
         
         return sale_id
-    except sqlite3.IntegrityError as e:
+    except Exception as e:
+        import psycopg2
+        if isinstance(e, psycopg2.IntegrityError):
         conn.rollback()
         conn.close()
         raise ValueError(f"Error recording sale") from e
@@ -868,15 +870,15 @@ def get_sales(
     params = []
     
     if product_id:
-        query += " AND s.product_id = ?"
+        query += " AND s.product_id = %s"
         params.append(product_id)
     
     if start_date:
-        query += " AND DATE(s.sale_date) >= ?"
+        query += " AND DATE(s.sale_date) >= %s"
         params.append(start_date)
     
     if end_date:
-        query += " AND DATE(s.sale_date) <= ?"
+        query += " AND DATE(s.sale_date) <= %s"
         params.append(end_date)
     
     query += " ORDER BY s.sale_date DESC"
@@ -900,7 +902,7 @@ def get_inventory_by_vendor(product_id: int) -> Dict[str, Any]:
     cursor = conn.cursor()
     
     # Get product info
-    cursor.execute("SELECT * FROM inventory WHERE product_id = ?", (product_id,))
+    cursor.execute("SELECT * FROM inventory WHERE product_id = %s", (product_id,))
     product = cursor.fetchone()
     
     if not product:
@@ -925,14 +927,14 @@ def get_inventory_by_vendor(product_id: int) -> Dict[str, Any]:
         FROM shipment_items si
         JOIN shipments s ON si.shipment_id = s.shipment_id
         JOIN vendors v ON s.vendor_id = v.vendor_id
-        WHERE si.product_id = ?
+        WHERE si.product_id = %s
         ORDER BY si.received_timestamp ASC
     """, (product_id,))
     
     shipments = cursor.fetchall()
     
     # Get total quantity sold
-    cursor.execute("SELECT COALESCE(SUM(quantity_sold), 0) as total_sold FROM sales WHERE product_id = ?", (product_id,))
+    cursor.execute("SELECT COALESCE(SUM(quantity_sold), 0) as total_sold FROM sales WHERE product_id = %s", (product_id,))
     total_sold_row = cursor.fetchone()
     total_sold = total_sold_row['total_sold'] if total_sold_row else 0
     
@@ -1045,7 +1047,7 @@ def create_pending_shipment(
     cursor.execute("""
         INSERT INTO pending_shipments 
         (vendor_id, file_path, expected_date, purchase_order_number, tracking_number, notes, uploaded_by, verification_mode)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """, (vendor_id, file_path, expected_date, purchase_order_number, tracking_number, notes, uploaded_by, verification_mode))
     
     conn.commit()
@@ -1070,7 +1072,7 @@ def add_pending_shipment_item(
     cursor = conn.cursor()
     
     # Try to match SKU to existing product
-    cursor.execute("SELECT product_id FROM inventory WHERE sku = ?", (product_sku,))
+    cursor.execute("SELECT product_id FROM inventory WHERE sku = %s", (product_sku,))
     product_row = cursor.fetchone()
     product_id = product_row['product_id'] if product_row else None
     
@@ -1093,7 +1095,7 @@ def add_pending_shipment_item(
             INSERT INTO pending_shipment_items 
             (pending_shipment_id, product_sku, product_name, quantity_expected, 
              unit_cost, lot_number, expiration_date, product_id, barcode)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (pending_shipment_id, product_sku, product_name, quantity_expected,
               unit_cost, lot_number, expiration_date, product_id, barcode))
     elif has_line_number:
@@ -1101,7 +1103,7 @@ def add_pending_shipment_item(
             INSERT INTO pending_shipment_items 
             (pending_shipment_id, product_sku, product_name, quantity_expected, 
              unit_cost, lot_number, expiration_date, product_id, line_number)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (pending_shipment_id, product_sku, product_name, quantity_expected,
               unit_cost, lot_number, expiration_date, product_id, line_number))
     else:
@@ -1109,7 +1111,7 @@ def add_pending_shipment_item(
             INSERT INTO pending_shipment_items 
             (pending_shipment_id, product_sku, product_name, quantity_expected, 
              unit_cost, lot_number, expiration_date, product_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """, (pending_shipment_id, product_sku, product_name, quantity_expected,
               unit_cost, lot_number, expiration_date, product_id))
     
@@ -1591,7 +1593,7 @@ def approve_pending_shipment(
         cursor.execute("""
             INSERT INTO shipments 
             (vendor_id, shipment_date, received_date, purchase_order_number, tracking_number, notes)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """, (pending['vendor_id'], pending['expected_date'], received_date,
               pending.get('purchase_order_number'), pending.get('tracking_number'),
               notes or pending.get('notes')))
@@ -1830,70 +1832,118 @@ def add_employee(
         raise ValueError("Either username or employee_code must be provided")
     
     try:
+        # Get establishment_id (required for Supabase)
+        establishment_id = get_current_establishment()
+        if not establishment_id:
+            conn.close()
+            raise ValueError("establishment_id is required. Set establishment context first.")
+        
         # Check if table has username column (RBAC migration)
-        cursor.execute("PRAGMA table_info(employees)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # Check columns using PostgreSQL information_schema
+        cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'employees' AND table_schema = 'public'
+        """)
+        columns = [row[0] for row in cursor.fetchall()]
+        
         has_username = 'username' in columns
         has_role_id = 'role_id' in columns
         has_pin_code = 'pin_code' in columns
         has_clerk_user_id = 'clerk_user_id' in columns
+        has_establishment_id = 'establishment_id' in columns
+        
+        # Add missing columns if needed (only if we're providing values for them)
+        if pin_code and not has_pin_code:
+            try:
+                cursor.execute("ALTER TABLE employees ADD COLUMN pin_code TEXT")
+                has_pin_code = True
+                conn.commit()
+                print("[DEBUG] Added pin_code column to employees table")
+            except Exception as e:
+                print(f"[DEBUG] Could not add pin_code column: {e}")
+        
+        if clerk_user_id and not has_clerk_user_id:
+            try:
+                cursor.execute("ALTER TABLE employees ADD COLUMN clerk_user_id TEXT")
+                has_clerk_user_id = True
+                conn.commit()
+                print("[DEBUG] Added clerk_user_id column to employees table")
+            except Exception as e:
+                print(f"[DEBUG] Could not add clerk_user_id column: {e}")
+        
+        if role_id and not has_role_id:
+            try:
+                cursor.execute("ALTER TABLE employees ADD COLUMN role_id INTEGER")
+                has_role_id = True
+                conn.commit()
+                print("[DEBUG] Added role_id column to employees table")
+            except Exception as e:
+                print(f"[DEBUG] Could not add role_id column: {e}")
         
         # Generate PIN if not provided
         if not pin_code:
             pin_code = generate_pin()
         
+        # PostgreSQL uses %s placeholders
+        param_placeholder = '%s'
+        
+        # Build base fields and values
+        base_fields = ['first_name', 'last_name', 'email', 'phone', 'position', 'department',
+                      'date_started', 'password_hash', 'hourly_rate', 'salary', 'employment_type', 'address',
+                      'emergency_contact_name', 'emergency_contact_phone', 'notes']
+        base_values = [first_name, last_name, email, phone, position, department,
+                      date_started, password_hash, hourly_rate, salary, employment_type, address,
+                      emergency_contact_name, emergency_contact_phone, notes]
+        
+        # Add establishment_id (required for Supabase)
+        if has_establishment_id and establishment_id:
+            base_fields.insert(0, 'establishment_id')
+            base_values.insert(0, establishment_id)
+        
         if has_username:
             # Use username column
             if has_role_id and has_pin_code and has_clerk_user_id:
-                cursor.execute("""
-                    INSERT INTO employees (
-                        username, first_name, last_name, email, phone, position, department,
-                        date_started, password_hash, hourly_rate, salary, employment_type, address,
-                        emergency_contact_name, emergency_contact_phone, notes, role_id, pin_code, clerk_user_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (login_identifier, first_name, last_name, email, phone, position, department,
-                      date_started, password_hash, hourly_rate, salary, employment_type, address,
-                      emergency_contact_name, emergency_contact_phone, notes, role_id, pin_code, clerk_user_id))
+                fields = ['username'] + base_fields + ['role_id', 'pin_code', 'clerk_user_id']
+                values = [login_identifier] + base_values + [role_id, pin_code, clerk_user_id]
             elif has_role_id and has_pin_code:
-                cursor.execute("""
-                    INSERT INTO employees (
-                        username, first_name, last_name, email, phone, position, department,
-                        date_started, password_hash, hourly_rate, salary, employment_type, address,
-                        emergency_contact_name, emergency_contact_phone, notes, role_id, pin_code
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (login_identifier, first_name, last_name, email, phone, position, department,
-                      date_started, password_hash, hourly_rate, salary, employment_type, address,
-                      emergency_contact_name, emergency_contact_phone, notes, role_id, pin_code))
+                fields = ['username'] + base_fields + ['role_id', 'pin_code']
+                values = [login_identifier] + base_values + [role_id, pin_code]
             else:
-                cursor.execute("""
-                    INSERT INTO employees (
-                        username, first_name, last_name, email, phone, position, department,
-                        date_started, password_hash, hourly_rate, salary, employment_type, address,
-                        emergency_contact_name, emergency_contact_phone, notes
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (login_identifier, first_name, last_name, email, phone, position, department,
-                      date_started, password_hash, hourly_rate, salary, employment_type, address,
-                      emergency_contact_name, emergency_contact_phone, notes))
+                fields = ['username'] + base_fields
+                values = [login_identifier] + base_values
         else:
             # Fall back to employee_code
-            cursor.execute("""
-                INSERT INTO employees (
-                    employee_code, first_name, last_name, email, phone, position, department,
-                    date_started, password_hash, hourly_rate, salary, employment_type, address,
-                    emergency_contact_name, emergency_contact_phone, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (login_identifier, first_name, last_name, email, phone, position, department,
-                  date_started, password_hash, hourly_rate, salary, employment_type, address,
-                  emergency_contact_name, emergency_contact_phone, notes))
+            if has_role_id and has_pin_code and has_clerk_user_id:
+                fields = ['employee_code'] + base_fields + ['role_id', 'pin_code', 'clerk_user_id']
+                values = [login_identifier] + base_values + [role_id, pin_code, clerk_user_id]
+            elif has_role_id and has_pin_code:
+                fields = ['employee_code'] + base_fields + ['role_id', 'pin_code']
+                values = [login_identifier] + base_values + [role_id, pin_code]
+            else:
+                fields = ['employee_code'] + base_fields
+                values = [login_identifier] + base_values
         
+        # Build and execute INSERT query
+        placeholders = ', '.join([param_placeholder] * len(fields))
+        fields_str = ', '.join(fields)
+        
+        cursor.execute(f"""
+            INSERT INTO employees ({fields_str})
+            VALUES ({placeholders})
+            RETURNING employee_id
+        """, tuple(values))
+        employee_id = cursor.fetchone()[0]
         conn.commit()
-        employee_id = cursor.lastrowid
         conn.close()
         return employee_id
-    except sqlite3.IntegrityError as e:
+    except Exception as e:
+        import psycopg2
         conn.rollback()
         conn.close()
-        raise ValueError(f"Employee identifier '{login_identifier}' already exists") from e
+        if isinstance(e, psycopg2.IntegrityError):
+            raise ValueError(f"Employee identifier '{login_identifier}' already exists") from e
+        raise
 
 def get_employee_by_clerk_user_id(clerk_user_id: str) -> Optional[Dict[str, Any]]:
     """Get employee by Clerk user ID"""
@@ -1901,26 +1951,45 @@ def get_employee_by_clerk_user_id(clerk_user_id: str) -> Optional[Dict[str, Any]
     cursor = conn.cursor()
     
     try:
-        cursor.execute("PRAGMA table_info(employees)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # Check if column exists using PostgreSQL information_schema
+        cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'employees' AND table_schema = 'public'
+            AND column_name = 'clerk_user_id'
+        """)
+        has_column = cursor.fetchone() is not None
         
-        if 'clerk_user_id' not in columns:
+        if not has_column:
             conn.close()
             return None
         
-        cursor.execute("SELECT * FROM employees WHERE clerk_user_id = ?", (clerk_user_id,))
+        # Use PostgreSQL placeholder
+        cursor.execute("SELECT * FROM employees WHERE clerk_user_id = %s", (clerk_user_id,))
+        
         row = cursor.fetchone()
         
         if not row:
             conn.close()
             return None
         
-        employee = dict(row)
+        # Handle both Row objects (SQLite) and tuple/dict (PostgreSQL)
+        if hasattr(row, 'keys'):
+            employee = dict(row)
+        else:
+            try:
+                column_names = [desc[0] for desc in cursor.description]
+                employee = dict(zip(column_names, row))
+            except:
+                employee = dict(row) if isinstance(row, dict) else {}
+        
         conn.close()
         return employee
     except Exception as e:
         conn.close()
         print(f"Error getting employee by Clerk user ID: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def link_clerk_user_to_employee(employee_id: int, clerk_user_id: str) -> bool:
@@ -1952,29 +2021,51 @@ def verify_pin_login(clerk_user_id: str, pin_code: str) -> Optional[Dict[str, An
     cursor = conn.cursor()
     
     try:
-        cursor.execute("PRAGMA table_info(employees)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # Check if columns exist using PostgreSQL information_schema
+        cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'employees' AND table_schema = 'public'
+            AND column_name IN ('clerk_user_id', 'pin_code')
+        """)
+        columns = [row[0] for row in cursor.fetchall()]
         
         if 'clerk_user_id' not in columns or 'pin_code' not in columns:
             conn.close()
+            print(f"[DEBUG] Missing columns: clerk_user_id={'clerk_user_id' in columns}, pin_code={'pin_code' in columns}")
             return None
         
+        # Use PostgreSQL placeholder
         cursor.execute("""
             SELECT * FROM employees 
-            WHERE clerk_user_id = ? AND pin_code = ?
+            WHERE clerk_user_id = %s AND pin_code = %s
         """, (clerk_user_id, pin_code))
         
         row = cursor.fetchone()
         conn.close()
         
         if not row:
+            print(f"[DEBUG] No employee found with clerk_user_id={clerk_user_id} and provided PIN")
             return None
         
-        employee = dict(row)
+        # Handle PostgreSQL row data (RealDictCursor provides dict-like rows)
+        if hasattr(row, 'keys'):
+            employee = dict(row)
+        else:
+            try:
+                column_names = [desc[0] for desc in cursor.description]
+                employee = dict(zip(column_names, row))
+            except:
+                # Fallback
+                employee = dict(row) if isinstance(row, dict) else {}
+        
+        print(f"[DEBUG] PIN login verified successfully for employee_id={employee.get('employee_id')}")
         return employee
     except Exception as e:
         conn.close()
         print(f"Error verifying PIN login: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def get_employee(employee_id: int) -> Optional[Dict[str, Any]]:
@@ -1982,7 +2073,7 @@ def get_employee(employee_id: int) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM employees WHERE employee_id = ?", (employee_id,))
+    cursor.execute("SELECT * FROM employees WHERE employee_id = %s", (employee_id,))
     row = cursor.fetchone()
     
     if not row:
@@ -2083,8 +2174,12 @@ def update_employee(employee_id: int, **kwargs) -> bool:
     cursor = conn.cursor()
     
     # Check if table has RBAC columns
-    cursor.execute("PRAGMA table_info(employees)")
-    columns = [col[1] for col in cursor.fetchall()]
+    cursor.execute("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'employees' AND table_schema = 'public'
+    """)
+    columns = [row[0] for row in cursor.fetchall()]
     has_role_id = 'role_id' in columns
     has_pin_code = 'pin_code' in columns
     has_username = 'username' in columns
@@ -2112,7 +2207,7 @@ def update_employee(employee_id: int, **kwargs) -> bool:
     
     for field, value in kwargs.items():
         if field in allowed_fields:
-            updates.append(f"{field} = ?")
+            updates.append(f"{field} = %s")
             values.append(value)
     
     # Handle password update
@@ -2128,7 +2223,7 @@ def update_employee(employee_id: int, **kwargs) -> bool:
     updates.append("updated_at = CURRENT_TIMESTAMP")
     values.append(employee_id)
     
-    query = f"UPDATE employees SET {', '.join(updates)} WHERE employee_id = ?"
+    query = f"UPDATE employees SET {', '.join(updates)} WHERE employee_id = %s"
     
     cursor.execute(query, values)
     conn.commit()
@@ -2143,13 +2238,13 @@ def delete_employee(employee_id: int) -> bool:
     cursor = conn.cursor()
     
     # Soft delete - set active to 0
-    cursor.execute("""
-        UPDATE employees
-        SET active = 0,
-            date_terminated = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE employee_id = ?
-    """, (employee_id,))
+        cursor.execute("""
+            UPDATE employees
+            SET active = 0,
+                date_terminated = NOW(),
+                updated_at = NOW()
+            WHERE employee_id = %s
+        """, (employee_id,))
     
     conn.commit()
     success = cursor.rowcount > 0
@@ -2272,7 +2367,7 @@ def create_order(
             product_id = item['product_id']
             quantity = item['quantity']
             
-            cursor.execute("SELECT current_quantity FROM inventory WHERE product_id = ?", (product_id,))
+            cursor.execute("SELECT current_quantity FROM inventory WHERE product_id = %s", (product_id,))
             row = cursor.fetchone()
             
             if not row:
@@ -4604,7 +4699,9 @@ def add_account(
         account_id = cursor.lastrowid
         conn.close()
         return account_id
-    except sqlite3.IntegrityError as e:
+    except Exception as e:
+        import psycopg2
+        if isinstance(e, psycopg2.IntegrityError):
         conn.rollback()
         conn.close()
         raise ValueError(f"Account number '{account_number}' already exists") from e
@@ -5648,7 +5745,7 @@ def report_shipment_issue(pending_shipment_id: int, pending_item_id: Optional[in
         INSERT INTO shipment_issues
         (pending_shipment_id, pending_item_id, issue_type, severity,
          quantity_affected, reported_by, description, photo_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """, (pending_shipment_id, pending_item_id, issue_type, severity,
           quantity_affected, employee_id, description, photo_path))
     
@@ -6526,7 +6623,7 @@ def update_customer_rewards_settings(**kwargs) -> bool:
             
             for field in allowed_fields:
                 if field in kwargs:
-                    updates.append(f"{field} = ?")
+                    updates.append(f"{field} = %s")
                     params.append(kwargs[field])
             
             if updates:
@@ -7020,6 +7117,35 @@ def get_onboarding_status() -> Dict[str, Any]:
     cursor = conn.cursor()
     
     try:
+        # Check if table exists first
+        USE_SUPABASE = os.getenv('USE_SUPABASE', 'false').lower() == 'true'
+        
+        if USE_SUPABASE:
+            # PostgreSQL - check if table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'store_setup'
+                )
+            """)
+            table_exists = cursor.fetchone()[0]
+        else:
+            # SQLite - check if table exists
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='store_setup'
+            """)
+            table_exists = cursor.fetchone() is not None
+        
+        if not table_exists:
+            # Table doesn't exist - onboarding not started
+            return {
+                'setup_completed': False,
+                'setup_step': 1,
+                'completed_at': None
+            }
+        
         cursor.execute("""
             SELECT * FROM store_setup 
             ORDER BY setup_id DESC 
@@ -7530,7 +7656,7 @@ def add_cash_transaction(session_id: int, employee_id: int, transaction_type: st
         cursor.execute("""
             INSERT INTO cash_transactions
             (session_id, employee_id, transaction_type, amount, reason, notes)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """, (session_id, employee_id, transaction_type, amount, reason, notes))
         
         transaction_id = cursor.lastrowid

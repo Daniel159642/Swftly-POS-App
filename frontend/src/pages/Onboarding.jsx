@@ -62,7 +62,8 @@ function Onboarding() {
       
       const text = await response.text()
       if (!text || text.trim() === '') {
-        // Empty response, start from step 1
+        // Empty response - no onboarding status, start from step 1
+        console.log('No onboarding status found, starting from step 1')
         setCurrentStep(1)
         setLoading(false)
         return
@@ -70,19 +71,20 @@ function Onboarding() {
       
       const data = JSON.parse(text)
       
-      // If onboarding is completed, redirect to login
+      // Always allow access to onboarding page
+      // If onboarding is completed, still allow access (user might want to re-setup)
       if (data.setup_completed) {
-        console.log('Onboarding completed, redirecting to login')
-        navigate('/login')
-        return
-      }
-      
-      // Load saved step or start from step 1
+        console.log('Onboarding already completed, but allowing access to re-setup')
+        // Start from step 1 to allow re-setup
+        setCurrentStep(1)
+      } else {
+        // Load saved step or start from step 1
         setCurrentStep(data.setup_step || 1)
-        setLoading(false)
+      }
+      setLoading(false)
     } catch (err) {
       console.error('Error checking onboarding status:', err)
-      // On error, just start from step 1
+      // On error, assume onboarding is needed and start from step 1
       setCurrentStep(1)
       setLoading(false)
     }
