@@ -115,40 +115,35 @@ USE_SUPABASE = False
 set_current_establishment = None
 get_current_establishment = None
 
-# Check if Supabase should be used
-if os.getenv('USE_SUPABASE', 'false').lower() == 'true':
+# System now uses Supabase exclusively - no SQLite fallback
+# Import Supabase connection (required)
+try:
+    from database_supabase import (
+        get_connection as get_supabase_connection,
+        set_current_establishment as _set_establishment,
+        get_current_establishment as _get_establishment,
+        get_supabase_client
+    )
+    # Test connection on startup
     try:
-        from database_supabase import (
-            get_connection as get_supabase_connection,
-            set_current_establishment as _set_establishment,
-            get_current_establishment as _get_establishment,
-            get_supabase_client
-        )
-        # Test connection first before enabling
-        try:
-            test_conn = get_supabase_connection()
-            test_conn.close()
-        except Exception as conn_err:
-            print(f"⚠ Warning: Supabase connection test failed: {conn_err}")
-            print("⚠ Falling back to SQLite. Check your SUPABASE_DB_URL in .env file.")
-            print("⚠ To disable Supabase, set USE_SUPABASE=false in .env")
-            USE_SUPABASE = False
-        else:
-            # Override get_connection in database module
-            from database import set_connection_override
-            set_connection_override(get_supabase_connection)
-            set_current_establishment = _set_establishment
-            get_current_establishment = _get_establishment
-            USE_SUPABASE = True
-            print("✓ Using Supabase database")
-    except ImportError as e:
-        print(f"⚠ Warning: Supabase configured but module not found: {e}")
-        print("⚠ Falling back to SQLite. Install: pip3 install supabase psycopg2-binary")
-        USE_SUPABASE = False
-    except Exception as e:
-        print(f"⚠ Warning: Could not initialize Supabase: {e}")
-        print("⚠ Falling back to SQLite")
-        USE_SUPABASE = False
+        test_conn = get_supabase_connection()
+        test_conn.close()
+        set_current_establishment = _set_establishment
+        get_current_establishment = _get_establishment
+        USE_SUPABASE = True
+        print("✓ Using Supabase database")
+    except Exception as conn_err:
+        print(f"❌ ERROR: Supabase connection failed: {conn_err}")
+        print("❌ This system requires Supabase. Please check your SUPABASE_DB_URL in .env file.")
+        print("❌ Get your connection string from: Supabase Dashboard > Settings > Database > Connection string")
+        raise SystemExit("Cannot start without Supabase connection")
+except ImportError as e:
+    print(f"❌ ERROR: Supabase module not found: {e}")
+    print("❌ Install required packages: pip3 install supabase psycopg2-binary python-dotenv")
+    raise SystemExit("Cannot start without Supabase dependencies")
+except Exception as e:
+    print(f"❌ ERROR: Could not initialize Supabase: {e}")
+    raise SystemExit("Cannot start without Supabase")
 
 # ============================================================================
 # ESTABLISHMENT CONTEXT HANDLING (for multi-tenant Supabase)
@@ -6001,6 +5996,7 @@ def api_save_onboarding_step():
                 except Exception as admin_err:
                     # Log error and fail the request so we can see what went wrong
                     print(f"[DEBUG] ✗ ERROR creating admin account: {type(admin_err).__name__}: {admin_err}")
+                    import traceback
                     traceback.print_exc()
                     # Don't fail the step save, but log the error prominently
                     print("=" * 80)
@@ -6470,6 +6466,7 @@ def api_complete_onboarding():
                     print(f"[DEBUG] ERROR: Missing store_info or clerk_user_id to create admin account")
         except Exception as admin_err:
             print(f"[DEBUG] Warning: Failed to create admin account during onboarding completion: {admin_err}")
+            import traceback
             traceback.print_exc()
             # Don't fail onboarding completion if admin creation fails
         
