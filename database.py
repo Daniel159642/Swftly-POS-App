@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Database utility functions for inventory management
-SUPABASE ONLY - All SQLite code has been removed
+PostgreSQL ONLY - All SQLite code has been removed
 """
 
 import hashlib
@@ -12,17 +12,17 @@ import os
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-# Import Supabase connection - this is the ONLY database backend
+# Import local PostgreSQL connection - this is the ONLY database backend
 try:
-    from database_supabase import (
-        get_connection as get_supabase_connection,
+    from database_postgres import (
+        get_connection as get_postgres_connection,
         get_current_establishment,
         set_current_establishment
     )
 except ImportError:
     raise ImportError(
-        "database_supabase module not found. "
-        "This system now requires Supabase. Install: pip3 install supabase psycopg2-binary"
+        "database_postgres module not found. "
+        "This system requires PostgreSQL. Install: pip3 install psycopg2-binary python-dotenv"
     )
 
 def generate_unique_barcode(pending_shipment_id: int, line_number: int, product_sku: str = '') -> str:
@@ -82,10 +82,10 @@ def generate_unique_barcode(pending_shipment_id: int, line_number: int, product_
 
 def get_connection():
     """
-    Get Supabase PostgreSQL connection
-    This system now uses Supabase exclusively - no SQLite support
+    Get local PostgreSQL connection
+    This system uses PostgreSQL exclusively - no SQLite support
     """
-    return get_supabase_connection()
+    return get_postgres_connection()
 
 def set_connection_override(connection_func):
     """

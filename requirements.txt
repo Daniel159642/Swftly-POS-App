@@ -52,7 +52,6 @@ cryptography>=41.0.0  # Encryption for storing sensitive API keys
 # Clerk authentication dependencies:
 clerk-backend-api>=1.0.0  # Clerk Backend SDK for user creation and invitations
 
-# Supabase database dependencies (for multi-tenant support):
-supabase>=2.0.0          # Supabase Python client
+# PostgreSQL database dependencies (local database):
 psycopg2-binary>=2.9.0    # PostgreSQL adapter for Python
 python-dotenv>=1.0.0      # Environment variable management

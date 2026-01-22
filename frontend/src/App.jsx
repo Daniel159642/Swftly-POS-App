@@ -1,10 +1,7 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { useAuth, useUser } from '@clerk/clerk-react'
 import { PermissionProvider, usePermissions } from './contexts/PermissionContext'
 import { ThemeProvider } from './contexts/ThemeContext'
-import MasterLogin from './components/MasterLogin'
-import SignUpPage from './components/SignUp'
 import Login from './components/Login'
 import Dashboard from './components/Dashboard'
 import POS from './components/POS'
@@ -20,8 +17,6 @@ import ShipmentVerification from './pages/ShipmentVerification'
 import StatisticsPage from './pages/Statistics'
 import Settings from './pages/Settings'
 import Accounting from './pages/Accounting'
-import Onboarding from './pages/Onboarding'
-import EmployeeOnboarding from './pages/EmployeeOnboarding'
 import CashRegister from './pages/CashRegister'
 import './index.css'
 
@@ -32,171 +27,48 @@ function ProtectedRoute({ children, sessionToken, employee, onLogout }) {
   return children
 }
 
+const loginSuccessHandler = (result, setSessionToken, setEmployee) => {
+  if (result.success) {
+    setSessionToken(result.session_token)
+    setEmployee({
+      employee_id: result.employee_id,
+      employee_name: result.employee_name,
+      position: result.position
+    })
+    localStorage.setItem('sessionToken', result.session_token)
+  }
+}
+
 function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLogout }) {
-  const { isSignedIn, isLoaded: clerkLoaded } = useAuth()
-  const { user } = useUser()
   const { fetchPermissions, setEmployee: setPermissionEmployee } = usePermissions()
-  const [onboardingChecked, setOnboardingChecked] = useState(false)
-  const [onboardingRequired, setOnboardingRequired] = useState(false)
-  
+
   useEffect(() => {
     if (employee?.employee_id) {
       fetchPermissions(employee.employee_id)
       setPermissionEmployee(employee)
     }
   }, [employee?.employee_id])
-  
-  useEffect(() => {
-    // Check onboarding status on mount
-    checkOnboardingStatus()
-  }, [])
-  
-  const checkOnboardingStatus = async () => {
-    try {
-      const response = await fetch('/api/onboarding/status')
-      
-      // Handle non-OK responses
-      if (!response.ok) {
-        console.log('Onboarding status check failed, defaulting to master login')
-        // Don't require onboarding on error - show master login first
-        setOnboardingRequired(false)
-        setOnboardingChecked(true)
-        return
-      }
-      
-      const data = await response.json()
-      
-      // If onboarding is completed, don't require it (allow normal login flow)
-      if (!data.setup_completed) {
-        setOnboardingRequired(true)
-      } else {
-        // Onboarding is complete, don't force onboarding
-        setOnboardingRequired(false)
-      }
-      setOnboardingChecked(true)
-    } catch (err) {
-      console.error('Error checking onboarding status:', err)
-      // On error, default to master login (don't force onboarding)
-      setOnboardingRequired(false)
-      setOnboardingChecked(true)
-    }
-  }
-  
-  // Wait for Clerk to load
-  if (!clerkLoaded) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        backgroundColor: 'var(--bg-secondary, #f5f5f5)'
-      }}>
-        <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>
-          Loading...
-        </div>
-      </div>
-    )
-  }
 
-  // If not signed in with Clerk, allow onboarding and master login
-  if (!isSignedIn) {
-    // Check onboarding status first
-    if (!onboardingChecked) {
-      return (
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: '100vh',
-          backgroundColor: 'var(--bg-secondary, #f5f5f5)'
-        }}>
-          <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>
-            Loading...
-          </div>
-        </div>
-      )
-    }
-    
-    return (
-      <Routes>
-        {/* Onboarding route - always accessible when not signed in */}
-        {/* Match both /onboarding and /onboarding/* - MUST be before catch-all */}
-        <Route path="/onboarding" element={<Onboarding />} />
-        <Route path="/onboarding/*" element={<Onboarding />} />
-        <Route path="/employee-onboarding" element={<EmployeeOnboarding />} />
-        <Route path="/master-login" element={<MasterLogin onMasterLoginSuccess={() => {}} />} />
-        {/* Redirect /sign-up to onboarding - signup is now built into onboarding */}
-        <Route path="/sign-up" element={<Navigate to="/onboarding" replace />} />
-        {/* Default redirect to master-login - always show master login first */}
-        <Route path="*" element={<Navigate to="/master-login" replace />} />
-      </Routes>
-    )
-  }
+  const onLogin = (result) => loginSuccessHandler(result, setSessionToken, setEmployee)
 
-  if (!onboardingChecked) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        backgroundColor: 'var(--bg-secondary, #f5f5f5)'
-      }}>
-        <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>
-          Loading...
-        </div>
-      </div>
-    )
-  }
-  
   return (
     <Routes>
-      <Route path="/onboarding" element={<Onboarding />} />
-      <Route path="/employee-onboarding" element={<EmployeeOnboarding />} />
-      <Route path="/master-login" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={
-        onboardingRequired && !sessionToken ? (
-          <Navigate to="/onboarding" replace />
+        sessionToken && employee ? (
+          <Navigate to="/dashboard" replace />
         ) : (
-          sessionToken && employee ? <Navigate to="/dashboard" replace /> : <Login onLogin={(result) => {
-            if (result.success) {
-              setSessionToken(result.session_token)
-              setEmployee({
-                employee_id: result.employee_id,
-                employee_name: result.employee_name,
-                position: result.position
-              })
-              localStorage.setItem('sessionToken', result.session_token)
-            }
-          }} />
+          <Login onLogin={onLogin} />
         )
       } />
-      {onboardingRequired && !sessionToken && (
-        <Route path="*" element={<Navigate to="/onboarding" replace />} />
-      )}
       <Route path="/dashboard" element={
-        onboardingRequired ? (
-          // If onboarding is required, redirect to onboarding even if logged in
-          <Navigate to="/onboarding" replace />
-        ) : sessionToken && employee ? (
+        sessionToken && employee ? (
           <ProtectedRoute sessionToken={sessionToken} employee={employee} onLogout={onLogout}>
             <Layout employee={employee} onLogout={onLogout}>
               <Dashboard />
             </Layout>
           </ProtectedRoute>
         ) : (
-          <Login onLogin={(result) => {
-            if (result.success) {
-              setSessionToken(result.session_token)
-              setEmployee({
-                employee_id: result.employee_id,
-                employee_name: result.employee_name,
-                position: result.position
-              })
-              localStorage.setItem('sessionToken', result.session_token)
-            }
-          }} />
+          <Login onLogin={onLogin} />
         )
       } />
       <Route path="/pos" element={
@@ -307,10 +179,20 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
       <Route path="/" element={
         sessionToken && employee ? (
           <Navigate to="/dashboard" replace />
-        ) : isSignedIn ? (
-          <Navigate to="/login" replace />
         ) : (
-          <Navigate to="/master-login" replace />
+          <Navigate to="/login" replace />
+        )
+      } />
+      <Route path="/onboarding" element={<Navigate to="/login" replace />} />
+      <Route path="/onboarding/*" element={<Navigate to="/login" replace />} />
+      <Route path="/employee-onboarding" element={<Navigate to="/login" replace />} />
+      <Route path="/master-login" element={<Navigate to="/login" replace />} />
+      <Route path="/sign-up" element={<Navigate to="/login" replace />} />
+      <Route path="*" element={
+        sessionToken && employee ? (
+          <Navigate to="/dashboard" replace />
+        ) : (
+          <Navigate to="/login" replace />
         )
       } />
     </Routes>
@@ -320,11 +202,11 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
 function Layout({ children, employee, onLogout }) {
   const navigate = useNavigate()
   const { hasPermission } = usePermissions()
-  
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
-      <div style={{ 
-        backgroundColor: 'var(--bg-primary, #fff)', 
+      <div style={{
+        backgroundColor: 'var(--bg-primary, #fff)',
         borderBottom: '1px solid var(--border-color, #ddd)',
         padding: '10px 20px',
         display: 'flex',
@@ -396,7 +278,7 @@ function Layout({ children, employee, onLogout }) {
           >
             Profile
           </button>
-          <button 
+          <button
             onClick={onLogout}
             style={{
               padding: '6px 12px',
@@ -420,11 +302,18 @@ function App() {
   const [sessionToken, setSessionToken] = useState(localStorage.getItem('sessionToken'))
   const [employee, setEmployee] = useState(null)
 
-  useEffect(() => {
+  const handleLogout = () => {
     if (sessionToken) {
-      verifySession()
+      fetch('/api/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: sessionToken })
+      }).catch(console.error)
     }
-  }, [])
+    setSessionToken(null)
+    setEmployee(null)
+    localStorage.removeItem('sessionToken')
+  }
 
   const verifySession = async () => {
     try {
@@ -433,14 +322,14 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_token: sessionToken })
       })
-      
+
       if (!response.ok) {
         const errorText = await response.text()
         console.error('Session verification failed:', response.status, errorText)
         handleLogout()
         return
       }
-      
+
       const result = await response.json()
       if (result.valid) {
         setEmployee({
@@ -457,18 +346,11 @@ function App() {
     }
   }
 
-  const handleLogout = () => {
+  useEffect(() => {
     if (sessionToken) {
-      fetch('/api/logout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_token: sessionToken })
-      }).catch(console.error)
+      verifySession()
     }
-    setSessionToken(null)
-    setEmployee(null)
-    localStorage.removeItem('sessionToken')
-  }
+  }, [])
 
   return (
     <BrowserRouter>

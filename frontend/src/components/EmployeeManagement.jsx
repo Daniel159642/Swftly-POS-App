@@ -329,13 +329,9 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
 
       // Show success message with PIN if generated
       setCreateSuccess({
-        message: data.account_type === 'clerk_master' 
-          ? `Employee created! Invitation email sent to ${newEmployee.email}`
-          : `Employee created! PIN: ${data.generated_pin || newEmployee.pin_code}`,
+        message: `Employee created! PIN: ${data.generated_pin || newEmployee.pin_code || '—'}`,
         employee: data.employee,
-        account_type: data.account_type,
-        generated_pin: data.generated_pin,
-        invitation_sent: data.invitation_sent
+        generated_pin: data.generated_pin
       })
 
       // Reset form
@@ -530,113 +526,8 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
                 />
               </div>
 
-              {/* Account Type Selection */}
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{
-                  display: 'block',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  marginBottom: '12px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                }}>
-                  Account Type *
-                </label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '12px',
-                    border: `2px solid ${
-                      newEmployee.account_type === 'pin_only' 
-                        ? `rgba(${themeColorRgb}, 0.7)` 
-                        : (isDarkMode ? 'var(--border-light, #404040)' : '#ddd')
-                    }`,
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    backgroundColor: newEmployee.account_type === 'pin_only' 
-                      ? `rgba(${themeColorRgb}, 0.1)` 
-                      : 'transparent'
-                  }}>
-                    <input
-                      type="radio"
-                      value="pin_only"
-                      checked={newEmployee.account_type === 'pin_only'}
-                      onChange={(e) => setNewEmployee({...newEmployee, account_type: e.target.value, email: ''})}
-                      style={{ marginRight: '12px' }}
-                    />
-                    <div>
-                      <div style={{ fontWeight: 600, marginBottom: '4px' }}>PIN Only</div>
-                      <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>
-                        Employee can only access when admin logs in through master login
-                      </div>
-                    </div>
-                  </label>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '12px',
-                    border: `2px solid ${
-                      newEmployee.account_type === 'clerk_master' 
-                        ? `rgba(${themeColorRgb}, 0.7)` 
-                        : (isDarkMode ? 'var(--border-light, #404040)' : '#ddd')
-                    }`,
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    backgroundColor: newEmployee.account_type === 'clerk_master' 
-                      ? `rgba(${themeColorRgb}, 0.1)` 
-                      : 'transparent'
-                  }}>
-                    <input
-                      type="radio"
-                      value="clerk_master"
-                      checked={newEmployee.account_type === 'clerk_master'}
-                      onChange={(e) => setNewEmployee({...newEmployee, account_type: e.target.value})}
-                      style={{ marginRight: '12px' }}
-                    />
-                    <div>
-                      <div style={{ fontWeight: 600, marginBottom: '4px' }}>Master Login</div>
-                      <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>
-                        Employee gets their own Clerk account and onboarding link via email
-                      </div>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {/* Email - required for Clerk master login */}
-              {newEmployee.account_type === 'clerk_master' && (
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{
-                    display: 'block',
-                    fontSize: '14px',
-                    fontWeight: 500,
-                    marginBottom: '8px',
-                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                  }}>
-                    Email Address * <span style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>(For Clerk account invitation)</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={newEmployee.email}
-                    onChange={(e) => setNewEmployee({...newEmployee, email: e.target.value})}
-                    required={newEmployee.account_type === 'clerk_master'}
-                    placeholder="employee@example.com"
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* PIN Section for PIN-only accounts */}
-              {newEmployee.account_type === 'pin_only' && (
+              {/* PIN Section (Clerk auth temporarily disabled) */}
+              {(
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{
                     display: 'block',
