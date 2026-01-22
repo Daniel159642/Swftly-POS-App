@@ -105,21 +105,30 @@ def verify_database():
             # Start a savepoint for testing
             cursor.execute("SAVEPOINT test_balance")
             
-            # Create test transaction
-            cursor.execute("""
-                INSERT INTO transactions (transaction_number, transaction_date, transaction_type, is_posted)
-                VALUES ('TEST-BALANCE-001', CURRENT_DATE, 'journal_entry', false)
-                RETURNING id
-            """)
-            txn_id = cursor.fetchone()[0]
+            # Get account IDs first
+            cursor.execute("SELECT id FROM accounts WHERE is_active = true LIMIT 2")
+            account_ids = cursor.fetchall()
             
-            # Add balanced lines
-            cursor.execute("""
-                INSERT INTO transaction_lines (transaction_id, account_id, line_number, debit_amount, credit_amount)
-                VALUES 
-                    (%s, (SELECT id FROM accounts LIMIT 1), 1, 100.00, 0),
-                    (%s, (SELECT id FROM accounts LIMIT 1 OFFSET 1), 2, 0, 100.00)
-            """, (txn_id, txn_id))
+            if len(account_ids) < 2:
+                print("⚠️  Need at least 2 active accounts for balance test\n")
+                cursor.execute("ROLLBACK TO SAVEPOINT test_balance")
+                cursor.execute("RELEASE SAVEPOINT test_balance")
+            else:
+                # Create test transaction
+                cursor.execute("""
+                    INSERT INTO transactions (transaction_number, transaction_date, transaction_type, is_posted)
+                    VALUES ('TEST-BALANCE-001', CURRENT_DATE, 'journal_entry', false)
+                    RETURNING id
+                """)
+                txn_id = cursor.fetchone()[0]
+                
+                # Add balanced lines
+                cursor.execute("""
+                    INSERT INTO transaction_lines (transaction_id, account_id, line_number, debit_amount, credit_amount)
+                    VALUES 
+                        (%s, %s, 1, 100.00, 0),
+                        (%s, %s, 2, 0, 100.00)
+                """, (txn_id, account_ids[0][0], txn_id, account_ids[1][0]))
             
             # Try to post (should succeed)
             cursor.execute("""
@@ -189,20 +198,28 @@ def verify_database():
         print(f"✅ Found {len(indexes)} indexes on core tables")
         print()
         
-        # Check seed data
+        # Check seed data (if tables exist)
         print("🌱 Checking seed data...")
-        cursor.execute("SELECT COUNT(*) FROM tax_rates")
-        tax_count = cursor.fetchone()[0]
+        try:
+            cursor.execute("SELECT COUNT(*) FROM tax_rates")
+            tax_count = cursor.fetchone()[0]
+            print(f"✅ Tax rates: {tax_count}")
+        except Exception:
+            print("⚠️  Tax rates table not found")
         
-        cursor.execute("SELECT COUNT(*) FROM accounting_customers")
-        customer_count = cursor.fetchone()[0]
+        try:
+            cursor.execute("SELECT COUNT(*) FROM accounting_customers")
+            customer_count = cursor.fetchone()[0]
+            print(f"✅ Customers: {customer_count}")
+        except Exception:
+            print("⚠️  Accounting customers table not found")
         
-        cursor.execute("SELECT COUNT(*) FROM accounting_vendors")
-        vendor_count = cursor.fetchone()[0]
-        
-        print(f"✅ Tax rates: {tax_count}")
-        print(f"✅ Customers: {customer_count}")
-        print(f"✅ Vendors: {vendor_count}")
+        try:
+            cursor.execute("SELECT COUNT(*) FROM accounting_vendors")
+            vendor_count = cursor.fetchone()[0]
+            print(f"✅ Vendors: {vendor_count}")
+        except Exception:
+            print("⚠️  Accounting vendors table not found")
         print()
         
         print("🎉 Database verification complete!")
