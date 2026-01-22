@@ -1600,12 +1600,18 @@ def api_payment_transactions():
 @app.route('/api/employees')
 def api_employees():
     """Get employees data"""
-    employees = list_employees(active_only=False)
-    if not employees:
-        return jsonify({'columns': [], 'data': []})
-    
-    columns = list(employees[0].keys())
-    return jsonify({'columns': columns, 'data': employees})
+    try:
+        employees = list_employees(active_only=False)
+        if not employees:
+            return jsonify({'columns': [], 'data': []})
+        
+        columns = list(employees[0].keys())
+        return jsonify({'columns': columns, 'data': employees})
+    except Exception as e:
+        print(f"Error in api_employees: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'columns': [], 'data': []}), 500
 
 @app.route('/api/customers')
 def api_customers():

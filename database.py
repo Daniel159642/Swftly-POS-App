@@ -2146,8 +2146,9 @@ def list_employees(active_only: bool = True) -> List[Dict[str, Any]]:
     """List all employees with tip summaries"""
     conn = None
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
+        from database_postgres import get_cursor
+        cursor = get_cursor()  # Use get_cursor which returns RealDictCursor
+        conn = cursor.connection
         
         # Check if employee_tips table exists
         cursor.execute("""
@@ -2197,25 +2198,30 @@ def list_employees(active_only: bool = True) -> List[Dict[str, Any]]:
         if rows is None:
             return []
         
-        # Handle both dict-like rows (RealDictRow) and tuple rows
+        # RealDictRow from psycopg2 is already dict-like, convert to regular dict for JSON serialization
+        from datetime import date, datetime
         result = []
         for row in rows:
-            if hasattr(row, '_asdict'):
-                # Named tuple
-                result.append(dict(row._asdict()))
-            elif isinstance(row, dict):
-                result.append(row)
-            else:
-                # Try to convert to dict
-                try:
-                    result.append(dict(row))
-                except (TypeError, ValueError):
-                    # Fallback: create dict from row items if possible
-                    if hasattr(row, '__iter__') and not isinstance(row, str):
-                        result.append(dict(row))
+            if isinstance(row, dict):
+                # RealDictRow is a dict subclass - convert to regular dict
+                # Also convert date/datetime objects to strings for JSON serialization
+                row_dict = {}
+                for k, v in row.items():
+                    if isinstance(v, (date, datetime)):
+                        row_dict[k] = v.isoformat()
                     else:
-                        # Last resort: convert to dict manually
-                        result.append({str(i): val for i, val in enumerate(row)})
+                        row_dict[k] = v
+                result.append(row_dict)
+            else:
+                # Fallback for other types
+                row_dict = {}
+                for k in (row.keys() if hasattr(row, 'keys') else range(len(row))):
+                    v = row[k]
+                    if isinstance(v, (date, datetime)):
+                        row_dict[k] = v.isoformat()
+                    else:
+                        row_dict[k] = v
+                result.append(row_dict)
         
         return result
     except Exception as e:
@@ -4121,8 +4127,9 @@ def employee_login(
     device_info: Optional[str] = None
 ) -> Dict[str, Any]:
     """Authenticate employee and create session"""
-    conn = get_connection()
-    cursor = conn.cursor()
+    from database_postgres import get_cursor
+    cursor = get_cursor()  # Use RealDictCursor
+    conn = cursor.connection
     
     # Support both username and employee_code for backward compatibility
     login_identifier = username if username else employee_code
@@ -4137,8 +4144,13 @@ def employee_login(
     password_hash = hash_password(password)
     
     # Check if table has username column (RBAC migration)
-    cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = \'employees\' AND table_schema = 'public'")
-    columns = [col[0] for col in cursor.fetchall()]
+    cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'employees' AND table_schema = 'public'")
+    column_rows = cursor.fetchall()
+    # Handle both RealDictRow and tuple results
+    if column_rows and isinstance(column_rows[0], dict):
+        columns = [row.get('column_name') for row in column_rows]
+    else:
+        columns = [row[0] if isinstance(row, (tuple, list)) else row.get('column_name', row) for row in column_rows]
     has_username = 'username' in columns
     
     # Verify credentials - try username first if available, then employee_code
@@ -4161,7 +4173,13 @@ def employee_login(
         conn.close()
         return {'success': False, 'message': 'Invalid credentials'}
     
-    employee = dict(employee)
+    # Convert to dict - handle both RealDictRow and tuple
+    if isinstance(employee, dict):
+        employee = dict(employee)
+    else:
+        # Tuple - convert using column names
+        columns = [desc[0] for desc in cursor.description]
+        employee = {col: val for col, val in zip(columns, employee)}
     
     # Check if employee has a password set
     if not employee.get('password_hash'):
@@ -4180,12 +4198,34 @@ def employee_login(
     # Generate session token
     session_token = secrets.token_urlsafe(32)
     
-    # Create session record
+    # Get establishment_id from employee
+    establishment_id = employee.get('establishment_id')
+    if not establishment_id:
+        # Get establishment_id from employee record
+        cursor.execute("SELECT establishment_id FROM employees WHERE employee_id = %s", (employee['employee_id'],))
+        est_row = cursor.fetchone()
+        if est_row:
+            establishment_id = est_row.get('establishment_id') if isinstance(est_row, dict) else est_row[0]
+    
+    # Create session record - check if establishment_id column exists
     cursor.execute("""
-        INSERT INTO employee_sessions (
-            employee_id, session_token, ip_address, device_info
-        ) VALUES (%s, %s, %s, %s)
-    """, (employee['employee_id'], session_token, ip_address, device_info))
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'employee_sessions' AND table_schema = 'public' AND column_name = 'establishment_id'
+    """)
+    has_establishment_id = cursor.fetchone() is not None
+    
+    if has_establishment_id and establishment_id:
+        cursor.execute("""
+            INSERT INTO employee_sessions (
+                employee_id, establishment_id, session_token, ip_address, device_info
+            ) VALUES (%s, %s, %s, %s, %s)
+        """, (employee['employee_id'], establishment_id, session_token, ip_address, device_info))
+    else:
+        cursor.execute("""
+            INSERT INTO employee_sessions (
+                employee_id, session_token, ip_address, device_info
+            ) VALUES (%s, %s, %s, %s)
+        """, (employee['employee_id'], session_token, ip_address, device_info))
     
     # Update last login
     cursor.execute("""
@@ -4644,13 +4684,42 @@ def log_audit_action(
     old_values_json = json.dumps(old_values) if old_values else None
     new_values_json = json.dumps(new_values) if new_values else None
     
+    # Get establishment_id if needed
+    establishment_id = None
     cursor.execute("""
-        INSERT INTO audit_log (
-            table_name, record_id, action_type, employee_id,
-            old_values, new_values, ip_address, notes
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    """, (table_name, record_id, action_type, employee_id,
-          old_values_json, new_values_json, ip_address, notes))
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_name = 'audit_log' AND table_schema = 'public' AND column_name = 'establishment_id'
+    """)
+    has_establishment_id = cursor.fetchone() is not None
+    
+    if has_establishment_id:
+        # Try to get establishment_id from employee
+        try:
+            emp_cursor = conn.cursor()
+            emp_cursor.execute("SELECT establishment_id FROM employees WHERE employee_id = %s", (employee_id,))
+            est_row = emp_cursor.fetchone()
+            if est_row:
+                establishment_id = est_row.get('establishment_id') if isinstance(est_row, dict) else est_row[0]
+            emp_cursor.close()
+        except:
+            pass
+    
+    if has_establishment_id and establishment_id:
+        cursor.execute("""
+            INSERT INTO audit_log (
+                establishment_id, table_name, record_id, action_type, employee_id,
+                old_values, new_values, ip_address, notes
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (establishment_id, table_name, record_id, action_type, employee_id,
+              old_values_json, new_values_json, ip_address, notes))
+    else:
+        cursor.execute("""
+            INSERT INTO audit_log (
+                table_name, record_id, action_type, employee_id,
+                old_values, new_values, ip_address, notes
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (table_name, record_id, action_type, employee_id,
+              old_values_json, new_values_json, ip_address, notes))
     
     conn.commit()
     audit_id = cursor.lastrowid
