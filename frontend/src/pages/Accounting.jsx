@@ -21,6 +21,7 @@ function Accounting() {
   const getAuthHeaders = () => {
     const token = localStorage.getItem('sessionToken')
     return {
+      'X-Session-Token': token || '',
       'Authorization': `Bearer ${token || ''}`,
       'Content-Type': 'application/json'
     }
