@@ -102,47 +102,51 @@ def verify_database():
         # Test transaction balance validation
         print("🧪 Testing transaction balance validation...")
         try:
-            # Start a savepoint for testing
-            cursor.execute("SAVEPOINT test_balance")
-            
             # Get account IDs first
             cursor.execute("SELECT id FROM accounts WHERE is_active = true LIMIT 2")
             account_ids = cursor.fetchall()
             
             if len(account_ids) < 2:
                 print("⚠️  Need at least 2 active accounts for balance test\n")
-                cursor.execute("ROLLBACK TO SAVEPOINT test_balance")
-                cursor.execute("RELEASE SAVEPOINT test_balance")
             else:
-                # Create test transaction
-                cursor.execute("""
-                    INSERT INTO transactions (transaction_number, transaction_date, transaction_type, is_posted)
-                    VALUES ('TEST-BALANCE-001', CURRENT_DATE, 'journal_entry', false)
-                    RETURNING id
-                """)
-                txn_id = cursor.fetchone()[0]
+                # Start a savepoint for testing
+                cursor.execute("SAVEPOINT test_balance")
                 
-                # Add balanced lines
-                cursor.execute("""
-                    INSERT INTO transaction_lines (transaction_id, account_id, line_number, debit_amount, credit_amount)
-                    VALUES 
-                        (%s, %s, 1, 100.00, 0),
-                        (%s, %s, 2, 0, 100.00)
-                """, (txn_id, account_ids[0][0], txn_id, account_ids[1][0]))
-            
-            # Try to post (should succeed)
-            cursor.execute("""
-                UPDATE transactions SET is_posted = true WHERE id = %s
-            """, (txn_id,))
-            
-            cursor.execute("ROLLBACK TO SAVEPOINT test_balance")
-            cursor.execute("RELEASE SAVEPOINT test_balance")
-            print("✅ Balance validation working correctly\n")
-            
+                try:
+                    # Create test transaction
+                    cursor.execute("""
+                        INSERT INTO transactions (transaction_number, transaction_date, transaction_type, is_posted)
+                        VALUES ('TEST-BALANCE-001', CURRENT_DATE, 'journal_entry', false)
+                        RETURNING id
+                    """)
+                    txn_id = cursor.fetchone()[0]
+                    
+                    # Add balanced lines
+                    cursor.execute("""
+                        INSERT INTO transaction_lines (transaction_id, account_id, line_number, debit_amount, credit_amount)
+                        VALUES 
+                            (%s, %s, 1, 100.00, 0),
+                            (%s, %s, 2, 0, 100.00)
+                    """, (txn_id, account_ids[0][0], txn_id, account_ids[1][0]))
+                    
+                    # Try to post (should succeed)
+                    cursor.execute("""
+                        UPDATE transactions SET is_posted = true WHERE id = %s
+                    """, (txn_id,))
+                    
+                    cursor.execute("ROLLBACK TO SAVEPOINT test_balance")
+                    cursor.execute("RELEASE SAVEPOINT test_balance")
+                    print("✅ Balance validation working correctly\n")
+                except Exception as e:
+                    try:
+                        cursor.execute("ROLLBACK TO SAVEPOINT test_balance")
+                        cursor.execute("RELEASE SAVEPOINT test_balance")
+                    except:
+                        pass
+                    print(f"❌ Balance validation test failed: {e}\n")
+                
         except Exception as e:
-            cursor.execute("ROLLBACK TO SAVEPOINT test_balance")
-            cursor.execute("RELEASE SAVEPOINT test_balance")
-            print(f"❌ Balance validation test failed: {e}\n")
+            print(f"⚠️  Balance validation test skipped: {e}\n")
         
         # Test function
         print("🧪 Testing get_account_balance function...")

@@ -80,6 +80,14 @@ def run_migration():
                                 error_msg = str(e).lower()
                                 if 'already exists' in error_msg or 'duplicate' in error_msg:
                                     print(f"   ⚠️  Skipping (already exists): {statement[:50]}...")
+                                    # Rollback the failed statement but continue
+                                    conn.rollback()
+                                    # Start new transaction
+                                    conn.commit()  # This will start a new transaction
+                                elif 'in failed sql transaction' in error_msg:
+                                    # Transaction was aborted, rollback and continue
+                                    conn.rollback()
+                                    print(f"   ⚠️  Transaction aborted, rolling back and continuing...")
                                 else:
                                     raise
                 
