@@ -59,20 +59,20 @@ class TransactionService {
     return response.data.data
   }
 
-  async getGeneralLedger(accountId, startDate, endDate) {
+  async getGeneralLedger(filters = {}) {
     const params = new URLSearchParams()
-    if (accountId) params.append('account_id', String(accountId))
-    if (startDate) params.append('start_date', startDate)
-    if (endDate) params.append('end_date', endDate)
+    if (filters.account_id) params.append('account_id', String(filters.account_id))
+    if (filters.start_date) params.append('start_date', filters.start_date)
+    if (filters.end_date) params.append('end_date', filters.end_date)
 
     const response = await api.get(`${this.basePath}/general-ledger?${params.toString()}`)
     return response.data.data || []
   }
 
-  async getAccountLedger(accountId, startDate, endDate) {
+  async getAccountLedger(accountId, filters = {}) {
     const params = new URLSearchParams()
-    if (startDate) params.append('start_date', startDate)
-    if (endDate) params.append('end_date', endDate)
+    if (filters.start_date) params.append('start_date', filters.start_date)
+    if (filters.end_date) params.append('end_date', filters.end_date)
 
     const response = await api.get(`${this.basePath}/account-ledger/${accountId}?${params.toString()}`)
     return response.data.data

@@ -8,6 +8,9 @@ import AccountFilters from '../components/accounts/AccountFilters'
 import TransactionTable from '../components/transactions/TransactionTable'
 import TransactionForm from '../components/transactions/TransactionForm'
 import TransactionFilters from '../components/transactions/TransactionFilters'
+import GeneralLedgerFilters from '../components/ledger/GeneralLedgerFilters'
+import GeneralLedgerTable from '../components/ledger/GeneralLedgerTable'
+import AccountLedgerCard from '../components/ledger/AccountLedgerCard'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
 import LoadingSpinner from '../components/common/LoadingSpinner'
@@ -16,6 +19,9 @@ import Alert from '../components/common/Alert'
 function Accounting() {
   const { themeMode, themeColor } = useTheme()
   const [activeTab, setActiveTab] = useState('dashboard')
+  
+  // Make setActiveTab available globally for AccountLedgerTab
+  window.setActiveTab = setActiveTab
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [dateRange, setDateRange] = useState({
@@ -162,6 +168,8 @@ function Accounting() {
         {activeTab === 'dashboard' && <DashboardTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'chart-of-accounts' && <ChartOfAccountsTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'transactions' && <TransactionsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
+        {activeTab === 'general-ledger' && <GeneralLedgerTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
+        {activeTab === 'account-ledger' && <AccountLedgerTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'invoices' && <InvoicesTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'bills' && <BillsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'customers' && <CustomersTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
@@ -513,6 +521,11 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
             onDelete={handleDeleteAccount}
             onToggleStatus={handleToggleStatus}
             onViewBalance={handleViewBalance}
+            onViewLedger={(account) => {
+              setActiveTab('account-ledger')
+              // Store account ID for account ledger tab
+              sessionStorage.setItem('selectedAccountId', account.id)
+            }}
           />
         </div>
       </div>
@@ -1069,6 +1082,617 @@ function InvoicesTab({ dateRange, formatCurrency, getAuthHeaders }) {
           </table>
         </div>
       )}
+    </div>
+  )
+}
+
+// General Ledger Tab
+function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
+  const [entries, setEntries] = useState([])
+  const [accounts, setAccounts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filters, setFilters] = useState({
+    start_date: dateRange.start_date,
+    end_date: dateRange.end_date
+  })
+  
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false)
+  const [selectedTransaction, setSelectedTransaction] = useState(null)
+  
+  const [alert, setAlert] = useState(null)
+  
+  const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
+  const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
+  const cardBg = isDarkMode ? '#1f1f1f' : '#ffffff'
+
+  useEffect(() => {
+    loadAccounts()
+  }, [])
+
+  useEffect(() => {
+    loadLedger()
+  }, [filters])
+
+  useEffect(() => {
+    // Update filters when dateRange changes
+    setFilters(prev => ({
+      ...prev,
+      start_date: dateRange.start_date,
+      end_date: dateRange.end_date
+    }))
+  }, [dateRange])
+
+  const loadAccounts = async () => {
+    try {
+      const data = await accountService.getAllAccounts({ is_active: true })
+      setAccounts(Array.isArray(data) ? data : [])
+    } catch (err) {
+      console.error('Error loading accounts:', err)
+    }
+  }
+
+  const loadLedger = async () => {
+    setLoading(true)
+    try {
+      const data = await transactionService.getGeneralLedger(filters)
+      setEntries(Array.isArray(data) ? data : [])
+    } catch (err) {
+      console.error('Error loading ledger:', err)
+      showAlert('error', err.response?.data?.message || 'Failed to fetch ledger entries')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleViewTransaction = async (transactionId) => {
+    try {
+      const transaction = await transactionService.getTransactionById(transactionId)
+      setSelectedTransaction(transaction)
+      setIsViewModalOpen(true)
+    } catch (err) {
+      showAlert('error', 'Failed to fetch transaction details')
+    }
+  }
+
+  const handleExport = () => {
+    if (entries.length === 0) {
+      showAlert('error', 'No data to export')
+      return
+    }
+
+    // Create CSV content
+    const headers = ['Date', 'Transaction #', 'Account', 'Description', 'Debit', 'Credit']
+    const rows = entries.map(entry => [
+      new Date(entry.transaction_date).toLocaleDateString(),
+      entry.transaction_number,
+      `${entry.account_number || ''} ${entry.account_name}`.trim(),
+      entry.line_description,
+      entry.debit_amount > 0 ? entry.debit_amount.toFixed(2) : '',
+      entry.credit_amount > 0 ? entry.credit_amount.toFixed(2) : '',
+    ])
+
+    // Add totals row
+    const totalDebits = entries.reduce((sum, e) => sum + (e.debit_amount || 0), 0)
+    const totalCredits = entries.reduce((sum, e) => sum + (e.credit_amount || 0), 0)
+    rows.push(['', '', '', 'TOTALS', totalDebits.toFixed(2), totalCredits.toFixed(2)])
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n')
+
+    // Download CSV
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `general-ledger-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    window.URL.revokeObjectURL(url)
+
+    showAlert('success', 'Ledger exported to CSV')
+  }
+
+  const showAlert = (type, message) => {
+    setAlert({ type, message })
+    setTimeout(() => setAlert(null), 5000)
+  }
+
+  const handleClearFilters = () => {
+    setFilters({
+      start_date: dateRange.start_date,
+      end_date: dateRange.end_date
+    })
+  }
+
+  const getSelectedAccountName = () => {
+    if (!filters.account_id) return 'All Accounts'
+    const account = accounts.find(a => a.id === filters.account_id)
+    return account ? `${account.account_number || ''} ${account.account_name}`.trim() : 'Unknown Account'
+  }
+
+  const totalDebits = entries.reduce((sum, e) => sum + (e.debit_amount || 0), 0)
+  const totalCredits = entries.reduce((sum, e) => sum + (e.credit_amount || 0), 0)
+
+  return (
+    <div>
+      <div style={{ marginBottom: '24px' }}>
+        <h3 style={{ color: textColor, marginBottom: '8px', fontSize: '24px', fontWeight: '600' }}>
+          General Ledger
+        </h3>
+        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+          View all posted accounting transactions
+        </p>
+      </div>
+
+      {alert && (
+        <Alert
+          type={alert.type}
+          message={alert.message}
+          onClose={() => setAlert(null)}
+        />
+      )}
+
+      <GeneralLedgerFilters
+        filters={filters}
+        accounts={accounts}
+        onFilterChange={setFilters}
+        onClearFilters={handleClearFilters}
+        onExport={handleExport}
+        loading={loading}
+      />
+
+      {loading ? (
+        <LoadingSpinner size="lg" text="Loading ledger entries..." />
+      ) : (
+        <>
+          <div style={{ 
+            marginBottom: '16px', 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center' 
+          }}>
+            <div>
+              <p style={{ fontSize: '14px', color: textColor, opacity: 0.7 }}>
+                Showing <span style={{ fontWeight: '600' }}>{entries.length}</span> entries
+                {filters.account_id && (
+                  <span> for account: <span style={{ fontWeight: '600' }}>{getSelectedAccountName()}</span></span>
+                )}
+              </p>
+              {filters.start_date && filters.end_date && (
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.5, marginTop: '4px' }}>
+                  Period: {new Date(filters.start_date).toLocaleDateString()} - {new Date(filters.end_date).toLocaleDateString()}
+                </p>
+              )}
+            </div>
+            {entries.length > 0 && (
+              <div style={{ fontSize: '14px', color: textColor, opacity: 0.7 }}>
+                <span style={{ fontWeight: '600' }}>
+                  Debits: ${totalDebits.toFixed(2)}
+                </span>
+                {' | '}
+                <span style={{ fontWeight: '600' }}>
+                  Credits: ${totalCredits.toFixed(2)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <GeneralLedgerTable
+            entries={entries}
+            showRunningBalance={false}
+            onViewTransaction={handleViewTransaction}
+          />
+        </>
+      )}
+
+      {/* View Transaction Modal */}
+      <Modal
+        isOpen={isViewModalOpen}
+        onClose={() => {
+          setIsViewModalOpen(false)
+          setSelectedTransaction(null)
+        }}
+        title="Transaction Details"
+        size="lg"
+      >
+        {selectedTransaction && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Transaction Number</p>
+                <p style={{ fontWeight: '600', color: textColor }}>{selectedTransaction.transaction.transaction_number}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Date</p>
+                <p style={{ fontWeight: '600', color: textColor }}>
+                  {new Date(selectedTransaction.transaction.transaction_date).toLocaleDateString()}
+                </p>
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Type</p>
+                <p style={{ fontWeight: '600', color: textColor, textTransform: 'capitalize' }}>
+                  {selectedTransaction.transaction.transaction_type.replace('_', ' ')}
+                </p>
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Status</p>
+                <span style={{
+                  padding: '4px 8px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  borderRadius: '12px',
+                  backgroundColor: selectedTransaction.transaction.is_posted 
+                    ? '#d1fae5' 
+                    : '#fef3c7',
+                  color: selectedTransaction.transaction.is_posted 
+                    ? '#065f46' 
+                    : '#92400e'
+                }}>
+                  {selectedTransaction.transaction.is_posted ? 'Posted' : 'Draft'}
+                </span>
+              </div>
+            </div>
+            
+            <div>
+              <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Description</p>
+              <p style={{ fontWeight: '600', color: textColor }}>{selectedTransaction.transaction.description}</p>
+            </div>
+
+            {selectedTransaction.transaction.reference_number && (
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Reference Number</p>
+                <p style={{ fontWeight: '600', color: textColor }}>{selectedTransaction.transaction.reference_number}</p>
+              </div>
+            )}
+
+            <div>
+              <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '8px' }}>Transaction Lines</p>
+              <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: isDarkMode ? '#1a1a1a' : '#f9fafb' }}>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Account</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Description</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Debit</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Credit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedTransaction.lines.map((line) => (
+                      <tr key={line.id} style={{ borderBottom: `1px solid ${borderColor}` }}>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor }}>
+                          {line.account_number && `${line.account_number} - `}
+                          {line.account_name}
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor }}>{line.description}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor, textAlign: 'right' }}>
+                          {line.debit_amount > 0 ? formatCurrency(line.debit_amount) : '-'}
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor, textAlign: 'right' }}>
+                          {line.credit_amount > 0 ? formatCurrency(line.credit_amount) : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </div>
+  )
+}
+
+// Account Ledger Tab
+function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
+  const [ledgerData, setLedgerData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [filters, setFilters] = useState({
+    start_date: dateRange.start_date,
+    end_date: dateRange.end_date
+  })
+  
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false)
+  const [selectedTransaction, setSelectedTransaction] = useState(null)
+  
+  const [alert, setAlert] = useState(null)
+  
+  const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
+  const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
+  const cardBg = isDarkMode ? '#1f1f1f' : '#ffffff'
+
+  const accountId = parseInt(sessionStorage.getItem('selectedAccountId') || '0')
+
+  useEffect(() => {
+    if (accountId) {
+      loadAccountLedger()
+    }
+  }, [accountId, filters])
+
+  useEffect(() => {
+    // Update filters when dateRange changes
+    setFilters(prev => ({
+      ...prev,
+      start_date: dateRange.start_date,
+      end_date: dateRange.end_date
+    }))
+  }, [dateRange])
+
+  const loadAccountLedger = async () => {
+    if (!accountId) return
+    
+    setLoading(true)
+    try {
+      const data = await transactionService.getAccountLedger(accountId, filters)
+      setLedgerData(data)
+    } catch (err) {
+      console.error('Error loading account ledger:', err)
+      showAlert('error', err.response?.data?.message || 'Failed to fetch account ledger')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleViewTransaction = async (transactionId) => {
+    try {
+      const transaction = await transactionService.getTransactionById(transactionId)
+      setSelectedTransaction(transaction)
+      setIsViewModalOpen(true)
+    } catch (err) {
+      showAlert('error', 'Failed to fetch transaction details')
+    }
+  }
+
+  const handleExport = () => {
+    if (!ledgerData || ledgerData.entries.length === 0) {
+      showAlert('error', 'No data to export')
+      return
+    }
+
+    const headers = ['Date', 'Transaction #', 'Description', 'Debit', 'Credit', 'Balance']
+    const rows = ledgerData.entries.map(entry => [
+      new Date(entry.transaction_date).toLocaleDateString(),
+      entry.transaction_number,
+      entry.line_description,
+      entry.debit_amount > 0 ? entry.debit_amount.toFixed(2) : '',
+      entry.credit_amount > 0 ? entry.credit_amount.toFixed(2) : '',
+      entry.running_balance?.toFixed(2) || '',
+    ])
+
+    const csvContent = [
+      [`Account: ${ledgerData.account.account_number || ''} ${ledgerData.account.account_name}`],
+      [`Ending Balance: $${ledgerData.ending_balance.toFixed(2)}`],
+      [],
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `account-ledger-${accountId}-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    window.URL.revokeObjectURL(url)
+
+    showAlert('success', 'Account ledger exported to CSV')
+  }
+
+  const showAlert = (type, message) => {
+    setAlert({ type, message })
+    setTimeout(() => setAlert(null), 5000)
+  }
+
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target
+    setFilters({
+      ...filters,
+      [name]: value || undefined,
+    })
+  }
+
+  const handleClearFilters = () => {
+    setFilters({
+      start_date: dateRange.start_date,
+      end_date: dateRange.end_date
+    })
+  }
+
+  if (!accountId) {
+    return (
+      <div>
+        <Alert type="error" message="No account selected. Please select an account from Chart of Accounts." />
+      </div>
+    )
+  }
+
+  if (loading) {
+    return <LoadingSpinner size="lg" text="Loading account ledger..." />
+  }
+
+  if (!ledgerData) {
+    return (
+      <div>
+        <Alert type="error" message="Failed to load account ledger" />
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <Button 
+          variant="secondary" 
+          size="sm" 
+          onClick={() => {
+            sessionStorage.removeItem('selectedAccountId')
+            if (window.setActiveTab) {
+              window.setActiveTab('chart-of-accounts')
+            }
+          }}
+        >
+          ← Back to Accounts
+        </Button>
+        <div>
+          <h3 style={{ color: textColor, marginBottom: '4px', fontSize: '24px', fontWeight: '600' }}>
+            Account Ledger
+          </h3>
+          <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+            {ledgerData.account.account_number && `${ledgerData.account.account_number} - `}
+            {ledgerData.account.account_name}
+          </p>
+        </div>
+      </div>
+
+      {alert && (
+        <Alert
+          type={alert.type}
+          message={alert.message}
+          onClose={() => setAlert(null)}
+        />
+      )}
+
+      <AccountLedgerCard
+        ledgerData={ledgerData}
+        dateRange={filters}
+      />
+
+      {/* Filters */}
+      <div style={{
+        backgroundColor: cardBg,
+        padding: '16px',
+        borderRadius: '8px',
+        border: `1px solid ${borderColor}`,
+        marginBottom: '24px',
+        boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
+      }}>
+        <h3 style={{ 
+          fontSize: '18px', 
+          fontWeight: '600', 
+          marginBottom: '16px',
+          color: textColor
+        }}>
+          Filter Transactions
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+          <Input
+            label="Start Date"
+            name="start_date"
+            type="date"
+            value={filters.start_date || ''}
+            onChange={handleFilterChange}
+          />
+
+          <Input
+            label="End Date"
+            name="end_date"
+            type="date"
+            value={filters.end_date || ''}
+            onChange={handleFilterChange}
+          />
+
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleClearFilters}
+              style={{ flex: 1 }}
+            >
+              Clear Filters
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleExport}
+              style={{ flex: 1 }}
+            >
+              📊 Export
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '16px' }}>
+        <p style={{ fontSize: '14px', color: textColor, opacity: 0.7 }}>
+          Showing <span style={{ fontWeight: '600' }}>{ledgerData.entries.length}</span> transactions
+        </p>
+      </div>
+
+      <GeneralLedgerTable
+        entries={ledgerData.entries}
+        showRunningBalance={true}
+        onViewTransaction={handleViewTransaction}
+      />
+
+      {/* View Transaction Modal */}
+      <Modal
+        isOpen={isViewModalOpen}
+        onClose={() => {
+          setIsViewModalOpen(false)
+          setSelectedTransaction(null)
+        }}
+        title="Transaction Details"
+        size="lg"
+      >
+        {selectedTransaction && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Transaction Number</p>
+                <p style={{ fontWeight: '600', color: textColor }}>{selectedTransaction.transaction.transaction_number}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Date</p>
+                <p style={{ fontWeight: '600', color: textColor }}>
+                  {new Date(selectedTransaction.transaction.transaction_date).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+            
+            <div>
+              <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Description</p>
+              <p style={{ fontWeight: '600', color: textColor }}>{selectedTransaction.transaction.description}</p>
+            </div>
+
+            <div>
+              <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '8px' }}>Transaction Lines</p>
+              <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: isDarkMode ? '#1a1a1a' : '#f9fafb' }}>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Account</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Description</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Debit</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Credit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedTransaction.lines.map((line) => (
+                      <tr key={line.id} style={{ borderBottom: `1px solid ${borderColor}` }}>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor }}>
+                          {line.account_number && `${line.account_number} - `}
+                          {line.account_name}
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor }}>{line.description}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor, textAlign: 'right' }}>
+                          {line.debit_amount > 0 ? formatCurrency(line.debit_amount) : '-'}
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor, textAlign: 'right' }}>
+                          {line.credit_amount > 0 ? formatCurrency(line.credit_amount) : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

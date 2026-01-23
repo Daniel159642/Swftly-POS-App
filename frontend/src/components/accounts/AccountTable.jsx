@@ -1,7 +1,7 @@
 import React from 'react'
 import Button from '../common/Button'
 
-function AccountTable({ accounts, onEdit, onDelete, onToggleStatus, onViewBalance }) {
+function AccountTable({ accounts, onEdit, onDelete, onToggleStatus, onViewBalance, onViewLedger }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   
   const getAccountTypeColor = (type) => {
@@ -229,6 +229,24 @@ function AccountTable({ accounts, onEdit, onDelete, onToggleStatus, onViewBalanc
                   >
                     Balance
                   </button>
+                  {onViewLedger && (
+                    <button
+                      onClick={() => onViewLedger(account)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#8b5cf6',
+                        cursor: 'pointer',
+                        padding: '4px 8px',
+                        fontSize: '14px',
+                        textDecoration: 'underline'
+                      }}
+                      onMouseEnter={(e) => e.target.style.opacity = '0.7'}
+                      onMouseLeave={(e) => e.target.style.opacity = '1'}
+                    >
+                      Ledger
+                    </button>
+                  )}
                   <button
                     onClick={() => onEdit(account)}
                     style={{
