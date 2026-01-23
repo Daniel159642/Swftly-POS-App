@@ -297,10 +297,21 @@ function MetricCard({ title, value, color, cardBackgroundColor, borderColor, tex
   )
 }
 
-// Chart of Accounts Tab
+// Chart of Accounts Tab - New Implementation with Full CRUD
 function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
   const [accounts, setAccounts] = useState([])
+  const [filteredAccounts, setFilteredAccounts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [filters, setFilters] = useState({})
+  
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isBalanceModalOpen, setIsBalanceModalOpen] = useState(false)
+  const [selectedAccount, setSelectedAccount] = useState(null)
+  const [accountBalance, setAccountBalance] = useState(null)
+  
+  const [alert, setAlert] = useState(null)
+  
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
@@ -310,89 +321,275 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
     loadAccounts()
   }, [])
 
+  useEffect(() => {
+    applyFilters()
+  }, [accounts, filters])
+
   const loadAccounts = async () => {
     try {
       setLoading(true)
-      const response = await fetch('/api/accounting/accounts', { headers: getAuthHeaders() })
-      if (response.ok) {
-        const data = await response.json()
-        setAccounts(Array.isArray(data) ? data : [])
-      }
+      const data = await accountService.getAllAccounts()
+      setAccounts(Array.isArray(data) ? data : [])
+      setFilteredAccounts(Array.isArray(data) ? data : [])
     } catch (err) {
       console.error('Error loading accounts:', err)
+      showAlert('error', err.response?.data?.message || 'Failed to fetch accounts')
     } finally {
       setLoading(false)
     }
   }
 
-  if (loading) {
-    return <div style={{ color: textColor, padding: '20px' }}>Loading chart of accounts...</div>
+  const applyFilters = () => {
+    let filtered = [...accounts]
+
+    if (filters.account_type) {
+      filtered = filtered.filter((acc) => acc.account_type === filters.account_type)
+    }
+
+    if (filters.is_active !== undefined) {
+      filtered = filtered.filter((acc) => acc.is_active === filters.is_active)
+    }
+
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase()
+      filtered = filtered.filter(
+        (acc) =>
+          acc.account_name?.toLowerCase().includes(searchLower) ||
+          acc.account_number?.toLowerCase().includes(searchLower)
+      )
+    }
+
+    setFilteredAccounts(filtered)
   }
 
-  const groupedAccounts = accounts.reduce((acc, account) => {
-    const type = account.account_type || 'Other'
-    if (!acc[type]) acc[type] = []
-    acc[type].push(account)
-    return acc
-  }, {})
+  const handleCreateAccount = async (data) => {
+    try {
+      await accountService.createAccount(data)
+      showAlert('success', 'Account created successfully')
+      setIsCreateModalOpen(false)
+      loadAccounts()
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to create account')
+      throw error
+    }
+  }
+
+  const handleUpdateAccount = async (data) => {
+    if (!selectedAccount) return
+    
+    try {
+      await accountService.updateAccount(selectedAccount.id, data)
+      showAlert('success', 'Account updated successfully')
+      setIsEditModalOpen(false)
+      setSelectedAccount(null)
+      loadAccounts()
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to update account')
+      throw error
+    }
+  }
+
+  const handleDeleteAccount = async (account) => {
+    if (!window.confirm(`Are you sure you want to delete "${account.account_name}"?`)) {
+      return
+    }
+
+    try {
+      await accountService.deleteAccount(account.id)
+      showAlert('success', 'Account deleted successfully')
+      loadAccounts()
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to delete account')
+    }
+  }
+
+  const handleToggleStatus = async (account) => {
+    try {
+      await accountService.toggleAccountStatus(account.id)
+      showAlert('success', `Account ${account.is_active ? 'deactivated' : 'activated'} successfully`)
+      loadAccounts()
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to toggle account status')
+    }
+  }
+
+  const handleViewBalance = async (account) => {
+    try {
+      const balance = await accountService.getAccountBalance(account.id)
+      setAccountBalance(balance)
+      setSelectedAccount(account)
+      setIsBalanceModalOpen(true)
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to fetch account balance')
+    }
+  }
+
+  const showAlert = (type, message) => {
+    setAlert({ type, message })
+    setTimeout(() => setAlert(null), 5000)
+  }
+
+  const handleClearFilters = () => {
+    setFilters({})
+  }
+
+  if (loading) {
+    return <LoadingSpinner size="lg" text="Loading accounts..." />
+  }
 
   return (
     <div>
-      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ color: textColor, margin: 0 }}>Chart of Accounts</h3>
-        <button
-          onClick={() => window.location.href = '/api/accounting/accounts/export'}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: '#3b82f6',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '14px'
-          }}
-        >
-          Export
-        </button>
+      <div style={{ 
+        marginBottom: '24px', 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center' 
+      }}>
+        <div>
+          <h3 style={{ color: textColor, margin: 0, fontSize: '24px', fontWeight: 600 }}>
+            Chart of Accounts
+          </h3>
+          <p style={{ color: textColor, opacity: 0.7, marginTop: '4px', fontSize: '14px' }}>
+            Manage your accounting accounts
+          </p>
+        </div>
+        <Button onClick={() => setIsCreateModalOpen(true)}>
+          + New Account
+        </Button>
       </div>
 
-      {Object.entries(groupedAccounts).map(([type, typeAccounts]) => (
-        <div key={type} style={{ marginBottom: '24px' }}>
-          <h4 style={{ color: textColor, marginBottom: '12px', fontSize: '16px', fontWeight: 600 }}>
-            {type} ({typeAccounts.length})
-          </h4>
-          <div style={{
-            border: `1px solid ${borderColor}`,
-            borderRadius: '8px',
-            overflow: 'hidden'
+      {alert && (
+        <Alert
+          type={alert.type}
+          message={alert.message}
+          onClose={() => setAlert(null)}
+        />
+      )}
+
+      <AccountFilters
+        filters={filters}
+        onFilterChange={setFilters}
+        onClearFilters={handleClearFilters}
+      />
+
+      <div style={{
+        backgroundColor: cardBg,
+        borderRadius: '8px',
+        border: `1px solid ${borderColor}`,
+        overflow: 'hidden'
+      }}>
+        <div style={{
+          padding: '16px 24px',
+          borderBottom: `1px solid ${borderColor}`
+        }}>
+          <p style={{
+            fontSize: '14px',
+            color: textColor,
+            opacity: 0.7,
+            margin: 0
           }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ backgroundColor: isDarkMode ? '#1a1a1a' : '#f9f9f9' }}>
-                  <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Account #</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Account Name</th>
-                  <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Type</th>
-                  <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {typeAccounts.map(account => (
-                  <tr key={account.id} style={{ borderBottom: `1px solid ${borderColor}` }}>
-                    <td style={{ padding: '12px', color: textColor }}>{account.account_number || '-'}</td>
-                    <td style={{ padding: '12px', color: textColor }}>{account.account_name}</td>
-                    <td style={{ padding: '12px', color: textColor, fontSize: '12px', opacity: 0.8 }}>
-                      {account.balance_type || '-'}
-                    </td>
-                    <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>
-                      {formatCurrency(account.balance || 0)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            Showing {filteredAccounts.length} of {accounts.length} accounts
+          </p>
         </div>
-      ))}
+        <div style={{ padding: '24px' }}>
+          <AccountTable
+            accounts={filteredAccounts}
+            onEdit={(account) => {
+              setSelectedAccount(account)
+              setIsEditModalOpen(true)
+            }}
+            onDelete={handleDeleteAccount}
+            onToggleStatus={handleToggleStatus}
+            onViewBalance={handleViewBalance}
+          />
+        </div>
+      </div>
+
+      {/* Create Account Modal */}
+      <Modal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Create New Account"
+        size="lg"
+      >
+        <AccountForm
+          accounts={accounts}
+          onSubmit={handleCreateAccount}
+          onCancel={() => setIsCreateModalOpen(false)}
+        />
+      </Modal>
+
+      {/* Edit Account Modal */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false)
+          setSelectedAccount(null)
+        }}
+        title="Edit Account"
+        size="lg"
+      >
+        <AccountForm
+          account={selectedAccount}
+          accounts={accounts}
+          onSubmit={handleUpdateAccount}
+          onCancel={() => {
+            setIsEditModalOpen(false)
+            setSelectedAccount(null)
+          }}
+        />
+      </Modal>
+
+      {/* Account Balance Modal */}
+      <Modal
+        isOpen={isBalanceModalOpen}
+        onClose={() => {
+          setIsBalanceModalOpen(false)
+          setAccountBalance(null)
+          setSelectedAccount(null)
+        }}
+        title="Account Balance"
+        size="md"
+      >
+        {accountBalance && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div>
+              <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, margin: '0 0 4px 0' }}>
+                Account Name
+              </p>
+              <p style={{ fontSize: '18px', fontWeight: 600, color: textColor, margin: 0 }}>
+                {accountBalance.accountName}
+              </p>
+            </div>
+            <div>
+              <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, margin: '0 0 4px 0' }}>
+                Balance Type
+              </p>
+              <p style={{ fontSize: '16px', color: textColor, margin: 0, textTransform: 'capitalize' }}>
+                {accountBalance.balanceType}
+              </p>
+            </div>
+            <div>
+              <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, margin: '0 0 4px 0' }}>
+                Current Balance
+              </p>
+              <p style={{ fontSize: '32px', fontWeight: 700, color: '#3b82f6', margin: 0 }}>
+                {formatCurrency(accountBalance.balance || 0)}
+              </p>
+            </div>
+            {accountBalance.asOfDate && (
+              <div>
+                <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, margin: '0 0 4px 0' }}>
+                  As of Date
+                </p>
+                <p style={{ fontSize: '14px', color: textColor, margin: 0 }}>
+                  {new Date(accountBalance.asOfDate).toLocaleDateString()}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
