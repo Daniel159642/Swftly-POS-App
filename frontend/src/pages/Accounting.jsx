@@ -11,6 +11,11 @@ import TransactionFilters from '../components/transactions/TransactionFilters'
 import GeneralLedgerFilters from '../components/ledger/GeneralLedgerFilters'
 import GeneralLedgerTable from '../components/ledger/GeneralLedgerTable'
 import AccountLedgerCard from '../components/ledger/AccountLedgerCard'
+import ProfitLossFilters from '../components/reports/ProfitLossFilters'
+import ProfitLossTable from '../components/reports/ProfitLossTable'
+import ComparativeProfitLossTable from '../components/reports/ComparativeProfitLossTable'
+import ProfitLossChart from '../components/reports/ProfitLossChart'
+import reportService from '../services/reportService'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
 import LoadingSpinner from '../components/common/LoadingSpinner'
@@ -121,6 +126,8 @@ function Accounting() {
             { id: 'dashboard', label: 'Dashboard' },
             { id: 'chart-of-accounts', label: 'Chart of Accounts' },
             { id: 'transactions', label: 'Transactions' },
+            { id: 'general-ledger', label: 'General Ledger' },
+            { id: 'profit-loss', label: 'Profit & Loss' },
             { id: 'invoices', label: 'Invoices' },
             { id: 'bills', label: 'Bills' },
             { id: 'customers', label: 'Customers' },
@@ -1689,6 +1696,278 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
           </div>
         )}
       </Modal>
+    </div>
+  )
+}
+
+// Profit & Loss Tab
+function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }) {
+  const [reportData, setReportData] = useState(null)
+  const [comparativeData, setComparativeData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [filters, setFilters] = useState({
+    start_date: dateRange.start_date,
+    end_date: dateRange.end_date,
+    comparison_type: 'none',
+  })
+  
+  const [alert, setAlert] = useState(null)
+  
+  const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
+  const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
+  const cardBg = isDarkMode ? '#1f1f1f' : '#ffffff'
+
+  useEffect(() => {
+    // Update filters when dateRange changes
+    setFilters(prev => ({
+      ...prev,
+      start_date: dateRange.start_date,
+      end_date: dateRange.end_date
+    }))
+  }, [dateRange])
+
+  const handleGenerateReport = async () => {
+    setLoading(true)
+    try {
+      if (filters.comparison_type === 'none') {
+        const data = await reportService.getProfitLoss(filters.start_date, filters.end_date)
+        setReportData(data)
+        setComparativeData(null)
+      } else {
+        let priorPeriod
+        if (filters.comparison_type === 'previous_period') {
+          priorPeriod = reportService.calculatePriorPeriod(filters.start_date, filters.end_date)
+        } else {
+          priorPeriod = reportService.calculatePriorYear(filters.start_date, filters.end_date)
+        }
+
+        const data = await reportService.getComparativeProfitLoss(
+          filters.start_date,
+          filters.end_date,
+          priorPeriod.start,
+          priorPeriod.end
+        )
+        
+        setComparativeData(data)
+        setReportData(data.current)
+      }
+      
+      showAlert('success', 'Report generated successfully')
+    } catch (error) {
+      console.error('Error generating report:', error)
+      showAlert('error', error.response?.data?.message || 'Failed to generate report')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleExport = () => {
+    if (!reportData) {
+      showAlert('error', 'No report data to export')
+      return
+    }
+
+    const rows = [
+      ['Profit & Loss Statement'],
+      [`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`],
+      [],
+      ['Account', 'Amount', '% of Revenue'],
+      [],
+      ['REVENUE'],
+    ]
+
+    reportData.revenue.forEach(account => {
+      rows.push([
+        `  ${account.account_number || ''} ${account.account_name}`,
+        account.balance.toFixed(2),
+        (account.percentage_of_revenue || 0).toFixed(1) + '%'
+      ])
+    })
+
+    rows.push(['Total Revenue', reportData.total_revenue.toFixed(2), '100.0%'])
+    rows.push([])
+
+    if (reportData.cost_of_goods_sold && reportData.cost_of_goods_sold.length > 0) {
+      rows.push(['COST OF GOODS SOLD'])
+      reportData.cost_of_goods_sold.forEach(account => {
+        rows.push([
+          `  ${account.account_number || ''} ${account.account_name}`,
+          account.balance.toFixed(2),
+          (account.percentage_of_revenue || 0).toFixed(1) + '%'
+        ])
+      })
+      rows.push(['Total Cost of Goods Sold', reportData.total_cogs.toFixed(2), ((reportData.total_cogs / reportData.total_revenue) * 100).toFixed(1) + '%'])
+      rows.push(['GROSS PROFIT', reportData.gross_profit.toFixed(2), ((reportData.gross_profit / reportData.total_revenue) * 100).toFixed(1) + '%'])
+      rows.push([])
+    }
+
+    rows.push(['EXPENSES'])
+    reportData.expenses.forEach(account => {
+      rows.push([
+        `  ${account.account_number || ''} ${account.account_name}`,
+        account.balance.toFixed(2),
+        (account.percentage_of_revenue || 0).toFixed(1) + '%'
+      ])
+    })
+
+    rows.push(['Total Expenses', reportData.total_expenses.toFixed(2), ((reportData.total_expenses / reportData.total_revenue) * 100).toFixed(1) + '%'])
+    rows.push([])
+    rows.push(['NET INCOME', reportData.net_income.toFixed(2), ((reportData.net_income / reportData.total_revenue) * 100).toFixed(1) + '%'])
+
+    const csvContent = rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `profit-loss-${filters.start_date}-to-${filters.end_date}.csv`
+    a.click()
+    window.URL.revokeObjectURL(url)
+
+    showAlert('success', 'Report exported to CSV')
+  }
+
+  const handleAccountClick = (accountId) => {
+    sessionStorage.setItem('selectedAccountId', accountId)
+    setActiveTab('account-ledger')
+  }
+
+  const showAlert = (type, message) => {
+    setAlert({ type, message })
+    setTimeout(() => setAlert(null), 5000)
+  }
+
+  const getPeriodLabel = () => {
+    return `${new Date(filters.start_date).toLocaleDateString()} - ${new Date(filters.end_date).toLocaleDateString()}`
+  }
+
+  const getPriorPeriodLabel = () => {
+    if (!comparativeData) return ''
+    return `${new Date(comparativeData.prior.start_date).toLocaleDateString()} - ${new Date(comparativeData.prior.end_date).toLocaleDateString()}`
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: '24px' }}>
+        <h3 style={{ color: textColor, marginBottom: '8px', fontSize: '24px', fontWeight: '600' }}>
+          Profit & Loss Statement
+        </h3>
+        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+          Income statement showing revenue, expenses, and net income
+        </p>
+      </div>
+
+      {alert && (
+        <Alert
+          type={alert.type}
+          message={alert.message}
+          onClose={() => setAlert(null)}
+        />
+      )}
+
+      <ProfitLossFilters
+        filters={filters}
+        onFilterChange={setFilters}
+        onGenerate={handleGenerateReport}
+        loading={loading}
+      />
+
+      {loading && <LoadingSpinner size="lg" text="Generating report..." />}
+
+      {!loading && reportData && (
+        <>
+          <div style={{ 
+            marginBottom: '24px', 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center' 
+          }}>
+            <div>
+              <h2 style={{ fontSize: '20px', fontWeight: '600', color: textColor }}>
+                {getPeriodLabel()}
+              </h2>
+              {comparativeData && (
+                <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, marginTop: '4px' }}>
+                  Compared to: {getPriorPeriodLabel()}
+                </p>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <Button variant="secondary" onClick={handleExport}>
+                📊 Export to CSV
+              </Button>
+              <Button variant="secondary" onClick={() => window.print()}>
+                🖨️ Print
+              </Button>
+            </div>
+          </div>
+
+          {comparativeData ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <ComparativeProfitLossTable
+                data={comparativeData}
+                currentLabel={getPeriodLabel()}
+                priorLabel={getPriorPeriodLabel()}
+              />
+              
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', 
+                gap: '24px' 
+              }}>
+                <div>
+                  <h3 style={{ 
+                    fontSize: '18px', 
+                    fontWeight: '600', 
+                    marginBottom: '16px',
+                    color: textColor
+                  }}>
+                    Current Period Detail
+                  </h3>
+                  <ProfitLossTable
+                    data={reportData}
+                    showPercentages={true}
+                    onAccountClick={handleAccountClick}
+                  />
+                </div>
+                <ProfitLossChart data={reportData} />
+              </div>
+            </div>
+          ) : (
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', 
+              gap: '24px' 
+            }}>
+              <div style={{ gridColumn: 'span 2' }}>
+                <ProfitLossTable
+                  data={reportData}
+                  showPercentages={true}
+                  onAccountClick={handleAccountClick}
+                />
+              </div>
+              <ProfitLossChart data={reportData} />
+            </div>
+          )}
+        </>
+      )}
+
+      {!loading && !reportData && (
+        <div style={{ 
+          backgroundColor: cardBg, 
+          borderRadius: '8px', 
+          border: `1px solid ${borderColor}`,
+          padding: '48px', 
+          textAlign: 'center' 
+        }}>
+          <p style={{ color: textColor, opacity: 0.7, marginBottom: '16px' }}>
+            Select a date range and click "Generate Report" to view your Profit & Loss Statement
+          </p>
+          <Button onClick={handleGenerateReport}>
+            Generate Report
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

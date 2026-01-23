@@ -6205,6 +6205,7 @@ def api_daily_cash_count():
 try:
     from backend.controllers.account_controller import account_controller
     from backend.controllers.transaction_controller import transaction_controller
+    from backend.controllers.report_controller import report_controller
     from backend.middleware.validators import validate_account_create, validate_account_update, validate_account_id
     from backend.middleware.validators import validate_transaction_create, validate_transaction_update, validate_transaction_id
     from backend.middleware.error_handler import handle_error, AppError
@@ -6459,6 +6460,36 @@ def api_v1_transactions_account_ledger(account_id):
     if BACKEND_AVAILABLE:
         try:
             return transaction_controller.get_account_ledger(account_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    else:
+        return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+# ============================================================================
+# REPORT API ENDPOINTS - Using new backend structure
+# ============================================================================
+
+@app.route('/api/v1/reports/profit-loss', methods=['GET'])
+def api_v1_reports_profit_loss():
+    """Get Profit & Loss statement - New backend API"""
+    if BACKEND_AVAILABLE:
+        try:
+            return report_controller.get_profit_loss()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    else:
+        return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/reports/profit-loss/comparative', methods=['GET'])
+def api_v1_reports_profit_loss_comparative():
+    """Get comparative Profit & Loss statement - New backend API"""
+    if BACKEND_AVAILABLE:
+        try:
+            return report_controller.get_comparative_profit_loss()
         except AppError as e:
             return handle_error(e)
         except Exception as e:
