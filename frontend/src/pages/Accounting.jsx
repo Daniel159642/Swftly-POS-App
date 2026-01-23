@@ -19,9 +19,6 @@ import Alert from '../components/common/Alert'
 function Accounting() {
   const { themeMode, themeColor } = useTheme()
   const [activeTab, setActiveTab] = useState('dashboard')
-  
-  // Make setActiveTab available globally for AccountLedgerTab
-  window.setActiveTab = setActiveTab
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [dateRange, setDateRange] = useState({
@@ -522,9 +519,8 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
             onToggleStatus={handleToggleStatus}
             onViewBalance={handleViewBalance}
             onViewLedger={(account) => {
-              setActiveTab('account-ledger')
-              // Store account ID for account ledger tab
               sessionStorage.setItem('selectedAccountId', account.id)
+              setActiveTab('account-ledger')
             }}
           />
         </div>
@@ -1387,7 +1383,7 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
 }
 
 // Account Ledger Tab
-function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
+function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }) {
   const [ledgerData, setLedgerData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState({
