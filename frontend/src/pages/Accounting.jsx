@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import accountService from '../services/accountService'
+import transactionService from '../services/transactionService'
 import AccountTable from '../components/accounts/AccountTable'
 import AccountForm from '../components/accounts/AccountForm'
 import AccountFilters from '../components/accounts/AccountFilters'
+import TransactionTable from '../components/transactions/TransactionTable'
+import TransactionForm from '../components/transactions/TransactionForm'
+import TransactionFilters from '../components/transactions/TransactionFilters'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
 import LoadingSpinner from '../components/common/LoadingSpinner'
@@ -602,83 +606,386 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
   )
 }
 
-// Transactions Tab
+// Transactions Tab - New Implementation with Full CRUD
 function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
   const [transactions, setTransactions] = useState([])
+  const [accounts, setAccounts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [filters, setFilters] = useState({ 
+    page: 1, 
+    limit: 50,
+    start_date: dateRange.start_date,
+    end_date: dateRange.end_date
+  })
+  const [pagination, setPagination] = useState({ total: 0, page: 1, totalPages: 1 })
+  
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false)
+  const [selectedTransaction, setSelectedTransaction] = useState(null)
+  
+  const [alert, setAlert] = useState(null)
+  
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
+  const cardBg = isDarkMode ? '#1f1f1f' : '#ffffff'
+
+  useEffect(() => {
+    loadAccounts()
+  }, [])
 
   useEffect(() => {
     loadTransactions()
+  }, [filters])
+
+  useEffect(() => {
+    // Update filters when dateRange changes
+    setFilters(prev => ({
+      ...prev,
+      start_date: dateRange.start_date,
+      end_date: dateRange.end_date
+    }))
   }, [dateRange])
+
+  const loadAccounts = async () => {
+    try {
+      const data = await accountService.getAllAccounts()
+      setAccounts(Array.isArray(data) ? data : [])
+    } catch (err) {
+      console.error('Error loading accounts:', err)
+    }
+  }
 
   const loadTransactions = async () => {
     try {
       setLoading(true)
-      const response = await fetch(
-        `/api/accounting/transactions?start_date=${dateRange.start_date}&end_date=${dateRange.end_date}`,
-        { headers: getAuthHeaders() }
-      )
-      if (response.ok) {
-        const data = await response.json()
-        setTransactions(Array.isArray(data) ? data : [])
-      }
+      const result = await transactionService.getAllTransactions(filters)
+      setTransactions(result.transactions || [])
+      setPagination(result.pagination || { total: 0, page: 1, totalPages: 1 })
     } catch (err) {
       console.error('Error loading transactions:', err)
+      showAlert('error', err.response?.data?.message || 'Failed to fetch transactions')
     } finally {
       setLoading(false)
     }
   }
 
-  if (loading) {
-    return <div style={{ color: textColor, padding: '20px' }}>Loading transactions...</div>
+  const handleCreateTransaction = async (data, postImmediately) => {
+    try {
+      const transaction = await transactionService.createTransaction(data)
+      
+      if (postImmediately) {
+        await transactionService.postTransaction(transaction.transaction.id)
+        showAlert('success', 'Transaction created and posted successfully')
+      } else {
+        showAlert('success', 'Transaction created successfully')
+      }
+      
+      setIsCreateModalOpen(false)
+      loadTransactions()
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to create transaction')
+      throw error
+    }
+  }
+
+  const handleUpdateTransaction = async (data) => {
+    if (!selectedTransaction) return
+    
+    try {
+      await transactionService.updateTransaction(selectedTransaction.transaction.id, data)
+      showAlert('success', 'Transaction updated successfully')
+      setIsEditModalOpen(false)
+      setSelectedTransaction(null)
+      loadTransactions()
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to update transaction')
+      throw error
+    }
+  }
+
+  const handleDeleteTransaction = async (transaction) => {
+    if (!window.confirm('Are you sure you want to delete this transaction?')) {
+      return
+    }
+
+    try {
+      await transactionService.deleteTransaction(transaction.transaction.id)
+      showAlert('success', 'Transaction deleted successfully')
+      loadTransactions()
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to delete transaction')
+    }
+  }
+
+  const handlePostTransaction = async (transaction) => {
+    if (!window.confirm('Post this transaction? This will affect account balances.')) {
+      return
+    }
+
+    try {
+      await transactionService.postTransaction(transaction.transaction.id)
+      showAlert('success', 'Transaction posted successfully')
+      loadTransactions()
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to post transaction')
+    }
+  }
+
+  const handleUnpostTransaction = async (transaction) => {
+    if (!window.confirm('Unpost this transaction? This will reverse its effect on account balances.')) {
+      return
+    }
+
+    try {
+      await transactionService.unpostTransaction(transaction.transaction.id)
+      showAlert('success', 'Transaction unposted successfully')
+      loadTransactions()
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to unpost transaction')
+    }
+  }
+
+  const handleVoidTransaction = async (transaction) => {
+    const reason = window.prompt('Enter reason for voiding this transaction:')
+    if (!reason) return
+
+    try {
+      await transactionService.voidTransaction(transaction.transaction.id, reason)
+      showAlert('success', 'Transaction voided successfully')
+      loadTransactions()
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to void transaction')
+    }
+  }
+
+  const showAlert = (type, message) => {
+    setAlert({ type, message })
+    setTimeout(() => setAlert(null), 5000)
+  }
+
+  const handleClearFilters = () => {
+    setFilters({ 
+      page: 1, 
+      limit: 50,
+      start_date: dateRange.start_date,
+      end_date: dateRange.end_date
+    })
+  }
+
+  const handlePageChange = (newPage) => {
+    setFilters({ ...filters, page: newPage })
+  }
+
+  if (loading && transactions.length === 0) {
+    return <LoadingSpinner size="lg" text="Loading transactions..." />
   }
 
   return (
     <div>
-      <h3 style={{ color: textColor, marginBottom: '16px' }}>Journal Entries</h3>
-      {transactions.length === 0 ? (
-        <div style={{ color: textColor, padding: '40px', textAlign: 'center' }}>
-          No transactions found for this period.
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <div>
+          <h3 style={{ color: textColor, marginBottom: '8px', fontSize: '24px', fontWeight: '600' }}>
+            Transactions
+          </h3>
+          <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+            Record and manage journal entries
+          </p>
         </div>
-      ) : (
-        <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Date</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Transaction #</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Type</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Description</th>
-                <th style={{ padding: '12px', textAlign: 'center', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map(txn => (
-                <tr key={txn.id} style={{ borderBottom: `1px solid ${borderColor}` }}>
-                  <td style={{ padding: '12px', color: textColor }}>{txn.transaction_date}</td>
-                  <td style={{ padding: '12px', color: textColor }}>{txn.transaction_number}</td>
-                  <td style={{ padding: '12px', color: textColor }}>{txn.transaction_type}</td>
-                  <td style={{ padding: '12px', color: textColor }}>{txn.description || '-'}</td>
-                  <td style={{ padding: '12px', textAlign: 'center', color: textColor }}>
-                    <span style={{
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      backgroundColor: txn.is_posted ? '#10b981' : '#f59e0b',
-                      color: 'white',
-                      fontSize: '12px'
-                    }}>
-                      {txn.is_posted ? 'Posted' : 'Draft'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Button onClick={() => setIsCreateModalOpen(true)}>+ New Transaction</Button>
+      </div>
+
+      {alert && (
+        <Alert
+          type={alert.type}
+          message={alert.message}
+          onClose={() => setAlert(null)}
+        />
       )}
+
+      <TransactionFilters
+        filters={filters}
+        onFilterChange={setFilters}
+        onClearFilters={handleClearFilters}
+      />
+
+      <div style={{ 
+        backgroundColor: cardBg, 
+        borderRadius: '8px', 
+        border: `1px solid ${borderColor}`,
+        boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
+      }}>
+        <div style={{ 
+          padding: '16px 24px', 
+          borderBottom: `1px solid ${borderColor}`, 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center' 
+        }}>
+          <p style={{ fontSize: '14px', color: textColor, opacity: 0.7 }}>
+            Showing {transactions.length} of {pagination.total} transactions
+          </p>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <Button
+              onClick={() => handlePageChange(filters.page - 1)}
+              disabled={filters.page === 1}
+              size="sm"
+              variant="secondary"
+            >
+              Previous
+            </Button>
+            <span style={{ padding: '0 12px', fontSize: '14px', color: textColor }}>
+              Page {pagination.page} of {pagination.totalPages}
+            </span>
+            <Button
+              onClick={() => handlePageChange(filters.page + 1)}
+              disabled={filters.page === pagination.totalPages}
+              size="sm"
+              variant="secondary"
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+        
+        <TransactionTable
+          transactions={transactions}
+          onView={(transaction) => {
+            setSelectedTransaction(transaction)
+            setIsViewModalOpen(true)
+          }}
+          onEdit={(transaction) => {
+            setSelectedTransaction(transaction)
+            setIsEditModalOpen(true)
+          }}
+          onDelete={handleDeleteTransaction}
+          onPost={handlePostTransaction}
+          onUnpost={handleUnpostTransaction}
+          onVoid={handleVoidTransaction}
+        />
+      </div>
+
+      {/* Create Transaction Modal */}
+      <Modal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Create New Transaction"
+        size="xl"
+      >
+        <TransactionForm
+          accounts={accounts}
+          onSubmit={handleCreateTransaction}
+          onCancel={() => setIsCreateModalOpen(false)}
+        />
+      </Modal>
+
+      {/* Edit Transaction Modal */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false)
+          setSelectedTransaction(null)
+        }}
+        title="Edit Transaction"
+        size="xl"
+      >
+        <TransactionForm
+          transaction={selectedTransaction}
+          accounts={accounts}
+          onSubmit={handleUpdateTransaction}
+          onCancel={() => {
+            setIsEditModalOpen(false)
+            setSelectedTransaction(null)
+          }}
+        />
+      </Modal>
+
+      {/* View Transaction Modal */}
+      <Modal
+        isOpen={isViewModalOpen}
+        onClose={() => {
+          setIsViewModalOpen(false)
+          setSelectedTransaction(null)
+        }}
+        title="Transaction Details"
+        size="lg"
+      >
+        {selectedTransaction && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Transaction Number</p>
+                <p style={{ fontWeight: '600', color: textColor }}>{selectedTransaction.transaction.transaction_number}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Date</p>
+                <p style={{ fontWeight: '600', color: textColor }}>
+                  {new Date(selectedTransaction.transaction.transaction_date).toLocaleDateString()}
+                </p>
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Type</p>
+                <p style={{ fontWeight: '600', color: textColor, textTransform: 'capitalize' }}>
+                  {selectedTransaction.transaction.transaction_type.replace('_', ' ')}
+                </p>
+              </div>
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Status</p>
+                <p style={{ fontWeight: '600', color: textColor }}>
+                  {selectedTransaction.transaction.is_void ? 'Voided' :
+                   selectedTransaction.transaction.is_posted ? 'Posted' : 'Draft'}
+                </p>
+              </div>
+            </div>
+            
+            <div>
+              <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Description</p>
+              <p style={{ fontWeight: '600', color: textColor }}>{selectedTransaction.transaction.description}</p>
+            </div>
+
+            {selectedTransaction.transaction.reference_number && (
+              <div>
+                <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '4px' }}>Reference Number</p>
+                <p style={{ fontWeight: '600', color: textColor }}>{selectedTransaction.transaction.reference_number}</p>
+              </div>
+            )}
+
+            <div>
+              <p style={{ fontSize: '12px', color: textColor, opacity: 0.7, marginBottom: '8px' }}>Transaction Lines</p>
+              <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: isDarkMode ? '#1a1a1a' : '#f9fafb' }}>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Account</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Description</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Debit</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Credit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedTransaction.lines.map((line) => (
+                      <tr key={line.id} style={{ borderBottom: `1px solid ${borderColor}` }}>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor }}>
+                          {line.account_number && `${line.account_number} - `}
+                          {line.account_name}
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor }}>{line.description}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor, textAlign: 'right' }}>
+                          {line.debit_amount > 0 ? formatCurrency(line.debit_amount) : '-'}
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: '14px', color: textColor, textAlign: 'right' }}>
+                          {line.credit_amount > 0 ? formatCurrency(line.credit_amount) : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
