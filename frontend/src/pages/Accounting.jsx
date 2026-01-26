@@ -15,6 +15,14 @@ import ProfitLossFilters from '../components/reports/ProfitLossFilters'
 import ProfitLossTable from '../components/reports/ProfitLossTable'
 import ComparativeProfitLossTable from '../components/reports/ComparativeProfitLossTable'
 import ProfitLossChart from '../components/reports/ProfitLossChart'
+import BalanceSheetFilters from '../components/reports/BalanceSheetFilters'
+import BalanceSheetTable from '../components/reports/BalanceSheetTable'
+import ComparativeBalanceSheetTable from '../components/reports/ComparativeBalanceSheetTable'
+import BalanceSheetChart from '../components/reports/BalanceSheetChart'
+import CashFlowFilters from '../components/reports/CashFlowFilters'
+import CashFlowTable from '../components/reports/CashFlowTable'
+import ComparativeCashFlowTable from '../components/reports/ComparativeCashFlowTable'
+import CashFlowChart from '../components/reports/CashFlowChart'
 import reportService from '../services/reportService'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
@@ -128,6 +136,8 @@ function Accounting() {
             { id: 'transactions', label: 'Transactions' },
             { id: 'general-ledger', label: 'General Ledger' },
             { id: 'profit-loss', label: 'Profit & Loss' },
+            { id: 'balance-sheet', label: 'Balance Sheet' },
+            { id: 'cash-flow', label: 'Cash Flow' },
             { id: 'invoices', label: 'Invoices' },
             { id: 'bills', label: 'Bills' },
             { id: 'customers', label: 'Customers' },
@@ -173,7 +183,10 @@ function Accounting() {
         {activeTab === 'chart-of-accounts' && <ChartOfAccountsTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'transactions' && <TransactionsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'general-ledger' && <GeneralLedgerTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
-        {activeTab === 'account-ledger' && <AccountLedgerTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
+        {activeTab === 'account-ledger' && <AccountLedgerTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} />}
+        {activeTab === 'profit-loss' && <ProfitLossTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} />}
+        {activeTab === 'balance-sheet' && <BalanceSheetTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} />}
+        {activeTab === 'cash-flow' && <CashFlowTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} />}
         {activeTab === 'invoices' && <InvoicesTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'bills' && <BillsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'customers' && <CustomersTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
@@ -1533,9 +1546,7 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
           size="sm" 
           onClick={() => {
             sessionStorage.removeItem('selectedAccountId')
-            if (window.setActiveTab) {
-              window.setActiveTab('chart-of-accounts')
-            }
+            setActiveTab('chart-of-accounts')
           }}
         >
           ← Back to Accounts
@@ -1966,6 +1977,342 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
           <Button onClick={handleGenerateReport}>
             Generate Report
           </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Balance Sheet Tab
+function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }) {
+  const [reportData, setReportData] = useState(null)
+  const [comparativeData, setComparativeData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [filters, setFilters] = useState({
+    as_of_date: new Date().toISOString().split('T')[0],
+    comparison_type: 'none'
+  })
+  const [alert, setAlert] = useState(null)
+  const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
+  const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
+  const cardBg = isDarkMode ? '#1f1f1f' : '#ffffff'
+
+  const handleGenerateReport = async () => {
+    setLoading(true)
+    try {
+      if (filters.comparison_type === 'none') {
+        const data = await reportService.getBalanceSheet(filters.as_of_date)
+        setReportData(data)
+        setComparativeData(null)
+      } else {
+        const priorDate = filters.comparison_type === 'previous_month'
+          ? reportService.calculatePriorMonth(filters.as_of_date)
+          : reportService.calculatePriorYearDate(filters.as_of_date)
+        const data = await reportService.getComparativeBalanceSheet(filters.as_of_date, priorDate)
+        setComparativeData(data)
+        setReportData(data.current)
+      }
+      showAlert('success', 'Report generated successfully')
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to generate report')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleExport = () => {
+    if (!reportData) {
+      showAlert('error', 'No report data to export')
+      return
+    }
+    const rows = [
+      ['Balance Sheet'],
+      [`As of: ${new Date(reportData.as_of_date).toLocaleDateString()}`],
+      [],
+      ['ASSETS']
+    ]
+    if (reportData.assets.current_assets?.length > 0) {
+      rows.push(['Current Assets'])
+      reportData.assets.current_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
+      rows.push(['Total Current Assets', reportData.assets.total_current_assets.toFixed(2)])
+    }
+    if (reportData.assets.fixed_assets?.length > 0) {
+      rows.push(['Fixed Assets'])
+      reportData.assets.fixed_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
+      rows.push(['Total Fixed Assets', reportData.assets.total_fixed_assets.toFixed(2)])
+    }
+    if (reportData.assets.other_assets?.length > 0) {
+      rows.push(['Other Assets'])
+      reportData.assets.other_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
+      rows.push(['Total Other Assets', reportData.assets.total_other_assets.toFixed(2)])
+    }
+    rows.push(['TOTAL ASSETS', reportData.assets.total_assets.toFixed(2)])
+    rows.push([])
+    rows.push(['LIABILITIES'])
+    if (reportData.liabilities.current_liabilities?.length > 0) {
+      rows.push(['Current Liabilities'])
+      reportData.liabilities.current_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
+      rows.push(['Total Current Liabilities', reportData.liabilities.total_current_liabilities.toFixed(2)])
+    }
+    if (reportData.liabilities.long_term_liabilities?.length > 0) {
+      rows.push(['Long-term Liabilities'])
+      reportData.liabilities.long_term_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
+      rows.push(['Total Long-term Liabilities', reportData.liabilities.total_long_term_liabilities.toFixed(2)])
+    }
+    rows.push(['TOTAL LIABILITIES', reportData.liabilities.total_liabilities.toFixed(2)])
+    rows.push([])
+    rows.push(['EQUITY'])
+    reportData.equity.equity_accounts?.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
+    rows.push(['Current Year Earnings', reportData.equity.current_year_earnings.toFixed(2)])
+    rows.push(['TOTAL EQUITY', reportData.equity.total_equity.toFixed(2)])
+    rows.push([])
+    rows.push(['TOTAL LIABILITIES AND EQUITY', (reportData.liabilities.total_liabilities + reportData.equity.total_equity).toFixed(2)])
+    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `balance-sheet-${filters.as_of_date}.csv`
+    a.click()
+    window.URL.revokeObjectURL(url)
+    showAlert('success', 'Report exported to CSV')
+  }
+
+  const handleAccountClick = (accountId) => {
+    sessionStorage.setItem('selectedAccountId', accountId)
+    setActiveTab('account-ledger')
+  }
+
+  const showAlert = (type, message) => {
+    setAlert({ type, message })
+    setTimeout(() => setAlert(null), 5000)
+  }
+
+  const getAsOfLabel = () => new Date(filters.as_of_date).toLocaleDateString()
+  const getPriorLabel = () => (comparativeData ? new Date(comparativeData.prior.as_of_date).toLocaleDateString() : '')
+
+  return (
+    <div>
+      <div style={{ marginBottom: '24px' }}>
+        <h3 style={{ color: textColor, marginBottom: '8px', fontSize: '24px', fontWeight: '600' }}>Balance Sheet</h3>
+        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+          Statement of financial position showing assets, liabilities, and equity
+        </p>
+      </div>
+      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
+      <BalanceSheetFilters
+        filters={filters}
+        onFilterChange={setFilters}
+        onGenerate={handleGenerateReport}
+        loading={loading}
+      />
+      {loading && <LoadingSpinner size="lg" text="Generating report..." />}
+      {!loading && reportData && (
+        <>
+          <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h2 style={{ fontSize: '20px', fontWeight: '600', color: textColor }}>As of {getAsOfLabel()}</h2>
+              {comparativeData && (
+                <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, marginTop: '4px' }}>
+                  Compared to: {getPriorLabel()}
+                </p>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <Button variant="secondary" onClick={handleExport}>📊 Export to CSV</Button>
+              <Button variant="secondary" onClick={() => window.print()}>🖨️ Print</Button>
+            </div>
+          </div>
+          {comparativeData ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <ComparativeBalanceSheetTable
+                data={comparativeData}
+                currentLabel={getAsOfLabel()}
+                priorLabel={getPriorLabel()}
+              />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+                <div>
+                  <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px', color: textColor }}>Current Period Detail</h3>
+                  <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} />
+                </div>
+                <BalanceSheetChart data={reportData} />
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+              <div style={{ gridColumn: 'span 2' }}>
+                <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} />
+              </div>
+              <BalanceSheetChart data={reportData} />
+            </div>
+          )}
+        </>
+      )}
+      {!loading && !reportData && (
+        <div style={{ backgroundColor: cardBg, borderRadius: '8px', border: `1px solid ${borderColor}`, padding: '48px', textAlign: 'center' }}>
+          <p style={{ color: textColor, opacity: 0.7, marginBottom: '16px' }}>
+            Select a date and click "Generate Report" to view your Balance Sheet
+          </p>
+          <Button onClick={handleGenerateReport}>Generate Report</Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Cash Flow Tab
+function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }) {
+  const [reportData, setReportData] = useState(null)
+  const [comparativeData, setComparativeData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [filters, setFilters] = useState({
+    start_date: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
+    end_date: new Date().toISOString().split('T')[0],
+    comparison_type: 'none'
+  })
+  const [alert, setAlert] = useState(null)
+  const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
+  const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
+  const cardBg = isDarkMode ? '#1f1f1f' : '#ffffff'
+
+  const handleGenerateReport = async () => {
+    setLoading(true)
+    try {
+      if (filters.comparison_type === 'none') {
+        const data = await reportService.getCashFlow(filters.start_date, filters.end_date)
+        setReportData(data)
+        setComparativeData(null)
+      } else {
+        const prior = filters.comparison_type === 'previous_period'
+          ? reportService.calculatePriorPeriod(filters.start_date, filters.end_date)
+          : reportService.calculatePriorYear(filters.start_date, filters.end_date)
+        const data = await reportService.getComparativeCashFlow(
+          filters.start_date,
+          filters.end_date,
+          prior.start,
+          prior.end
+        )
+        setComparativeData(data)
+        setReportData(data.current)
+      }
+      showAlert('success', 'Report generated successfully')
+    } catch (error) {
+      showAlert('error', error.response?.data?.message || 'Failed to generate report')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleExport = () => {
+    if (!reportData) {
+      showAlert('error', 'No report data to export')
+      return
+    }
+    const op = reportData.operating_activities || {}
+    const inv = reportData.investing_activities || {}
+    const fin = reportData.financing_activities || {}
+    const rows = [
+      ['Cash Flow Statement'],
+      [`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`],
+      [],
+      ['OPERATING ACTIVITIES'],
+      ['Net Income', (op.net_income ?? 0).toFixed(2)]
+    ]
+    ;(op.adjustments || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
+    ;(op.working_capital_changes || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
+    rows.push(['Net Cash from Operating Activities', (op.net_cash_from_operations ?? 0).toFixed(2)])
+    rows.push([])
+    rows.push(['INVESTING ACTIVITIES'])
+    if ((inv.items || []).length === 0) rows.push(['  No investing activities'])
+    else (inv.items || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
+    rows.push(['Net Cash from Investing Activities', (inv.net_cash_from_investing ?? 0).toFixed(2)])
+    rows.push([])
+    rows.push(['FINANCING ACTIVITIES'])
+    if ((fin.items || []).length === 0) rows.push(['  No financing activities'])
+    else (fin.items || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
+    rows.push(['Net Cash from Financing Activities', (fin.net_cash_from_financing ?? 0).toFixed(2)])
+    rows.push([])
+    rows.push(['NET CHANGE IN CASH', (reportData.net_change_in_cash ?? 0).toFixed(2)])
+    rows.push(['Beginning Cash', (reportData.beginning_cash ?? 0).toFixed(2)])
+    rows.push(['ENDING CASH', (reportData.ending_cash ?? 0).toFixed(2)])
+    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `cash-flow-${filters.start_date}-to-${filters.end_date}.csv`
+    a.click()
+    window.URL.revokeObjectURL(url)
+    showAlert('success', 'Report exported to CSV')
+  }
+
+  const handleAccountClick = (accountId) => {
+    sessionStorage.setItem('selectedAccountId', accountId)
+    setActiveTab('account-ledger')
+  }
+
+  const showAlert = (type, message) => {
+    setAlert({ type, message })
+    setTimeout(() => setAlert(null), 5000)
+  }
+
+  const getPeriodLabel = () => `${new Date(filters.start_date).toLocaleDateString()} - ${new Date(filters.end_date).toLocaleDateString()}`
+  const getPriorLabel = () => {
+    if (!comparativeData?.prior) return ''
+    const p = comparativeData.prior
+    return `${new Date(p.start_date).toLocaleDateString()} - ${new Date(p.end_date).toLocaleDateString()}`
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: '24px' }}>
+        <h3 style={{ color: textColor, marginBottom: '8px', fontSize: '24px', fontWeight: '600' }}>Cash Flow Statement</h3>
+        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+          Statement of cash flows showing operating, investing, and financing activities
+        </p>
+      </div>
+      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
+      <CashFlowFilters filters={filters} onFilterChange={setFilters} onGenerate={handleGenerateReport} loading={loading} />
+      {loading && <LoadingSpinner size="lg" text="Generating report..." />}
+      {!loading && reportData && (
+        <>
+          <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h2 style={{ fontSize: '20px', fontWeight: '600', color: textColor }}>{getPeriodLabel()}</h2>
+              {comparativeData && <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, marginTop: '4px' }}>Compared to: {getPriorLabel()}</p>}
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <Button variant="secondary" onClick={handleExport}>📊 Export to CSV</Button>
+              <Button variant="secondary" onClick={() => window.print()}>🖨️ Print</Button>
+            </div>
+          </div>
+          {comparativeData ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <ComparativeCashFlowTable data={comparativeData} currentLabel={getPeriodLabel()} priorLabel={getPriorLabel()} />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+                <div>
+                  <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px', color: textColor }}>Current Period Detail</h3>
+                  <CashFlowTable data={reportData} onAccountClick={handleAccountClick} />
+                </div>
+                <CashFlowChart data={reportData} />
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+              <div style={{ gridColumn: 'span 2' }}>
+                <CashFlowTable data={reportData} onAccountClick={handleAccountClick} />
+              </div>
+              <CashFlowChart data={reportData} />
+            </div>
+          )}
+        </>
+      )}
+      {!loading && !reportData && (
+        <div style={{ backgroundColor: cardBg, borderRadius: '8px', border: `1px solid ${borderColor}`, padding: '48px', textAlign: 'center' }}>
+          <p style={{ color: textColor, opacity: 0.7, marginBottom: '16px' }}>Select a date range and click "Generate Report" to view your Cash Flow Statement</p>
+          <Button onClick={handleGenerateReport}>Generate Report</Button>
         </div>
       )}
     </div>

@@ -1599,19 +1599,24 @@ def api_payment_transactions():
 
 @app.route('/api/employees')
 def api_employees():
-    """Get employees data"""
+    """Get employees data. Always returns JSON (even on 500) so clients can parse safely."""
     try:
         employees = list_employees(active_only=False)
         if not employees:
             return jsonify({'columns': [], 'data': []})
-        
         columns = list(employees[0].keys())
         return jsonify({'columns': columns, 'data': employees})
     except Exception as e:
         print(f"Error in api_employees: {e}")
-        import traceback
         traceback.print_exc()
-        return jsonify({'error': str(e), 'columns': [], 'data': []}), 500
+        try:
+            return jsonify({'error': str(e), 'columns': [], 'data': []}), 500
+        except Exception:
+            return Response(
+                '{"error":"Internal server error","columns":[],"data":[]}',
+                status=500,
+                mimetype='application/json'
+            )
 
 @app.route('/api/customers')
 def api_customers():
@@ -6206,8 +6211,19 @@ try:
     from backend.controllers.account_controller import account_controller
     from backend.controllers.transaction_controller import transaction_controller
     from backend.controllers.report_controller import report_controller
+    from backend.controllers.customer_controller import customer_controller
+    from backend.controllers.invoice_controller import invoice_controller
+    from backend.controllers.payment_controller import payment_controller
+    from backend.controllers.vendor_controller import vendor_controller
+    from backend.controllers.bill_controller import bill_controller
+    from backend.controllers.bill_payment_controller import bill_payment_controller
+    from backend.controllers.inventory_controller import inventory_controller
     from backend.middleware.validators import validate_account_create, validate_account_update, validate_account_id
     from backend.middleware.validators import validate_transaction_create, validate_transaction_update, validate_transaction_id
+    from backend.middleware.validators import validate_vendor_create, validate_vendor_update, validate_vendor_id
+    from backend.middleware.validators import validate_bill_create, validate_bill_update, validate_bill_id, validate_bill_void
+    from backend.middleware.validators import validate_bill_payment_create, validate_bill_payment_update, validate_bill_payment_id, validate_bill_payment_void, validate_vendor_id_for_bills
+    from backend.middleware.validators import validate_item_create, validate_item_update, validate_item_id, validate_inventory_adjustment
     from backend.middleware.error_handler import handle_error, AppError
     BACKEND_AVAILABLE = True
 except ImportError as e:
@@ -6496,6 +6512,768 @@ def api_v1_reports_profit_loss_comparative():
             return handle_error(e)
     else:
         return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/reports/balance-sheet', methods=['GET'])
+def api_v1_reports_balance_sheet():
+    """Get Balance Sheet as of date - New backend API"""
+    if BACKEND_AVAILABLE:
+        try:
+            return report_controller.get_balance_sheet()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    else:
+        return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/reports/balance-sheet/comparative', methods=['GET'])
+def api_v1_reports_balance_sheet_comparative():
+    """Get comparative Balance Sheet - New backend API"""
+    if BACKEND_AVAILABLE:
+        try:
+            return report_controller.get_comparative_balance_sheet()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    else:
+        return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/reports/cash-flow', methods=['GET'])
+def api_v1_reports_cash_flow():
+    """Get Cash Flow statement - New backend API"""
+    if BACKEND_AVAILABLE:
+        try:
+            return report_controller.get_cash_flow()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    else:
+        return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/reports/cash-flow/comparative', methods=['GET'])
+def api_v1_reports_cash_flow_comparative():
+    """Get comparative Cash Flow - New backend API"""
+    if BACKEND_AVAILABLE:
+        try:
+            return report_controller.get_comparative_cash_flow()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    else:
+        return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+# Customer API Routes
+@app.route('/api/v1/customers', methods=['GET'])
+def api_v1_customers_list():
+    if BACKEND_AVAILABLE:
+        try:
+            return customer_controller.get_all()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/customers/search', methods=['GET'])
+def api_v1_customers_search():
+    if BACKEND_AVAILABLE:
+        try:
+            return customer_controller.search()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/customers', methods=['POST'])
+def api_v1_customers_create():
+    if BACKEND_AVAILABLE:
+        try:
+            return customer_controller.create()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/customers/<int:customer_id>', methods=['GET'])
+def api_v1_customers_get(customer_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return customer_controller.get_by_id(customer_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/customers/<int:customer_id>/balance', methods=['GET'])
+def api_v1_customers_balance(customer_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return customer_controller.get_balance(customer_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/customers/<int:customer_id>/invoices', methods=['GET'])
+def api_v1_customers_invoices(customer_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return customer_controller.get_invoices(customer_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/customers/<int:customer_id>/statement', methods=['GET'])
+def api_v1_customers_statement(customer_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return customer_controller.get_statement(customer_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/customers/<int:customer_id>', methods=['PUT'])
+def api_v1_customers_update(customer_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return customer_controller.update(customer_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/customers/<int:customer_id>/toggle-status', methods=['PATCH'])
+def api_v1_customers_toggle_status(customer_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return customer_controller.toggle_status(customer_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/customers/<int:customer_id>', methods=['DELETE'])
+def api_v1_customers_delete(customer_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return customer_controller.delete(customer_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+# Vendor API Routes
+@app.route('/api/v1/vendors', methods=['GET'])
+def api_v1_vendors_list():
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.get_all()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/vendors/search', methods=['GET'])
+def api_v1_vendors_search():
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.search()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/vendors/1099', methods=['GET'])
+def api_v1_vendors_1099():
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.get_1099_vendors()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/vendors', methods=['POST'])
+@validate_vendor_create
+def api_v1_vendors_create():
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.create()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/vendors/<int:vendor_id>', methods=['GET'])
+def api_v1_vendors_get(vendor_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.get_by_id(vendor_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/vendors/<int:vendor_id>/balance', methods=['GET'])
+def api_v1_vendors_balance(vendor_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.get_balance(vendor_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/vendors/<int:vendor_id>/bills', methods=['GET'])
+def api_v1_vendors_bills(vendor_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.get_bills(vendor_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/vendors/<int:vendor_id>/statement', methods=['GET'])
+def api_v1_vendors_statement(vendor_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.get_statement(vendor_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/vendors/<int:vendor_id>', methods=['PUT'])
+@validate_vendor_update
+def api_v1_vendors_update(vendor_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.update(vendor_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/vendors/<int:vendor_id>/toggle-status', methods=['PATCH'])
+def api_v1_vendors_toggle_status(vendor_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.toggle_status(vendor_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/vendors/<int:vendor_id>', methods=['DELETE'])
+def api_v1_vendors_delete(vendor_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return vendor_controller.delete(vendor_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+# Invoice API Routes
+@app.route('/api/v1/invoices', methods=['GET'])
+def api_v1_invoices_list():
+    if BACKEND_AVAILABLE:
+        try:
+            return invoice_controller.get_all()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/invoices/overdue', methods=['GET'])
+def api_v1_invoices_overdue():
+    if BACKEND_AVAILABLE:
+        try:
+            return invoice_controller.get_overdue()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/invoices', methods=['POST'])
+def api_v1_invoices_create():
+    if BACKEND_AVAILABLE:
+        try:
+            return invoice_controller.create()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/invoices/<int:invoice_id>', methods=['GET'])
+def api_v1_invoices_get(invoice_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return invoice_controller.get_by_id(invoice_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/invoices/<int:invoice_id>', methods=['PUT'])
+def api_v1_invoices_update(invoice_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return invoice_controller.update(invoice_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/invoices/<int:invoice_id>/send', methods=['POST'])
+def api_v1_invoices_send(invoice_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return invoice_controller.mark_as_sent(invoice_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/invoices/<int:invoice_id>/void', methods=['POST'])
+def api_v1_invoices_void(invoice_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return invoice_controller.void_invoice(invoice_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/invoices/<int:invoice_id>', methods=['DELETE'])
+def api_v1_invoices_delete(invoice_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return invoice_controller.delete(invoice_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+# Bill API Routes
+@app.route('/api/v1/bills', methods=['GET'])
+def api_v1_bills_list():
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_controller.get_all()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bills/overdue', methods=['GET'])
+def api_v1_bills_overdue():
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_controller.get_overdue()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bills', methods=['POST'])
+@validate_bill_create
+def api_v1_bills_create():
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_controller.create()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bills/<int:bill_id>', methods=['GET'])
+def api_v1_bills_get(bill_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_controller.get_by_id(bill_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bills/<int:bill_id>', methods=['PUT'])
+@validate_bill_update
+def api_v1_bills_update(bill_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_controller.update(bill_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bills/<int:bill_id>/void', methods=['POST'])
+@validate_bill_void
+def api_v1_bills_void(bill_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_controller.void_bill(bill_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bills/<int:bill_id>', methods=['DELETE'])
+def api_v1_bills_delete(bill_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_controller.delete(bill_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+# Payment API Routes
+@app.route('/api/v1/payments', methods=['GET'])
+def api_v1_payments_list():
+    if BACKEND_AVAILABLE:
+        try:
+            return payment_controller.get_all()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/payments/customer/<int:customer_id>/outstanding', methods=['GET'])
+def api_v1_payments_customer_outstanding(customer_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return payment_controller.get_customer_outstanding_invoices(customer_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/payments', methods=['POST'])
+def api_v1_payments_create():
+    if BACKEND_AVAILABLE:
+        try:
+            return payment_controller.create()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/payments/<int:payment_id>/receipt', methods=['GET'])
+def api_v1_payments_receipt(payment_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return payment_controller.get_payment_receipt(payment_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/payments/<int:payment_id>/void', methods=['POST'])
+def api_v1_payments_void(payment_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return payment_controller.void_payment(payment_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/payments/<int:payment_id>', methods=['GET'])
+def api_v1_payments_get(payment_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return payment_controller.get_by_id(payment_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/payments/<int:payment_id>', methods=['PUT'])
+def api_v1_payments_update(payment_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return payment_controller.update(payment_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/payments/<int:payment_id>', methods=['DELETE'])
+def api_v1_payments_delete(payment_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return payment_controller.delete(payment_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+# Bill Payment API Routes
+@app.route('/api/v1/bill-payments', methods=['GET'])
+def api_v1_bill_payments_list():
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_payment_controller.get_all()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bill-payments/vendor/<int:vendor_id>/outstanding', methods=['GET'])
+@validate_vendor_id_for_bills
+def api_v1_bill_payments_vendor_outstanding(vendor_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_payment_controller.get_vendor_outstanding_bills(vendor_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bill-payments', methods=['POST'])
+@validate_bill_payment_create
+def api_v1_bill_payments_create():
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_payment_controller.create()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bill-payments/<int:payment_id>/check-data', methods=['GET'])
+@validate_bill_payment_id
+def api_v1_bill_payments_check_data(payment_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_payment_controller.get_payment_check_data(payment_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bill-payments/<int:payment_id>/void', methods=['POST'])
+@validate_bill_payment_void
+@validate_bill_payment_id
+def api_v1_bill_payments_void(payment_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_payment_controller.void_payment(payment_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bill-payments/<int:payment_id>', methods=['GET'])
+@validate_bill_payment_id
+def api_v1_bill_payments_get(payment_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_payment_controller.get_by_id(payment_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bill-payments/<int:payment_id>', methods=['PUT'])
+@validate_bill_payment_update
+@validate_bill_payment_id
+def api_v1_bill_payments_update(payment_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_payment_controller.update(payment_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/bill-payments/<int:payment_id>', methods=['DELETE'])
+@validate_bill_payment_id
+def api_v1_bill_payments_delete(payment_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return bill_payment_controller.delete(payment_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+# Inventory API Routes
+@app.route('/api/v1/inventory/items', methods=['GET'])
+def api_v1_inventory_items_list():
+    if BACKEND_AVAILABLE:
+        try:
+            return inventory_controller.get_all_items()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/inventory/low-stock', methods=['GET'])
+def api_v1_inventory_low_stock():
+    if BACKEND_AVAILABLE:
+        try:
+            return inventory_controller.get_low_stock_items()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/inventory/value', methods=['GET'])
+def api_v1_inventory_value():
+    if BACKEND_AVAILABLE:
+        try:
+            return inventory_controller.get_inventory_value()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/inventory/report', methods=['GET'])
+def api_v1_inventory_report():
+    if BACKEND_AVAILABLE:
+        try:
+            return inventory_controller.get_inventory_report()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/inventory/items/<int:item_id>', methods=['GET'])
+@validate_item_id
+def api_v1_inventory_items_get(item_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return inventory_controller.get_item_by_id(item_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/inventory/items/<int:item_id>/history', methods=['GET'])
+@validate_item_id
+def api_v1_inventory_items_history(item_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return inventory_controller.get_item_history(item_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/inventory/items', methods=['POST'])
+@validate_item_create
+def api_v1_inventory_items_create():
+    if BACKEND_AVAILABLE:
+        try:
+            return inventory_controller.create_item()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/inventory/items/<int:item_id>', methods=['PUT'])
+@validate_item_update
+@validate_item_id
+def api_v1_inventory_items_update(item_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return inventory_controller.update_item(item_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/inventory/adjust', methods=['POST'])
+@validate_inventory_adjustment
+def api_v1_inventory_adjust():
+    if BACKEND_AVAILABLE:
+        try:
+            return inventory_controller.adjust_inventory()
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
+
+@app.route('/api/v1/inventory/items/<int:item_id>', methods=['DELETE'])
+@validate_item_id
+def api_v1_inventory_items_delete(item_id):
+    if BACKEND_AVAILABLE:
+        try:
+            return inventory_controller.delete_item(item_id)
+        except AppError as e:
+            return handle_error(e)
+        except Exception as e:
+            return handle_error(e)
+    return jsonify({'success': False, 'message': 'Backend not available'}), 500
 
 # Legacy endpoint (for backward compatibility)
 @app.route('/api/accounting/accounts', methods=['GET'])

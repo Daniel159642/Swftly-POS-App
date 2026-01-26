@@ -73,6 +73,72 @@ class ReportController:
         except Exception as e:
             raise AppError(str(e), 500)
 
+    @staticmethod
+    def get_balance_sheet() -> tuple:
+        """Get Balance Sheet as of date"""
+        try:
+            as_of_str = request.args.get('as_of_date')
+            if not as_of_str:
+                as_of = datetime.now().date()
+            else:
+                as_of = datetime.fromisoformat(as_of_str.split('T')[0]).date()
+            report = report_service.get_balance_sheet(as_of)
+            return jsonify({'success': True, 'data': report}), 200
+        except Exception as e:
+            raise AppError(str(e), 500)
+
+    @staticmethod
+    def get_comparative_balance_sheet() -> tuple:
+        """Get comparative Balance Sheet"""
+        try:
+            current_str = request.args.get('current_date')
+            prior_str = request.args.get('prior_date')
+            if not current_str or not prior_str:
+                raise AppError('current_date and prior_date are required', 400)
+            current_date = datetime.fromisoformat(current_str.split('T')[0]).date()
+            prior_date = datetime.fromisoformat(prior_str.split('T')[0]).date()
+            report = report_service.get_comparative_balance_sheet(current_date, prior_date)
+            return jsonify({'success': True, 'data': report}), 200
+        except Exception as e:
+            raise AppError(str(e), 500)
+
+    @staticmethod
+    def get_cash_flow() -> tuple:
+        """Get Cash Flow statement"""
+        try:
+            start_str = request.args.get('start_date')
+            end_str = request.args.get('end_date')
+            if not start_str or not end_str:
+                today = datetime.now().date()
+                start_date = datetime(today.year, 1, 1).date()
+                end_date = today
+            else:
+                start_date = datetime.fromisoformat(start_str.split('T')[0]).date()
+                end_date = datetime.fromisoformat(end_str.split('T')[0]).date()
+            report = report_service.get_cash_flow(start_date, end_date)
+            return jsonify({'success': True, 'data': report}), 200
+        except Exception as e:
+            raise AppError(str(e), 500)
+
+    @staticmethod
+    def get_comparative_cash_flow() -> tuple:
+        """Get comparative Cash Flow"""
+        try:
+            current_start = request.args.get('current_start')
+            current_end = request.args.get('current_end')
+            prior_start = request.args.get('prior_start')
+            prior_end = request.args.get('prior_end')
+            if not all([current_start, current_end, prior_start, prior_end]):
+                raise AppError('current_start, current_end, prior_start, prior_end required', 400)
+            cs = datetime.fromisoformat(current_start.split('T')[0]).date()
+            ce = datetime.fromisoformat(current_end.split('T')[0]).date()
+            ps = datetime.fromisoformat(prior_start.split('T')[0]).date()
+            pe = datetime.fromisoformat(prior_end.split('T')[0]).date()
+            report = report_service.get_comparative_cash_flow(cs, ce, ps, pe)
+            return jsonify({'success': True, 'data': report}), 200
+        except Exception as e:
+            raise AppError(str(e), 500)
+
 
 # Singleton instance
 report_controller = ReportController()
