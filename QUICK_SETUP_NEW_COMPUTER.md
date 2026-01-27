@@ -143,5 +143,24 @@ npm run dev
 - **No employees in dropdown?** Check backend is running on port 5001
 - **Connection error?** Run: `python3 check_postgres_connection.py`
 - **Login fails?** Verify admin account exists: `psql -U postgres -d pos_db -c "SELECT * FROM employees;"`
+- **Database errors after pulling code?** See `SYNC_DATABASE.md` - you need to run SQL files to update the database!
+
+## ⚠️ IMPORTANT: After Pulling Code
+
+**The database doesn't automatically update when you pull code!**
+
+If you pull code that includes database changes (`.sql` files), you must run:
+
+```bash
+python3 fix_audit_triggers.py
+```
+
+Or for complete sync:
+
+```bash
+python3 setup_complete_database.py
+```
+
+See `SYNC_DATABASE.md` for details.
 
 For detailed setup, see `SETUP_FOR_OTHER_COMPUTERS.md`
