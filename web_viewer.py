@@ -54,6 +54,7 @@ from database import (
 from permission_manager import get_permission_manager
 from sms_service_email_to_aws import EmailToAWSSMSService
 import os
+import sys
 import json
 from datetime import datetime, time, date
 from decimal import Decimal
@@ -7402,7 +7403,23 @@ def api_accounting_dashboard():
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
+# Auto-sync database on startup (check if updates needed)
 if __name__ == '__main__':
+    # Check if database needs syncing (only on startup, not on import)
+    try:
+        if os.path.exists('auto_sync_database.py'):
+            import subprocess
+            result = subprocess.run(
+                [sys.executable, 'auto_sync_database.py'],
+                capture_output=True,
+                timeout=10
+            )
+            # Only print if there were actual updates
+            if 'updated' in result.stdout.decode('utf-8', errors='ignore').lower():
+                print(result.stdout.decode('utf-8', errors='ignore'))
+    except Exception as e:
+        # Silently fail - don't block startup if sync fails
+        pass
     print("Starting web viewer...")
     print("Open your browser to: http://localhost:5001")
     if SOCKETIO_AVAILABLE and socketio:
