@@ -257,9 +257,40 @@ BEGIN
     -- Get establishment_id from current session or default to 1
     BEGIN
         establishment_id_val := current_setting('app.establishment_id', TRUE)::INTEGER;
+        IF establishment_id_val IS NULL THEN
+            RAISE EXCEPTION 'establishment_id is NULL';
+        END IF;
     EXCEPTION WHEN OTHERS THEN
-        -- Default to establishment_id = 1 if not set
-        SELECT establishment_id INTO establishment_id_val FROM establishments LIMIT 1;
+        -- Try to get from establishments table
+        BEGIN
+            SELECT establishment_id INTO establishment_id_val FROM establishments LIMIT 1;
+        EXCEPTION WHEN OTHERS THEN
+            establishment_id_val := NULL;
+        END;
+        
+        -- If still NULL, try to create default establishment or use 1
+        IF establishment_id_val IS NULL THEN
+            BEGIN
+                -- Try to insert default establishment if it doesn't exist
+                INSERT INTO establishments (establishment_name, establishment_code, is_active)
+                VALUES ('Default Establishment', 'default', TRUE)
+                ON CONFLICT (establishment_code) DO NOTHING
+                RETURNING establishment_id INTO establishment_id_val;
+                
+                -- If insert didn't return ID, try to get it
+                IF establishment_id_val IS NULL THEN
+                    SELECT establishment_id INTO establishment_id_val 
+                    FROM establishments 
+                    WHERE establishment_code = 'default' 
+                    LIMIT 1;
+                END IF;
+            EXCEPTION WHEN OTHERS THEN
+                -- Last resort: use 1 (will fail if establishments table doesn't exist, but that's a bigger problem)
+                establishment_id_val := 1;
+            END;
+        END IF;
+        
+        -- Final fallback
         IF establishment_id_val IS NULL THEN
             establishment_id_val := 1;
         END IF;
