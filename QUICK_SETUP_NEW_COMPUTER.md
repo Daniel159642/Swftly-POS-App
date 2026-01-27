@@ -46,7 +46,7 @@ EOF
 ## 5. Run Schema
 
 ```bash
-psql -U postgres -d pos_db -f schema_supabase.sql
+psql -U postgres -d pos_db -f schema_postgres.sql
 ```
 
 ## 6. Create Admin Account
@@ -60,6 +60,14 @@ Enter:
 - First Name: `Admin`
 - Last Name: `User`
 - Password: `123456` (or your choice)
+
+## 6b. Initialize Admin Permissions (IMPORTANT!)
+
+```bash
+python3 init_admin_permissions.py
+```
+
+This sets up roles and permissions and assigns the Admin role to your admin account. **Without this step, admin won't have permissions to access features like payments, accounting, etc.**
 
 ## 7. Install Dependencies
 

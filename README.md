@@ -133,7 +133,20 @@ Two database triggers automatically update inventory quantities:
    - Run schema: `psql -U postgres -d pos_db -f schema_postgres.sql`
    - Configure connection in `.env` file (see `.env.example`)
 
+2. Create admin account:
+   ```bash
+   python3 create_admin_account.py
+   ```
+
+3. **Initialize permissions (REQUIRED for admin access):**
+   ```bash
+   python3 init_admin_permissions.py
+   ```
+   **⚠️ Without this step, admin won't have permissions to access features!**
+
 The system uses PostgreSQL for all database operations.
+
+For detailed setup instructions on a new computer, see `QUICK_SETUP_NEW_COMPUTER.md` or `SETUP_FOR_OTHER_COMPUTERS.md`.
 
 ## Usage
 

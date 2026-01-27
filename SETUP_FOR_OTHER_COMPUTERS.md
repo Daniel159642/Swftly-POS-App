@@ -63,10 +63,10 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/pos_db
 
 ```bash
 # Run the schema to create all tables
-psql -U postgres -d pos_db -f schema_supabase.sql
+psql -U postgres -d pos_db -f schema_postgres.sql
 
 # Or if using a different user:
-psql -U your_username -d pos_db -f schema_supabase.sql
+psql -U your_username -d pos_db -f schema_postgres.sql
 ```
 
 ## Step 6: Create Admin Account
@@ -81,6 +81,24 @@ Follow the prompts:
 - First Name: `Admin` (or your name)
 - Last Name: `User` (or your name)
 - Password: `123456` (or your choice - remember this!)
+
+## Step 6b: Initialize Admin Permissions (CRITICAL!)
+
+```bash
+# This sets up roles and permissions - REQUIRED for admin to have access
+python3 init_admin_permissions.py
+```
+
+**⚠️ IMPORTANT:** Without running this script, the admin account won't have permissions to:
+- Access accounting features
+- Process payments
+- Manage settings
+- And other admin functions
+
+This script:
+- Creates default roles (Admin, Manager, Cashier, etc.)
+- Sets up all permissions
+- Assigns Admin role to your admin account
 
 ## Step 7: Install Python Dependencies
 
