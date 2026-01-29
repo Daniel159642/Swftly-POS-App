@@ -150,17 +150,18 @@ function ShipmentVerificationDashboard() {
     }}>
       {/* Sidebar Navigation - 1/4 of page */}
       <div style={{
+        position: 'fixed',
+        left: 0,
+        top: '56px',
+        zIndex: 100,
         width: sidebarMinimized ? '60px' : '25%',
-        flexShrink: 0,
+        height: 'calc(100vh - 56px)',
         backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
         padding: sidebarMinimized ? '32px 10px 48px 10px' : '32px 10px 48px 10px',
-        minHeight: '100vh',
-        position: 'sticky',
-        top: 0,
-        alignSelf: 'flex-start',
         borderRight: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`,
         transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), padding 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-        overflow: 'hidden'
+        overflowY: 'auto',
+        overflowX: 'hidden'
       }}>
         <div style={{
           display: 'flex',
@@ -346,12 +347,13 @@ function ShipmentVerificationDashboard() {
 
       {/* Main Content Area - 3/4 of page */}
       <div style={{
+        marginLeft: sidebarMinimized ? '60px' : '25%',
         width: sidebarMinimized ? 'calc(100% - 60px)' : '75%',
         flex: 1,
         padding: '48px 64px 64px 64px',
         backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
         maxWidth: sidebarMinimized ? 'none' : '1200px',
-        transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+        transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
       }}>
         {(filter === 'new_shipment' || editingDraftId) ? (
           <UploadShipmentForm
@@ -1429,17 +1431,18 @@ function ShipmentVerificationDetail({ shipmentId }) {
       }}>
       {/* Sidebar Navigation - 1/4 of page */}
       <div style={{
+        position: 'fixed',
+        left: 0,
+        top: '56px',
+        zIndex: 100,
         width: sidebarMinimized ? '60px' : '25%',
-        flexShrink: 0,
+        height: 'calc(100vh - 56px)',
         backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
         padding: sidebarMinimized ? '32px 10px 48px 10px' : '32px 10px 48px 10px',
-        minHeight: '100vh',
-        position: 'sticky',
-        top: 0,
-        alignSelf: 'flex-start',
         borderRight: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`,
         transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), padding 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-        overflow: 'hidden'
+        overflowY: 'auto',
+        overflowX: 'hidden'
       }}>
         <div style={{
           display: 'flex',
@@ -1626,12 +1629,13 @@ function ShipmentVerificationDetail({ shipmentId }) {
 
       {/* Main Content Area - 3/4 of page */}
       <div style={{
+        marginLeft: sidebarMinimized ? '60px' : '25%',
         width: sidebarMinimized ? 'calc(100% - 60px)' : '75%',
         flex: 1,
         padding: '48px 64px 64px 64px',
         backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
         maxWidth: sidebarMinimized ? 'none' : '1200px',
-        transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+        transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
       }}>
 
       {/* Manual Barcode Entry */}
@@ -3208,7 +3212,8 @@ function UploadShipmentForm({ onClose, onSuccess }) {
     expected_delivery_date: '',
     document: null,
     verification_mode: 'auto_add',
-    tracking_number: ''
+    tracking_number: '',
+    manualEntry: false
   })
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null) // { message, type: 'success' | 'error' }
@@ -3406,8 +3411,10 @@ function UploadShipmentForm({ onClose, onSuccess }) {
       const uploadFormData = new FormData()
       uploadFormData.append('document', formData.document)
 
-      // First, preview the document
-      const previewResponse = await fetch('/api/shipments/preview', {
+      // Manual entry uses a separate endpoint so the server never scrapes
+      const isManual = Boolean(formData.manualEntry)
+      const previewUrl = isManual ? '/api/shipments/preview-manual' : '/api/shipments/preview'
+      const previewResponse = await fetch(previewUrl, {
         method: 'POST',
         body: uploadFormData
       })
@@ -3615,6 +3622,19 @@ function UploadShipmentForm({ onClose, onSuccess }) {
     })
   }
 
+  const addItem = () => {
+    setEditingItems(prev => [...prev, {
+      product_sku: '',
+      product_name: '',
+      quantity_expected: 0,
+      unit_cost: 0,
+      lot_number: '',
+      expiration_date: '',
+      barcode: '',
+      _id: prev.length + Date.now()
+    }])
+  }
+
   const handleSaveDraft = async () => {
     if (!formData.vendor_id) {
       setToast({ message: 'Please select a vendor', type: 'error' })
@@ -3757,9 +3777,40 @@ function UploadShipmentForm({ onClose, onSuccess }) {
               backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
               fontWeight: 600,
               fontSize: '14px',
-              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px'
             }}>
-              Items ({editingItems.length})
+              <span>Items ({editingItems.length})</span>
+              <button
+                type="button"
+                onClick={addItem}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.9)`
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+                }}
+              >
+                <Plus size={16} />
+                Add item
+              </button>
             </div>
             <div 
               style={{
@@ -4446,6 +4497,53 @@ function UploadShipmentForm({ onClose, onSuccess }) {
 
   return (
     <>
+        <style>{`
+          .upload-form-switch.checkbox-wrapper-2 .ikxBAC,
+          .checkbox-wrapper-2.upload-form-switch .ikxBAC {
+            appearance: none;
+            background-color: #dfe1e4;
+            border-radius: 72px;
+            border-style: none;
+            flex-shrink: 0;
+            height: 20px;
+            margin: 0;
+            position: relative;
+            width: 30px;
+          }
+          .upload-form-switch.checkbox-wrapper-2 .ikxBAC::before,
+          .checkbox-wrapper-2.upload-form-switch .ikxBAC::before {
+            bottom: -6px;
+            content: "";
+            left: -6px;
+            position: absolute;
+            right: -6px;
+            top: -6px;
+          }
+          .upload-form-switch.checkbox-wrapper-2 .ikxBAC::after,
+          .checkbox-wrapper-2.upload-form-switch .ikxBAC::after {
+            background-color: #fff;
+            border-radius: 50%;
+            content: "";
+            height: 14px;
+            left: 3px;
+            position: absolute;
+            top: 3px;
+            width: 14px;
+            transition: all 100ms ease-out;
+          }
+          .upload-form-switch.checkbox-wrapper-2 .ikxBAC:checked,
+          .checkbox-wrapper-2.upload-form-switch .ikxBAC:checked {
+            background-color: #6e79d6;
+          }
+          .upload-form-switch.checkbox-wrapper-2 .ikxBAC:checked::after,
+          .checkbox-wrapper-2.upload-form-switch .ikxBAC:checked::after {
+            left: 13px;
+          }
+          .upload-form-switch.checkbox-wrapper-2 input[type=checkbox],
+          .checkbox-wrapper-2.upload-form-switch input[type=checkbox] {
+            cursor: pointer;
+          }
+        `}</style>
         <FormTitle isDarkMode={isDarkMode}>
           Upload New Shipment
         </FormTitle>
@@ -4571,6 +4669,41 @@ function UploadShipmentForm({ onClose, onSuccess }) {
               {formData.verification_mode === 'auto_add' 
                 ? 'Items will be added to inventory as soon as you check them in'
                 : 'Items will be added to inventory only after completing verification'}
+            </div>
+          </FormField>
+
+          <FormField>
+            <label style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              cursor: 'pointer'
+            }}>
+              <div className="checkbox-wrapper-2 upload-form-switch">
+                <input
+                  type="checkbox"
+                  className="sc-gJwTLC ikxBAC"
+                  checked={formData.manualEntry}
+                  onChange={(e) => setFormData({ ...formData, manualEntry: e.target.checked })}
+                />
+              </div>
+              <span style={{
+                fontSize: '14px',
+                fontWeight: 600,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+              }}>
+                Manual entry
+              </span>
+            </label>
+            <div style={{
+              fontSize: '13px',
+              color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+              marginTop: '8px',
+              lineHeight: '1.5'
+            }}>
+              {formData.manualEntry
+                ? 'File will open on the right for reference; add line items on the left yourself (no scraping).'
+                : 'Document will be scraped to pre-fill line items.'}
             </div>
           </FormField>
 

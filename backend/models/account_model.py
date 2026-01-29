@@ -68,35 +68,28 @@ class AccountRepository:
         cursor = get_cursor()
         try:
             query = """
-                SELECT * FROM accounts
+                SELECT * FROM accounting.accounts
                 WHERE 1=1
             """
             params = []
-            param_count = 1
             
             if filters:
                 if filters.get('account_type'):
-                    query += f" AND account_type = ${param_count}"
+                    query += " AND account_type = %s"
                     params.append(filters['account_type'])
-                    param_count += 1
                 
                 if filters.get('is_active') is not None:
-                    query += f" AND is_active = ${param_count}"
+                    query += " AND is_active = %s"
                     params.append(filters['is_active'])
-                    param_count += 1
                 
                 if filters.get('parent_account_id') is not None:
-                    query += f" AND parent_account_id = ${param_count}"
+                    query += " AND parent_account_id = %s"
                     params.append(filters['parent_account_id'])
-                    param_count += 1
                 
                 if filters.get('search'):
-                    query += f" AND (account_name ILIKE ${param_count} OR account_number ILIKE ${param_count})"
+                    query += " AND (account_name ILIKE %s OR account_number ILIKE %s)"
                     search_term = f"%{filters['search']}%"
-                    params.append(search_term)
-                    param_count += 1
-                    params.append(search_term)
-                    param_count += 1
+                    params.extend([search_term, search_term])
             
             query += " ORDER BY account_number, account_name"
             
@@ -111,7 +104,7 @@ class AccountRepository:
         """Find account by ID"""
         cursor = get_cursor()
         try:
-            cursor.execute("SELECT * FROM accounts WHERE id = %s", (account_id,))
+            cursor.execute("SELECT * FROM accounting.accounts WHERE id = %s", (account_id,))
             row = cursor.fetchone()
             return Account(dict(row)) if row else None
         finally:
@@ -122,7 +115,7 @@ class AccountRepository:
         """Find account by account number"""
         cursor = get_cursor()
         try:
-            cursor.execute("SELECT * FROM accounts WHERE account_number = %s", (account_number,))
+            cursor.execute("SELECT * FROM accounting.accounts WHERE account_number = %s", (account_number,))
             row = cursor.fetchone()
             return Account(dict(row)) if row else None
         finally:
@@ -135,7 +128,7 @@ class AccountRepository:
         conn = get_connection()
         try:
             cursor.execute("""
-                INSERT INTO accounts (
+                INSERT INTO accounting.accounts (
                     account_number, account_name, account_type, sub_type,
                     parent_account_id, balance_type, description, opening_balance,
                     opening_balance_date, created_by, updated_by
@@ -193,7 +186,7 @@ class AccountRepository:
             params.append(user_id)
             params.append(account_id)
             
-            query = f"UPDATE accounts SET {', '.join(fields)} WHERE id = %s RETURNING *"
+            query = f"UPDATE accounting.accounts SET {', '.join(fields)} WHERE id = %s RETURNING *"
             cursor.execute(query, params)
             row = cursor.fetchone()
             
@@ -215,14 +208,14 @@ class AccountRepository:
         conn = get_connection()
         try:
             # Check if account has child accounts
-            cursor.execute("SELECT COUNT(*) FROM accounts WHERE parent_account_id = %s", (account_id,))
-            child_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) AS cnt FROM accounting.accounts WHERE parent_account_id = %s", (account_id,))
+            child_count = cursor.fetchone()['cnt'] or 0
             if child_count > 0:
                 raise ValueError('Cannot delete account with child accounts')
             
             # Check if account has been used in transactions
-            cursor.execute("SELECT COUNT(*) FROM transaction_lines WHERE account_id = %s", (account_id,))
-            transaction_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) AS cnt FROM accounting.transaction_lines WHERE account_id = %s", (account_id,))
+            transaction_count = cursor.fetchone()['cnt'] or 0
             if transaction_count > 0:
                 raise ValueError('Cannot delete account that has been used in transactions')
             
@@ -231,7 +224,7 @@ class AccountRepository:
             if account and account.is_system_account:
                 raise ValueError('Cannot delete system account')
             
-            cursor.execute("DELETE FROM accounts WHERE id = %s", (account_id,))
+            cursor.execute("DELETE FROM accounting.accounts WHERE id = %s", (account_id,))
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
@@ -246,8 +239,8 @@ class AccountRepository:
         cursor = get_cursor()
         try:
             cursor.execute("""
-                SELECT * FROM accounts 
-                WHERE parent_account_id = %s 
+                SELECT * FROM accounting.accounts
+                WHERE parent_account_id = %s
                 ORDER BY account_number
             """, (parent_id,))
             rows = cursor.fetchall()
@@ -261,9 +254,9 @@ class AccountRepository:
         cursor = get_cursor()
         try:
             if as_of_date:
-                cursor.execute("SELECT calculate_account_balance(%s, %s) as balance", (account_id, as_of_date))
+                cursor.execute("SELECT accounting.calculate_account_balance(%s, %s) as balance", (account_id, as_of_date))
             else:
-                cursor.execute("SELECT calculate_account_balance(%s, CURRENT_DATE) as balance", (account_id,))
+                cursor.execute("SELECT accounting.calculate_account_balance(%s, CURRENT_DATE) as balance", (account_id,))
             row = cursor.fetchone()
             return float(row['balance']) if row and row['balance'] is not None else 0.0
         finally:
@@ -276,7 +269,7 @@ class AccountRepository:
         try:
             search_pattern = f"%{search_term}%"
             cursor.execute("""
-                SELECT * FROM accounts 
+                SELECT * FROM accounting.accounts
                 WHERE account_name ILIKE %s OR account_number ILIKE %s
                 ORDER BY account_number, account_name
             """, (search_pattern, search_pattern))

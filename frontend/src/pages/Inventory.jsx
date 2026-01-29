@@ -62,8 +62,19 @@ function Inventory() {
     category: '',
     vendor: '',
     vendor_id: null,
-    photo: null
+    photo: null,
+    item_type: 'product',
+    unit: ''
   })
+  const [inventoryFilter, setInventoryFilter] = useState('all') // 'all' | 'product' | 'ingredient'
+  const [editingVariants, setEditingVariants] = useState([])
+  const [editingIngredients, setEditingIngredients] = useState([])
+  const [newVariant, setNewVariant] = useState({ variant_name: '', price: '', cost: '0' })
+  const [newRecipeRow, setNewRecipeRow] = useState({ ingredient_id: '', quantity_required: '', unit: '' })
+  const [createVariants, setCreateVariants] = useState([])
+  const [createRecipeRows, setCreateRecipeRows] = useState([])
+  const [createNewVariant, setCreateNewVariant] = useState({ variant_name: '', price: '', cost: '0' })
+  const [createNewRecipeRow, setCreateNewRecipeRow] = useState({ ingredient_id: '', quantity_required: '', unit: '' })
   const [photoPreview, setPhotoPreview] = useState(null)
   const [showPhotoPreview, setShowPhotoPreview] = useState(false)
   const [isCroppingPhoto, setIsCroppingPhoto] = useState(false)
@@ -125,10 +136,10 @@ function Inventory() {
   }, [])
 
   useEffect(() => {
-    loadInventory()
+    loadInventory(inventoryFilter)
     loadVendors()
     loadCategories()
-  }, [])
+  }, [inventoryFilter])
 
   // Hide scrollbar for inventory buttons
   useEffect(() => {
@@ -165,14 +176,13 @@ function Inventory() {
     // Optionally, you could also filter the inventory immediately
   }
 
-  const loadInventory = async () => {
+  const loadInventory = async (filter = inventoryFilter) => {
     setLoading(true)
     setError(null)
-    
     try {
-      const response = await fetch('/api/inventory')
+      const url = filter && filter !== 'all' ? `/api/inventory?item_type=${filter}` : '/api/inventory'
+      const response = await fetch(url)
       const result = await response.json()
-      // API returns { columns: [...], data: [...] }
       if (result.data) {
         setInventory(result.data)
       }
@@ -220,6 +230,25 @@ function Inventory() {
     }
   }
 
+  const loadProductVariants = async (productId) => {
+    try {
+      const res = await fetch(`/api/inventory/${productId}/variants`)
+      const data = await res.json()
+      setEditingVariants(data.data || [])
+    } catch {
+      setEditingVariants([])
+    }
+  }
+  const loadProductIngredients = async (productId) => {
+    try {
+      const res = await fetch(`/api/inventory/${productId}/ingredients`)
+      const data = await res.json()
+      setEditingIngredients(data.data || [])
+    } catch {
+      setEditingIngredients([])
+    }
+  }
+
   const handleEditProduct = (product) => {
     setEditingProduct(product)
     setEditFormData({
@@ -232,7 +261,9 @@ function Inventory() {
       category: product.category || '',
       vendor: product.vendor || product.vendor_name || '',
       vendor_id: product.vendor_id || null,
-      photo: null
+      photo: null,
+      item_type: product.item_type || 'product',
+      unit: product.unit || ''
     })
     // Set photo preview from existing product photo if available
     if (product.photo) {
@@ -245,7 +276,14 @@ function Inventory() {
     setEditIsCroppingPhoto(false)
     setEditCropBox({ x: 0, y: 0, width: 0, height: 0 })
     setEditFixedContainerSize({ width: 0, height: 0 })
-    // Close any open create forms
+    setEditingVariants([])
+    setEditingIngredients([])
+    setNewVariant({ variant_name: '', price: '', cost: '0' })
+    setNewRecipeRow({ ingredient_id: '', quantity_required: '', unit: '' })
+    if (product.item_type !== 'ingredient') {
+      loadProductVariants(product.product_id)
+      loadProductIngredients(product.product_id)
+    }
     setShowCreateProduct(false)
     setShowCreateCategory(false)
     setShowCreateVendor(false)
@@ -556,6 +594,91 @@ function Inventory() {
     }))
   }
 
+  const handleAddVariant = async () => {
+    if (!editingProduct?.product_id || !newVariant.variant_name?.trim() || newVariant.price === '' || parseFloat(newVariant.price) < 0) return
+    try {
+      const res = await fetch(`/api/inventory/${editingProduct.product_id}/variants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          variant_name: newVariant.variant_name.trim(),
+          price: parseFloat(newVariant.price),
+          cost: parseFloat(newVariant.cost) || 0
+        })
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.message || 'Failed to add variant')
+      setNewVariant({ variant_name: '', price: '', cost: '0' })
+      loadProductVariants(editingProduct.product_id)
+    } catch (err) {
+      setEditError(err.message || 'Failed to add variant')
+    }
+  }
+  const handleDeleteVariant = async (variantId) => {
+    if (!editingProduct?.product_id) return
+    try {
+      const res = await fetch(`/api/inventory/variants/${variantId}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.message || 'Failed to delete variant')
+      loadProductVariants(editingProduct.product_id)
+    } catch (err) {
+      setEditError(err.message || 'Failed to delete variant')
+    }
+  }
+  const handleAddRecipeIngredient = async () => {
+    if (!editingProduct?.product_id || !newRecipeRow.ingredient_id || !newRecipeRow.quantity_required || parseFloat(newRecipeRow.quantity_required) <= 0 || !newRecipeRow.unit?.trim()) return
+    try {
+      const res = await fetch(`/api/inventory/${editingProduct.product_id}/ingredients`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ingredient_id: parseInt(newRecipeRow.ingredient_id, 10),
+          quantity_required: parseFloat(newRecipeRow.quantity_required),
+          unit: newRecipeRow.unit.trim()
+        })
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.message || 'Failed to add ingredient')
+      setNewRecipeRow({ ingredient_id: '', quantity_required: '', unit: '' })
+      loadProductIngredients(editingProduct.product_id)
+    } catch (err) {
+      setEditError(err.message || 'Failed to add ingredient')
+    }
+  }
+  const handleDeleteRecipeIngredient = async (recipeId) => {
+    try {
+      const res = await fetch(`/api/inventory/ingredients/${recipeId}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.message || 'Failed to remove')
+      if (editingProduct?.product_id) loadProductIngredients(editingProduct.product_id)
+    } catch (err) {
+      setEditError(err.message || 'Failed to remove ingredient')
+    }
+  }
+
+  const addCreateVariant = () => {
+    const name = (createNewVariant.variant_name || '').trim()
+    const price = parseFloat(createNewVariant.price)
+    if (!name || isNaN(price) || price < 0) return
+    setCreateVariants(prev => [...prev, { variant_name: name, price, cost: parseFloat(createNewVariant.cost) || 0 }])
+    setCreateNewVariant({ variant_name: '', price: '', cost: '0' })
+  }
+  const removeCreateVariant = (idx) => {
+    setCreateVariants(prev => prev.filter((_, i) => i !== idx))
+  }
+  const addCreateRecipeRow = () => {
+    const ingredient_id = createNewRecipeRow.ingredient_id
+    const qty = parseFloat(createNewRecipeRow.quantity_required)
+    const unit = (createNewRecipeRow.unit || '').trim()
+    if (!ingredient_id || isNaN(qty) || qty <= 0 || !unit) return
+    const ing = inventory.find(i => i.product_id === parseInt(ingredient_id, 10))
+    setCreateRecipeRows(prev => [...prev, { ingredient_id: parseInt(ingredient_id, 10), quantity_required: qty, unit, ingredient_name: ing?.product_name || '' }])
+    setCreateNewRecipeRow({ ingredient_id: '', quantity_required: '', unit: '' })
+  }
+  const removeCreateRecipeRow = (idx) => {
+    setCreateRecipeRows(prev => prev.filter((_, i) => i !== idx))
+  }
+
   const handleSaveProduct = async (e) => {
     if (e) e.preventDefault()
     setEditLoading(true)
@@ -573,6 +696,8 @@ function Inventory() {
       formData.append('current_quantity', editFormData.current_quantity || '0')
       formData.append('category', editFormData.category || '')
       formData.append('vendor', editFormData.vendor || '')
+      formData.append('item_type', editFormData.item_type || 'product')
+      if (editFormData.unit != null) formData.append('unit', editFormData.unit || '')
       if (editFormData.vendor_id) {
         formData.append('vendor_id', editFormData.vendor_id)
       }
@@ -616,11 +741,13 @@ function Inventory() {
       formData.append('product_name', createProductData.product_name)
       formData.append('sku', createProductData.sku)
       formData.append('barcode', createProductData.barcode || '')
-      formData.append('product_price', createProductData.product_price)
-      formData.append('product_cost', createProductData.product_cost)
+      formData.append('product_price', createProductData.item_type === 'ingredient' ? '0' : (createProductData.product_price || '0'))
+      formData.append('product_cost', createProductData.product_cost || '0')
       formData.append('current_quantity', createProductData.current_quantity || '0')
       formData.append('category', createProductData.category || '')
       formData.append('vendor', createProductData.vendor || '')
+      formData.append('item_type', createProductData.item_type || 'product')
+      if (createProductData.unit) formData.append('unit', createProductData.unit)
       if (createProductData.vendor_id) {
         formData.append('vendor_id', createProductData.vendor_id)
       }
@@ -639,6 +766,28 @@ function Inventory() {
         throw new Error(result.message || 'Failed to create product')
       }
 
+      const productId = result.product_id
+      if (productId && (createProductData.item_type || 'product') === 'product') {
+        for (const v of createVariants) {
+          const vr = await fetch(`/api/inventory/${productId}/variants`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ variant_name: v.variant_name, price: v.price, cost: v.cost })
+          })
+          const vd = await vr.json()
+          if (!vd.success) throw new Error(vd.message || 'Failed to add variant')
+        }
+        for (const r of createRecipeRows) {
+          const rr = await fetch(`/api/inventory/${productId}/ingredients`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ingredient_id: r.ingredient_id, quantity_required: r.quantity_required, unit: r.unit })
+          })
+          const rd = await rr.json()
+          if (!rd.success) throw new Error(rd.message || 'Failed to add ingredient')
+        }
+      }
+
       setCreateSuccess(true)
       setCreateProductData({
         product_name: '',
@@ -650,8 +799,14 @@ function Inventory() {
         category: '',
         vendor: '',
         vendor_id: null,
-        photo: null
+        photo: null,
+        item_type: 'product',
+        unit: ''
       })
+      setCreateVariants([])
+      setCreateRecipeRows([])
+      setCreateNewVariant({ variant_name: '', price: '', cost: '0' })
+      setCreateNewRecipeRow({ ingredient_id: '', quantity_required: '', unit: '' })
       setPhotoPreview(null)
       setTimeout(() => {
         loadInventory()
@@ -1874,7 +2029,7 @@ function Inventory() {
                       type="text"
                       value={createProductData.product_name}
                       onChange={(e) => setCreateProductData({ ...createProductData, product_name: e.target.value })}
-                      placeholder="Product Name *"
+                      placeholder={createProductData.item_type === 'ingredient' ? 'Ingredient Name *' : 'Product Name *'}
                       required
                       style={{
                         width: '100%',
@@ -1888,6 +2043,67 @@ function Inventory() {
                       }}
                     />
                   </div>
+
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '4px',
+                      fontSize: '11px',
+                      fontWeight: 500,
+                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
+                      fontFamily: '"Product Sans", sans-serif'
+                    }}>
+                      Type
+                    </label>
+                    <select
+                      value={createProductData.item_type || 'product'}
+                      onChange={(e) => setCreateProductData({ ...createProductData, item_type: e.target.value })}
+                      style={{
+                        width: '100%',
+                        padding: '6px',
+                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
+                        borderRadius: '4px',
+                        fontSize: '13px',
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                        boxSizing: 'border-box'
+                      }}
+                    >
+                      <option value="product">Product (sold at POS)</option>
+                      <option value="ingredient">Ingredient (used in recipes, not sold)</option>
+                    </select>
+                  </div>
+
+                  {createProductData.item_type === 'ingredient' && (
+                    <div>
+                      <label style={{
+                        display: 'block',
+                        marginBottom: '4px',
+                        fontSize: '11px',
+                        fontWeight: 500,
+                        color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
+                        fontFamily: '"Product Sans", sans-serif'
+                      }}>
+                        Unit
+                      </label>
+                      <input
+                        type="text"
+                        value={createProductData.unit || ''}
+                        onChange={(e) => setCreateProductData({ ...createProductData, unit: e.target.value })}
+                        placeholder="e.g. oz, lb, g, ml, each"
+                        style={{
+                          width: '100%',
+                          padding: '6px',
+                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
+                          borderRadius: '4px',
+                          fontSize: '13px',
+                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label style={{
@@ -2175,6 +2391,54 @@ function Inventory() {
                     />
                   </div>
 
+                  {(createProductData.item_type || 'product') === 'product' && (
+                    <>
+                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #eee' }}>
+                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#555' }}>Sizes / Variants (e.g. Small $3, Large $5)</label>
+                        {createVariants.length > 0 && (
+                          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px 0' }}>
+                            {createVariants.map((v, idx) => (
+                              <li key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', fontSize: '13px' }}>
+                                <span style={{ flex: 1 }}>{v.variant_name} — ${Number(v.price).toFixed(2)}</span>
+                                <button type="button" onClick={() => removeCreateVariant(idx)} style={{ padding: '2px 8px', fontSize: '11px', color: '#c33', border: '1px solid #c33', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>Remove</button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                          <input type="text" placeholder="Size name" value={createNewVariant.variant_name} onChange={(e) => setCreateNewVariant({ ...createNewVariant, variant_name: e.target.value })} style={{ width: '100px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
+                          <input type="number" step="0.01" min="0" placeholder="Price" value={createNewVariant.price} onChange={(e) => setCreateNewVariant({ ...createNewVariant, price: e.target.value })} style={{ width: '80px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
+                          <input type="number" step="0.01" min="0" placeholder="Cost" value={createNewVariant.cost} onChange={(e) => setCreateNewVariant({ ...createNewVariant, cost: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
+                          <button type="button" onClick={addCreateVariant} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Add size</button>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #eee' }}>
+                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#555' }}>Ingredients used (recipe)</label>
+                        {createRecipeRows.length > 0 && (
+                          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px 0' }}>
+                            {createRecipeRows.map((r, idx) => (
+                              <li key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', fontSize: '13px' }}>
+                                <span style={{ flex: 1 }}>{r.ingredient_name || 'Ingredient'} — {r.quantity_required} {r.unit}</span>
+                                <button type="button" onClick={() => removeCreateRecipeRow(idx)} style={{ padding: '2px 8px', fontSize: '11px', color: '#c33', border: '1px solid #c33', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>Remove</button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                          <select value={createNewRecipeRow.ingredient_id} onChange={(e) => setCreateNewRecipeRow({ ...createNewRecipeRow, ingredient_id: e.target.value })} style={{ minWidth: '140px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }}>
+                            <option value="">Select ingredient</option>
+                            {inventory.filter((i) => i.item_type === 'ingredient').map((ing) => (
+                              <option key={ing.product_id} value={ing.product_id}>{ing.product_name} ({ing.unit || '—'})</option>
+                            ))}
+                          </select>
+                          <input type="number" step="0.0001" min="0.0001" placeholder="Qty" value={createNewRecipeRow.quantity_required} onChange={(e) => setCreateNewRecipeRow({ ...createNewRecipeRow, quantity_required: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
+                          <input type="text" placeholder="Unit" value={createNewRecipeRow.unit} onChange={(e) => setCreateNewRecipeRow({ ...createNewRecipeRow, unit: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
+                          <button type="button" onClick={addCreateRecipeRow} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Add</button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
                   <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                     <button
                       type="button"
@@ -2192,8 +2456,14 @@ function Inventory() {
                           category: '',
                           vendor: '',
                           vendor_id: null,
-                          photo: null
+                          photo: null,
+                          item_type: 'product',
+                          unit: ''
                         })
+                        setCreateVariants([])
+                        setCreateRecipeRows([])
+                        setCreateNewVariant({ variant_name: '', price: '', cost: '0' })
+                        setCreateNewRecipeRow({ ingredient_id: '', quantity_required: '', unit: '' })
                         setPhotoPreview(null)
                       }}
                       disabled={createLoading}
@@ -2722,6 +2992,32 @@ function Inventory() {
                     />
                   </div>
 
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px', fontWeight: 500, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontFamily: '"Product Sans", sans-serif' }}>Type</label>
+                    <select
+                      name="item_type"
+                      value={editFormData.item_type || 'product'}
+                      onChange={handleEditChange}
+                      style={{ width: '100%', padding: '6px', border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd', borderRadius: '4px', fontSize: '13px', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', boxSizing: 'border-box' }}
+                    >
+                      <option value="product">Product (sold at POS)</option>
+                      <option value="ingredient">Ingredient (used in recipes)</option>
+                    </select>
+                  </div>
+                  {(editFormData.item_type || 'product') === 'ingredient' && (
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px', fontWeight: 500, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontFamily: '"Product Sans", sans-serif' }}>Unit</label>
+                      <input
+                        type="text"
+                        name="unit"
+                        value={editFormData.unit || ''}
+                        onChange={handleEditChange}
+                        placeholder="e.g. oz, lb, g, ml, each"
+                        style={{ width: '100%', padding: '6px', border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd', borderRadius: '4px', fontSize: '13px', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  )}
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>
                       <label style={{
@@ -2963,6 +3259,54 @@ function Inventory() {
                     />
                   </div>
 
+                  {(editFormData.item_type || editingProduct?.item_type) !== 'ingredient' && editingProduct?.product_id && (
+                    <>
+                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #eee' }}>
+                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#555' }}>Sizes / Variants (e.g. Small $3, Large $5)</label>
+                        {editingVariants.length > 0 && (
+                          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px 0' }}>
+                            {editingVariants.map((v) => (
+                              <li key={v.variant_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', fontSize: '13px' }}>
+                                <span style={{ flex: 1 }}>{v.variant_name} — ${Number(v.price).toFixed(2)}</span>
+                                <button type="button" onClick={() => handleDeleteVariant(v.variant_id)} style={{ padding: '2px 8px', fontSize: '11px', color: '#c33', border: '1px solid #c33', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>Remove</button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                          <input type="text" placeholder="Size name" value={newVariant.variant_name} onChange={(e) => setNewVariant({ ...newVariant, variant_name: e.target.value })} style={{ width: '100px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
+                          <input type="number" step="0.01" min="0" placeholder="Price" value={newVariant.price} onChange={(e) => setNewVariant({ ...newVariant, price: e.target.value })} style={{ width: '80px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
+                          <input type="number" step="0.01" min="0" placeholder="Cost" value={newVariant.cost} onChange={(e) => setNewVariant({ ...newVariant, cost: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
+                          <button type="button" onClick={handleAddVariant} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Add size</button>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #eee' }}>
+                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#555' }}>Ingredients used (recipe)</label>
+                        {editingIngredients.length > 0 && (
+                          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px 0' }}>
+                            {editingIngredients.map((r) => (
+                              <li key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', fontSize: '13px' }}>
+                                <span style={{ flex: 1 }}>{r.ingredient_name || r.product_name} — {r.quantity_required} {r.unit}</span>
+                                <button type="button" onClick={() => handleDeleteRecipeIngredient(r.id)} style={{ padding: '2px 8px', fontSize: '11px', color: '#c33', border: '1px solid #c33', borderRadius: '4px', background: 'transparent', cursor: 'pointer' }}>Remove</button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                          <select value={newRecipeRow.ingredient_id} onChange={(e) => setNewRecipeRow({ ...newRecipeRow, ingredient_id: e.target.value })} style={{ minWidth: '140px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }}>
+                            <option value="">Select ingredient</option>
+                            {inventory.filter((i) => i.item_type === 'ingredient').map((ing) => (
+                              <option key={ing.product_id} value={ing.product_id}>{ing.product_name} ({ing.unit || '—'})</option>
+                            ))}
+                          </select>
+                          <input type="number" step="0.0001" min="0.0001" placeholder="Qty" value={newRecipeRow.quantity_required} onChange={(e) => setNewRecipeRow({ ...newRecipeRow, quantity_required: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
+                          <input type="text" placeholder="Unit" value={newRecipeRow.unit} onChange={(e) => setNewRecipeRow({ ...newRecipeRow, unit: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
+                          <button type="button" onClick={handleAddRecipeIngredient} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Add</button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
                   <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                     <button
                       type="button"
@@ -3017,6 +3361,29 @@ function Inventory() {
           borderLeft: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
           paddingLeft: '30px'
         }}>
+          {/* Item type filter: All | Products | Ingredients */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', marginTop: '3px' }}>
+            {['all', 'product', 'ingredient'].map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setInventoryFilter(f)}
+                style={{
+                  padding: '4px 12px',
+                  height: '26px',
+                  fontSize: '12px',
+                  borderRadius: '6px',
+                  border: inventoryFilter === f ? `1px solid rgba(${themeColorRgb}, 0.6)` : (isDarkMode ? '1px solid #444' : '1px solid #ccc'),
+                  backgroundColor: inventoryFilter === f ? `rgba(${themeColorRgb}, 0.25)` : (isDarkMode ? 'rgba(255,255,255,0.05)' : '#f5f5f5'),
+                  color: inventoryFilter === f ? `rgba(${themeColorRgb}, 1)` : (isDarkMode ? '#ccc' : '#555'),
+                  fontWeight: inventoryFilter === f ? 600 : 500,
+                  cursor: 'pointer'
+                }}
+              >
+                {f === 'all' ? 'All items' : f === 'product' ? 'Products' : 'Ingredients'}
+              </button>
+            ))}
+          </div>
           {/* Filter Buttons */}
           <div style={{ 
             display: 'flex', 

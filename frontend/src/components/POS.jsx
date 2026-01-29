@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { usePermissions, ProtectedComponent } from '../contexts/PermissionContext'
 import { useTheme } from '../contexts/ThemeContext'
 import BarcodeScanner from './BarcodeScanner'
 import CustomerDisplayPopup from './CustomerDisplayPopup'
-import { ScanBarcode, UserPlus, CheckCircle } from 'lucide-react'
+import { ScanBarcode, UserPlus, CheckCircle, Gift, X, AlertCircle } from 'lucide-react'
 import { formLabelStyle, inputBaseStyle, getInputFocusHandlers } from './FormStyles'
 
 function POS({ employeeId, employeeName }) {
+  const navigate = useNavigate()
   const { hasPermission } = usePermissions()
   const { themeColor, themeMode } = useTheme()
   
@@ -50,7 +52,7 @@ function POS({ employeeId, employeeName }) {
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [processing, setProcessing] = useState(false)
   const [message, setMessage] = useState(null)
-  const [toast, setToast] = useState(null) // { message, type: 'success' }
+  const [toast, setToast] = useState(null) // { message, type: 'success'|'warning', action?: { label, onClick } }
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [amountPaid, setAmountPaid] = useState('')
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
@@ -75,24 +77,46 @@ function POS({ employeeId, employeeName }) {
     enabled: false,
     require_email: false,
     require_phone: false,
-    require_both: false
+    require_both: false,
+    reward_type: 'points',
+    points_per_dollar: 1.0,
+    points_redemption_value: 0.01
   })
   const [customerSearchTerm, setCustomerSearchTerm] = useState('')
   const [customerSearchResults, setCustomerSearchResults] = useState([])
   const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [showCreateCustomer, setShowCreateCustomer] = useState(false)
+  const [showRewardsModal, setShowRewardsModal] = useState(false)
+  const [customerRewardsDetail, setCustomerRewardsDetail] = useState(null)
+  const [pointsToUse, setPointsToUse] = useState('')
+  const [rewardsDetailLoading, setRewardsDetailLoading] = useState(false)
   
   // Check if user can process sales
   const canProcessSale = hasPermission('process_sale')
   const canApplyDiscount = hasPermission('apply_discount')
   const canVoidTransaction = hasPermission('void_transaction')
 
-  // Auto-dismiss toast after 4 seconds
+  // Auto-dismiss toast after 4 seconds (longer if it has an action button)
   useEffect(() => {
     if (!toast) return
-    const t = setTimeout(() => setToast(null), 4000)
+    const delay = toast.action ? 10000 : 4000
+    const t = setTimeout(() => setToast(null), delay)
     return () => clearTimeout(t)
   }, [toast])
+
+  const checkRegisterOpen = async () => {
+    const sessionToken = localStorage.getItem('sessionToken')
+    if (!sessionToken) return false
+    try {
+      const res = await fetch(`/api/register/session?status=open`, {
+        headers: { 'Authorization': `Bearer ${sessionToken}` }
+      })
+      const data = await res.json()
+      return data.success && data.data && Array.isArray(data.data) && data.data.length > 0
+    } catch (e) {
+      return false
+    }
+  }
 
   // Check for exchange credit on mount
   useEffect(() => {
@@ -157,12 +181,16 @@ function POS({ employeeId, employeeName }) {
       const response = await fetch('/api/customer-rewards-settings')
       const data = await response.json()
       if (data.success && data.settings) {
-        setRewardsSettings({
+        setRewardsSettings(prev => ({
+          ...prev,
           enabled: data.settings.enabled === 1 || data.settings.enabled === true,
           require_email: data.settings.require_email === 1 || data.settings.require_email === true,
           require_phone: data.settings.require_phone === 1 || data.settings.require_phone === true,
-          require_both: data.settings.require_both === 1 || data.settings.require_both === true
-        })
+          require_both: data.settings.require_both === 1 || data.settings.require_both === true,
+          reward_type: data.settings.reward_type || 'points',
+          points_per_dollar: parseFloat(data.settings.points_per_dollar) || 1.0,
+          points_redemption_value: parseFloat(data.settings.points_redemption_value) || 0.01
+        }))
       }
     } catch (error) {
       console.error('Error loading rewards settings:', error)
@@ -195,7 +223,7 @@ function POS({ employeeId, employeeName }) {
   const fetchAllProducts = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`/api/inventory`)
+      const response = await fetch(`/api/inventory?item_type=product&include_variants=1`)
       const data = await response.json()
       
       if (data.data) {
@@ -271,7 +299,7 @@ function POS({ employeeId, employeeName }) {
     setLoading(true)
     try {
       // Always fetch fresh data from API to include newly created products
-      const response = await fetch(`/api/inventory`)
+      const response = await fetch(`/api/inventory?item_type=product&include_variants=1`)
       const data = await response.json()
       
       const productsToSearch = data.data || []
@@ -388,32 +416,43 @@ function POS({ employeeId, employeeName }) {
     }
   }
 
-  const addToCart = (product) => {
-    // Use functional update to ensure we're working with latest cart state
+  const [showVariantModal, setShowVariantModal] = useState(false)
+  const [productForVariant, setProductForVariant] = useState(null)
+
+  const addToCart = (product, variant = null) => {
+    if (product.variants && product.variants.length > 0 && !variant) {
+      setProductForVariant(product)
+      setShowVariantModal(true)
+      return
+    }
+    const unitPrice = variant ? parseFloat(variant.price) : (parseFloat(product.product_price) || 0)
+    const displayName = variant ? `${product.product_name} (${variant.variant_name})` : product.product_name
     setCart(prevCart => {
-      const existingItem = prevCart.find(item => item.product_id === product.product_id)
-      
+      const existingItem = prevCart.find(item =>
+        item.product_id === product.product_id && (item.variant_id || null) === (variant?.variant_id || null)
+      )
       if (existingItem) {
-        // Increase quantity
         return prevCart.map(item =>
-          item.product_id === product.product_id
+          item.product_id === product.product_id && (item.variant_id || null) === (variant?.variant_id || null)
             ? { ...item, quantity: item.quantity + 1 }
             : item
         )
-      } else {
-        // Add new item
-        return [...prevCart, {
-          product_id: product.product_id,
-          product_name: product.product_name,
-          sku: product.sku,
-          unit_price: parseFloat(product.product_price) || 0,
-          quantity: 1,
-          available_quantity: product.current_quantity || 0
-        }]
       }
+      return [...prevCart, {
+        product_id: product.product_id,
+        product_name: displayName,
+        sku: product.sku,
+        unit_price: unitPrice,
+        quantity: 1,
+        available_quantity: product.current_quantity || 0,
+        variant_id: variant?.variant_id || null,
+        variant_name: variant?.variant_name || null
+      }]
     })
     setSearchTerm('')
     setSearchResults([])
+    setShowVariantModal(false)
+    setProductForVariant(null)
   }
 
   const handleCategorySelect = (category) => {
@@ -433,7 +472,7 @@ function POS({ employeeId, employeeName }) {
     
     try {
       // Always fetch fresh data from API to include newly created products
-      const response = await fetch(`/api/inventory`)
+      const response = await fetch(`/api/inventory?item_type=product&include_variants=1`)
       const data = await response.json()
       
       // Update cached products list
@@ -447,37 +486,71 @@ function POS({ employeeId, employeeName }) {
         )].sort()
         setCategories(uniqueCategories)
         
+        // Normalize scanned barcode - remove all whitespace and convert to string
+        const normalizedScannedBarcode = barcode.toString().replace(/\s+/g, '')
+        
         // Debug logging
-        console.log('Scanned barcode:', barcode, 'Length:', barcode.length)
+        console.log('Scanned barcode:', barcode, 'Normalized:', normalizedScannedBarcode, 'Length:', normalizedScannedBarcode.length)
+        
+        // Helper function to normalize barcode for comparison
+        const normalizeBarcode = (barcodeValue) => {
+          if (!barcodeValue) return null
+          // Convert to string, remove all whitespace, and trim
+          return barcodeValue.toString().replace(/\s+/g, '').trim()
+        }
+        
+        // Helper function to compare barcodes (handles string/number and leading zeros)
+        const compareBarcodes = (barcode1, barcode2) => {
+          const norm1 = normalizeBarcode(barcode1)
+          const norm2 = normalizeBarcode(barcode2)
+          if (!norm1 || !norm2) return false
+          
+          // Exact match
+          if (norm1 === norm2) return true
+          
+          // Try numeric comparison (handles leading zeros)
+          const num1 = parseInt(norm1, 10)
+          const num2 = parseInt(norm2, 10)
+          if (!isNaN(num1) && !isNaN(num2) && num1 === num2) {
+            return true
+          }
+          
+          return false
+        }
         
         // Debug: log all products with barcodes
         const productsWithBarcodes = data.data.filter(p => p.barcode)
         console.log('Products with barcodes:', productsWithBarcodes.map(p => ({
           name: p.product_name,
           barcode: p.barcode,
-          barcodeLength: p.barcode?.length
+          normalized: normalizeBarcode(p.barcode),
+          barcodeLength: normalizeBarcode(p.barcode)?.length
         })))
         
-        // Try to find by barcode first (exact match)
-        let product = data.data.find(p => p.barcode && p.barcode.toString().trim() === barcode.toString().trim())
+        // Try to find by barcode first (exact match with normalization)
+        let product = data.data.find(p => p.barcode && compareBarcodes(p.barcode, normalizedScannedBarcode))
         
         // If not found and barcode is 13 digits (EAN13), try without leading 0 (12 digits)
-        if (!product && barcode.length === 13 && barcode.startsWith('0')) {
-          const barcode12 = barcode.substring(1)
+        if (!product && normalizedScannedBarcode.length === 13 && normalizedScannedBarcode.startsWith('0')) {
+          const barcode12 = normalizedScannedBarcode.substring(1)
           console.log('Trying 12-digit version:', barcode12)
-          product = data.data.find(p => p.barcode && p.barcode.toString().trim() === barcode12)
+          product = data.data.find(p => p.barcode && compareBarcodes(p.barcode, barcode12))
         }
         
         // If not found and barcode is 12 digits, try with leading 0 (13 digits)
-        if (!product && barcode.length === 12) {
-          const barcode13 = '0' + barcode
+        if (!product && normalizedScannedBarcode.length === 12 && /^\d+$/.test(normalizedScannedBarcode)) {
+          const barcode13 = '0' + normalizedScannedBarcode
           console.log('Trying 13-digit version:', barcode13)
-          product = data.data.find(p => p.barcode && (p.barcode.toString().trim() === barcode13 || p.barcode.toString().trim() === barcode))
+          product = data.data.find(p => p.barcode && compareBarcodes(p.barcode, barcode13))
         }
         
-        // If not found by barcode, try by SKU
+        // If not found by barcode, try by SKU (with normalization)
         if (!product) {
-          product = data.data.find(p => p.sku && p.sku.toString().trim() === barcode.toString().trim())
+          product = data.data.find(p => {
+            if (!p.sku) return false
+            const normalizedSku = normalizeBarcode(p.sku)
+            return normalizedSku && compareBarcodes(normalizedSku, normalizedScannedBarcode)
+          })
         }
         
         if (product) {
@@ -572,13 +645,13 @@ function POS({ employeeId, employeeName }) {
       if (data.success && data.matches && data.matches.length > 0) {
         const match = data.matches[0]
         // Get full product details
-        const productResponse = await fetch(`/api/inventory`)
+        const productResponse = await fetch(`/api/inventory?item_type=product&include_variants=1`)
         const productData = await productResponse.json()
         
         if (productData.data) {
           const product = productData.data.find(p => p.product_id === match.product_id)
           if (product) {
-            addToCart(product)
+            addToCart(product) // Will show variant modal if product has variants
             setMessage({ 
               type: 'success', 
               text: `Added ${product.product_name} to cart (${(match.confidence * 100).toFixed(0)}% confidence)` 
@@ -605,21 +678,20 @@ function POS({ employeeId, employeeName }) {
     }
   }
 
-  const updateQuantity = (productId, newQuantity) => {
+  const updateQuantity = (productId, newQuantity, variantId = null) => {
     if (newQuantity <= 0) {
-      removeFromCart(productId)
+      removeFromCart(productId, variantId)
       return
     }
-    
     setCart(cart.map(item =>
-      item.product_id === productId
+      item.product_id === productId && (item.variant_id || null) === (variantId ?? null)
         ? { ...item, quantity: newQuantity }
         : item
     ))
   }
 
-  const removeFromCart = (productId) => {
-    setCart(cart.filter(item => item.product_id !== productId))
+  const removeFromCart = (productId, variantId = null) => {
+    setCart(cart.filter(item => !(item.product_id === productId && (item.variant_id || null) === (variantId ?? null))))
   }
 
   const calculateSubtotal = () => {
@@ -835,27 +907,21 @@ function POS({ employeeId, employeeName }) {
   }
 
   const searchCustomers = async (term) => {
-    if (term.length < 2) {
+    if (!term || term.length < 1) {
       setCustomerSearchResults([])
       return
     }
-    
     try {
-      const response = await fetch(`/api/customers`)
+      const response = await fetch(`/api/customers/search?q=${encodeURIComponent(term)}`)
       const data = await response.json()
-      
-      if (data.data) {
-        const termLower = term.toLowerCase()
-        const filtered = data.data.filter(customer => {
-          const name = (customer.customer_name || '').toLowerCase()
-          const email = (customer.email || '').toLowerCase()
-          const phone = (customer.phone || '').toLowerCase()
-          return name.includes(termLower) || email.includes(termLower) || phone.includes(termLower)
-        })
-        setCustomerSearchResults(filtered.slice(0, 10))
+      if (data.success && data.data) {
+        setCustomerSearchResults(data.data.slice(0, 10))
+      } else {
+        setCustomerSearchResults([])
       }
     } catch (error) {
       console.error('Error searching customers:', error)
+      setCustomerSearchResults([])
     }
   }
 
@@ -869,6 +935,65 @@ function POS({ employeeId, employeeName }) {
     })
     setCustomerSearchTerm('')
     setCustomerSearchResults([])
+    setShowRewardsModal(true)
+    setPointsToUse('')
+    setCustomerRewardsDetail(null)
+  }
+
+  useEffect(() => {
+    if (showRewardsModal && selectedCustomer?.customer_id) {
+      setRewardsDetailLoading(true)
+      fetch(`/api/customers/${selectedCustomer.customer_id}/rewards`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.data) {
+            setCustomerRewardsDetail(data.data)
+          }
+          setRewardsDetailLoading(false)
+        })
+        .catch(() => setRewardsDetailLoading(false))
+    }
+  }, [showRewardsModal, selectedCustomer?.customer_id])
+
+  const addPointsRedemptionToCart = (points) => {
+    const p = parseInt(points, 10)
+    if (!selectedCustomer || isNaN(p) || p <= 0) return
+    const available = (customerRewardsDetail?.loyalty_points ?? selectedCustomer.loyalty_points ?? 0) || 0
+    if (p > available) {
+      setToast({ message: `Customer has ${available} points`, type: 'error' })
+      return
+    }
+    const value = rewardsSettings.points_redemption_value || 0.01
+    const discountAmount = p * value
+    const existing = cart.find(item => item.is_points_redemption)
+    if (existing) {
+      setCart(prev => prev.map(item =>
+        item.is_points_redemption
+          ? { ...item, points_used: p, quantity: 1, unit_price: -discountAmount }
+          : item
+      ))
+    } else {
+      setCart(prev => [...prev, {
+        product_id: 'POINTS_REDEMPTION',
+        product_name: 'Points redemption',
+        sku: 'POINTS',
+        unit_price: -discountAmount,
+        quantity: 1,
+        discount: 0,
+        tax_rate: taxRate,
+        available_quantity: 999,
+        is_points_redemption: true,
+        points_used: p
+      }])
+    }
+    setToast({ message: `${p} points ($${discountAmount.toFixed(2)}) added to cart`, type: 'success' })
+    setShowRewardsModal(false)
+    setPointsToUse('')
+  }
+
+  const removePointsRedemptionFromCart = () => {
+    setCart(prev => prev.filter(item => !item.is_points_redemption))
+    setToast({ message: 'Points redemption removed from cart', type: 'success' })
   }
 
   const handleCreateCustomer = () => {
@@ -886,6 +1011,8 @@ function POS({ employeeId, employeeName }) {
     setCustomerInfo({ name: '', email: '', phone: '', address: '' })
     setCustomerSearchTerm('')
     setCustomerSearchResults([])
+    setShowRewardsModal(false)
+    setCart(prev => prev.filter(item => !item.is_points_redemption))
   }
 
   const handleCalculatorInput = (value) => {
@@ -931,22 +1058,27 @@ function POS({ employeeId, employeeName }) {
       const exchangeCreditId = exchangeCreditItem?.exchange_credit_id
       const exchangeReturnId = exchangeCreditItem?.exchange_return_id
       
-      // Prepare items with all required fields for order creation (exclude exchange credit)
+      // Points redemption: get points used from cart (single line)
+      const pointsRedemptionItem = cart.find(item => item.is_points_redemption)
+      const pointsUsed = pointsRedemptionItem ? (pointsRedemptionItem.points_used || 0) : 0
+
+      // Prepare items with all required fields for order creation (exclude exchange credit and points redemption)
       const items = cart
-        .filter(item => !item.is_exchange_credit && item.product_id !== 'EXCHANGE_CREDIT')
+        .filter(item => !item.is_exchange_credit && item.product_id !== 'EXCHANGE_CREDIT' && !item.is_points_redemption && item.product_id !== 'POINTS_REDEMPTION')
         .map(item => ({
           product_id: item.product_id,
           quantity: parseInt(item.quantity) || 1,
           unit_price: parseFloat(item.unit_price) || 0,
           discount: parseFloat(item.discount) || 0,
-          tax_rate: parseFloat(item.tax_rate) || taxRate || 0.08  // Use item-specific tax_rate or order tax_rate
+          tax_rate: parseFloat(item.tax_rate) || taxRate || 0.08,
+          ...(item.variant_id ? { variant_id: item.variant_id } : {})
         }))
       
       // Log items being sent for debugging
       console.log('Items being sent to create_order:', items)
 
       // Prepare customer info and order type for order creation
-      let customerId = null
+      let customerId = selectedCustomer?.customer_id || null
       const orderTypeToSave = orderType || null
       // Include customer info if customer is selected/entered (optional for rewards)
       let customerInfoToSave = null
@@ -966,7 +1098,10 @@ function POS({ employeeId, employeeName }) {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${sessionToken}`
             },
-            body: JSON.stringify({ items: items })
+            body: JSON.stringify({
+              items: items,
+              customer_id: customerId || undefined
+            })
           })
           
           const transactionResult = await transactionResponse.json()
@@ -1126,7 +1261,9 @@ function POS({ employeeId, employeeName }) {
               tip: selectedTip || 0,
               discount: exchangeCreditAmount, // Apply exchange credit as discount
               order_type: orderTypeToSave,
-              customer_info: customerInfoToSave
+              customer_info: customerInfoToSave,
+              customer_id: customerId,
+              points_used: pointsUsed
             })
           })
           result = await response.json()
@@ -1208,6 +1345,74 @@ function POS({ employeeId, employeeName }) {
       position: 'relative',
       fontFamily: '"Product Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     }}>
+      {/* Size / Variant selection modal */}
+      {showVariantModal && productForVariant && productForVariant.variants && productForVariant.variants.length > 0 && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 999,
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }} onClick={() => { setShowVariantModal(false); setProductForVariant(null) }}>
+          <div style={{
+            backgroundColor: '#fff',
+            borderRadius: '12px',
+            padding: '24px',
+            maxWidth: '360px',
+            width: '90%',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 600 }}>Choose size</div>
+            <div style={{ marginBottom: '8px', fontSize: '14px', color: '#666' }}>{productForVariant.product_name}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {productForVariant.variants.map(v => (
+                <button
+                  key={v.variant_id}
+                  type="button"
+                  onClick={() => addToCart(productForVariant, v)}
+                  style={{
+                    padding: '12px 16px',
+                    border: `2px solid rgba(${themeColorRgb}, 0.5)`,
+                    borderRadius: '8px',
+                    backgroundColor: `rgba(${themeColorRgb}, 0.08)`,
+                    fontSize: '15px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                >
+                  <span>{v.variant_name}</span>
+                  <span>${parseFloat(v.price).toFixed(2)}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => { setShowVariantModal(false); setProductForVariant(null) }}
+              style={{
+                marginTop: '16px',
+                width: '100%',
+                padding: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '8px',
+                backgroundColor: '#f5f5f5',
+                cursor: 'pointer',
+                fontSize: '14px'
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Customer Display Full Screen Overlay */}
       {showCustomerDisplay && (
         <div style={{
@@ -1614,50 +1819,54 @@ function POS({ employeeId, employeeName }) {
                       ${(parseFloat(item.unit_price) || 0).toFixed(2)}
                     </td>
                     <td style={{ textAlign: 'center', padding: '12px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                        <button
-                          onClick={() => updateQuantity(item.product_id, item.quantity - 1)}
-                          disabled={showPaymentForm}
-                          style={{
-                            width: '28px',
-                            height: '28px',
-                            border: 'none',
-                            backgroundColor: 'transparent',
-                            borderRadius: '4px',
-                            cursor: showPaymentForm ? 'not-allowed' : 'pointer',
-                            fontSize: '18px',
-                            lineHeight: '1',
-                            color: themeColor,
-                            opacity: showPaymentForm ? 0.3 : 1
-                          }}
-                        >-</button>
-                        <span style={{ minWidth: '30px', textAlign: 'center', fontWeight: 500 }}>
-                          {item.quantity}
-                        </span>
-                        <button
-                          onClick={() => updateQuantity(item.product_id, item.quantity + 1)}
-                          disabled={showPaymentForm || item.quantity >= item.available_quantity}
-                          style={{
-                            width: '28px',
-                            height: '28px',
-                            border: 'none',
-                            backgroundColor: 'transparent',
-                            borderRadius: '4px',
-                            cursor: (showPaymentForm || item.quantity >= item.available_quantity) ? 'not-allowed' : 'pointer',
-                            fontSize: '18px',
-                            lineHeight: '1',
-                            color: themeColor,
-                            opacity: (showPaymentForm || item.quantity >= item.available_quantity) ? 0.3 : 1
-                          }}
-                        >+</button>
-                      </div>
+                      {item.is_points_redemption ? (
+                        <span style={{ fontWeight: 500 }}>{item.points_used || 0} pts</span>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                          <button
+                            onClick={() => updateQuantity(item.product_id, item.quantity - 1, item.variant_id)}
+                            disabled={showPaymentForm}
+                            style={{
+                              width: '28px',
+                              height: '28px',
+                              border: 'none',
+                              backgroundColor: 'transparent',
+                              borderRadius: '4px',
+                              cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                              fontSize: '18px',
+                              lineHeight: '1',
+                              color: themeColor,
+                              opacity: showPaymentForm ? 0.3 : 1
+                            }}
+                          >-</button>
+                          <span style={{ minWidth: '30px', textAlign: 'center', fontWeight: 500 }}>
+                            {item.quantity}
+                          </span>
+                          <button
+                            onClick={() => updateQuantity(item.product_id, item.quantity + 1, item.variant_id)}
+                            disabled={showPaymentForm || item.quantity >= item.available_quantity}
+                            style={{
+                              width: '28px',
+                              height: '28px',
+                              border: 'none',
+                              backgroundColor: 'transparent',
+                              borderRadius: '4px',
+                              cursor: (showPaymentForm || item.quantity >= item.available_quantity) ? 'not-allowed' : 'pointer',
+                              fontSize: '18px',
+                              lineHeight: '1',
+                              color: themeColor,
+                              opacity: (showPaymentForm || item.quantity >= item.available_quantity) ? 0.3 : 1
+                            }}
+                          >+</button>
+                        </div>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right', padding: '12px', fontFamily: '"Product Sans", sans-serif', fontWeight: 500 }}>
                       ${(parseFloat(item.unit_price) * item.quantity || 0).toFixed(2)}
                     </td>
                     <td style={{ padding: '12px' }}>
                       <button
-                        onClick={() => removeFromCart(item.product_id)}
+                        onClick={() => removeFromCart(item.product_id, item.variant_id)}
                         disabled={showPaymentForm}
                         style={{
                           border: 'none',
@@ -2015,10 +2224,24 @@ function POS({ employeeId, employeeName }) {
               </button>
             }>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!showPaymentForm) {
+                    const registerOpen = await checkRegisterOpen()
+                    if (!registerOpen) {
+                      setToast({
+                        message: 'Register is closed. Open the register to process payments.',
+                        type: 'warning',
+                        action: {
+                          label: 'Open Register',
+                          onClick: () => {
+                            setToast(null)
+                            navigate('/settings?tab=cash')
+                          }
+                        }
+                      })
+                      return
+                    }
                     // Only check requirements if rewards are enabled AND customer is selected/entered
-                    // Customer lookup is optional, so we don't force it
                     if (rewardsSettings.enabled && (selectedCustomer || customerInfo.name) && !checkCustomerInfoRequirements()) {
                       setShowCustomerInfoModal(true)
                       return
@@ -3105,6 +3328,134 @@ function POS({ employeeId, employeeName }) {
         </div>
       )}
 
+      {/* Customer Rewards Modal - shown when a customer is selected */}
+      {showRewardsModal && selectedCustomer && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1500
+          }}
+          onClick={() => setShowRewardsModal(false)}
+        >
+          <div
+            style={{
+              backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+              borderRadius: '12px',
+              maxWidth: '420px',
+              width: '90%',
+              maxHeight: '85vh',
+              overflow: 'auto',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+              padding: '20px'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Gift size={22} style={{ color: `rgb(${themeColorRgb})` }} />
+                Customer Rewards
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowRewardsModal(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <p style={{ margin: '0 0 16px', fontSize: '14px', color: '#666' }}>
+              {selectedCustomer.customer_name || 'Customer'}
+            </p>
+            {rewardsDetailLoading ? (
+              <p style={{ color: '#666' }}>Loading…</p>
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                  <div style={{ padding: '12px', backgroundColor: '#f5f5f5', borderRadius: '8px', minWidth: '100px' }}>
+                    <div style={{ fontSize: '12px', color: '#666' }}>Points</div>
+                    <div style={{ fontSize: '20px', fontWeight: 700 }}>{customerRewardsDetail?.loyalty_points ?? selectedCustomer.loyalty_points ?? 0}</div>
+                  </div>
+                  <div style={{ padding: '12px', backgroundColor: '#f5f5f5', borderRadius: '8px', minWidth: '100px' }}>
+                    <div style={{ fontSize: '12px', color: '#666' }}>Orders</div>
+                    <div style={{ fontSize: '20px', fontWeight: 700 }}>{customerRewardsDetail?.order_count ?? 0}</div>
+                  </div>
+                  <div style={{ padding: '12px', backgroundColor: '#f5f5f5', borderRadius: '8px', minWidth: '100px' }}>
+                    <div style={{ fontSize: '12px', color: '#666' }}>Total spent</div>
+                    <div style={{ fontSize: '18px', fontWeight: 700 }}>${(customerRewardsDetail?.total_spent ?? 0).toFixed(2)}</div>
+                  </div>
+                </div>
+                {customerRewardsDetail?.popular_items?.length > 0 && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '6px' }}>Popular items</div>
+                    <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '13px' }}>
+                      {customerRewardsDetail.popular_items.map((it, i) => (
+                        <li key={i}>{it.product_name} (×{it.qty})</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {rewardsSettings.reward_type === 'points' && (customerRewardsDetail?.loyalty_points ?? selectedCustomer.loyalty_points ?? 0) > 0 && (
+                  <div style={{ borderTop: '1px solid #eee', paddingTop: '16px' }}>
+                    <div style={{ fontSize: '13px', marginBottom: '8px' }}>Use points (100 pts = $1)</div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        type="number"
+                        min={1}
+                        max={customerRewardsDetail?.loyalty_points ?? selectedCustomer.loyalty_points ?? 0}
+                        value={pointsToUse}
+                        onChange={e => setPointsToUse(e.target.value.replace(/\D/g, ''))}
+                        placeholder="Points to use"
+                        style={{
+                          ...inputBaseStyle(isDarkMode, themeColorRgb),
+                          width: '100px',
+                          padding: '8px'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setPointsToUse(String(customerRewardsDetail?.loyalty_points ?? selectedCustomer.loyalty_points ?? 0))}
+                        style={{
+                          padding: '8px 12px',
+                          backgroundColor: `rgba(${themeColorRgb}, 0.2)`,
+                          border: `1px solid rgba(${themeColorRgb}, 0.5)`,
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '13px'
+                        }}
+                      >
+                        Use all
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addPointsRedemptionToCart(pointsToUse)}
+                        disabled={!pointsToUse || parseInt(pointsToUse, 10) <= 0}
+                        style={{
+                          padding: '8px 16px',
+                          backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                          fontWeight: 600
+                        }}
+                      >
+                        Add to cart
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Barcode Scanner Modal */}
       {showBarcodeScanner && (
         <BarcodeScanner
@@ -3137,7 +3488,7 @@ function POS({ employeeId, employeeName }) {
         </div>
       )}
 
-      {/* Toast notification for order success */}
+      {/* Toast notification for order success or register closed */}
       {toast && (
         <div
           role="status"
@@ -3149,7 +3500,7 @@ function POS({ employeeId, employeeName }) {
             transform: 'translateX(-50%)',
             display: 'flex',
             alignItems: 'center',
-            gap: '10px',
+            gap: '12px',
             padding: '12px 20px',
             backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
             color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
@@ -3161,9 +3512,34 @@ function POS({ employeeId, employeeName }) {
             fontWeight: 500,
             maxWidth: '90vw'
           }}
+          onClick={(e) => { if (!toast.action) setToast(null); e.stopPropagation() }}
         >
-          <CheckCircle size={20} style={{ flexShrink: 0, color: `rgb(${themeColorRgb})` }} />
-          <span>{toast.message}</span>
+          {toast.type === 'warning' ? (
+            <AlertCircle size={20} style={{ flexShrink: 0, color: 'var(--warning, #e6a800)' }} />
+          ) : (
+            <CheckCircle size={20} style={{ flexShrink: 0, color: `rgb(${themeColorRgb})` }} />
+          )}
+          <span style={{ flex: 1 }}>{toast.message}</span>
+          {toast.action && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); toast.action?.onClick?.() }}
+              style={{
+                flexShrink: 0,
+                padding: '8px 16px',
+                backgroundColor: `rgba(${themeColorRgb}, 0.9)`,
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
     </div>

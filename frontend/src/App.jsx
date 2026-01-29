@@ -7,7 +7,6 @@ import Login from './components/Login'
 import Dashboard from './components/Dashboard'
 import POS from './components/POS'
 import Tables from './pages/Tables'
-import Returns from './pages/Returns'
 import RecentOrders from './pages/RecentOrders'
 import Inventory from './pages/Inventory'
 import Calendar from './components/Calendar'
@@ -19,6 +18,8 @@ import StatisticsPage from './pages/Statistics'
 import SettingsPage from './pages/Settings'
 import Accounting from './pages/Accounting'
 import CashRegister from './pages/CashRegister'
+import Customers from './pages/Customers'
+import Home from './pages/Home'
 import './index.css'
 
 function ProtectedRoute({ children, sessionToken, employee, onLogout }) {
@@ -83,13 +84,6 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
         <ProtectedRoute sessionToken={sessionToken} employee={employee} onLogout={onLogout}>
           <Layout employee={employee} onLogout={onLogout}>
             <Tables />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/returns" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} onLogout={onLogout}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <Returns />
           </Layout>
         </ProtectedRoute>
       } />
@@ -177,11 +171,18 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
           </Layout>
         </ProtectedRoute>
       } />
+      <Route path="/customers" element={
+        <ProtectedRoute sessionToken={sessionToken} employee={employee} onLogout={onLogout}>
+          <Layout employee={employee} onLogout={onLogout}>
+            <Customers />
+          </Layout>
+        </ProtectedRoute>
+      } />
       <Route path="/" element={
         sessionToken && employee ? (
           <Navigate to="/dashboard" replace />
         ) : (
-          <Navigate to="/login" replace />
+          <Home />
         )
       } />
       <Route path="/onboarding" element={<Navigate to="/login" replace />} />
@@ -205,8 +206,13 @@ function Layout({ children, employee, onLogout }) {
   const { hasPermission } = usePermissions()
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
+    <div style={{ minHeight: '100vh', paddingTop: '52px', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
       <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000,
         backgroundColor: 'var(--bg-primary, #fff)',
         borderBottom: '3px solid var(--border-color, #ddd)',
         padding: '12px 20px',

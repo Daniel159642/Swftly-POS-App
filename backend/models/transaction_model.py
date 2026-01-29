@@ -13,6 +13,7 @@ import os
 # Add parent directory to path to import database_postgres
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from database_postgres import get_cursor, get_connection
+from psycopg2.extras import RealDictCursor
 
 
 class Transaction:
@@ -121,8 +122,8 @@ class TransactionRepository:
             # Build base query
             query = """
                 SELECT DISTINCT t.*
-                FROM transactions t
-                LEFT JOIN transaction_lines tl ON t.id = tl.transaction_id
+                FROM accounting.transactions t
+                LEFT JOIN accounting.transaction_lines tl ON t.id = tl.transaction_id
                 WHERE 1=1
             """
             params = []
@@ -162,7 +163,8 @@ class TransactionRepository:
             # Get total count - need to modify query for counting
             count_query = query.replace('SELECT DISTINCT t.*', 'SELECT COUNT(DISTINCT t.id)')
             cursor.execute(count_query, params)
-            total = cursor.fetchone()[0] if cursor.rowcount > 0 else 0
+            row = cursor.fetchone()
+            total = (list(row.values())[0] or 0) if row else 0
             
             # Add ordering and pagination
             query += " ORDER BY t.transaction_date DESC, t.id DESC LIMIT %s OFFSET %s"
@@ -180,8 +182,8 @@ class TransactionRepository:
                 # Get lines for this transaction
                 cursor.execute("""
                     SELECT tl.*, a.account_name, a.account_number
-                    FROM transaction_lines tl
-                    JOIN accounts a ON tl.account_id = a.id
+                    FROM accounting.transaction_lines tl
+                    JOIN accounting.accounts a ON tl.account_id = a.id
                     WHERE tl.transaction_id = %s
                     ORDER BY tl.line_number
                 """, (txn.id,))
@@ -210,7 +212,7 @@ class TransactionRepository:
         """Find transaction by ID with lines"""
         cursor = get_cursor()
         try:
-            cursor.execute("SELECT * FROM transactions WHERE id = %s", (transaction_id,))
+            cursor.execute("SELECT * FROM accounting.transactions WHERE id = %s", (transaction_id,))
             txn_row = cursor.fetchone()
             
             if not txn_row:
@@ -221,8 +223,8 @@ class TransactionRepository:
             # Get lines
             cursor.execute("""
                 SELECT tl.*, a.account_name, a.account_number
-                FROM transaction_lines tl
-                JOIN accounts a ON tl.account_id = a.id
+                FROM accounting.transaction_lines tl
+                JOIN accounting.accounts a ON tl.account_id = a.id
                 WHERE tl.transaction_id = %s
                 ORDER BY tl.line_number
             """, (transaction_id,))
@@ -242,7 +244,7 @@ class TransactionRepository:
         """Find transaction by transaction number"""
         cursor = get_cursor()
         try:
-            cursor.execute("SELECT * FROM transactions WHERE transaction_number = %s", (transaction_number,))
+            cursor.execute("SELECT * FROM accounting.transactions WHERE transaction_number = %s", (transaction_number,))
             txn_row = cursor.fetchone()
             
             if not txn_row:
@@ -253,8 +255,8 @@ class TransactionRepository:
             # Get lines
             cursor.execute("""
                 SELECT tl.*, a.account_name, a.account_number
-                FROM transaction_lines tl
-                JOIN accounts a ON tl.account_id = a.id
+                FROM accounting.transaction_lines tl
+                JOIN accounting.accounts a ON tl.account_id = a.id
                 WHERE tl.transaction_id = %s
                 ORDER BY tl.line_number
             """, (txn.id,))
@@ -272,8 +274,8 @@ class TransactionRepository:
     @staticmethod
     def create(data: Dict[str, Any], user_id: int) -> Dict[str, Any]:
         """Create a new transaction with lines"""
-        cursor = get_cursor()
         conn = get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         try:
             # psycopg2 transactions are implicit - no need for explicit begin()
             
@@ -281,12 +283,12 @@ class TransactionRepository:
             if not TransactionRepository.validate_balance(data.get('lines', [])):
                 raise ValueError('Transaction is not balanced. Total debits must equal total credits.')
             
-            # Generate transaction number (database trigger will handle this if NULL)
-            transaction_number = data.get('transaction_number')
+            # Generate transaction number (database trigger will handle if empty)
+            transaction_number = data.get('transaction_number') or ''
             
             # Insert transaction
             cursor.execute("""
-                INSERT INTO transactions (
+                INSERT INTO accounting.transactions (
                     transaction_number, transaction_date, transaction_type,
                     reference_number, description, is_posted, created_by, updated_by
                 ) VALUES (%s, %s, %s, %s, %s, false, %s, %s)
@@ -308,7 +310,7 @@ class TransactionRepository:
             lines = []
             for i, line_data in enumerate(data.get('lines', []), 1):
                 cursor.execute("""
-                    INSERT INTO transaction_lines (
+                    INSERT INTO accounting.transaction_lines (
                         transaction_id, account_id, line_number, debit_amount, credit_amount,
                         description, entity_type, entity_id, class_id, location_id, billable
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -341,12 +343,13 @@ class TransactionRepository:
             raise
         finally:
             cursor.close()
+            conn.close()
     
     @staticmethod
     def update(transaction_id: int, data: Dict[str, Any], user_id: int) -> Dict[str, Any]:
         """Update an existing transaction"""
-        cursor = get_cursor()
         conn = get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         try:
             # Check if transaction exists
             existing = TransactionRepository.find_by_id(transaction_id)
@@ -373,7 +376,7 @@ class TransactionRepository:
                 update_values.append(transaction_id)
                 
                 cursor.execute(
-                    f"UPDATE transactions SET {', '.join(update_fields)} WHERE id = %s",
+                    f"UPDATE accounting.transactions SET {', '.join(update_fields)} WHERE id = %s",
                     update_values
                 )
             
@@ -384,12 +387,12 @@ class TransactionRepository:
                     raise ValueError('Transaction is not balanced. Total debits must equal total credits.')
                 
                 # Delete existing lines
-                cursor.execute("DELETE FROM transaction_lines WHERE transaction_id = %s", (transaction_id,))
+                cursor.execute("DELETE FROM accounting.transaction_lines WHERE transaction_id = %s", (transaction_id,))
                 
                 # Insert new lines
                 for i, line_data in enumerate(data['lines'], 1):
                     cursor.execute("""
-                        INSERT INTO transaction_lines (
+                        INSERT INTO accounting.transaction_lines (
                             transaction_id, account_id, line_number, debit_amount, credit_amount,
                             description, entity_type, entity_id, class_id, location_id, billable
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -416,12 +419,13 @@ class TransactionRepository:
             raise
         finally:
             cursor.close()
+            conn.close()
     
     @staticmethod
     def delete(transaction_id: int) -> bool:
         """Delete a transaction"""
-        cursor = get_cursor()
         conn = get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         try:
             # Check if transaction exists and can be deleted
             existing = TransactionRepository.find_by_id(transaction_id)
@@ -431,7 +435,7 @@ class TransactionRepository:
             if existing['transaction']['is_posted']:
                 raise ValueError('Cannot delete posted transaction. Unpost or void it first.')
             
-            cursor.execute("DELETE FROM transactions WHERE id = %s", (transaction_id,))
+            cursor.execute("DELETE FROM accounting.transactions WHERE id = %s", (transaction_id,))
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
@@ -439,103 +443,89 @@ class TransactionRepository:
             raise
         finally:
             cursor.close()
+            conn.close()
     
     @staticmethod
     def post_transaction(transaction_id: int, user_id: int) -> Dict[str, Any]:
         """Post a transaction"""
-        cursor = get_cursor()
         conn = get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         try:
-            # Check transaction exists
             existing = TransactionRepository.find_by_id(transaction_id)
             if not existing:
                 raise ValueError('Transaction not found')
-            
             if existing['transaction']['is_posted']:
                 raise ValueError('Transaction is already posted')
-            
             if existing['transaction']['is_void']:
                 raise ValueError('Cannot post voided transaction')
-            
-            # Validate balance
             if not TransactionRepository.validate_balance(existing['lines']):
                 raise ValueError('Cannot post unbalanced transaction')
-            
-            # Use database function to post
-            cursor.execute("SELECT post_transaction(%s)", (transaction_id,))
-            result = cursor.fetchone()
-            
-            if not result or not result[0]:
-                raise ValueError('Failed to post transaction')
-            
+            cursor.execute("""
+                UPDATE accounting.transactions
+                SET is_posted = true, updated_by = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (user_id, transaction_id))
             conn.commit()
-            
             return TransactionRepository.find_by_id(transaction_id)
         except Exception as e:
             conn.rollback()
             raise
         finally:
             cursor.close()
+            conn.close()
     
     @staticmethod
     def unpost_transaction(transaction_id: int, user_id: int) -> Dict[str, Any]:
         """Unpost a transaction"""
-        cursor = get_cursor()
         conn = get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         try:
             existing = TransactionRepository.find_by_id(transaction_id)
             if not existing:
                 raise ValueError('Transaction not found')
-            
             if not existing['transaction']['is_posted']:
                 raise ValueError('Transaction is not posted')
-            
             if existing['transaction']['is_void']:
                 raise ValueError('Cannot unpost voided transaction')
-            
             cursor.execute("""
-                UPDATE transactions 
-                SET is_posted = false, updated_by = %s, updated_at = CURRENT_TIMESTAMP 
+                UPDATE accounting.transactions
+                SET is_posted = false, updated_by = %s, updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
             """, (user_id, transaction_id))
-            
             conn.commit()
-            
             return TransactionRepository.find_by_id(transaction_id)
         except Exception as e:
             conn.rollback()
             raise
         finally:
             cursor.close()
+            conn.close()
     
     @staticmethod
     def void_transaction(transaction_id: int, reason: str, user_id: int) -> Dict[str, Any]:
         """Void a transaction"""
-        cursor = get_cursor()
         conn = get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         try:
             existing = TransactionRepository.find_by_id(transaction_id)
             if not existing:
                 raise ValueError('Transaction not found')
-            
             if existing['transaction']['is_void']:
                 raise ValueError('Transaction is already voided')
-            
-            # Use database function to void
-            cursor.execute("SELECT void_transaction(%s, %s)", (transaction_id, reason))
-            result = cursor.fetchone()
-            
-            if not result or not result[0]:
-                raise ValueError('Failed to void transaction')
-            
+            cursor.execute("""
+                UPDATE accounting.transactions
+                SET is_void = true, void_reason = %s, void_date = CURRENT_DATE,
+                    updated_by = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (reason or '', user_id, transaction_id))
             conn.commit()
-            
             return TransactionRepository.find_by_id(transaction_id)
         except Exception as e:
             conn.rollback()
             raise
         finally:
             cursor.close()
+            conn.close()
     
     @staticmethod
     def validate_balance(lines: List[Dict[str, Any]]) -> bool:
@@ -567,9 +557,9 @@ class TransactionRepository:
                     tl.debit_amount,
                     tl.credit_amount,
                     tl.description as line_description
-                FROM transactions t
-                JOIN transaction_lines tl ON t.id = tl.transaction_id
-                JOIN accounts a ON tl.account_id = a.id
+                FROM accounting.transactions t
+                JOIN accounting.transaction_lines tl ON t.id = tl.transaction_id
+                JOIN accounting.accounts a ON tl.account_id = a.id
                 WHERE t.is_posted = true AND t.is_void = false
             """
             params = []

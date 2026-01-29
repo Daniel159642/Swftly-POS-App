@@ -5,10 +5,14 @@ Supports multiple stores, each with their own provider configuration
 """
 
 import smtplib
+import logging
 from email.mime.text import MIMEText
 from typing import Optional, Dict, Any
 import re
 from database import get_connection
+from psycopg2.extras import RealDictCursor
+
+logger = logging.getLogger(__name__)
 
 class EmailToAWSSMSService:
     """SMS service: Start with email (free), migrate to AWS SNS"""
@@ -16,12 +20,13 @@ class EmailToAWSSMSService:
     def __init__(self):
         pass
         
-        # Carrier email-to-SMS gateways (US carriers)
+        # Carrier email-to-SMS gateways (US). NOTE: ATT (June 2025), Verizon, T-Mobile (late 2024)
+        # have discontinued these; domains may not resolve or accept mail. Try Sprint first, then others.
         self.carrier_gateways = {
-            'att': '@txt.att.net',
+            'sprint': '@messaging.sprintpcs.com',
             'verizon': '@vtext.com',
             'tmobile': '@tmomail.net',
-            'sprint': '@messaging.sprintpcs.com',
+            'att': '@txt.att.net',
             'boost': '@sms.myboostmobile.com',
             'cricket': '@sms.cricketwireless.net',
             'uscellular': '@email.uscc.net',
@@ -33,7 +38,7 @@ class EmailToAWSSMSService:
     def get_store_sms_settings(self, store_id: int) -> Optional[Dict[str, Any]]:
         """Get SMS settings for a store"""
         conn = get_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("""
             SELECT * FROM sms_settings 
             WHERE store_id = %s AND is_active = 1
@@ -43,43 +48,64 @@ class EmailToAWSSMSService:
         return dict(row) if row else None
     
     def clean_phone_number(self, phone_number: str) -> str:
-        """Clean phone number to digits only"""
-        return ''.join(filter(str.isdigit, phone_number))
+        """Clean phone number to digits only; normalize US 11-digit (1+10) to 10 digits."""
+        digits = ''.join(filter(str.isdigit, str(phone_number or '')))
+        if len(digits) == 11 and digits.startswith('1'):
+            return digits[1:]
+        return digits
     
-    def send_via_email(self, phone_number: str, message: str, settings: Dict) -> Dict[str, Any]:
-        """Send SMS via email-to-SMS gateways (FREE)"""
+    def send_via_email(self, phone_number: str, message: str, settings: Dict,
+                       carrier_preference: Optional[str] = None) -> Dict[str, Any]:
+        """Send SMS via email-to-SMS gateways (FREE). carrier_preference: att, verizon, tmobile, sprint (try only that gateway first)."""
+        raw_phone = str(phone_number or '').strip()
         phone_clean = self.clean_phone_number(phone_number)
         
-        if len(phone_clean) != 10:
-            return {'success': False, 'error': 'US phone numbers must be 10 digits'}
+        print(f'[SMS] Phone: raw={raw_phone!r} -> cleaned={phone_clean!r} (len={len(phone_clean)}) carrier_pref={carrier_preference!r}')
+        logger.info('[SMS] send_via_email: raw_phone=%r -> cleaned=%r (len=%d) carrier_pref=%s',
+                    raw_phone, phone_clean, len(phone_clean), carrier_preference)
         
-        # Try all major carrier gateways
-        gateways_to_try = [
-            f'{phone_clean}{self.carrier_gateways["att"]}',
-            f'{phone_clean}{self.carrier_gateways["verizon"]}',
-            f'{phone_clean}{self.carrier_gateways["tmobile"]}',
-            f'{phone_clean}{self.carrier_gateways["sprint"]}',
+        if len(phone_clean) != 10:
+            err = f'US phone must be 10 digits (got {len(phone_clean)} after cleaning: {phone_clean!r})'
+            print(f'[SMS] Validation failed: {err}')
+            logger.warning('[SMS] %s', err)
+            return {'success': False, 'error': err}
+        
+        # Order: try Sprint first (ATT/Verizon/T-Mobile have discontinued their gateways as of 2024–2025)
+        all_gateways = [
+            ('sprint', f'{phone_clean}{self.carrier_gateways["sprint"]}'),
+            ('verizon', f'{phone_clean}{self.carrier_gateways["verizon"]}'),
+            ('tmobile', f'{phone_clean}{self.carrier_gateways["tmobile"]}'),
+            ('att', f'{phone_clean}{self.carrier_gateways["att"]}'),
         ]
+        if carrier_preference and carrier_preference.lower() in ('att', 'verizon', 'tmobile', 'sprint'):
+            pref = carrier_preference.lower()
+            gateways_to_try = [(c, e) for c, e in all_gateways if c == pref]
+            gateways_to_try += [(c, e) for c, e in all_gateways if c != pref]
+        else:
+            gateways_to_try = all_gateways
         
         smtp_server = settings.get('smtp_server', 'smtp.gmail.com')
-        smtp_port = settings.get('smtp_port', 587)
-        smtp_user = settings.get('smtp_user')
+        smtp_port = int(settings.get('smtp_port', 587) or 587)
+        smtp_user = (settings.get('smtp_user') or '').strip()
         smtp_password = settings.get('smtp_password')
         use_tls = settings.get('smtp_use_tls', 1)
         
         if not smtp_user or not smtp_password:
+            logger.warning('[SMS] SMTP credentials missing (user=%s)', 'set' if smtp_user else 'empty')
             return {'success': False, 'error': 'SMTP credentials not configured'}
         
         # Truncate message to 160 chars (SMS limit)
-        message_short = message[:160] if len(message) > 160 else message
+        message_short = (message or '')[:160]
         
         last_error = None
-        for email_address in gateways_to_try:
+        for carrier_name, email_address in gateways_to_try:
             try:
+                print(f'[SMS] Trying gateway: {carrier_name} -> {email_address}')
+                logger.info('[SMS] Trying gateway: %s -> %s', carrier_name, email_address)
                 msg = MIMEText(message_short)
                 msg['From'] = smtp_user
                 msg['To'] = email_address
-                msg['Subject'] = ''  # Some carriers ignore subject
+                msg['Subject'] = ''
                 
                 server = smtplib.SMTP(smtp_server, smtp_port)
                 if use_tls:
@@ -88,25 +114,35 @@ class EmailToAWSSMSService:
                 server.send_message(msg)
                 server.quit()
                 
-                # If we get here, it worked (no exception)
+                print(f'[SMS] Sent OK via {carrier_name} ({email_address})')
+                logger.info('[SMS] Sent successfully via %s (%s)', carrier_name, email_address)
                 return {
                     'success': True,
                     'provider': 'email',
                     'gateway_used': email_address,
-                    'note': 'Email-to-SMS sent (no delivery confirmation available)'
+                    'carrier_tried': carrier_name,
+                    'phone_cleaned': phone_clean,
+                    'note': 'Email-to-SMS sent (no delivery confirmation). If you did not receive it, your carrier may differ; we tried ' + carrier_name + ' first.'
                 }
                 
             except smtplib.SMTPAuthenticationError as e:
                 last_error = f'SMTP authentication failed: {str(e)}'
-                break  # Don't try other gateways if auth fails
+                logger.warning('[SMS] SMTP auth failed: %s', e)
+                break
             except Exception as e:
                 last_error = f'Gateway {email_address} failed: {str(e)}'
-                continue  # Try next gateway
+                print(f'[SMS] Gateway {email_address} failed: {e}')
+                logger.info('[SMS] Gateway %s failed: %s', email_address, e)
+                continue
         
+        print(f'[SMS] All gateways failed. Last error: {last_error}')
+        logger.warning('[SMS] All gateways failed. Last error: %s', last_error)
+        hint = ' Major US carriers (ATT, Verizon, T-Mobile) have discontinued free email-to-SMS. Use AWS SNS in Settings for reliable delivery.'
         return {
             'success': False,
-            'error': last_error or 'All email gateways failed',
-            'provider': 'email'
+            'error': (last_error or 'All email gateways failed') + hint,
+            'provider': 'email',
+            'phone_cleaned': phone_clean
         }
     
     def send_via_aws_sns(self, phone_number: str, message: str, settings: Dict) -> Dict[str, Any]:
@@ -155,8 +191,9 @@ class EmailToAWSSMSService:
     def send_sms(self, store_id: int, phone_number: str, message: str,
                  customer_id: Optional[int] = None,
                  message_type: str = 'manual',
-                 employee_id: Optional[int] = None) -> Dict[str, Any]:
-        """Send SMS using store's configured provider"""
+                 employee_id: Optional[int] = None,
+                 carrier_preference: Optional[str] = None) -> Dict[str, Any]:
+        """Send SMS using store's configured provider. carrier_preference: att, verizon, tmobile, sprint (email-to-SMS only)."""
         
         # Get store settings
         settings = self.get_store_sms_settings(store_id)
@@ -169,7 +206,7 @@ class EmailToAWSSMSService:
         
         # Save to database first
         conn = get_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("""
             INSERT INTO sms_messages (
                 store_id, customer_id, phone_number, message_text,
@@ -177,7 +214,7 @@ class EmailToAWSSMSService:
             ) VALUES (%s, %s, %s, %s, 'outbound', 'pending', %s, %s, %s)
             RETURNING message_id
         """, (store_id, customer_id, phone_number, message, message_type, settings['sms_provider'], employee_id))
-        message_id = cursor.fetchone()[0]
+        message_id = cursor.fetchone()['message_id']
         conn.commit()
         
         # Send via configured provider
@@ -185,7 +222,7 @@ class EmailToAWSSMSService:
         result = None
         
         if provider == 'email':
-            result = self.send_via_email(phone_number, message, settings)
+            result = self.send_via_email(phone_number, message, settings, carrier_preference=carrier_preference)
         elif provider == 'aws_sns':
             if not settings.get('aws_access_key_id'):
                 result = {'success': False, 'error': 'AWS credentials not configured'}
@@ -220,7 +257,7 @@ class EmailToAWSSMSService:
     def is_opted_out(self, phone_number: str, store_id: Optional[int] = None) -> bool:
         """Check if phone number has opted out"""
         conn = get_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         if store_id:
             cursor.execute("""
@@ -241,7 +278,7 @@ class EmailToAWSSMSService:
                                    points_earned: int, total_points: int) -> Dict[str, Any]:
         """Send automated rewards earned message"""
         conn = get_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("SELECT customer_name, phone FROM customers WHERE customer_id = %s", (customer_id,))
         customer = cursor.fetchone()
         conn.close()
@@ -268,7 +305,7 @@ class EmailToAWSSMSService:
     def get_rewards_template(self, store_id: int, template_type: str) -> str:
         """Get template for rewards messages"""
         conn = get_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("""
             SELECT template_text FROM sms_templates
             WHERE store_id = %s AND category = 'rewards'
@@ -293,7 +330,7 @@ class EmailToAWSSMSService:
     def migrate_to_aws(self, store_id: int, aws_access_key: str, aws_secret: str, region: str = 'us-east-1') -> Dict[str, Any]:
         """Helper to migrate store from email to AWS SNS"""
         conn = get_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("""
             UPDATE sms_settings SET
                 sms_provider = 'aws_sns',

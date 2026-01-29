@@ -87,11 +87,11 @@ function Dashboard() {
       onClick: () => navigate('/recent-orders')
     },
     {
-      id: 'returns',
-      title: 'Returns',
-      description: 'Process returns',
+      id: 'customers',
+      title: 'Customers',
+      description: 'Manage customers',
       size: 'medium',
-      onClick: () => navigate('/returns')
+      onClick: () => navigate('/customers')
     },
     {
       id: 'inventory',

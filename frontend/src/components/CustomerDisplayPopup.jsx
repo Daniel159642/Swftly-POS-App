@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { io } from 'socket.io-client'
 import { useTheme } from '../contexts/ThemeContext'
 import './CustomerDisplay.css'
+import './CustomerDisplayButtons.css'
 
 function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymentMethod, amountPaid, onClose, onPaymentMethodSelect, onTipSelect, onReceiptSelect, onProceedToPayment, showSummary, employeeId, paymentCompleted, transactionId: propTransactionId, orderId: propOrderId, orderNumber: propOrderNumber }) {
   const { themeColor, themeMode } = useTheme()
@@ -53,6 +54,7 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
   const [customTipAmount, setCustomTipAmount] = useState('')
   const [signatureData, setSignatureData] = useState(null)
   const [isDrawing, setIsDrawing] = useState(false)
+  const [checkoutUi, setCheckoutUi] = useState(null) // { review_order, cash_confirmation, receipt } with backgroundColor, buttonColor, fontFamily, fontWeight, textColor
 
   // Initialize Socket.IO connection
   useEffect(() => {
@@ -202,6 +204,8 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
   }, [propTransactionId, propOrderId, propOrderNumber])
 
   // Initialize signature canvas when receipt screen is shown
+  const receiptSigBg = checkoutUi?.receipt?.signature_background || '#ffffff'
+  const receiptSigInk = checkoutUi?.receipt?.signature_ink_color || '#000000'
   useEffect(() => {
     if (currentScreen === 'receipt') {
       // Small delay to ensure canvas is rendered
@@ -223,12 +227,12 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
           canvas.height = 250
         }
 
-        // Clear canvas
-        ctx.fillStyle = '#ffffff'
+        // Clear canvas with configured background
+        ctx.fillStyle = receiptSigBg
         ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-        // Set drawing style
-        ctx.strokeStyle = '#000000'
+        // Set drawing style (ink color from settings)
+        ctx.strokeStyle = receiptSigInk
         ctx.lineWidth = 2
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
@@ -339,7 +343,7 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
       setSignatureData(null)
       setIsDrawing(false)
     }
-  }, [currentScreen])
+  }, [currentScreen, receiptSigBg, receiptSigInk])
 
 
   const loadDisplaySettings = async () => {
@@ -352,6 +356,9 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
           setTipSuggestions(Array.isArray(result.data.tip_suggestions) 
             ? result.data.tip_suggestions 
             : [15, 18, 20, 25])
+        }
+        if (result.data.checkout_ui && typeof result.data.checkout_ui === 'object') {
+          setCheckoutUi(result.data.checkout_ui)
         }
       }
     } catch (err) {
@@ -848,12 +855,109 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
     return 0
   }
 
+  const checkoutScreenKey = currentScreen === 'transaction' ? 'review_order' : currentScreen === 'cash_confirmation' ? 'cash_confirmation' : currentScreen === 'receipt' ? 'receipt' : null
+  const screenStyle = checkoutScreenKey && checkoutUi?.[checkoutScreenKey] ? checkoutUi[checkoutScreenKey] : null
+  const popupBackground = screenStyle?.backgroundColor || getGradientBackground()
+  const popupColor = screenStyle?.textColor || '#333'
+  const popupFontFamily = screenStyle?.title_font ?? (screenStyle?.fontFamily || '-apple-system, "system-ui", "SF Pro Display", "Segoe UI", Roboto, sans-serif')
+  const popupFontWeight = screenStyle?.fontWeight || '600'
+  const buttonBg = screenStyle?.buttonColor || '#4a90e2'
+  const getCheckoutTextStyle = (s, type) => {
+    if (!s) return {}
+    const t = type === 'title' ? 'title' : type === 'button' ? 'button' : 'body'
+    const font = s[`${t}_font`] ?? s.fontFamily ?? 'system-ui'
+    const size = s[`${t}_font_size`] != null ? s[`${t}_font_size`] : (t === 'title' ? 36 : t === 'button' ? 36 : 24)
+    const bold = s[`${t}_bold`] ?? (t === 'button')
+    const fw = s.fontWeight ?? '600'
+    return {
+      fontFamily: font,
+      fontSize: `${Number(size)}px`,
+      fontWeight: bold ? '700' : (t === 'button' ? fw : '400'),
+      fontStyle: s[`${t}_italic`] ? 'italic' : 'normal',
+      textAlign: (s[`${t}_align`] || (t === 'title' ? 'center' : 'left'))
+    }
+  }
+  const titleStyle = screenStyle ? getCheckoutTextStyle(screenStyle, 'title') : {}
+  const bodyStyle = screenStyle ? getCheckoutTextStyle(screenStyle, 'body') : {}
+  const buttonTextStyle = screenStyle ? getCheckoutTextStyle(screenStyle, 'button') : {}
+  const buttonStyleId = screenStyle?.button_style || 'default'
+
+  const renderCheckoutButton = (label, onClick, fullWidth = false) => {
+    const wrapStyle = { flex: fullWidth ? 'none' : 1, width: fullWidth ? '100%' : undefined, minWidth: 0 }
+    const defaultBtnStyle = {
+      flex: fullWidth ? 'none' : 1,
+      width: fullWidth ? '100%' : undefined,
+      height: '100px',
+      padding: '16px',
+      paddingTop: '8px',
+      backgroundColor: buttonBg,
+      backgroundImage: 'none',
+      color: '#fff',
+      border: 0,
+      borderRadius: '8px',
+      cursor: 'pointer',
+      boxShadow: 'inset 0 -8px rgb(0 0 0/0.4), 0 2px 4px rgb(0 0 0/0.2)',
+      transition: 'transform 0.4s cubic-bezier(0.55, 1, 0.15, 1)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      touchAction: 'manipulation',
+      ...buttonTextStyle
+    }
+    if (buttonStyleId === 'default') {
+      return (
+        <button
+          type="button"
+          role="button"
+          onClick={onClick}
+          style={defaultBtnStyle}
+          onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.92)' }}
+          onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+        >
+          {label}
+        </button>
+      )
+    }
+    if (buttonStyleId === 'push') {
+      return (
+        <div className="checkout-btn-wrap" style={wrapStyle}>
+          <button
+            type="button"
+            role="button"
+            className="checkout-btn--push"
+            style={{ ['--checkout-btn-color']: buttonBg, ...buttonTextStyle }}
+            onClick={onClick}
+          >
+            <span className="checkout-btn__shadow" aria-hidden />
+            <span className="checkout-btn__edge" aria-hidden />
+            <span className="checkout-btn__front">{label}</span>
+          </button>
+        </div>
+      )
+    }
+    const className = `checkout-btn--${buttonStyleId}`
+    return (
+      <div className={`checkout-btn-wrap${fullWidth ? ' checkout-btn-wrap--full' : ''}`} style={wrapStyle}>
+        <button
+          type="button"
+          role="button"
+          className={className}
+          style={{ ['--checkout-btn-color']: buttonBg, ...buttonTextStyle }}
+          onClick={onClick}
+        >
+          {buttonStyleId === 'soft-push' ? <span className="checkout-btn__text">{label}</span> : label}
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div style={{ 
       height: '100vh', 
       width: '100%', 
       overflow: 'auto',
-      background: getGradientBackground(),
+      background: popupBackground,
       display: 'flex',
       flexDirection: 'column'
     }}>
@@ -866,16 +970,19 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
-        flex: 1
+        flex: 1,
+        color: popupColor,
+        fontFamily: popupFontFamily,
+        fontWeight: popupFontWeight
       }}>
         {/* Transaction Screen - Summary before payment */}
         {currentScreen === 'transaction' && (
           <div className="transaction-screen-popup">
             <div className="screen-header">
-              <h2>Review Your Order</h2>
+              <h2 style={titleStyle}>Review Your Order</h2>
             </div>
             
-            <div className="items-list">
+            <div className="items-list" style={bodyStyle}>
               {cart.map((item, idx) => (
                 <div key={idx} className="item-row">
                   <span className="item-name">{item.product_name}</span>
@@ -885,7 +992,7 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
               ))}
             </div>
             
-            <div className="totals-section">
+            <div className="totals-section" style={bodyStyle}>
               <div className="total-row">
                 <span>Subtotal:</span>
                 <span>${subtotal.toFixed(2)}</span>
@@ -907,70 +1014,15 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
             </div>
 
             <div style={{ display: 'flex', gap: '20px', width: '100%', marginTop: '20px' }}>
-              {/* Always show both Cash and Card buttons */}
               {(() => {
-                // Find cash and card methods from API
                 const cashMethod = paymentMethods.find(m => m.method_type === 'cash')
                 const cardMethod = paymentMethods.find(m => m.method_type === 'card' || m.method_type === 'credit_card')
-                
-                // Use API methods if available, otherwise use defaults
                 const cash = cashMethod || { method_type: 'cash', payment_method_id: 'cash_default' }
                 const card = cardMethod || { method_type: 'card', payment_method_id: 'card_default' }
-                
-                const buttonStyle = {
-                  flex: 1,
-                  height: '100px',
-                  padding: '16px',
-                  paddingTop: '8px',
-                  backgroundImage: 'linear-gradient(to bottom, #6ba3f0, #4a90e2)',
-                  color: '#fff',
-                  border: 0,
-                  borderRadius: '8px',
-                  fontSize: '36px',
-                  fontFamily: '-apple-system, "system-ui", "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  boxShadow: 'inset 0 -8px rgb(0 0 0/0.4), 0 2px 4px rgb(0 0 0/0.2)',
-                  transition: 'transform 0.4s cubic-bezier(0.55, 1, 0.15, 1), opacity 0.2s ease-in-out',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  touchAction: 'manipulation',
-                  textAlign: 'center'
-                }
-                
                 return (
                   <>
-                    <button
-                      onClick={() => selectPaymentMethod(cash)}
-                      style={buttonStyle}
-                      onMouseDown={(e) => {
-                        e.currentTarget.style.transform = 'scale(0.92)'
-                      }}
-                      onMouseUp={(e) => {
-                        e.currentTarget.style.transform = 'scale(1)'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'scale(1)'
-                      }}
-                    >
-                      Cash
-                    </button>
-                    <button
-                      onClick={() => selectPaymentMethod(card)}
-                      style={buttonStyle}
-                      onMouseDown={(e) => {
-                        e.currentTarget.style.transform = 'scale(0.92)'
-                      }}
-                      onMouseUp={(e) => {
-                        e.currentTarget.style.transform = 'scale(1)'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'scale(1)'
-                      }}
-                    >
-                      Card
-                    </button>
+                    {renderCheckoutButton('Cash', () => selectPaymentMethod(cash))}
+                    {renderCheckoutButton('Card', () => selectPaymentMethod(card))}
                   </>
                 )
               })()}
@@ -1183,13 +1235,13 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
             </div>
             
             <div className="screen-header" style={{ width: '100%', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0, fontSize: '40px' }}>
+              <h2 style={{ margin: 0, ...titleStyle }}>
                 Please give the cash amount to the cashier
               </h2>
             </div>
             
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-              <div className="totals-section" style={{ background: `rgba(${themeColorRgb}, 0.15)`, borderRadius: '15px', padding: '20px', width: '100%' }}>
+              <div className="totals-section" style={{ background: `rgba(${themeColorRgb}, 0.15)`, borderRadius: '15px', padding: '20px', width: '100%', ...bodyStyle }}>
                 <div className="total-row">
                   <span>Subtotal:</span>
                   <span>${subtotal.toFixed(2)}</span>
@@ -1234,16 +1286,16 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
         {currentScreen === 'receipt' && (
           <div className="receipt-screen-popup" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
             <div className="screen-header" style={{ width: '100%', marginBottom: '30px' }}>
-              <h2>Sign Below</h2>
+              <h2 style={titleStyle}>Sign Below</h2>
             </div>
             
             {/* Signature Area */}
             <div style={{
               width: '100%',
               height: '250px',
-              border: `2px solid rgba(${themeColorRgb}, 0.3)`,
+              border: `${checkoutUi?.receipt?.signature_border_width ?? 2}px solid ${checkoutUi?.receipt?.signature_border_color || `rgba(${themeColorRgb}, 0.3)`}`,
               borderRadius: '8px',
-              backgroundColor: '#fff',
+              backgroundColor: checkoutUi?.receipt?.signature_background || '#fff',
               marginBottom: '30px',
               position: 'relative'
             }}>
@@ -1261,114 +1313,10 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
             {/* Receipt Options */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', marginTop: '20px' }}>
               <div style={{ display: 'flex', gap: '20px', width: '100%' }}>
-                <button
-                  onClick={() => selectReceipt('print')}
-                  style={{
-                    flex: 1,
-                    height: '100px',
-                    padding: '16px',
-                    paddingTop: '8px',
-                    backgroundImage: 'linear-gradient(to bottom, #6ba3f0, #4a90e2)',
-                    color: '#fff',
-                    border: 0,
-                    borderRadius: '8px',
-                    fontSize: '36px',
-                    fontFamily: '-apple-system, "system-ui", "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    boxShadow: 'inset 0 -8px rgb(0 0 0/0.4), 0 2px 4px rgb(0 0 0/0.2)',
-                    transition: 'transform 0.4s cubic-bezier(0.55, 1, 0.15, 1), opacity 0.2s ease-in-out',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    touchAction: 'manipulation',
-                    textAlign: 'center'
-                  }}
-                  onMouseDown={(e) => {
-                    e.currentTarget.style.transform = 'scale(0.92)'
-                  }}
-                  onMouseUp={(e) => {
-                    e.currentTarget.style.transform = 'scale(1)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'scale(1)'
-                  }}
-                >
-                  Print
-                </button>
-                
-                <button
-                  onClick={() => selectReceipt('none')}
-                  style={{
-                    flex: 1,
-                    height: '100px',
-                    padding: '16px',
-                    paddingTop: '8px',
-                    backgroundImage: 'linear-gradient(to bottom, #6ba3f0, #4a90e2)',
-                    color: '#fff',
-                    border: 0,
-                    borderRadius: '8px',
-                    fontSize: '36px',
-                    fontFamily: '-apple-system, "system-ui", "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    boxShadow: 'inset 0 -8px rgb(0 0 0/0.4), 0 2px 4px rgb(0 0 0/0.2)',
-                    transition: 'transform 0.4s cubic-bezier(0.55, 1, 0.15, 1), opacity 0.2s ease-in-out',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    touchAction: 'manipulation',
-                    textAlign: 'center'
-                  }}
-                  onMouseDown={(e) => {
-                    e.currentTarget.style.transform = 'scale(0.92)'
-                  }}
-                  onMouseUp={(e) => {
-                    e.currentTarget.style.transform = 'scale(1)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'scale(1)'
-                  }}
-                >
-                  No Receipt
-                </button>
+                {renderCheckoutButton('Print', () => selectReceipt('print'))}
+                {renderCheckoutButton('No Receipt', () => selectReceipt('none'))}
               </div>
-              
-              <button
-                onClick={() => selectReceipt('email')}
-                style={{
-                  width: '100%',
-                  height: '100px',
-                  padding: '16px',
-                  paddingTop: '8px',
-                  backgroundImage: 'linear-gradient(to bottom, #6ba3f0, #4a90e2)',
-                  color: '#fff',
-                  border: 0,
-                  borderRadius: '8px',
-                  fontSize: '36px',
-                  fontFamily: '-apple-system, "system-ui", "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  boxShadow: 'inset 0 -8px rgb(0 0 0/0.4), 0 2px 4px rgb(0 0 0/0.2)',
-                  transition: 'transform 0.4s cubic-bezier(0.55, 1, 0.15, 1), opacity 0.2s ease-in-out',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  touchAction: 'manipulation',
-                  textAlign: 'center'
-                }}
-                onMouseDown={(e) => {
-                  e.currentTarget.style.transform = 'scale(0.92)'
-                }}
-                onMouseUp={(e) => {
-                  e.currentTarget.style.transform = 'scale(1)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'scale(1)'
-                }}
-              >
-                Email
-              </button>
+              {renderCheckoutButton('Email', () => selectReceipt('email'), true)}
             </div>
             
             {receiptType === 'email' && (

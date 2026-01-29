@@ -1,0 +1,369 @@
+/* Checkout UI button style options. Use --checkout-btn-color to theme. */
+
+.checkout-btn-wrap {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+.checkout-btn-wrap--full {
+  flex: none;
+  width: 100%;
+}
+
+/* ---- Default: solid with inset shadow (applied via inline in JS) ---- */
+
+/* ---- Push (button-1 style) ---- */
+.checkout-btn--push {
+  position: relative;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  outline-offset: 4px;
+  transition: filter 250ms;
+  user-select: none;
+  touch-action: manipulation;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.checkout-btn--push .checkout-btn__shadow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  will-change: transform;
+  transform: translateY(2px);
+  transition: transform 600ms cubic-bezier(0.3, 0.7, 0.4, 1);
+}
+
+.checkout-btn--push .checkout-btn__edge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  background: linear-gradient(to left, color-mix(in srgb, var(--checkout-btn-color) 60%, black) 0%, color-mix(in srgb, var(--checkout-btn-color) 85%, black) 8%, color-mix(in srgb, var(--checkout-btn-color) 85%, black) 92%, color-mix(in srgb, var(--checkout-btn-color) 60%, black) 100%);
+}
+
+.checkout-btn--push .checkout-btn__front {
+  display: block;
+  position: relative;
+  padding: 12px 27px;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  color: white;
+  background: var(--checkout-btn-color);
+  will-change: transform;
+  transform: translateY(-4px);
+  transition: transform 600ms cubic-bezier(0.3, 0.7, 0.4, 1);
+  width: 100%;
+  height: 100%;
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.checkout-btn--push:hover {
+  filter: brightness(110%);
+}
+
+.checkout-btn--push:hover .checkout-btn__front {
+  transform: translateY(-6px);
+  transition: transform 250ms cubic-bezier(0.3, 0.7, 0.4, 1.5);
+}
+
+.checkout-btn--push:active .checkout-btn__front {
+  transform: translateY(-2px);
+  transition: transform 34ms;
+}
+
+.checkout-btn--push:hover .checkout-btn__shadow {
+  transform: translateY(4px);
+  transition: transform 250ms cubic-bezier(0.3, 0.7, 0.4, 1.5);
+}
+
+.checkout-btn--push:active .checkout-btn__shadow {
+  transform: translateY(1px);
+  transition: transform 34ms;
+}
+
+/* ---- Pill (button-3 style) ---- */
+.checkout-btn--pill {
+  touch-action: manipulation;
+  position: relative;
+  border: 1px solid var(--checkout-btn-color);
+  border-radius: 50px;
+  padding: 12px 16px;
+  min-height: 100px;
+  background-color: var(--checkout-btn-color);
+  background-image: radial-gradient(75% 50% at 50% 0%, rgba(255,255,255,0.4), transparent), radial-gradient(75% 35% at 50% 80%, rgba(255,255,255,0.3), transparent);
+  box-shadow: inset 0 -2px 4px 1px rgba(0,0,0,0.3), 0 1px 4px 1px rgba(0,0,0,0.1);
+  color: #fff;
+  cursor: pointer;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, background-color 0.2s;
+  font: inherit;
+}
+
+.checkout-btn--pill:hover {
+  transform: scale(1.04);
+}
+
+.checkout-btn--pill:active {
+  transform: scale(0.96);
+  background-color: color-mix(in srgb, var(--checkout-btn-color) 80%, black);
+}
+
+/* ---- Border bottom (button-5 style) ---- */
+.checkout-btn--border-bottom {
+  appearance: button;
+  background-color: var(--checkout-btn-color);
+  border: solid transparent;
+  border-radius: 16px;
+  border-width: 0 0 4px;
+  box-sizing: border-box;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  min-height: 100px;
+  padding: 13px 16px;
+  flex: 1;
+  touch-action: manipulation;
+  transition: filter 0.2s;
+}
+
+.checkout-btn--border-bottom:hover {
+  filter: brightness(1.1);
+}
+
+.checkout-btn--border-bottom:active {
+  border-width: 4px 0 0;
+  background: color-mix(in srgb, var(--checkout-btn-color) 90%, white);
+}
+
+/* ---- Soft push (button-10 style) ---- */
+.checkout-btn--soft-push {
+  touch-action: manipulation;
+  font-weight: 600;
+  color: #382b22;
+  padding: 1em 2em;
+  min-height: 100px;
+  background: #fff0f0;
+  border: 2px solid color-mix(in srgb, var(--checkout-btn-color) 70%, #888);
+  border-radius: 0.75em;
+  transform-style: preserve-3d;
+  transition: transform 150ms cubic-bezier(0, 0, 0.58, 1), background 150ms cubic-bezier(0, 0, 0.58, 1);
+  cursor: pointer;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  font: inherit;
+}
+
+.checkout-btn--soft-push::before {
+  position: absolute;
+  content: "";
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--checkout-btn-color) 85%, white);
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--checkout-btn-color) 70%, #888), 0 0.625em 0 0 #ffe3e2;
+  transform: translate3d(0, 0.75em, -1em);
+  transition: transform 150ms cubic-bezier(0, 0, 0.58, 1), box-shadow 150ms cubic-bezier(0, 0, 0.58, 1);
+  z-index: -1;
+}
+
+.checkout-btn--soft-push:hover {
+  background: #ffe9e9;
+  transform: translate(0, 0.25em);
+}
+
+.checkout-btn--soft-push:hover::before {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--checkout-btn-color) 70%, #888), 0 0.5em 0 0 #ffe3e2;
+  transform: translate3d(0, 0.5em, -1em);
+}
+
+.checkout-btn--soft-push:active {
+  transform: translate(0em, 0.75em);
+}
+
+.checkout-btn--soft-push:active::before {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--checkout-btn-color) 70%, #888), 0 0 #ffe3e2;
+  transform: translate3d(0, 0, -1em);
+}
+
+.checkout-btn--soft-push .checkout-btn__text {
+  color: var(--checkout-btn-color);
+}
+
+/* ---- Inset (button-59 style) ---- */
+.checkout-btn--inset {
+  padding: 0.8rem 1.5rem;
+  min-height: 100px;
+  background-color: var(--checkout-btn-color);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border: 0;
+  z-index: 1;
+  user-select: none;
+  cursor: pointer;
+  flex: 1;
+  font: inherit;
+  transition: all 0.7s cubic-bezier(0, 0.8, 0.26, 0.99);
+}
+
+.checkout-btn--inset::before {
+  position: absolute;
+  pointer-events: none;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  content: '';
+  transition: 0.7s cubic-bezier(0, 0.8, 0.26, 0.99);
+  z-index: -1;
+  background-color: var(--checkout-btn-color);
+  box-shadow: inset 0 -4px rgba(0,0,0,0.5), inset 0 4px rgba(255,255,255,0.2), inset -4px 0 rgba(255,255,255,0.2), inset 4px 0 rgba(0,0,0,0.5);
+}
+
+.checkout-btn--inset::after {
+  position: absolute;
+  pointer-events: none;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  content: '';
+  box-shadow: 0 4px 0 0 rgba(0,0,0,0.15);
+  transition: 0.7s cubic-bezier(0, 0.8, 0.26, 0.99);
+}
+
+.checkout-btn--inset:hover::before {
+  box-shadow: inset 0 -4px rgba(0,0,0,0.7), inset 0 4px rgba(255,255,255,0.08), inset -4px 0 rgba(255,255,255,0.08), inset 4px 0 rgba(0,0,0,0.7);
+}
+
+.checkout-btn--inset:active {
+  transform: translateY(4px);
+}
+
+.checkout-btn--inset:active::after {
+  box-shadow: 0 0 0 0 rgba(0,0,0,0.15);
+}
+
+/* ---- Bevel (button-44 style) ---- */
+.checkout-btn--bevel {
+  background: var(--checkout-btn-color);
+  border-top: 1px solid color-mix(in srgb, var(--checkout-btn-color) 80%, white);
+  border-right: 1px solid color-mix(in srgb, var(--checkout-btn-color) 50%, black);
+  border-bottom: 1px solid color-mix(in srgb, var(--checkout-btn-color) 40%, black);
+  border-left: 1px solid color-mix(in srgb, var(--checkout-btn-color) 50%, black);
+  border-radius: 4px;
+  box-shadow: inset 0 1px 10px 1px color-mix(in srgb, var(--checkout-btn-color) 120%, white), 0 1px 0 color-mix(in srgb, var(--checkout-btn-color) 50%, black), 0 6px 0 color-mix(in srgb, var(--checkout-btn-color) 40%, black), 0 8px 4px 1px #111;
+  color: #fff;
+  padding: 10px 0 12px;
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 1;
+  font: inherit;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.checkout-btn--bevel:hover {
+  box-shadow: inset 0 0 20px 1px color-mix(in srgb, var(--checkout-btn-color) 130%, white), 0 1px 0 color-mix(in srgb, var(--checkout-btn-color) 50%, black), 0 6px 0 color-mix(in srgb, var(--checkout-btn-color) 40%, black), 0 8px 4px 1px #111;
+}
+
+.checkout-btn--bevel:active {
+  box-shadow: inset 0 1px 10px 1px color-mix(in srgb, var(--checkout-btn-color) 120%, white), 0 1px 0 color-mix(in srgb, var(--checkout-btn-color) 50%, black), 0 2px 0 color-mix(in srgb, var(--checkout-btn-color) 40%, black), 0 4px 3px 0 #111;
+  transform: translateY(4px);
+}
+
+/* ---- Gradient (button-37 style) ---- */
+.checkout-btn--gradient {
+  color: #fff;
+  padding: 15px 25px;
+  min-height: 100px;
+  background-color: var(--checkout-btn-color);
+  background-image: radial-gradient(93% 87% at 87% 89%, rgba(0,0,0,0.23) 0%, transparent 86%), radial-gradient(66% 66% at 26% 20%, rgba(255,255,255,0.55) 0%, transparent 70%, transparent 100%);
+  box-shadow: inset -3px -3px 9px rgba(255,255,255,0.25), inset 0 3px 9px rgba(255,255,255,0.3), inset 0 1px 1px rgba(255,255,255,0.6), inset 0 -8px 36px rgba(0,0,0,0.3), 2px 19px 31px rgba(0,0,0,0.2);
+  border-radius: 14px;
+  border: 0;
+  cursor: pointer;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  transition: all 150ms ease-in-out;
+}
+
+.checkout-btn--gradient:hover {
+  filter: brightness(1.05);
+}
+
+.checkout-btn--gradient:active {
+  transform: scale(0.95);
+}
+
+/* ---- Gold (button-18 style - fixed) ---- */
+.checkout-btn--gold {
+  touch-action: manipulation;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+  border: none;
+  border-radius: 0.3em;
+  min-height: 100px;
+  padding: 0 1em;
+  flex: 1;
+  text-transform: uppercase;
+  box-shadow: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(110,80,20,0.4), inset 0 -2px 5px 1px rgba(139,66,8,1), inset 0 -1px 1px 3px rgba(250,227,133,1);
+  background-image: linear-gradient(160deg, #a54e07, #b47e11, #fef1a2, #bc881b, #a54e07);
+  border: 1px solid #a55d07;
+  color: rgb(120,50,5);
+  text-shadow: 0 2px 2px rgba(250,227,133,1);
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  background-size: 100% 100%;
+  font: inherit;
+}
+
+.checkout-btn--gold:hover {
+  background-size: 150% 150%;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.19), 0 6px 6px rgba(0,0,0,0.23), inset 0 -2px 5px 1px #b17d10, inset 0 -1px 1px 3px rgba(250,227,133,1);
+}
+
+.checkout-btn--gold:active {
+  box-shadow: 0 3px 6px rgba(0,0,0,0.16), inset 0 -2px 5px 1px #b17d10, inset 0 -1px 1px 3px rgba(250,227,133,1);
+}

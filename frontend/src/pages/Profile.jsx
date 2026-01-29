@@ -617,17 +617,18 @@ function Profile({ employeeId, employeeName }) {
     }}>
       {/* Sidebar Navigation - 1/4 of page */}
       <div style={{
+        position: 'fixed',
+        left: 0,
+        top: '56px',
+        zIndex: 100,
         width: sidebarMinimized ? '60px' : '25%',
-        flexShrink: 0,
+        height: 'calc(100vh - 56px)',
         backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
         padding: sidebarMinimized ? '32px 10px 48px 10px' : '32px 10px 48px 10px',
-        minHeight: '100vh',
-        position: 'sticky',
-        top: 0,
-        alignSelf: 'flex-start',
         borderRight: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`,
         transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), padding 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-        overflow: 'hidden'
+        overflowY: 'auto',
+        overflowX: 'hidden'
       }}>
         <div style={{
           display: 'flex',
@@ -806,12 +807,13 @@ function Profile({ employeeId, employeeName }) {
 
       {/* Main Content Area - 3/4 of page */}
       <div style={{
+        marginLeft: sidebarMinimized ? '60px' : '25%',
         width: sidebarMinimized ? 'calc(100% - 60px)' : '75%',
         flex: 1,
         padding: '48px 64px 64px 64px',
         backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
         maxWidth: sidebarMinimized ? 'none' : '1200px',
-        transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+        transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
       }}>
         {/* Tab Content */}
       {activeTab === 'profile' && (

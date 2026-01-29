@@ -407,6 +407,20 @@ class CustomerDisplaySystem:
                         WHERE order_id = %s
                     """, (payment_method_name, order_payment_status, order_id))
             
+            # Award loyalty points when payment succeeds and transaction has a customer
+            customer_id = transaction.get('customer_id')
+            if customer_id and order_payment_status == 'completed':
+                try:
+                    from database import award_rewards_for_purchase
+                    subtotal = float(transaction.get('subtotal', 0) or 0)
+                    tax = float(transaction.get('tax', 0) or 0)
+                    amount_for_rewards = subtotal + tax
+                    award_rewards_for_purchase(cursor, customer_id, amount_for_rewards, points_used=0)
+                except Exception as rew_err:
+                    print(f"Warning: Could not award rewards: {rew_err}")
+                    import traceback
+                    traceback.print_exc()
+            
             # Note: Inventory is already updated when order_items are created in start_transaction
             # No need to update again here to avoid double deduction
             
@@ -533,6 +547,11 @@ class CustomerDisplaySystem:
                     settings['tip_suggestions'] = json.loads(settings['tip_suggestions'])
                 except:
                     settings['tip_suggestions'] = [15, 18, 20, 25]
+            if settings.get('checkout_ui'):
+                try:
+                    settings['checkout_ui'] = json.loads(settings['checkout_ui']) if isinstance(settings['checkout_ui'], str) else settings['checkout_ui']
+                except Exception:
+                    settings['checkout_ui'] = None
         else:
             # Return defaults if no settings exist
             settings = {
@@ -558,7 +577,7 @@ class CustomerDisplaySystem:
                 'store_location', 'show_promotions', 'show_survey_prompt',
                 'show_loyalty_signup', 'tip_enabled', 'tip_after_payment',
                 'tip_suggestions', 'idle_screen_content', 'branding_logo_path',
-                'theme_color'
+                'theme_color', 'checkout_ui'
             ]
             
             if existing:
@@ -570,6 +589,8 @@ class CustomerDisplaySystem:
                 for field, value in kwargs.items():
                     if field in allowed_fields:
                         if field == 'tip_suggestions' and isinstance(value, list):
+                            value = json.dumps(value)
+                        elif field == 'checkout_ui' and (isinstance(value, dict) or isinstance(value, list)):
                             value = json.dumps(value)
                         updates.append(f"{field} = %s")
                         values.append(value)
@@ -606,6 +627,8 @@ class CustomerDisplaySystem:
                         placeholders.append('%s')
                         value = defaults[field]
                         if field == 'tip_suggestions' and isinstance(value, list):
+                            value = json.dumps(value)
+                        elif field == 'checkout_ui' and (isinstance(value, dict) or isinstance(value, list)):
                             value = json.dumps(value)
                         values.append(value)
                 

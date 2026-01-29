@@ -736,35 +736,47 @@ def add_product(
     current_quantity: int = 0,
     category: Optional[str] = None,
     barcode: Optional[str] = None,
-    auto_extract_metadata: bool = True
+    auto_extract_metadata: bool = True,
+    item_type: str = "product",
+    unit: Optional[str] = None,
+    sell_at_pos: bool = True
 ) -> int:
     """
-    Add a new product to inventory
-    
-    Args:
-        auto_extract_metadata: If True, automatically extract metadata after creating product
+    Add a new product or ingredient to inventory.
+    item_type: 'product' (sellable at POS) or 'ingredient' (raw material, not sold at POS).
+    unit: For ingredients, e.g. 'oz', 'lb', 'g', 'ml', 'each'.
+    sell_at_pos: If False, item is hidden from POS (e.g. ingredients).
     """
+    if item_type not in ("product", "ingredient"):
+        raise ValueError("item_type must be 'product' or 'ingredient'")
+    if item_type == "ingredient":
+        sell_at_pos = False
     conn = get_connection()
     cursor = conn.cursor()
-    
     try:
+        from database_postgres import get_current_establishment
+        establishment_id = get_current_establishment()
+        if establishment_id is None:
+            establishment_id = _get_or_create_default_establishment(conn)
         cursor.execute("""
             INSERT INTO inventory 
-            (product_name, sku, product_price, product_cost, vendor, vendor_id, photo, current_quantity, category, barcode)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (product_name, sku, product_price, product_cost, vendor, vendor_id, photo, current_quantity, category, barcode))
-        
+            (establishment_id, product_name, sku, product_price, product_cost, vendor, vendor_id, photo,
+             current_quantity, category, barcode, item_type, unit, sell_at_pos)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING product_id
+        """, (establishment_id, product_name, sku, product_price, product_cost, vendor, vendor_id, photo,
+              current_quantity, category, barcode, item_type, unit, sell_at_pos))
+        row = cursor.fetchone()
+        product_id = row[0] if row and not isinstance(row, dict) else (row.get("product_id") if row else None)
         conn.commit()
-        product_id = cursor.lastrowid
         conn.close()
-        
-        # Automatically extract metadata if enabled
-        if auto_extract_metadata:
+        if not product_id:
+            raise ValueError("Insert did not return product_id")
+        if item_type == "product" and auto_extract_metadata:
             try:
                 extract_metadata_for_product(product_id, auto_sync_category=True)
             except Exception:
-                pass  # Don't fail product creation if metadata extraction fails
-        
+                pass
         return product_id
     except Exception as e:
         import psycopg2
@@ -772,6 +784,7 @@ def add_product(
             conn.rollback()
             conn.close()
             raise ValueError(f"SKU '{sku}' already exists in database") from e
+        raise
 
 def get_product(product_id: int) -> Optional[Dict[str, Any]]:
     """Get a product by ID"""
@@ -810,6 +823,169 @@ def get_product_by_barcode(barcode: str) -> Optional[Dict[str, Any]]:
     
     return dict(row) if row else None
 
+
+# ---------------------------------------------------------------------------
+# Product variants (sizes with different prices) and ingredients (recipes)
+# ---------------------------------------------------------------------------
+
+def get_product_variants(product_id: int) -> List[Dict[str, Any]]:
+    """Get all size/variant options for a product. Returns list of dicts with variant_id, variant_name, price, cost, sort_order."""
+    from psycopg2.extras import RealDictCursor
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT variant_id, product_id, variant_name, price, cost, sort_order, created_at
+            FROM product_variants WHERE product_id = %s ORDER BY sort_order, variant_name
+        """, (product_id,))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows] if rows else []
+    finally:
+        conn.close()
+
+
+def add_product_variant(product_id: int, variant_name: str, price: float, cost: float = 0.0, sort_order: int = 0) -> int:
+    """Add a size/variant to a product. Returns variant_id."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO product_variants (product_id, variant_name, price, cost, sort_order)
+            VALUES (%s, %s, %s, %s, %s) RETURNING variant_id
+        """, (product_id, variant_name.strip(), float(price), float(cost), sort_order))
+        row = cursor.fetchone()
+        variant_id = row[0] if row and not isinstance(row, dict) else (row.get("variant_id") if row else None)
+        conn.commit()
+        return variant_id
+    except Exception as e:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def update_product_variant(variant_id: int, variant_name: Optional[str] = None, price: Optional[float] = None,
+                           cost: Optional[float] = None, sort_order: Optional[int] = None) -> bool:
+    """Update a product variant."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    updates, values = [], []
+    if variant_name is not None:
+        updates.append("variant_name = %s")
+        values.append(variant_name.strip())
+    if price is not None:
+        updates.append("price = %s")
+        values.append(float(price))
+    if cost is not None:
+        updates.append("cost = %s")
+        values.append(float(cost))
+    if sort_order is not None:
+        updates.append("sort_order = %s")
+        values.append(sort_order)
+    if not updates:
+        conn.close()
+        return False
+    values.append(variant_id)
+    try:
+        cursor.execute("UPDATE product_variants SET " + ", ".join(updates) + " WHERE variant_id = %s", tuple(values))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_product_variant(variant_id: int) -> bool:
+    """Remove a product variant."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM product_variants WHERE variant_id = %s", (variant_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_product_ingredients(product_id: int, variant_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Get recipe: ingredients used for a product (optionally for a specific variant)."""
+    from psycopg2.extras import RealDictCursor
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        if variant_id is not None:
+            cursor.execute("""
+                SELECT pi.id, pi.product_id, pi.variant_id, pi.ingredient_id, pi.quantity_required, pi.unit,
+                       i.product_name AS ingredient_name, i.sku AS ingredient_sku, i.unit AS ingredient_unit
+                FROM product_ingredients pi
+                JOIN inventory i ON i.product_id = pi.ingredient_id
+                WHERE pi.product_id = %s AND pi.variant_id = %s
+                ORDER BY pi.id
+            """, (product_id, variant_id))
+        else:
+            cursor.execute("""
+                SELECT pi.id, pi.product_id, pi.variant_id, pi.ingredient_id, pi.quantity_required, pi.unit,
+                       i.product_name AS ingredient_name, i.sku AS ingredient_sku, i.unit AS ingredient_unit
+                FROM product_ingredients pi
+                JOIN inventory i ON i.product_id = pi.ingredient_id
+                WHERE pi.product_id = %s AND pi.variant_id IS NULL
+                ORDER BY pi.id
+            """, (product_id,))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows] if rows else []
+    finally:
+        conn.close()
+
+
+def add_product_ingredient(product_id: int, ingredient_id: int, quantity_required: float, unit: str,
+                            variant_id: Optional[int] = None) -> int:
+    """Add an ingredient to a product recipe (optionally for a specific variant). Returns id."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO product_ingredients (product_id, variant_id, ingredient_id, quantity_required, unit)
+            VALUES (%s, %s, %s, %s, %s) RETURNING id
+        """, (product_id, variant_id, ingredient_id, float(quantity_required), unit.strip()))
+        row = cursor.fetchone()
+        rid = row[0] if row and not isinstance(row, dict) else (row.get("id") if row else None)
+        conn.commit()
+        return rid
+    except Exception as e:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def delete_product_ingredient(recipe_id: int) -> bool:
+    """Remove an ingredient from a product recipe."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM product_ingredients WHERE id = %s", (recipe_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_variant_by_id(variant_id: int) -> Optional[Dict[str, Any]]:
+    """Get a single variant by id."""
+    from psycopg2.extras import RealDictCursor
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT v.*, i.product_name, i.sku FROM product_variants v
+            JOIN inventory i ON i.product_id = v.product_id
+            WHERE v.variant_id = %s
+        """, (variant_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def update_product(product_id: int, employee_id: Optional[int] = None, auto_extract_metadata: bool = False, **kwargs) -> bool:
     """
     Update product information with optional audit logging
@@ -827,8 +1003,9 @@ def update_product(product_id: int, employee_id: Optional[int] = None, auto_extr
         return False
     
     # Build update query dynamically
-    allowed_fields = ['product_name', 'sku', 'product_price', 'product_cost', 
-                     'vendor', 'vendor_id', 'photo', 'current_quantity', 'category', 'barcode']
+    allowed_fields = ['product_name', 'sku', 'product_price', 'product_cost',
+                     'vendor', 'vendor_id', 'photo', 'current_quantity', 'category', 'barcode',
+                     'item_type', 'unit', 'sell_at_pos']
     
     updates = []
     values = []
@@ -3295,8 +3472,9 @@ def verify_pin_login(clerk_user_id: str, pin_code: str) -> Optional[Dict[str, An
 
 def get_employee(employee_id: int) -> Optional[Dict[str, Any]]:
     """Get employee by ID with tip summary"""
+    from psycopg2.extras import RealDictCursor
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     cursor.execute("SELECT * FROM employees WHERE employee_id = %s", (employee_id,))
     row = cursor.fetchone()
@@ -3542,28 +3720,147 @@ def delete_employee(employee_id: int) -> bool:
 def add_customer(
     customer_name: Optional[str] = None,
     email: Optional[str] = None,
-    phone: Optional[str] = None
+    phone: Optional[str] = None,
+    address: Optional[str] = None,
+    establishment_id: Optional[int] = None
 ) -> int:
-    """Add a new customer"""
+    """Add a new customer (scoped to establishment)."""
     conn = get_connection()
     cursor = conn.cursor()
-    
-    cursor.execute("""
-        INSERT INTO customers (customer_name, email, phone)
-        VALUES (%s, %s, %s)
-        RETURNING customer_id
-    """, (customer_name, email, phone))
-    
-    result = cursor.fetchone()
-    if isinstance(result, dict):
-        customer_id = result.get('customer_id')
-    else:
-        customer_id = result[0] if result else None
-    
-    conn.commit()
-    conn.close()
-    
-    return customer_id
+    try:
+        if establishment_id is None:
+            from database_postgres import get_current_establishment
+            establishment_id = get_current_establishment()
+        if establishment_id is None:
+            establishment_id = _get_or_create_default_establishment(conn)
+        cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'address'
+        """)
+        has_address = cursor.fetchone() is not None
+        if has_address and address is not None:
+            cursor.execute("""
+                INSERT INTO customers (establishment_id, customer_name, email, phone, address)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING customer_id
+            """, (establishment_id, customer_name, email, phone, address))
+        else:
+            cursor.execute("""
+                INSERT INTO customers (establishment_id, customer_name, email, phone)
+                VALUES (%s, %s, %s, %s)
+                RETURNING customer_id
+            """, (establishment_id, customer_name, email, phone))
+        result = cursor.fetchone()
+        if isinstance(result, dict):
+            customer_id = result.get('customer_id')
+        else:
+            customer_id = result[0] if result else None
+        conn.commit()
+        return customer_id
+    finally:
+        conn.close()
+
+
+def search_customers(establishment_id: Optional[int], q: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Search customers by name, email, or phone (establishment-scoped). Returns list with loyalty_points."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        if establishment_id is None:
+            from database_postgres import get_current_establishment
+            establishment_id = get_current_establishment()
+        if establishment_id is None:
+            establishment_id = _get_or_create_default_establishment(conn)
+        term = f"%{(q or '').strip()}%"
+        cursor.execute("""
+            SELECT customer_id, establishment_id, customer_name, email, phone, loyalty_points, created_date
+            FROM customers
+            WHERE establishment_id = %s
+              AND (customer_name ILIKE %s OR email ILIKE %s OR phone ILIKE %s)
+            ORDER BY customer_name NULLS LAST
+            LIMIT %s
+        """, (establishment_id, term, term, term, limit))
+        rows = cursor.fetchall()
+        cols = ['customer_id', 'establishment_id', 'customer_name', 'email', 'phone', 'loyalty_points', 'created_date']
+        return [dict(zip(cols, row)) for row in rows] if rows else []
+    finally:
+        conn.close()
+
+
+def get_customer_rewards_detail(customer_id: int) -> Optional[Dict[str, Any]]:
+    """Get customer with rewards summary: order count, total spent, popular items."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM customers WHERE customer_id = %s", (customer_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        # Cursor may return tuple; get column names
+        colnames = [desc[0] for desc in cursor.description]
+        customer = dict(zip(colnames, row)) if isinstance(row, (list, tuple)) else dict(row)
+        cursor.execute("""
+            SELECT COUNT(*) AS order_count, COALESCE(SUM(total), 0) AS total_spent
+            FROM orders
+            WHERE customer_id = %s AND order_status = 'completed'
+        """, (customer_id,))
+        r = cursor.fetchone()
+        if isinstance(r, dict):
+            customer['order_count'] = r.get('order_count', 0)
+            customer['total_spent'] = float(r.get('total_spent', 0) or 0)
+        else:
+            customer['order_count'] = r[0] if r else 0
+            customer['total_spent'] = float(r[1]) if r and len(r) > 1 else 0.0
+        cursor.execute("""
+            SELECT i.product_id, i.product_name, SUM(oi.quantity) AS qty
+            FROM order_items oi
+            JOIN orders o ON o.order_id = oi.order_id
+            JOIN inventory i ON i.product_id = oi.product_id
+            WHERE o.customer_id = %s AND o.order_status = 'completed'
+            GROUP BY i.product_id, i.product_name
+            ORDER BY qty DESC
+            LIMIT 5
+        """, (customer_id,))
+        popular = cursor.fetchall()
+        pc = [desc[0] for desc in cursor.description]
+        customer['popular_items'] = [dict(zip(pc, x)) for x in popular] if popular else []
+        return customer
+    finally:
+        conn.close()
+
+
+def award_rewards_for_purchase(cursor, customer_id: int, amount_for_rewards: float, points_used: int = 0) -> Dict[str, Any]:
+    """
+    Award loyalty points (and optionally deduct points_used) for a purchase.
+    Uses the provided cursor so it can be called from another module within the same transaction.
+    Returns dict with points_earned, reward_type (for logging).
+    """
+    rewards_info = {'points_earned': 0, 'discount_amount': 0.0, 'reward_type': 'points'}
+    if not customer_id:
+        return rewards_info
+    try:
+        rewards_settings = get_customer_rewards_settings()
+        if not rewards_settings.get('enabled'):
+            return rewards_info
+        rewards_info = calculate_rewards(amount_for_rewards, rewards_settings)
+        if rewards_info['reward_type'] == 'points' and rewards_info['points_earned'] > 0:
+            cursor.execute("""
+                UPDATE customers 
+                SET loyalty_points = COALESCE(loyalty_points, 0) + %s
+                WHERE customer_id = %s
+            """, (rewards_info['points_earned'], customer_id))
+        if points_used and points_used > 0:
+            cursor.execute("""
+                UPDATE customers 
+                SET loyalty_points = GREATEST(COALESCE(loyalty_points, 0) - %s, 0)
+                WHERE customer_id = %s
+            """, (points_used, customer_id))
+    except Exception as e:
+        print(f"Error awarding rewards: {e}")
+        import traceback
+        traceback.print_exc()
+    return rewards_info
+
 
 def get_customer(customer_id: int) -> Optional[Dict[str, Any]]:
     """Get customer by ID"""
@@ -3635,7 +3932,8 @@ def create_order(
     notes: Optional[str] = None,
     tip: float = 0.0,
     order_type: Optional[str] = None,
-    customer_info: Optional[Dict[str, str]] = None
+    customer_info: Optional[Dict[str, str]] = None,
+    points_used: int = 0
 ) -> Dict[str, Any]:
     """
     Create a new order and process payment
@@ -3717,7 +4015,7 @@ def create_order(
                 existing_customer = None
             
             if existing_customer:
-                customer_id = existing_customer['customer_id']
+                customer_id = existing_customer['customer_id'] if isinstance(existing_customer, dict) else existing_customer[0]
                 # Update customer info if provided
                 update_fields = []
                 update_values = []
@@ -3741,12 +4039,24 @@ def create_order(
                         WHERE customer_id = %s
                     """, update_values)
             else:
-                # Create new customer
+                # Create new customer (include establishment_id)
                 cursor.execute("""
-                    INSERT INTO customers (customer_name, email, phone, address)
-                    VALUES (%s, %s, %s, %s)
-                    RETURNING customer_id
-                """, (customer_name, customer_email, customer_phone, customer_address))
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'address'
+                """)
+                has_addr = cursor.fetchone() is not None
+                if has_addr and customer_address is not None:
+                    cursor.execute("""
+                        INSERT INTO customers (establishment_id, customer_name, email, phone, address)
+                        VALUES (%s, %s, %s, %s, %s)
+                        RETURNING customer_id
+                    """, (establishment_id, customer_name, customer_email, customer_phone, customer_address))
+                else:
+                    cursor.execute("""
+                        INSERT INTO customers (establishment_id, customer_name, email, phone)
+                        VALUES (%s, %s, %s, %s)
+                        RETURNING customer_id
+                    """, (establishment_id, customer_name, customer_email, customer_phone))
                 result = cursor.fetchone()
                 if isinstance(result, dict):
                     customer_id = result.get('customer_id')
@@ -3772,6 +4082,24 @@ def create_order(
             
             subtotal += item_subtotal
             total_tax += item_tax
+        
+        # Points redemption: validate and add discount
+        points_discount = 0.0
+        if customer_id and points_used and points_used > 0:
+            cursor.execute("SELECT loyalty_points FROM customers WHERE customer_id = %s", (customer_id,))
+            prow = cursor.fetchone()
+            cust_points = (prow.get('loyalty_points', 0) if isinstance(prow, dict) else (prow[0] if prow else 0)) or 0
+            if points_used > cust_points:
+                conn.rollback()
+                conn.close()
+                return {'success': False, 'message': f'Customer has {cust_points} points; cannot use {points_used}', 'order_id': None}
+            rewards_settings = get_customer_rewards_settings()
+            redemption_value = float(rewards_settings.get('points_redemption_value', 0.01) if rewards_settings else 0.01)
+            points_discount = points_used * redemption_value
+            # Cap points discount so order total does not go negative
+            max_discount = subtotal + total_tax
+            points_discount = min(points_discount, max_discount)
+            discount += points_discount
         
         # Ensure establishment_id is set (should already be set above, but double-check)
         if establishment_id is None:
@@ -3865,14 +4193,15 @@ def create_order(
                 }
             
             try:
-                # Insert order item with all fields
+                variant_id = item.get('variant_id')
+                # Insert order item with all fields (variant_id optional for size/variant)
                 cursor.execute("""
                     INSERT INTO order_items (
                         establishment_id, order_id, product_id, quantity, unit_price, discount, subtotal,
-                        tax_rate, tax_amount
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        tax_rate, tax_amount, variant_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (item_establishment_id, order_id, product_id, quantity, unit_price, item_discount, item_subtotal,
-                      item_tax_rate, item_tax))
+                      item_tax_rate, item_tax, variant_id))
                 
                 # Verify the insert succeeded
                 if cursor.rowcount == 0:
@@ -3977,6 +4306,13 @@ def create_order(
                             SET loyalty_points = COALESCE(loyalty_points, 0) + %s
                             WHERE customer_id = %s
                         """, (rewards_info['points_earned'], customer_id))
+                    # Deduct points if customer used points on this order
+                    if points_used and points_used > 0:
+                        cursor.execute("""
+                            UPDATE customers 
+                            SET loyalty_points = GREATEST(COALESCE(loyalty_points, 0) - %s, 0)
+                            WHERE customer_id = %s
+                        """, (points_used, customer_id))
                     elif rewards_info['discount_amount'] > 0:
                         # Apply discount to order if reward type is percentage or fixed
                         # Note: This is for future use - currently discount is handled separately
@@ -4633,6 +4969,7 @@ def process_return_immediate(
         # Calculate return amounts from items
         calculated_subtotal = 0
         calculated_tax = 0
+        return_items_data = []  # Initialize list to store return item data
         
         # Process return items and calculate amounts
         for item in items_to_return:
@@ -4701,11 +5038,11 @@ def process_return_immediate(
         # Create return record (using pending_returns table but immediately approved)
         cursor.execute("""
             INSERT INTO pending_returns (
-                return_number, order_id, employee_id, customer_id,
+                establishment_id, return_number, order_id, employee_id, customer_id,
                 total_refund_amount, reason, notes, status, approved_by, approved_date
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved', %s, CURRENT_TIMESTAMP)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'approved', %s, CURRENT_TIMESTAMP)
             RETURNING return_id
-        """, (return_number, order_id, employee_id, customer_id, final_return_total, reason, notes, employee_id))
+        """, (establishment_id, return_number, order_id, employee_id, customer_id, final_return_total, reason, notes, employee_id))
         
         return_result = cursor.fetchone()
         return_id = return_result['return_id'] if isinstance(return_result, dict) else return_result[0]
@@ -8648,6 +8985,7 @@ def get_customer_rewards_settings() -> Optional[Dict[str, Any]]:
             require_both INTEGER DEFAULT 0 CHECK(require_both IN (0, 1)),
             reward_type TEXT DEFAULT 'points' CHECK(reward_type IN ('points', 'percentage', 'fixed')),
             points_per_dollar REAL DEFAULT 1.0 CHECK(points_per_dollar >= 0),
+            points_redemption_value REAL DEFAULT 0.01 CHECK(points_redemption_value >= 0),
             percentage_discount REAL DEFAULT 0.0 CHECK(percentage_discount >= 0 AND percentage_discount <= 100),
             fixed_discount REAL DEFAULT 0.0 CHECK(fixed_discount >= 0),
             minimum_spend REAL DEFAULT 0.0 CHECK(minimum_spend >= 0),
@@ -8674,13 +9012,28 @@ def get_customer_rewards_settings() -> Optional[Dict[str, Any]]:
             'require_phone': 0,
             'require_both': 0,
             'reward_type': 'points',
+            'points_enabled': 1,
+            'percentage_enabled': 0,
+            'fixed_enabled': 0,
             'points_per_dollar': 1.0,
+            'points_redemption_value': 0.01,
             'percentage_discount': 0.0,
             'fixed_discount': 0.0,
             'minimum_spend': 0.0
         }
     
-    return dict(row)
+    d = dict(row)
+    if d.get('points_redemption_value') is None:
+        d['points_redemption_value'] = 0.01
+    # Backward compat: derive enabled flags from reward_type if columns missing
+    reward_type = d.get('reward_type') or 'points'
+    if d.get('points_enabled') is None:
+        d['points_enabled'] = 1 if reward_type == 'points' else 0
+    if d.get('percentage_enabled') is None:
+        d['percentage_enabled'] = 1 if reward_type == 'percentage' else 0
+    if d.get('fixed_enabled') is None:
+        d['fixed_enabled'] = 1 if reward_type == 'fixed' else 0
+    return d
 
 def update_customer_rewards_settings(**kwargs) -> bool:
     """Update customer rewards settings"""
@@ -8698,6 +9051,7 @@ def update_customer_rewards_settings(**kwargs) -> bool:
                 require_both INTEGER DEFAULT 0 CHECK(require_both IN (0, 1)),
                 reward_type TEXT DEFAULT 'points' CHECK(reward_type IN ('points', 'percentage', 'fixed')),
                 points_per_dollar REAL DEFAULT 1.0 CHECK(points_per_dollar >= 0),
+                points_redemption_value REAL DEFAULT 0.01 CHECK(points_redemption_value >= 0),
                 percentage_discount REAL DEFAULT 0.0 CHECK(percentage_discount >= 0 AND percentage_discount <= 100),
                 fixed_discount REAL DEFAULT 0.0 CHECK(fixed_discount >= 0),
                 minimum_spend REAL DEFAULT 0.0 CHECK(minimum_spend >= 0),
@@ -8713,8 +9067,9 @@ def update_customer_rewards_settings(**kwargs) -> bool:
         
         allowed_fields = [
             'enabled', 'require_email', 'require_phone', 'require_both',
-            'reward_type', 'points_per_dollar', 'percentage_discount',
-            'fixed_discount', 'minimum_spend'
+            'reward_type', 'points_enabled', 'percentage_enabled', 'fixed_enabled',
+            'points_per_dollar', 'points_redemption_value',
+            'percentage_discount', 'fixed_discount', 'minimum_spend'
         ]
         
         if count == 0:
@@ -8729,7 +9084,11 @@ def update_customer_rewards_settings(**kwargs) -> bool:
                 'require_phone': 0,
                 'require_both': 0,
                 'reward_type': 'points',
+                'points_enabled': 1,
+                'percentage_enabled': 0,
+                'fixed_enabled': 0,
                 'points_per_dollar': 1.0,
+                'points_redemption_value': 0.01,
                 'percentage_discount': 0.0,
                 'fixed_discount': 0.0,
                 'minimum_spend': 0.0
@@ -8737,7 +9096,7 @@ def update_customer_rewards_settings(**kwargs) -> bool:
             
             for field in allowed_fields:
                 insert_fields.append(field)
-                insert_placeholders.append('?')
+                insert_placeholders.append('%s')
                 insert_values.append(kwargs.get(field, defaults.get(field)))
             
             cursor.execute(f"""
@@ -9645,9 +10004,12 @@ def open_cash_register(employee_id: int, register_id: int = 1, starting_cash: fl
     cursor = conn.cursor()
     
     try:
+        # Get or create default establishment
+        establishment_id = _get_or_create_default_establishment(conn)
+        
         # Check if there's an open session for this register
         cursor.execute("""
-            SELECT session_id FROM cash_register_sessions
+            SELECT register_session_id FROM cash_register_sessions
             WHERE register_id = %s AND status = 'open'
         """, (register_id,))
         
@@ -9663,11 +10025,12 @@ def open_cash_register(employee_id: int, register_id: int = 1, starting_cash: fl
         # Create new session
         cursor.execute("""
             INSERT INTO cash_register_sessions
-            (register_id, employee_id, starting_cash, notes, status)
-            VALUES (%s, %s, %s, %s, 'open')
-        """, (register_id, employee_id, starting_cash, notes))
+            (establishment_id, register_id, employee_id, starting_cash, notes, status)
+            VALUES (%s, %s, %s, %s, %s, 'open')
+            RETURNING register_session_id
+        """, (establishment_id, register_id, employee_id, starting_cash, notes))
         
-        session_id = cursor.lastrowid
+        session_id = cursor.fetchone()[0]
         
         # Log audit
         try:
@@ -9720,7 +10083,7 @@ def close_cash_register(session_id: int, employee_id: int, ending_cash: float, n
         cursor.execute("""
             SELECT register_id, employee_id, starting_cash, opened_at, status
             FROM cash_register_sessions
-            WHERE session_id = %s
+            WHERE register_session_id = %s
         """, (session_id,))
         
         session = cursor.fetchone()
@@ -9740,13 +10103,14 @@ def close_cash_register(session_id: int, employee_id: int, ending_cash: float, n
                 COALESCE(SUM(CASE WHEN o.payment_method = 'cash' THEN o.total ELSE 0 END), 0) as cash_sales,
                 COALESCE(SUM(CASE WHEN o.payment_method = 'cash' AND o.order_status = 'returned' THEN o.total ELSE 0 END), 0) as cash_refunds
             FROM orders o
-            WHERE o.order_date >= %s AND o.order_date <= datetime('now')
-            AND o.payment_method = 'cash'
+            WHERE o.payment_method = 'cash'
+            AND o.order_date >= %s AND o.order_date <= CURRENT_TIMESTAMP
         """, (session['opened_at'],))
         
         sales_data = cursor.fetchone()
-        cash_sales = sales_data[0] if sales_data else 0.0
-        cash_refunds = sales_data[1] if sales_data else 0.0
+        # Convert Decimal to float for calculations
+        cash_sales = float(sales_data[0]) if sales_data and sales_data[0] is not None else 0.0
+        cash_refunds = float(sales_data[1]) if sales_data and sales_data[1] is not None else 0.0
         
         # Calculate cash in/out transactions
         cursor.execute("""
@@ -9758,14 +10122,19 @@ def close_cash_register(session_id: int, employee_id: int, ending_cash: float, n
         """, (session_id,))
         
         trans_data = cursor.fetchone()
-        cash_in = trans_data[0] if trans_data else 0.0
-        cash_out = trans_data[1] if trans_data else 0.0
+        # Convert Decimal to float for calculations
+        cash_in = float(trans_data[0]) if trans_data and trans_data[0] is not None else 0.0
+        cash_out = float(trans_data[1]) if trans_data and trans_data[1] is not None else 0.0
+        
+        # Convert starting_cash to float
+        starting_cash = float(session['starting_cash']) if session.get('starting_cash') is not None else 0.0
         
         # Calculate expected cash
-        expected_cash = session['starting_cash'] + cash_sales - cash_refunds + cash_in - cash_out
+        expected_cash = starting_cash + cash_sales - cash_refunds + cash_in - cash_out
         
-        # Calculate discrepancy
-        discrepancy = ending_cash - expected_cash
+        # Calculate discrepancy (ensure ending_cash is float)
+        ending_cash_float = float(ending_cash) if ending_cash is not None else 0.0
+        discrepancy = ending_cash_float - expected_cash
         
         # Update session
         cursor.execute("""
@@ -9780,9 +10149,9 @@ def close_cash_register(session_id: int, employee_id: int, ending_cash: float, n
                 cash_out = %s,
                 discrepancy = %s,
                 status = 'closed',
-                notes = COALESCE(notes, '') || CASE WHEN ? IS NOT NULL THEN '\n' || ? ELSE '' END
-            WHERE session_id = %s
-        """, (employee_id, ending_cash, expected_cash, cash_sales, cash_refunds, 
+                notes = COALESCE(notes, '') || CASE WHEN %s IS NOT NULL THEN '\n' || %s ELSE '' END
+            WHERE register_session_id = %s
+        """, (employee_id, ending_cash_float, expected_cash, cash_sales, cash_refunds, 
               cash_in, cash_out, discrepancy, notes, notes, session_id))
         
         # Log audit
@@ -9828,12 +10197,12 @@ def close_cash_register(session_id: int, employee_id: int, ending_cash: float, n
         traceback.print_exc()
         return {'success': False, 'message': str(e)}
 
-def add_cash_transaction(session_id: int, employee_id: int, transaction_type: str, amount: float, reason: Optional[str] = None, notes: Optional[str] = None) -> Dict[str, Any]:
+def add_cash_transaction(session_id: Optional[int], employee_id: int, transaction_type: str, amount: float, reason: Optional[str] = None, notes: Optional[str] = None) -> Dict[str, Any]:
     """
     Add a cash transaction (cash in/out, deposit, withdrawal, adjustment)
     
     Args:
-        session_id: Register session ID
+        session_id: Register session ID (optional - can be None if register is not open)
         employee_id: Employee making the transaction
         transaction_type: 'cash_in', 'cash_out', 'deposit', 'withdrawal', 'adjustment'
         amount: Transaction amount
@@ -9847,28 +10216,33 @@ def add_cash_transaction(session_id: int, employee_id: int, transaction_type: st
     cursor = conn.cursor()
     
     try:
-        # Verify session is open
-        cursor.execute("""
-            SELECT status FROM cash_register_sessions WHERE session_id = %s
-        """, (session_id,))
+        # If session_id is provided, verify session is open
+        if session_id is not None:
+            cursor.execute("""
+                SELECT status FROM cash_register_sessions WHERE register_session_id = %s
+            """, (session_id,))
+            
+            session = cursor.fetchone()
+            if not session:
+                conn.close()
+                return {'success': False, 'message': 'Session not found'}
+            
+            if session[0] != 'open':
+                conn.close()
+                return {'success': False, 'message': f'Session is {session[0]}, cannot add transactions'}
         
-        session = cursor.fetchone()
-        if not session:
-            conn.close()
-            return {'success': False, 'message': 'Session not found'}
+        # Get establishment_id
+        establishment_id = _get_or_create_default_establishment(conn)
         
-        if session[0] != 'open':
-            conn.close()
-            return {'success': False, 'message': f'Session is {session[0]}, cannot add transactions'}
-        
-        # Insert transaction
+        # Insert transaction (session_id can be NULL)
         cursor.execute("""
             INSERT INTO cash_transactions
-            (session_id, employee_id, transaction_type, amount, reason, notes)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (session_id, employee_id, transaction_type, amount, reason, notes))
+            (establishment_id, session_id, employee_id, transaction_type, amount, reason, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING transaction_id
+        """, (establishment_id, session_id, employee_id, transaction_type, amount, reason, notes))
         
-        transaction_id = cursor.lastrowid
+        transaction_id = cursor.fetchone()[0]
         
         # Log audit
         try:
@@ -9916,14 +10290,15 @@ def get_register_session(session_id: Optional[int] = None, register_id: Optional
     Returns:
         Session dict or list of sessions
     """
+    from psycopg2.extras import RealDictCursor
     conn = get_connection()
-    cursor = conn.cursor()
-    # PostgreSQL cursor returns dict-like rows
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
         if session_id:
             cursor.execute("""
                 SELECT crs.*,
+                       crs.register_session_id as session_id,
                        e1.first_name || ' ' || e1.last_name as opened_by_name,
                        e2.first_name || ' ' || e2.last_name as closed_by_name,
                        e3.first_name || ' ' || e3.last_name as reconciled_by_name
@@ -9931,7 +10306,7 @@ def get_register_session(session_id: Optional[int] = None, register_id: Optional
                 LEFT JOIN employees e1 ON crs.employee_id = e1.employee_id
                 LEFT JOIN employees e2 ON crs.closed_by = e2.employee_id
                 LEFT JOIN employees e3 ON crs.reconciled_by = e3.employee_id
-                WHERE crs.session_id = %s
+                WHERE crs.register_session_id = %s
             """, (session_id,))
             
             row = cursor.fetchone()
@@ -9940,6 +10315,7 @@ def get_register_session(session_id: Optional[int] = None, register_id: Optional
         else:
             query = """
                 SELECT crs.*,
+                       crs.register_session_id as session_id,
                        e1.first_name || ' ' || e1.last_name as opened_by_name,
                        e2.first_name || ' ' || e2.last_name as closed_by_name,
                        e3.first_name || ' ' || e3.last_name as reconciled_by_name
@@ -9964,7 +10340,7 @@ def get_register_session(session_id: Optional[int] = None, register_id: Optional
             cursor.execute(query, params)
             rows = cursor.fetchall()
             conn.close()
-            return [dict(row) for row in rows]
+            return [dict(row) for row in rows] if rows else []
             
     except Exception as e:
         conn.close()
@@ -9983,9 +10359,9 @@ def get_register_summary(session_id: int) -> Dict[str, Any]:
     Returns:
         Dict with session details and transactions
     """
+    from psycopg2.extras import RealDictCursor
     conn = get_connection()
-    cursor = conn.cursor()
-    # PostgreSQL cursor returns dict-like rows
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
         # Get session
@@ -10006,15 +10382,27 @@ def get_register_summary(session_id: int) -> Dict[str, Any]:
         transactions = [dict(row) for row in cursor.fetchall()]
         
         # Get cash sales from orders
-        cursor.execute("""
-            SELECT 
-                COUNT(*) as transaction_count,
-                COALESCE(SUM(CASE WHEN o.order_status != 'voided' THEN o.total ELSE 0 END), 0) as total_sales,
-                COALESCE(SUM(CASE WHEN o.order_status = 'voided' THEN o.total ELSE 0 END), 0) as voided_amount
-            FROM orders o
-            WHERE o.payment_method = 'cash'
-            AND o.order_date >= ? AND o.order_date <= COALESCE(%s, datetime('now'))
-        """, (session['opened_at'], session.get('closed_at')))
+        closed_at = session.get('closed_at')
+        if closed_at:
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as transaction_count,
+                    COALESCE(SUM(CASE WHEN o.order_status != 'voided' THEN o.total ELSE 0 END), 0) as total_sales,
+                    COALESCE(SUM(CASE WHEN o.order_status = 'voided' THEN o.total ELSE 0 END), 0) as voided_amount
+                FROM orders o
+                WHERE o.payment_method = 'cash'
+                AND o.order_date >= %s AND o.order_date <= %s
+            """, (session['opened_at'], closed_at))
+        else:
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as transaction_count,
+                    COALESCE(SUM(CASE WHEN o.order_status != 'voided' THEN o.total ELSE 0 END), 0) as total_sales,
+                    COALESCE(SUM(CASE WHEN o.order_status = 'voided' THEN o.total ELSE 0 END), 0) as voided_amount
+                FROM orders o
+                WHERE o.payment_method = 'cash'
+                AND o.order_date >= %s AND o.order_date <= CURRENT_TIMESTAMP
+            """, (session['opened_at'],))
         
         sales_data = dict(cursor.fetchone())
         
@@ -10052,7 +10440,7 @@ def reconcile_register_session(session_id: int, employee_id: int, notes: Optiona
     try:
         # Check session exists and is closed
         cursor.execute("""
-            SELECT status FROM cash_register_sessions WHERE session_id = %s
+            SELECT status FROM cash_register_sessions WHERE register_session_id = %s
         """, (session_id,))
         
         session = cursor.fetchone()
@@ -10070,8 +10458,8 @@ def reconcile_register_session(session_id: int, employee_id: int, notes: Optiona
             SET status = 'reconciled',
                 reconciled_by = %s,
                 reconciled_at = CURRENT_TIMESTAMP,
-                notes = COALESCE(notes, '') || CASE WHEN ? IS NOT NULL THEN '\nReconciled: ' || ? ELSE '' END
-            WHERE session_id = %s
+                notes = COALESCE(notes, '') || CASE WHEN %s IS NOT NULL THEN '\nReconciled: ' || %s ELSE '' END
+            WHERE register_session_id = %s
         """, (employee_id, notes, notes, session_id))
         
         # Log audit
@@ -10292,6 +10680,9 @@ def save_daily_cash_count(
     cursor = conn.cursor()
     
     try:
+        # Get or create default establishment
+        establishment_id = _get_or_create_default_establishment(conn)
+        
         if count_type not in ['drop', 'opening', 'closing']:
             conn.close()
             return {'success': False, 'message': 'count_type must be "drop", "opening", or "closing"'}
@@ -10319,8 +10710,8 @@ def save_daily_cash_count(
         # Check if count already exists for this date/type
         cursor.execute("""
             SELECT count_id FROM daily_cash_counts
-            WHERE register_id = %s AND count_date = %s AND count_type = %s
-        """, (register_id, count_date, count_type))
+            WHERE establishment_id = %s AND register_id = %s AND count_date = %s AND count_type = %s
+        """, (establishment_id, register_id, count_date, count_type))
         
         existing = cursor.fetchone()
         
@@ -10340,10 +10731,11 @@ def save_daily_cash_count(
             # Insert new
             cursor.execute("""
                 INSERT INTO daily_cash_counts
-                (register_id, count_date, count_type, total_amount, denominations, counted_by, notes)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (register_id, count_date, count_type, total_amount, denominations_json, employee_id, notes))
-            count_id = cursor.lastrowid
+                (establishment_id, register_id, count_date, count_type, total_amount, denominations, counted_by, notes)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING count_id
+            """, (establishment_id, register_id, count_date, count_type, total_amount, denominations_json, employee_id, notes))
+            count_id = cursor.fetchone()[0]
         
         # Log audit
         try:
@@ -10381,6 +10773,176 @@ def save_daily_cash_count(
         traceback.print_exc()
         return {'success': False, 'message': str(e)}
 
+def get_register_events(
+    register_id: Optional[int] = None,
+    limit: Optional[int] = 100
+) -> List[Dict[str, Any]]:
+    """
+    Get all register events (open, close, drop, take out) as a unified list
+    
+    Args:
+        register_id: Filter by register ID
+        limit: Maximum number of events to return
+    
+    Returns:
+        List of event dicts with unified structure
+    """
+    from psycopg2.extras import RealDictCursor
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        all_events = []
+        
+        # Get open/close events from cash_register_sessions
+        query = """
+            SELECT 
+                crs.register_session_id as event_id,
+                'open' as event_type,
+                crs.starting_cash as amount,
+                crs.opened_at as timestamp,
+                crs.employee_id,
+                e.first_name || ' ' || e.last_name as employee_name,
+                crs.notes,
+                crs.register_id
+            FROM cash_register_sessions crs
+            LEFT JOIN employees e ON crs.employee_id = e.employee_id
+            WHERE 1=1
+        """
+        params = []
+        if register_id:
+            query += " AND crs.register_id = %s"
+            params.append(register_id)
+        
+        cursor.execute(query, params)
+        for row in cursor.fetchall():
+            all_events.append({
+                'event_id': f"open_{row['event_id']}",
+                'event_type': 'open',
+                'amount': float(row['amount']) if row['amount'] else 0,
+                'timestamp': row['timestamp'],
+                'employee_id': row['employee_id'],
+                'employee_name': row['employee_name'],
+                'notes': row['notes'] or 'Register opened',
+                'register_id': row['register_id']
+            })
+        
+        # Get close events
+        query = """
+            SELECT 
+                crs.register_session_id as event_id,
+                'close' as event_type,
+                crs.ending_cash as amount,
+                crs.closed_at as timestamp,
+                crs.closed_by as employee_id,
+                e.first_name || ' ' || e.last_name as employee_name,
+                crs.notes,
+                crs.register_id
+            FROM cash_register_sessions crs
+            LEFT JOIN employees e ON crs.closed_by = e.employee_id
+            WHERE crs.status = 'closed' AND crs.closed_at IS NOT NULL
+        """
+        params = []
+        if register_id:
+            query += " AND crs.register_id = %s"
+            params.append(register_id)
+        
+        cursor.execute(query, params)
+        for row in cursor.fetchall():
+            all_events.append({
+                'event_id': f"close_{row['event_id']}",
+                'event_type': 'close',
+                'amount': float(row['amount']) if row['amount'] else 0,
+                'timestamp': row['timestamp'],
+                'employee_id': row['employee_id'],
+                'employee_name': row['employee_name'],
+                'notes': row['notes'] or 'Register closed',
+                'register_id': row['register_id']
+            })
+        
+        # Get drop events from daily_cash_counts
+        query = """
+            SELECT 
+                dc.count_id as event_id,
+                'drop' as event_type,
+                dc.total_amount as amount,
+                dc.counted_at as timestamp,
+                dc.counted_by as employee_id,
+                e.first_name || ' ' || e.last_name as employee_name,
+                dc.notes,
+                dc.register_id
+            FROM daily_cash_counts dc
+            LEFT JOIN employees e ON dc.counted_by = e.employee_id
+            WHERE dc.count_type = 'drop'
+        """
+        params = []
+        if register_id:
+            query += " AND dc.register_id = %s"
+            params.append(register_id)
+        
+        cursor.execute(query, params)
+        for row in cursor.fetchall():
+            all_events.append({
+                'event_id': f"drop_{row['event_id']}",
+                'event_type': 'drop',
+                'amount': float(row['amount']) if row['amount'] else 0,
+                'timestamp': row['timestamp'],
+                'employee_id': row['employee_id'],
+                'employee_name': row['employee_name'],
+                'notes': row['notes'] or 'Cash drop',
+                'register_id': row['register_id']
+            })
+        
+        # Get take out money events from cash_transactions
+        query = """
+            SELECT 
+                ct.transaction_id as event_id,
+                'take_out' as event_type,
+                ct.amount,
+                ct.transaction_date as timestamp,
+                ct.employee_id,
+                e.first_name || ' ' || e.last_name as employee_name,
+                ct.reason || CASE WHEN ct.notes IS NOT NULL THEN ': ' || ct.notes ELSE '' END as notes,
+                COALESCE(crs.register_id, 1) as register_id
+            FROM cash_transactions ct
+            JOIN employees e ON ct.employee_id = e.employee_id
+            LEFT JOIN cash_register_sessions crs ON ct.session_id = crs.register_session_id
+            WHERE ct.transaction_type = 'cash_out'
+        """
+        params = []
+        if register_id:
+            query += " AND (crs.register_id = %s OR ct.session_id IS NULL)"
+            params.append(register_id)
+        
+        cursor.execute(query, params)
+        for row in cursor.fetchall():
+            all_events.append({
+                'event_id': f"takeout_{row['event_id']}",
+                'event_type': 'take_out',
+                'amount': float(row['amount']) if row['amount'] else 0,
+                'timestamp': row['timestamp'],
+                'employee_id': row['employee_id'],
+                'employee_name': row['employee_name'],
+                'notes': row['notes'] or 'Money taken out',
+                'register_id': row['register_id']
+            })
+        
+        # Sort by timestamp descending and limit
+        all_events.sort(key=lambda x: x['timestamp'] or '', reverse=True)
+        if limit:
+            all_events = all_events[:limit]
+        
+        conn.close()
+        return all_events
+        
+    except Exception as e:
+        if conn:
+            conn.close()
+        print(f"Error getting register events: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
 def get_daily_cash_counts(
     register_id: Optional[int] = None,
     count_date: Optional[str] = None,
@@ -10401,9 +10963,9 @@ def get_daily_cash_counts(
     Returns:
         List of count dicts
     """
+    from psycopg2.extras import RealDictCursor
     conn = get_connection()
-    cursor = conn.cursor()
-    # PostgreSQL cursor returns dict-like rows
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
         query = """
@@ -10428,11 +10990,11 @@ def get_daily_cash_counts(
             params.append(count_type)
         
         if start_date:
-            query += " AND dc.count_date >= ?"
+            query += " AND dc.count_date >= %s"
             params.append(start_date)
         
         if end_date:
-            query += " AND dc.count_date <= ?"
+            query += " AND dc.count_date <= %s"
             params.append(end_date)
         
         query += " ORDER BY dc.count_date DESC, dc.counted_at DESC"

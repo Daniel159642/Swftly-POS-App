@@ -1,0 +1,112 @@
+.home-page {
+  min-height: 100vh;
+  background-image: linear-gradient(315deg, #d5ddf8, #fff 57%);
+  background-attachment: fixed;
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  padding: 1rem 1.5rem;
+}
+
+.home-header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.home-logo {
+  min-width: 1px;
+}
+
+.home-sign-in {
+  padding: 0.5rem 1rem;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.home-sign-in:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.8);
+}
+
+.home-hero {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  padding: 2rem;
+}
+
+.home-hero-title {
+  font-size: clamp(3rem, 10vw, 6rem);
+  font-weight: 700;
+  color: #1a1a2e;
+  letter-spacing: -0.02em;
+  font-style: italic;
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.home-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.home-section {
+  min-height: 25vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem;
+}
+
+.home-section-inner {
+  max-width: 1200px;
+  width: 100%;
+  min-height: 80px;
+}
+
+.home-floating-toolbar {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  padding: 0.5rem 1rem;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+}
+
+.home-floating-toolbar-inner {
+  min-width: 120px;
+  min-height: 24px;
+}
+
+.home-footer {
+  margin-top: auto;
+  padding: 2rem 1.5rem;
+}
+
+.home-footer-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: 40px;
+}

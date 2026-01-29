@@ -41,6 +41,7 @@ from database import (
     clock_in, clock_out, get_current_clock_status, get_schedule,
     get_store_location_settings, update_store_location_settings,
     get_customer_rewards_settings, update_customer_rewards_settings, calculate_rewards,
+    add_customer, search_customers, get_customer_rewards_detail,
     # Accounting functions
     generate_balance_sheet, generate_income_statement,
     generate_trial_balance,
@@ -54,6 +55,16 @@ from database import (
 from permission_manager import get_permission_manager
 from sms_service_email_to_aws import EmailToAWSSMSService
 import os
+# QuickBooks-style accounting backend (accounting schema)
+try:
+    from backend.controllers.account_controller import account_controller
+    from backend.controllers.transaction_controller import transaction_controller
+    from backend.controllers.report_controller import report_controller
+    from backend.middleware.error_handler import AppError, handle_error as handle_app_error
+    _ACCOUNTING_BACKEND_AVAILABLE = True
+except Exception as e:
+    _ACCOUNTING_BACKEND_AVAILABLE = False
+    print(f"Note: Accounting backend not loaded: {e}")
 import sys
 import json
 from datetime import datetime, time, date
@@ -210,6 +221,11 @@ def handle_500_error(e):
         # Last resort - return plain text JSON
         return Response(f'{{"success": false, "error": "{error_msg}", "message": "Internal server error"}}', 
                        mimetype='application/json', status=500)
+
+if _ACCOUNTING_BACKEND_AVAILABLE:
+    @app.errorhandler(AppError)
+    def handle_app_error_exc(e):
+        return handle_app_error(e)
 
 # After request hook to ensure all error responses are JSON
 @app.after_request
@@ -417,7 +433,17 @@ def api_inventory():
                 finally:
                     conn.close()
 
-            # Create product
+            item_type = (data.get('item_type') or 'product').lower()
+            if item_type not in ('product', 'ingredient'):
+                item_type = 'product'
+            unit = data.get('unit')
+            sell_at_pos = data.get('sell_at_pos', True)
+            if isinstance(sell_at_pos, str):
+                sell_at_pos = sell_at_pos.lower() in ('true', '1', 'yes')
+            if item_type == 'ingredient':
+                sell_at_pos = False
+
+            # Create product or ingredient
             product_id = add_product(
                 product_name=product_name,
                 sku=sku,
@@ -429,13 +455,16 @@ def api_inventory():
                 current_quantity=int(data.get('current_quantity', 0)) or 0,
                 category=data.get('category'),
                 barcode=data.get('barcode'),
-                auto_extract_metadata=True
+                auto_extract_metadata=(item_type == 'product'),
+                item_type=item_type,
+                unit=unit,
+                sell_at_pos=sell_at_pos
             )
-            
+            kind = 'Ingredient' if item_type == 'ingredient' else 'Product'
             return jsonify({
                 'success': True,
                 'product_id': product_id,
-                'message': 'Product created successfully'
+                'message': f'{kind} created successfully'
             })
         except ValueError as e:
             return jsonify({'success': False, 'message': str(e)}), 400
@@ -443,13 +472,14 @@ def api_inventory():
             traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500
     else:
-        # GET request (PostgreSQL)
+        # GET request (PostgreSQL) - optional filter: item_type=product|ingredient (default: all)
         try:
             from database import ensure_metadata_tables
             ensure_metadata_tables()
+            item_type_filter = request.args.get('item_type', '').lower()
             conn, cursor = _pg_conn()
             try:
-                cursor.execute("""
+                sql = """
                     SELECT 
                         i.*,
                         v.vendor_name,
@@ -466,11 +496,46 @@ def api_inventory():
                     LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
                     LEFT JOIN product_metadata pm ON i.product_id = pm.product_id
                     LEFT JOIN categories c ON pm.category_id = c.category_id
-                    ORDER BY i.product_name
-                """)
+                    WHERE 1=1
+                """
+                params = []
+                cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'inventory' AND column_name = 'item_type'")
+                has_item_type = cursor.fetchone() is not None
+                if has_item_type and item_type_filter == 'product':
+                    sql += " AND (i.item_type = 'product' OR i.item_type IS NULL)"
+                elif has_item_type and item_type_filter == 'ingredient':
+                    sql += " AND i.item_type = 'ingredient'"
+                if has_item_type:
+                    sql += " ORDER BY i.item_type NULLS LAST, i.product_name"
+                else:
+                    sql += " ORDER BY i.product_name"
+                cursor.execute(sql, params)
                 rows = cursor.fetchall()
                 columns = list(rows[0].keys()) if rows else []
                 data = [dict(r) for r in rows]
+                include_variants = request.args.get('include_variants', '').lower() in ('1', 'true', 'yes')
+                if include_variants and data:
+                    try:
+                        product_ids = [r.get('product_id') for r in data if r.get('product_id')]
+                        if product_ids:
+                            placeholders = ','.join(['%s'] * len(product_ids))
+                            cursor.execute(
+                                "SELECT variant_id, product_id, variant_name, price, cost, sort_order FROM product_variants WHERE product_id IN (" + placeholders + ") ORDER BY product_id, sort_order, variant_name",
+                                tuple(product_ids)
+                            )
+                            variant_rows = cursor.fetchall()
+                            variants_by_product = {}
+                            for v in variant_rows:
+                                vd = dict(v)
+                                pid = vd.get('product_id')
+                                if pid not in variants_by_product:
+                                    variants_by_product[pid] = []
+                                variants_by_product[pid].append(vd)
+                            for row in data:
+                                row['variants'] = variants_by_product.get(row.get('product_id')) or []
+                    except Exception:
+                        for row in data:
+                            row['variants'] = []
                 return jsonify({'columns': columns, 'data': data})
             finally:
                 conn.close()
@@ -483,10 +548,24 @@ def api_inventory():
 def api_update_inventory(product_id):
     """Update inventory product with audit logging"""
     try:
-        if not request.is_json:
-            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-        
-        data = request.json
+        if request.is_json:
+            data = request.json
+        else:
+            data = request.form.to_dict()
+            if request.files:
+                for k, v in request.files.items():
+                    if v and v.filename:
+                        upload_dir = 'uploads/product_photos'
+                        os.makedirs(upload_dir, exist_ok=True)
+                        path = os.path.join(upload_dir, secure_filename(f"product_{product_id}_{datetime.now().timestamp()}_{v.filename}"))
+                        v.save(path)
+                        data['photo'] = path
+            for key in ('product_price', 'product_cost', 'current_quantity', 'vendor_id'):
+                if key in data and data[key] not in (None, ''):
+                    try:
+                        data[key] = float(data[key]) if key != 'current_quantity' else int(float(data[key]))
+                    except (TypeError, ValueError):
+                        pass
         
         # Verify session and get employee_id
         session_token = data.get('session_token') or request.headers.get('X-Session-Token')
@@ -524,6 +603,116 @@ def api_update_inventory(product_id):
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
+
+
+# ---------------------------------------------------------------------------
+# Product variants (sizes with different prices) and ingredients (recipes)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/inventory/<int:product_id>/variants', methods=['GET', 'POST'])
+def api_product_variants(product_id):
+    """Get or add size/variant options for a product (e.g. Small $3, Large $5)."""
+    from database import get_product, get_product_variants, add_product_variant
+    if request.method == 'GET':
+        try:
+            variants = get_product_variants(product_id)
+            return jsonify({'success': True, 'data': variants})
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+    else:
+        try:
+            data = request.get_json() or {}
+            variant_name = (data.get('variant_name') or data.get('name') or '').strip()
+            price = float(data.get('price', 0))
+            cost = float(data.get('cost', 0))
+            sort_order = int(data.get('sort_order', 0))
+            if not variant_name:
+                return jsonify({'success': False, 'message': 'variant_name is required'}), 400
+            if price < 0:
+                return jsonify({'success': False, 'message': 'price must be >= 0'}), 400
+            variant_id = add_product_variant(product_id, variant_name, price, cost, sort_order)
+            return jsonify({'success': True, 'variant_id': variant_id, 'message': 'Variant added'}), 201
+        except ValueError as e:
+            return jsonify({'success': False, 'message': str(e)}), 400
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/variants/<int:variant_id>', methods=['PUT', 'DELETE'])
+def api_product_variant_by_id(variant_id):
+    """Update or delete a product variant."""
+    from database import update_product_variant, delete_product_variant, get_variant_by_id
+    if request.method == 'DELETE':
+        try:
+            ok = delete_product_variant(variant_id)
+            return jsonify({'success': ok, 'message': 'Variant deleted' if ok else 'Variant not found'}), 200 if ok else 404
+        except Exception as e:
+            return jsonify({'success': False, 'message': str(e)}), 500
+    try:
+        data = request.get_json() or {}
+        updates = {}
+        if 'variant_name' in data or 'name' in data:
+            updates['variant_name'] = (data.get('variant_name') or data.get('name') or '').strip()
+        if 'price' in data:
+            updates['price'] = float(data['price'])
+        if 'cost' in data:
+            updates['cost'] = float(data['cost'])
+        if 'sort_order' in data:
+            updates['sort_order'] = int(data['sort_order'])
+        if not updates:
+            return jsonify({'success': False, 'message': 'No fields to update'}), 400
+        ok = update_product_variant(variant_id, **updates)
+        return jsonify({'success': ok, 'message': 'Variant updated' if ok else 'Variant not found'}), 200 if ok else 404
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/<int:product_id>/ingredients', methods=['GET', 'POST'])
+def api_product_ingredients(product_id):
+    """Get or add recipe ingredients for a product (ingredients used to make this product)."""
+    from database import get_product_ingredients, add_product_ingredient
+    if request.method == 'GET':
+        try:
+            variant_id = request.args.get('variant_id', type=int)
+            ingredients = get_product_ingredients(product_id, variant_id if variant_id else None)
+            return jsonify({'success': True, 'data': ingredients})
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+    else:
+        try:
+            data = request.get_json() or {}
+            ingredient_id = data.get('ingredient_id')
+            quantity_required = float(data.get('quantity_required', data.get('quantity', 0)))
+            unit = (data.get('unit') or '').strip()
+            variant_id = data.get('variant_id')
+            if not ingredient_id:
+                return jsonify({'success': False, 'message': 'ingredient_id is required'}), 400
+            if quantity_required <= 0:
+                return jsonify({'success': False, 'message': 'quantity_required must be > 0'}), 400
+            if not unit:
+                return jsonify({'success': False, 'message': 'unit is required (e.g. oz, lb, each)'}), 400
+            rid = add_product_ingredient(product_id, int(ingredient_id), quantity_required, unit, variant_id)
+            return jsonify({'success': True, 'id': rid, 'message': 'Ingredient added to recipe'}), 201
+        except ValueError as e:
+            return jsonify({'success': False, 'message': str(e)}), 400
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/ingredients/<int:recipe_id>', methods=['DELETE'])
+def api_delete_product_ingredient(recipe_id):
+    """Remove an ingredient from a product recipe."""
+    from database import delete_product_ingredient
+    try:
+        ok = delete_product_ingredient(recipe_id)
+        return jsonify({'success': ok, 'message': 'Ingredient removed from recipe' if ok else 'Not found'}), 200 if ok else 404
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @app.route('/api/vendors/<int:vendor_id>', methods=['PUT'])
 def api_update_vendor(vendor_id):
@@ -1041,9 +1230,35 @@ def api_get_shipment_items(shipment_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/shipments/preview-manual', methods=['POST'])
+def api_preview_shipment_manual():
+    """Upload a document for manual entry only: save file and return empty items (no scraping)."""
+    try:
+        if 'document' not in request.files:
+            return jsonify({'success': False, 'message': 'No document file provided'}), 400
+        file = request.files['document']
+        if file.filename == '':
+            return jsonify({'success': False, 'message': 'No file selected'}), 400
+        filename = secure_filename(f"preview_{datetime.now().timestamp()}_{file.filename}")
+        upload_dir = 'uploads/shipments'
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, filename)
+        file.save(file_path)
+        return jsonify({
+            'success': True,
+            'items': [],
+            'file_path': file_path,
+            'filename': file.filename
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @app.route('/api/shipments/preview', methods=['POST'])
 def api_preview_shipment():
-    """Preview scraped data from a vendor shipment document without creating shipment"""
+    """Preview scraped data from a vendor shipment document without creating shipment.
+    For manual entry (no scrape), use POST /api/shipments/preview-manual instead."""
     try:
         # Check if file is present
         if 'document' not in request.files:
@@ -1053,12 +1268,28 @@ def api_preview_shipment():
         if file.filename == '':
             return jsonify({'success': False, 'message': 'No file selected'}), 400
         
+        # Accept manual from header, form body, or query string
+        manual_val = (
+            (request.headers.get('X-Shipment-Manual-Entry') or '') or
+            (request.form.get('manual') or '') or
+            (request.args.get('manual') or '')
+        ).strip().lower()
+        manual = manual_val in ('1', 'true', 'yes')
+        
         # Save uploaded file temporarily
         filename = secure_filename(f"preview_{datetime.now().timestamp()}_{file.filename}")
         upload_dir = 'uploads/shipments'
         os.makedirs(upload_dir, exist_ok=True)
         file_path = os.path.join(upload_dir, filename)
         file.save(file_path)
+        
+        if manual:
+            return jsonify({
+                'success': True,
+                'items': [],
+                'file_path': file_path,
+                'filename': file.filename
+            })
         
         # Scrape the document
         from document_scraper import scrape_document
@@ -1574,7 +1805,8 @@ def api_create_order():
             customer_id=data.get('customer_id'),
             tip=data.get('tip', 0.0),
             order_type=data.get('order_type'),
-            customer_info=data.get('customer_info')
+            customer_info=data.get('customer_info'),
+            points_used=int(data.get('points_used', 0) or 0)
         )
         
         return jsonify(result)
@@ -1681,6 +1913,70 @@ def api_update_receipt_settings():
                 """, vals)
             conn.commit()
             return jsonify({'success': True, 'message': 'Receipt settings updated successfully'})
+        finally:
+            conn.close()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/receipt-templates', methods=['GET'])
+def api_list_receipt_templates():
+    """List custom receipt templates"""
+    try:
+        conn, cursor = _pg_conn()
+        try:
+            cursor.execute("""
+                SELECT id, name, settings, created_at
+                FROM receipt_templates
+                ORDER BY created_at DESC
+            """)
+            rows = cursor.fetchall()
+            templates = []
+            for r in rows:
+                templates.append({
+                    'id': r['id'],
+                    'name': r['name'],
+                    'settings': r['settings'] if isinstance(r['settings'], dict) else (json.loads(r['settings']) if isinstance(r['settings'], str) else {}),
+                    'created_at': r['created_at'].isoformat() if hasattr(r['created_at'], 'isoformat') else str(r['created_at'])
+                })
+            return jsonify({'success': True, 'templates': templates})
+        finally:
+            conn.close()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/receipt-templates', methods=['POST'])
+def api_create_receipt_template():
+    """Create a new named receipt template"""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        data = request.json
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify({'success': False, 'message': 'Template name is required'}), 400
+        settings = data.get('settings')
+        if settings is None:
+            settings = {}
+        conn, cursor = _pg_conn()
+        try:
+            cursor.execute("""
+                INSERT INTO receipt_templates (name, settings)
+                VALUES (%s, %s)
+                RETURNING id, name, settings, created_at
+            """, (name, json.dumps(settings) if not isinstance(settings, str) else settings))
+            row = cursor.fetchone()
+            conn.commit()
+            return jsonify({
+                'success': True,
+                'template': {
+                    'id': row['id'],
+                    'name': row['name'],
+                    'settings': row['settings'] if isinstance(row['settings'], dict) else json.loads(row['settings'] or '{}'),
+                    'created_at': row['created_at'].isoformat() if hasattr(row['created_at'], 'isoformat') else str(row['created_at'])
+                }
+            })
         finally:
             conn.close()
     except Exception as e:
@@ -2023,11 +2319,55 @@ def api_employees():
                 status=500
             )
 
-@app.route('/api/customers')
+@app.route('/api/customers', methods=['GET', 'POST'])
 def api_customers():
-    """Get customers data"""
+    """Get customers data (GET) or create customer (POST)"""
+    if request.method == 'POST':
+        try:
+            data = request.get_json() or {}
+            cid = add_customer(
+                customer_name=data.get('customer_name'),
+                email=data.get('email'),
+                phone=data.get('phone'),
+                address=data.get('address'),
+                establishment_id=None
+            )
+            return jsonify({'success': True, 'customer_id': cid})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 400
     columns, data = get_table_data('customers')
     return jsonify({'columns': columns, 'data': data})
+
+
+@app.route('/api/customers/search')
+def api_customers_search():
+    """Search customers by name, email, or phone (for POS customer lookup)."""
+    try:
+        q = request.args.get('q', '').strip()
+        establishment_id = request.args.get('establishment_id', type=int) or None
+        results = search_customers(establishment_id, q, limit=20)
+        return jsonify({'success': True, 'data': results})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'data': [], 'message': str(e)}), 500
+
+
+@app.route('/api/customers/<int:customer_id>/rewards')
+def api_customer_rewards(customer_id):
+    """Get customer rewards detail: points, order count, total spent, popular items."""
+    try:
+        detail = get_customer_rewards_detail(customer_id)
+        if not detail:
+            return jsonify({'success': False, 'message': 'Customer not found'}), 404
+        return jsonify({'success': True, 'data': detail})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @app.route('/api/employee_schedule', methods=['GET', 'POST'])
 def api_employee_schedule():
@@ -6504,6 +6844,9 @@ def api_update_customer_rewards_settings():
             'require_phone': data.get('require_phone'),
             'require_both': data.get('require_both'),
             'reward_type': data.get('reward_type'),
+            'points_enabled': data.get('points_enabled'),
+            'percentage_enabled': data.get('percentage_enabled'),
+            'fixed_enabled': data.get('fixed_enabled'),
             'points_per_dollar': data.get('points_per_dollar'),
             'percentage_discount': data.get('percentage_discount'),
             'fixed_discount': data.get('fixed_discount'),
@@ -6729,6 +7072,7 @@ def api_sms_send():
         phone_number = data.get('phone_number')
         message_text = data.get('message_text')
         customer_id = data.get('customer_id')
+        carrier_preference = data.get('carrier_preference')  # att, verizon, tmobile, sprint (for email-to-SMS)
         
         if not phone_number or not message_text:
             return jsonify({'success': False, 'message': 'Phone number and message text required'}), 400
@@ -6746,9 +7090,14 @@ def api_sms_send():
             phone_number=phone_number,
             message=message_text,
             customer_id=customer_id,
-            employee_id=employee_id
+            employee_id=employee_id,
+            carrier_preference=carrier_preference
         )
-        
+        # Debug: log result so terminal shows what happened (gateway, phone_cleaned, error)
+        if result.get('success'):
+            print(f"[SMS] Sent OK: phone_cleaned={result.get('phone_cleaned')} gateway={result.get('gateway_used')} carrier_tried={result.get('carrier_tried')}")
+        else:
+            print(f"[SMS] Send failed: {result.get('error')} phone_cleaned={result.get('phone_cleaned')}")
         return jsonify(result)
     except Exception as e:
         traceback.print_exc()
@@ -7046,8 +7395,12 @@ def api_add_cash_transaction():
 def api_get_register_session():
     """Get register session(s)"""
     try:
-        # Verify session
-        session_token = request.headers.get('X-Session-Token') or request.args.get('session_token')
+        # Verify session (support Bearer for POS)
+        session_token = (
+            request.headers.get('Authorization', '').replace('Bearer ', '').strip() or
+            request.headers.get('X-Session-Token') or
+            request.args.get('session_token')
+        )
         if not session_token:
             return jsonify({'success': False, 'message': 'Session token required'}), 401
         
@@ -7153,6 +7506,37 @@ def api_reconcile_register():
             
     except Exception as e:
         print(f"Error reconciling register: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/register/events', methods=['GET'])
+def api_get_register_events():
+    """Get all register events (open, close, drop, take out)"""
+    try:
+        # Verify session
+        session_token = request.headers.get('X-Session-Token') or request.args.get('session_token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        from database import get_register_events
+        
+        register_id = request.args.get('register_id')
+        limit = request.args.get('limit', 100)
+        
+        result = get_register_events(
+            register_id=int(register_id) if register_id else None,
+            limit=int(limit) if limit else 100
+        )
+        
+        return jsonify({'success': True, 'data': result}), 200
+            
+    except Exception as e:
+        print(f"Error getting register events: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -7295,6 +7679,148 @@ def api_daily_cash_count():
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
+# ============================================================================
+# QUICKBOOKS-STYLE ACCOUNTING API (/api/v1/* and /api/accounting/*)
+# ============================================================================
+
+if _ACCOUNTING_BACKEND_AVAILABLE:
+    # ---------- /api/v1/accounts ----------
+    @app.route('/api/v1/accounts', methods=['GET'])
+    def api_v1_accounts_list():
+        return account_controller.get_all_accounts()
+
+    @app.route('/api/v1/accounts', methods=['POST'])
+    def api_v1_accounts_create():
+        return account_controller.create_account()
+
+    @app.route('/api/v1/accounts/tree', methods=['GET'])
+    def api_v1_accounts_tree():
+        return account_controller.get_account_tree()
+
+    @app.route('/api/v1/accounts/<int:account_id>', methods=['GET'])
+    def api_v1_accounts_get(account_id):
+        return account_controller.get_account_by_id(account_id)
+
+    @app.route('/api/v1/accounts/<int:account_id>', methods=['PUT'])
+    def api_v1_accounts_update(account_id):
+        return account_controller.update_account(account_id)
+
+    @app.route('/api/v1/accounts/<int:account_id>', methods=['DELETE'])
+    def api_v1_accounts_delete(account_id):
+        return account_controller.delete_account(account_id)
+
+    @app.route('/api/v1/accounts/<int:account_id>/children', methods=['GET'])
+    def api_v1_accounts_children(account_id):
+        return account_controller.get_account_children(account_id)
+
+    @app.route('/api/v1/accounts/<int:account_id>/balance', methods=['GET'])
+    def api_v1_accounts_balance(account_id):
+        return account_controller.get_account_balance(account_id)
+
+    @app.route('/api/v1/accounts/<int:account_id>/toggle-status', methods=['PATCH'])
+    def api_v1_accounts_toggle(account_id):
+        return account_controller.toggle_account_status(account_id)
+
+    # ---------- /api/v1/transactions ----------
+    @app.route('/api/v1/transactions', methods=['GET'])
+    def api_v1_transactions_list():
+        return transaction_controller.get_all_transactions()
+
+    @app.route('/api/v1/transactions', methods=['POST'])
+    def api_v1_transactions_create():
+        return transaction_controller.create_transaction()
+
+    @app.route('/api/v1/transactions/general-ledger', methods=['GET'])
+    def api_v1_transactions_gl():
+        return transaction_controller.get_general_ledger()
+
+    @app.route('/api/v1/transactions/<int:transaction_id>', methods=['GET'])
+    def api_v1_transactions_get(transaction_id):
+        return transaction_controller.get_transaction_by_id(transaction_id)
+
+    @app.route('/api/v1/transactions/<int:transaction_id>', methods=['PUT'])
+    def api_v1_transactions_update(transaction_id):
+        return transaction_controller.update_transaction(transaction_id)
+
+    @app.route('/api/v1/transactions/<int:transaction_id>', methods=['DELETE'])
+    def api_v1_transactions_delete(transaction_id):
+        return transaction_controller.delete_transaction(transaction_id)
+
+    @app.route('/api/v1/transactions/<int:transaction_id>/post', methods=['POST'])
+    def api_v1_transactions_post(transaction_id):
+        return transaction_controller.post_transaction(transaction_id)
+
+    @app.route('/api/v1/transactions/<int:transaction_id>/unpost', methods=['POST'])
+    def api_v1_transactions_unpost(transaction_id):
+        return transaction_controller.unpost_transaction(transaction_id)
+
+    @app.route('/api/v1/transactions/<int:transaction_id>/void', methods=['POST'])
+    def api_v1_transactions_void(transaction_id):
+        return transaction_controller.void_transaction(transaction_id)
+
+    # ---------- /api/accounting reports (trial-balance, P&L, balance-sheet) ----------
+    @app.route('/api/accounting/trial-balance', methods=['GET'])
+    def api_accounting_trial_balance():
+        as_of = request.args.get('as_of_date')
+        if not as_of:
+            as_of = date.today().isoformat()
+        try:
+            d = datetime.fromisoformat(as_of.split('T')[0]).date()
+        except Exception:
+            return jsonify({'success': False, 'message': 'Invalid as_of_date. Use YYYY-MM-DD'}), 400
+        conn, cur = _pg_conn()
+        cur.execute("SELECT * FROM accounting.get_trial_balance(%s)", (d,))
+        rows = cur.fetchall()
+        data = [dict(row) for row in rows]
+        conn.close()
+        total_d = sum(float(row.get('total_debits') or 0) for row in data)
+        total_c = sum(float(row.get('total_credits') or 0) for row in data)
+        return jsonify({'success': True, 'data': {'accounts': data, 'total_debits': total_d, 'total_credits': total_c, 'date': as_of}}), 200
+
+    @app.route('/api/accounting/profit-loss', methods=['GET'])
+    def api_accounting_profit_loss():
+        return report_controller.get_profit_loss()
+
+    @app.route('/api/accounting/balance-sheet', methods=['GET'])
+    def api_accounting_balance_sheet():
+        return report_controller.get_balance_sheet()
+
+    @app.route('/api/accounting/aging', methods=['GET'])
+    def api_accounting_aging():
+        as_of = request.args.get('as_of_date')
+        if not as_of:
+            as_of = date.today().isoformat()
+        try:
+            d = datetime.fromisoformat(as_of.split('T')[0]).date()
+        except Exception:
+            return jsonify({'success': False, 'message': 'Invalid as_of_date. Use YYYY-MM-DD'}), 400
+        conn, cur = _pg_conn()
+        try:
+            cur.execute("SELECT * FROM accounting.get_aging_report(%s)", (d,))
+            rows = cur.fetchall()
+            data = [dict(row) for row in rows]
+        except Exception:
+            data = []
+        finally:
+            conn.close()
+        return jsonify({'success': True, 'data': data}), 200
+
+    @app.route('/api/accounting/invoices', methods=['GET'])
+    def api_accounting_invoices():
+        return jsonify({'success': True, 'data': []}), 200
+
+    @app.route('/api/accounting/bills', methods=['GET'])
+    def api_accounting_bills():
+        return jsonify({'success': True, 'data': []}), 200
+
+    @app.route('/api/accounting/customers', methods=['GET'])
+    def api_accounting_customers():
+        return jsonify({'success': True, 'data': []}), 200
+
+    @app.route('/api/accounting/vendors', methods=['GET'])
+    def api_accounting_vendors():
+        return jsonify({'success': True, 'data': []}), 200
+
 @app.route('/api/accounting/dashboard', methods=['GET'])
 def api_accounting_dashboard():
     """Get accounting dashboard data"""
@@ -7424,7 +7950,8 @@ if __name__ == '__main__':
     print("Open your browser to: http://localhost:5001")
     if SOCKETIO_AVAILABLE and socketio:
         print("Socket.IO enabled - real-time features available")
-        socketio.run(app, debug=True, host='0.0.0.0', port=5001, allow_unsafe_werkzeug=True)
+        # use_reloader=False avoids "write() before start_response" on Socket.IO WebSocket upgrade
+        socketio.run(app, debug=True, host='0.0.0.0', port=5001, allow_unsafe_werkzeug=True, use_reloader=False)
     else:
         print("Socket.IO disabled - using standard Flask server")
         app.run(debug=True, host='0.0.0.0', port=5001)
