@@ -4,12 +4,16 @@ function ProfitLossTable({ data, showPercentages = true, onAccountClick }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
 
   const formatCurrency = (amount) => {
-    return `$${Math.abs(amount).toFixed(2)}`
+    const n = Number(amount)
+    if (Number.isNaN(n)) return '$0.00'
+    return `$${Math.abs(n).toFixed(2)}`
   }
 
   const formatPercentage = (percentage) => {
     if (percentage === undefined || percentage === null) return ''
-    return `${percentage.toFixed(1)}%`
+    const n = Number(percentage)
+    if (Number.isNaN(n)) return ''
+    return `${n.toFixed(1)}%`
   }
 
   const AccountRow = ({ account, indent = false }) => {

@@ -250,7 +250,7 @@ class AccountRepository:
     
     @staticmethod
     def get_account_balance(account_id: int, as_of_date: Optional[date] = None) -> float:
-        """Get account balance using database function"""
+        """Get account balance. Uses DB function if present, else computes from transaction_lines."""
         cursor = get_cursor()
         try:
             if as_of_date:
@@ -258,7 +258,46 @@ class AccountRepository:
             else:
                 cursor.execute("SELECT accounting.calculate_account_balance(%s, CURRENT_DATE) as balance", (account_id,))
             row = cursor.fetchone()
-            return float(row['balance']) if row and row['balance'] is not None else 0.0
+            if not row or row['balance'] is None:
+                return 0.0
+            return float(row['balance'])
+        except Exception:
+            # DB function may not exist (e.g. bootstrap-only); compute in Python
+            return AccountRepository._compute_account_balance(account_id, as_of_date)
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _compute_account_balance(account_id: int, as_of_date: Optional[date] = None) -> float:
+        """Compute account balance from transaction_lines (no DB function required)."""
+        cursor = get_cursor()
+        try:
+            cursor.execute(
+                "SELECT balance_type, COALESCE(opening_balance, 0) as opening_balance FROM accounting.accounts WHERE id = %s",
+                (account_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return 0.0
+            balance_type = (row.get('balance_type') or 'debit').lower()
+            opening = float(row.get('opening_balance') or 0)
+            d = as_of_date if as_of_date is not None else date.today()
+            cursor.execute("""
+                SELECT COALESCE(SUM(tl.debit_amount), 0) as td, COALESCE(SUM(tl.credit_amount), 0) as tc
+                FROM accounting.transaction_lines tl
+                JOIN accounting.transactions t ON t.id = tl.transaction_id
+                WHERE tl.account_id = %s AND t.is_posted = true AND (t.is_void IS NOT TRUE OR t.is_void = false)
+                  AND t.transaction_date <= %s
+            """, (account_id, d))
+            r = cursor.fetchone()
+            td = float(r['td'] or 0) if r else 0
+            tc = float(r['tc'] or 0) if r else 0
+            if balance_type == 'credit':
+                return float(opening + tc - td)
+            return float(opening + td - tc)
         finally:
             cursor.close()
     

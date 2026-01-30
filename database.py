@@ -1265,6 +1265,159 @@ def _get_or_create_default_establishment(conn=None) -> int:
             raise ValueError("Failed to get or create default establishment")
         
         return establishment_id
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def get_establishment_settings(establishment_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Get store settings (sales tax %, transaction fee rates) from establishments.settings JSONB.
+    If establishment_id is None, uses first establishment.
+    Returns: default_sales_tax_pct (0-100), transaction_fee_rates (dict of method -> rate 0-1).
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        if establishment_id is None:
+            cursor.execute("SELECT establishment_id FROM establishments ORDER BY establishment_id LIMIT 1")
+            row = cursor.fetchone()
+            establishment_id = row[0] if row and (isinstance(row, tuple) or hasattr(row, '__getitem__')) else (row.get('establishment_id') if isinstance(row, dict) else None)
+        if not establishment_id:
+            conn.close()
+            return _default_store_settings()
+        cursor.execute("SELECT settings FROM establishments WHERE establishment_id = %s", (establishment_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return _default_store_settings()
+        raw = row[0] if isinstance(row, tuple) else (row.get('settings') if isinstance(row, dict) else row)
+        if not raw:
+            return _default_store_settings()
+        import json
+        s = raw if isinstance(raw, dict) else (json.loads(raw) if isinstance(raw, str) else {})
+        return {
+            'default_sales_tax_pct': float(s.get('default_sales_tax_pct', 8.0)),
+            'transaction_fee_rates': s.get('transaction_fee_rates') or {
+                'credit_card': 0.029, 'debit_card': 0.015, 'mobile_payment': 0.026,
+                'cash': 0.0, 'check': 0.0, 'store_credit': 0.0
+            }
+        }
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return _default_store_settings()
+
+
+def _default_store_settings() -> Dict[str, Any]:
+    return {
+        'default_sales_tax_pct': 8.0,
+        'transaction_fee_rates': {
+            'credit_card': 0.029, 'debit_card': 0.015, 'mobile_payment': 0.026,
+            'cash': 0.0, 'check': 0.0, 'store_credit': 0.0
+        }
+    }
+
+
+def update_establishment_settings(establishment_id: Optional[int], settings: Dict[str, Any]) -> bool:
+    """Update store settings (merge into establishments.settings JSONB)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        if establishment_id is None:
+            cursor.execute("SELECT establishment_id FROM establishments ORDER BY establishment_id LIMIT 1")
+            row = cursor.fetchone()
+            establishment_id = row[0] if row and (isinstance(row, tuple) or hasattr(row, '__getitem__')) else (row.get('establishment_id') if isinstance(row, dict) else None)
+        if not establishment_id:
+            conn.close()
+            return False
+        cursor.execute("SELECT settings FROM establishments WHERE establishment_id = %s", (establishment_id,))
+        row = cursor.fetchone()
+        current = row[0] if row else {}
+        if current is None:
+            current = {}
+        if isinstance(current, str):
+            import json
+            current = json.loads(current) if current else {}
+        if 'default_sales_tax_pct' in settings:
+            current['default_sales_tax_pct'] = float(settings['default_sales_tax_pct'])
+        if 'transaction_fee_rates' in settings:
+            current['transaction_fee_rates'] = dict(settings['transaction_fee_rates'])
+        import json
+        cursor.execute(
+            "UPDATE establishments SET settings = %s::jsonb WHERE establishment_id = %s",
+            (json.dumps(current), establishment_id)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception:
+        try:
+            conn.rollback()
+            conn.close()
+        except Exception:
+            pass
+        return False
+
+
+def get_labor_summary(start_date: str, end_date: str, establishment_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Sum hours and labor cost from time_clock joined with employees (hourly_rate).
+    Returns: total_hours, total_labor_cost, entries (list of { employee_id, name, hours, hourly_rate, labor_cost }).
+    """
+    from psycopg2.extras import RealDictCursor
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        if establishment_id is None:
+            cursor.execute("SELECT establishment_id FROM establishments ORDER BY establishment_id LIMIT 1")
+            row = cursor.fetchone()
+            establishment_id = row['establishment_id'] if row else None
+        if not establishment_id:
+            conn.close()
+            return {'total_hours': 0.0, 'total_labor_cost': 0.0, 'entries': []}
+        cursor.execute("""
+            SELECT tc.employee_id,
+                   e.first_name || ' ' || e.last_name AS employee_name,
+                   COALESCE(SUM(tc.total_hours), 0) AS hours,
+                   COALESCE(e.hourly_rate, 0) AS hourly_rate
+            FROM time_clock tc
+            JOIN employees e ON e.employee_id = tc.employee_id
+            WHERE tc.establishment_id = %s
+              AND tc.clock_out IS NOT NULL
+              AND DATE(tc.clock_in) >= %s AND DATE(tc.clock_in) <= %s
+            GROUP BY tc.employee_id, e.first_name, e.last_name, e.hourly_rate
+        """, (establishment_id, start_date, end_date))
+        rows = cursor.fetchall()
+        entries = []
+        total_hours = 0.0
+        total_labor_cost = 0.0
+        for r in rows:
+            hours = float(r.get('hours') or 0)
+            rate = float(r.get('hourly_rate') or 0)
+            cost = hours * rate
+            total_hours += hours
+            total_labor_cost += cost
+            entries.append({
+                'employee_id': r.get('employee_id'),
+                'employee_name': r.get('employee_name') or '',
+                'hours': round(hours, 2),
+                'hourly_rate': rate,
+                'labor_cost': round(cost, 2)
+            })
+        conn.close()
+        return {'total_hours': round(total_hours, 2), 'total_labor_cost': round(total_labor_cost, 2), 'entries': entries}
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return {'total_hours': 0.0, 'total_labor_cost': 0.0, 'entries': []}
     except Exception as e:
         # Rollback on any error
         try:
@@ -4166,6 +4319,11 @@ def create_order(
             order_id = result[0] if result else None
         
         # Add order items (triggers will update inventory)
+        # Check if order_items has variant_id column (optional; added by product_variants migration)
+        cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'order_items'")
+        oi_columns = [row[0] if isinstance(row, tuple) else row.get('column_name') for row in cursor.fetchall()]
+        has_order_items_variant_id = 'variant_id' in oi_columns
+
         print(f"Creating order_items for order_id {order_id}, {len(items)} items")
         for idx, item in enumerate(items):
             print(f"Processing item {idx + 1}/{len(items)}: {item}")
@@ -4194,14 +4352,22 @@ def create_order(
             
             try:
                 variant_id = item.get('variant_id')
-                # Insert order item with all fields (variant_id optional for size/variant)
-                cursor.execute("""
-                    INSERT INTO order_items (
-                        establishment_id, order_id, product_id, quantity, unit_price, discount, subtotal,
-                        tax_rate, tax_amount, variant_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (item_establishment_id, order_id, product_id, quantity, unit_price, item_discount, item_subtotal,
-                      item_tax_rate, item_tax, variant_id))
+                if has_order_items_variant_id:
+                    cursor.execute("""
+                        INSERT INTO order_items (
+                            establishment_id, order_id, product_id, quantity, unit_price, discount, subtotal,
+                            tax_rate, tax_amount, variant_id
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (item_establishment_id, order_id, product_id, quantity, unit_price, item_discount, item_subtotal,
+                          item_tax_rate, item_tax, variant_id))
+                else:
+                    cursor.execute("""
+                        INSERT INTO order_items (
+                            establishment_id, order_id, product_id, quantity, unit_price, discount, subtotal,
+                            tax_rate, tax_amount
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (item_establishment_id, order_id, product_id, quantity, unit_price, item_discount, item_subtotal,
+                          item_tax_rate, item_tax))
                 
                 # Verify the insert succeeded
                 if cursor.rowcount == 0:
@@ -4501,22 +4667,23 @@ def process_return(
     reason: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Process a partial or full return
+    Process a partial or full return. Refund includes proportional sales tax.
     items_to_return: List of dicts with keys: order_item_id, quantity
     """
     conn = get_connection()
     cursor = conn.cursor()
     
     try:
-        total_refund = 0.0
+        total_refund_subtotal = 0.0
+        total_refund_tax = 0.0
         
         for item in items_to_return:
             order_item_id = item['order_item_id']
             return_qty = item['quantity']
             
-            # Get original item details
+            # Get original item details (include tax_rate for refund with tax)
             cursor.execute("""
-                SELECT product_id, quantity, unit_price, discount
+                SELECT product_id, quantity, unit_price, discount, COALESCE(tax_rate, 0) as tax_rate
                 FROM order_items
                 WHERE order_item_id = %s
             """, (order_item_id,))
@@ -4530,10 +4697,13 @@ def process_return(
             if return_qty > original['quantity']:
                 raise ValueError(f"Return quantity ({return_qty}) exceeds original quantity ({original['quantity']})")
             
-            # Calculate refund amount
-            item_refund = (original['unit_price'] * return_qty) - \
-                         (original['discount'] * return_qty / original['quantity'])
-            total_refund += item_refund
+            # Refund amount: subtotal + proportional tax
+            item_subtotal = (float(original['unit_price']) * return_qty) - \
+                            (float(original.get('discount', 0)) * return_qty / original['quantity'])
+            item_tax_rate = float(original.get('tax_rate') or 0)
+            item_tax = item_subtotal * item_tax_rate
+            total_refund_subtotal += item_subtotal
+            total_refund_tax += item_tax
             
             # Return items to inventory
             cursor.execute("""
@@ -4561,20 +4731,22 @@ def process_return(
                     WHERE order_item_id = %s
                 """, (order_item_id,))
         
-        # Update order total
+        total_refund = total_refund_subtotal + total_refund_tax
+        # Update order: subtract subtotal, tax, and total
         notes_text = f"\nReturn processed by employee_id {employee_id} on {datetime.now().isoformat()}"
         if reason:
             notes_text += f". Reason: {reason}"
-        notes_text += f". Refund: ${total_refund:.2f}"
+        notes_text += f". Refund: ${total_refund:.2f} (subtotal + tax)"
         
         cursor.execute("""
             UPDATE orders
             SET total = total - %s,
                 subtotal = subtotal - %s,
+                tax_amount = tax_amount - %s,
                 order_status = 'returned',
                 notes = COALESCE(notes, '') || %s
             WHERE order_id = %s
-        """, (total_refund, total_refund, notes_text, order_id))
+        """, (total_refund, total_refund_subtotal, total_refund_tax, notes_text, order_id))
         
         # Record refund transaction
         cursor.execute("""

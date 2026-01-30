@@ -31,8 +31,8 @@ function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransac
   }
 
   const calculateTotals = () => {
-    const totalDebits = entries.reduce((sum, entry) => sum + (entry.debit_amount || 0), 0)
-    const totalCredits = entries.reduce((sum, entry) => sum + (entry.credit_amount || 0), 0)
+    const totalDebits = entries.reduce((sum, entry) => sum + (parseFloat(entry.debit_amount) || 0), 0)
+    const totalCredits = entries.reduce((sum, entry) => sum + (parseFloat(entry.credit_amount) || 0), 0)
     return { totalDebits, totalCredits }
   }
 
@@ -167,14 +167,14 @@ function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransac
                   )}
                 </td>
                 <td style={{ ...tdStyle, textAlign: 'right', fontWeight: '600' }}>
-                  {entry.debit_amount > 0 ? `$${entry.debit_amount.toFixed(2)}` : '-'}
+                  {(parseFloat(entry.debit_amount) || 0) > 0 ? `$${(parseFloat(entry.debit_amount) || 0).toFixed(2)}` : '-'}
                 </td>
                 <td style={{ ...tdStyle, textAlign: 'right', fontWeight: '600' }}>
-                  {entry.credit_amount > 0 ? `$${entry.credit_amount.toFixed(2)}` : '-'}
+                  {(parseFloat(entry.credit_amount) || 0) > 0 ? `$${(parseFloat(entry.credit_amount) || 0).toFixed(2)}` : '-'}
                 </td>
                 {showRunningBalance && entry.running_balance !== undefined && (
                   <td style={{ ...tdStyle, textAlign: 'right', fontWeight: '700' }}>
-                    ${entry.running_balance.toFixed(2)}
+                    ${(parseFloat(entry.running_balance) || 0).toFixed(2)}
                   </td>
                 )}
               </tr>

@@ -1252,7 +1252,10 @@ function POS({ employeeId, employeeName }) {
           // Fall back to old system
           response = await fetch('/api/create_order', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(localStorage.getItem('sessionToken') && { Authorization: `Bearer ${localStorage.getItem('sessionToken')}` })
+            },
             body: JSON.stringify({
               employee_id: employeeId,
               items: items,
@@ -1321,8 +1324,67 @@ function POS({ employeeId, employeeName }) {
           }
         }
       } else {
-        // Fall back to old system (shouldn't normally reach here)
-        setMessage({ type: 'error', text: 'Transaction system unavailable. Please try again.' })
+        // Transaction/start failed or unavailable – fall back to create_order
+        response = await fetch('/api/create_order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(localStorage.getItem('sessionToken') && { Authorization: `Bearer ${localStorage.getItem('sessionToken')}` })
+          },
+          body: JSON.stringify({
+            employee_id: employeeId,
+            items: items,
+            payment_method: paymentMethod,
+            tax_rate: taxRate,
+            tip: selectedTip || 0,
+            discount: exchangeCreditAmount,
+            order_type: orderTypeToSave,
+            customer_info: customerInfoToSave,
+            customer_id: customerId,
+            points_used: pointsUsed
+          })
+        })
+        result = await response.json()
+        if (result.success) {
+          if (exchangeCreditAmount > 0 && result.order_id && exchangeCreditId) {
+            try {
+              await fetch('/api/apply_exchange_credit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  order_id: result.order_id,
+                  exchange_credit_id: exchangeCreditId,
+                  credit_amount: exchangeCreditAmount
+                })
+              })
+            } catch (err) {
+              console.error('Error applying exchange credit:', err)
+            }
+          }
+          setToast({ message: `Order ${result.order_number} processed successfully!`, type: 'success' })
+          setPaymentCompleted(true)
+          if (result.order_id) {
+            setCurrentOrderId(result.order_id)
+            setCurrentOrderNumber(result.order_number)
+            if (exchangeCreditId) {
+              sessionStorage.setItem('exchangeCreditUsed', JSON.stringify({
+                credit_id: exchangeCreditId,
+                return_id: exchangeReturnId,
+                amount_used: exchangeCreditAmount
+              }))
+            }
+          }
+          if (paymentMethod === 'cash') {
+            const change = calculateChange()
+            setChangeAmount(change)
+            setShowChangeScreen(true)
+            setShowPaymentForm(false)
+          } else {
+            setShowPaymentForm(false)
+          }
+        } else {
+          setMessage({ type: 'error', text: result.message || 'Failed to process order' })
+        }
       }
     } catch (err) {
       setMessage({ type: 'error', text: 'Error processing order. Please try again.' })

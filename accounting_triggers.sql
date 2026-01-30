@@ -246,13 +246,33 @@ DECLARE
     pk_column_name TEXT;
     pk_value INTEGER;
 BEGIN
-    -- Get employee_id from current session or use NULL
+    -- Get employee_id from current session or use default
     -- In production, you'd get this from session context
     BEGIN
         employee_id_val := current_setting('app.employee_id', TRUE)::INTEGER;
     EXCEPTION WHEN OTHERS THEN
         employee_id_val := NULL;
     END;
+    
+    -- If employee_id is NULL, try to get default (admin employee or first active employee)
+    IF employee_id_val IS NULL THEN
+        BEGIN
+            -- Try to get admin employee (employee_id = 1) or first active employee
+            SELECT employee_id INTO employee_id_val 
+            FROM employees 
+            WHERE (employee_id = 1 OR active = TRUE)
+            ORDER BY employee_id = 1 DESC, employee_id ASC
+            LIMIT 1;
+            
+            -- If still NULL, use 1 as fallback (will fail if employees table is empty, but that's a bigger problem)
+            IF employee_id_val IS NULL THEN
+                employee_id_val := 1;
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            -- Last resort: use 1
+            employee_id_val := 1;
+        END;
+    END IF;
     
     -- Get establishment_id from current session or default to 1
     BEGIN

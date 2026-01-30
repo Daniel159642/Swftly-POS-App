@@ -77,19 +77,22 @@ class ReportService:
                         'balance': balance
                     })
         
-        # Calculate totals
-        total_revenue = sum(item['balance'] for item in revenue_balances)
-        total_cogs = sum(item['balance'] for item in cogs_balances)
-        gross_profit = total_revenue - total_cogs
-        total_expenses = sum(item['balance'] for item in expense_balances)
-        net_income = gross_profit - total_expenses
+        # Calculate totals (coerce to float to avoid float + Decimal elsewhere)
+        def _f(v):
+            return float(v) if v is not None else 0.0
+        total_revenue = _f(sum(_f(item['balance']) for item in revenue_balances))
+        total_cogs = _f(sum(_f(item['balance']) for item in cogs_balances))
+        gross_profit = _f(total_revenue - total_cogs)
+        total_expenses = _f(sum(_f(item['balance']) for item in expense_balances))
+        net_income = _f(gross_profit - total_expenses)
         
         # Calculate percentage of revenue for each line
         def add_percentage(items):
             return [
                 {
                     **item,
-                    'percentage_of_revenue': (item['balance'] / total_revenue * 100) if total_revenue > 0 else 0
+                    'balance': _f(item['balance']),
+                    'percentage_of_revenue': _f((item['balance'] / total_revenue * 100) if total_revenue > 0 else 0)
                 }
                 for item in items
             ]
@@ -117,8 +120,8 @@ class ReportService:
         """Calculate account balance for a specific period"""
         ledger = TransactionRepository.get_general_ledger(account_id, start_date, end_date)
         
-        total_debits = sum(entry.get('debit_amount', 0) or 0 for entry in ledger)
-        total_credits = sum(entry.get('credit_amount', 0) or 0 for entry in ledger)
+        total_debits = sum(float(entry.get('debit_amount') or 0) for entry in ledger)
+        total_credits = sum(float(entry.get('credit_amount') or 0) for entry in ledger)
         
         # For revenue accounts (credit balance type), credits increase balance (positive)
         # For expense/COGS accounts (debit balance type), debits increase balance (positive for expenses)
@@ -165,8 +168,19 @@ class ReportService:
         }
 
     @staticmethod
+    def _to_float(v):
+        """Coerce any numeric to float; avoid float + Decimal errors everywhere."""
+        if v is None:
+            return 0.0
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
     def get_balance_sheet(as_of_date: date) -> Dict[str, Any]:
         """Generate Balance Sheet as of a specific date"""
+        _f = ReportService._to_float
         all_accounts = AccountRepository.find_all()
         asset_accounts = [a for a in all_accounts if a.account_type == 'Asset' and a.is_active]
         liability_accounts = [a for a in all_accounts if a.account_type == 'Liability' and a.is_active]
@@ -174,7 +188,7 @@ class ReportService:
 
         def _balance(acc) -> float:
             b = AccountRepository.get_account_balance(acc.id, as_of_date)
-            return float(b) if b is not None else 0.0
+            return _f(b)
 
         def _item(acc):
             bal = _balance(acc)
@@ -184,7 +198,7 @@ class ReportService:
                 'account_name': acc.account_name,
                 'account_type': acc.account_type,
                 'sub_type': acc.sub_type,
-                'balance': bal,
+                'balance': _f(bal),
             }
 
         def _is_current_asset(a) -> bool:
@@ -225,47 +239,51 @@ class ReportService:
         ]
         current_liabilities = current_liabilities + other_liab
 
-        total_current_assets = sum(x['balance'] for x in current_assets)
-        total_fixed_assets = sum(x['balance'] for x in fixed_assets)
-        total_other_assets = sum(x['balance'] for x in other_assets)
-        total_assets = total_current_assets + total_fixed_assets + total_other_assets
+        total_current_assets = _f(sum(_f(x['balance']) for x in current_assets))
+        total_fixed_assets = _f(sum(_f(x['balance']) for x in fixed_assets))
+        total_other_assets = _f(sum(_f(x['balance']) for x in other_assets))
+        total_assets = _f(total_current_assets + total_fixed_assets + total_other_assets)
 
-        total_current_liabilities = sum(x['balance'] for x in current_liabilities)
-        total_long_term_liabilities = sum(x['balance'] for x in long_term_liabilities)
-        total_liabilities = total_current_liabilities + total_long_term_liabilities
+        total_current_liabilities = _f(sum(_f(x['balance']) for x in current_liabilities))
+        total_long_term_liabilities = _f(sum(_f(x['balance']) for x in long_term_liabilities))
+        total_liabilities = _f(total_current_liabilities + total_long_term_liabilities)
 
         equity_items = [_item(a) for a in equity_accounts if _balance(a) != 0]
-        retained_earnings = sum(x['balance'] for x in equity_items)
+        retained_earnings = _f(sum(_f(x['balance']) for x in equity_items))
 
         year_start = date(as_of_date.year, 1, 1)
         pl = ReportService.get_profit_loss(year_start, as_of_date)
-        current_year_earnings = pl['net_income']
-        total_equity = retained_earnings + current_year_earnings
+        current_year_earnings = _f(pl.get('net_income'))
+        total_equity = _f(_f(retained_earnings) + _f(current_year_earnings))
 
-        balances = abs(total_assets - (total_liabilities + total_equity)) < 0.01
+        balances = abs(_f(total_assets) - _f(total_liabilities + total_equity)) < 0.01
+
+        # Normalize all list items so 'balance' is float
+        def _norm(items):
+            return [dict((k, _f(v) if k == 'balance' else v) for k, v in item.items()) for item in items]
 
         return {
             'assets': {
-                'current_assets': current_assets,
-                'fixed_assets': fixed_assets,
-                'other_assets': other_assets,
-                'total_current_assets': total_current_assets,
-                'total_fixed_assets': total_fixed_assets,
-                'total_other_assets': total_other_assets,
-                'total_assets': total_assets,
+                'current_assets': _norm(current_assets),
+                'fixed_assets': _norm(fixed_assets),
+                'other_assets': _norm(other_assets),
+                'total_current_assets': _f(total_current_assets),
+                'total_fixed_assets': _f(total_fixed_assets),
+                'total_other_assets': _f(total_other_assets),
+                'total_assets': _f(total_assets),
             },
             'liabilities': {
-                'current_liabilities': current_liabilities,
-                'long_term_liabilities': long_term_liabilities,
-                'total_current_liabilities': total_current_liabilities,
-                'total_long_term_liabilities': total_long_term_liabilities,
-                'total_liabilities': total_liabilities,
+                'current_liabilities': _norm(current_liabilities),
+                'long_term_liabilities': _norm(long_term_liabilities),
+                'total_current_liabilities': _f(total_current_liabilities),
+                'total_long_term_liabilities': _f(total_long_term_liabilities),
+                'total_liabilities': _f(total_liabilities),
             },
             'equity': {
-                'equity_accounts': equity_items,
-                'retained_earnings': retained_earnings,
-                'current_year_earnings': current_year_earnings,
-                'total_equity': total_equity,
+                'equity_accounts': _norm(equity_items),
+                'retained_earnings': _f(retained_earnings),
+                'current_year_earnings': _f(current_year_earnings),
+                'total_equity': _f(total_equity),
             },
             'as_of_date': as_of_date.isoformat(),
             'balances': balances,
@@ -321,11 +339,11 @@ class ReportService:
     @staticmethod
     def _period_activity(account_id: int, start_date: date, end_date: date, balance_type: str) -> float:
         ledger = TransactionRepository.get_general_ledger(account_id, start_date, end_date)
-        debits = sum(e.get('debit_amount') or 0 for e in ledger)
-        credits = sum(e.get('credit_amount') or 0 for e in ledger)
+        debits = sum(float(e.get('debit_amount') or 0) for e in ledger)
+        credits = sum(float(e.get('credit_amount') or 0) for e in ledger)
         if balance_type == 'credit':
-            return credits - debits
-        return debits - credits
+            return float(credits - debits)
+        return float(debits - credits)
 
     @staticmethod
     def _cash_flow_adjustment(description: str, amount: float, account_id: Optional[int] = None) -> Dict[str, Any]:
@@ -408,8 +426,8 @@ class ReportService:
             if not _is_fixed(a):
                 continue
             ledger = TransactionRepository.get_general_ledger(a.id, start_date, end_date)
-            purchases = sum(e.get('debit_amount') or 0 for e in ledger)
-            sales = sum(e.get('credit_amount') or 0 for e in ledger)
+            purchases = sum(float(e.get('debit_amount') or 0) for e in ledger)
+            sales = sum(float(e.get('credit_amount') or 0) for e in ledger)
             if purchases > 1e-9:
                 investing.append(
                     ReportService._cash_flow_adjustment(f'Purchase of {a.account_name}', -purchases, a.id)
@@ -425,8 +443,8 @@ class ReportService:
             if not _is_long_term_liability(a):
                 continue
             ledger = TransactionRepository.get_general_ledger(a.id, start_date, end_date)
-            borrow = sum(e.get('credit_amount') or 0 for e in ledger)
-            pay = sum(e.get('debit_amount') or 0 for e in ledger)
+            borrow = sum(float(e.get('credit_amount') or 0) for e in ledger)
+            pay = sum(float(e.get('debit_amount') or 0) for e in ledger)
             if borrow > 1e-9:
                 financing.append(
                     ReportService._cash_flow_adjustment(f'Proceeds from {a.account_name}', borrow, a.id)
@@ -442,8 +460,8 @@ class ReportService:
             if 'retained' in s or 'earnings' in s:
                 continue
             ledger = TransactionRepository.get_general_ledger(a.id, start_date, end_date)
-            total_contrib += sum(e.get('credit_amount') or 0 for e in ledger)
-            total_draws += sum(e.get('debit_amount') or 0 for e in ledger)
+            total_contrib += sum(float(e.get('credit_amount') or 0) for e in ledger)
+            total_draws += sum(float(e.get('debit_amount') or 0) for e in ledger)
         if total_contrib > 1e-9:
             financing.append(
                 ReportService._cash_flow_adjustment('Owner contributions', total_contrib, None)

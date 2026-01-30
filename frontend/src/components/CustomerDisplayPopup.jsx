@@ -56,15 +56,11 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
   const [isDrawing, setIsDrawing] = useState(false)
   const [checkoutUi, setCheckoutUi] = useState(null) // { review_order, cash_confirmation, receipt } with backgroundColor, buttonColor, fontFamily, fontWeight, textColor
 
-  // Initialize Socket.IO connection
+  // Initialize Socket.IO connection – use same origin so Vite proxy (or Flask) handles /socket.io
   useEffect(() => {
-    // Connect to backend Socket.IO server
-    // In development, Vite proxy should handle /socket.io to localhost:5001
-    // But we'll connect directly to backend to avoid proxy issues
-    const socketUrl = 'http://localhost:5001'
-    
-    const newSocket = io(socketUrl, {
-      transports: ['websocket', 'polling'],
+    const newSocket = io({
+      transports: ['polling'],
+      upgrade: false,
       path: '/socket.io/',
       reconnection: true,
       reconnectionDelay: 1000,

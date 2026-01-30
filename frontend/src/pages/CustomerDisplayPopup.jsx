@@ -87,7 +87,10 @@ function CustomerDisplayPopup() {
   // Initialize Socket.IO connection
   useEffect(() => {
     const newSocket = io({
-      transports: ['websocket', 'polling'],
+      // The backend runs Socket.IO in Werkzeug/threading mode, which does not reliably
+      // support WebSocket upgrades. Force polling to avoid "Invalid frame header".
+      transports: ['polling'],
+      upgrade: false,
       path: '/socket.io/'
     })
     

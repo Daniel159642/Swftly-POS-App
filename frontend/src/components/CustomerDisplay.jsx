@@ -55,7 +55,10 @@ function CustomerDisplay() {
   useEffect(() => {
     // Use relative URL - Vite proxy will handle routing to backend
     const newSocket = io({
-      transports: ['websocket', 'polling'],
+      // The backend runs Socket.IO in Werkzeug/threading mode, which does not reliably
+      // support WebSocket upgrades. Force polling to avoid "Invalid frame header".
+      transports: ['polling'],
+      upgrade: false,
       path: '/socket.io/'
     })
     

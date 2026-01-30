@@ -46,12 +46,22 @@ def _payment_account_for_order(order: Dict[str, Any]) -> str:
     return '1000'  # Cash
 
 
+def _ensure_accounting_ready() -> None:
+    """Ensure accounting schema and seed accounts exist so journalizing can succeed."""
+    try:
+        from accounting_bootstrap import ensure_accounting_schema
+        ensure_accounting_schema()
+    except Exception as e:
+        print(f"Accounting bootstrap check: {e}")
+
+
 def journalize_sale_to_accounting(order_id: int, employee_id: int) -> Dict[str, Any]:
     """
     Create and post a sales_receipt transaction in accounting.transactions for a completed order.
     Uses same logic as database.journalize_sale but writes to accounting schema.
     Idempotent: skips if a posted transaction already exists for this order.
     """
+    _ensure_accounting_ready()
     # Idempotency: skip if we already posted a sale for this order
     existing = TransactionRepository.find_by_source_document('order', order_id)
     if existing and existing.get('transaction', {}).get('is_posted'):
@@ -126,6 +136,7 @@ def journalize_sale_to_accounting(order_id: int, employee_id: int) -> Dict[str, 
 
         lines = _resolve_lines_to_account_ids(line_items)
         data = {
+            'transaction_number': f'POS-{order_id}',
             'transaction_date': datetime.now().date().isoformat(),
             'transaction_type': 'sales_receipt',
             'description': f'Sale – Order #{order_id}',

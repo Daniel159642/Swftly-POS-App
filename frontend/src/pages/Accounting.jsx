@@ -55,6 +55,16 @@ function Accounting() {
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const boxShadow = isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
 
+  // Hide scrollbar for tab strip (same pattern as Tables page)
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.textContent = `
+      .accounting-tabs-scroll::-webkit-scrollbar { display: none; }
+    `
+    document.head.appendChild(style)
+    return () => { document.head.removeChild(style) }
+  }, [])
+
   const getAuthHeaders = () => {
     const token = localStorage.getItem('sessionToken')
     return {
@@ -130,47 +140,83 @@ function Accounting() {
           />
         </div>
 
-        {/* Tabs */}
-        <div style={{ 
-          display: 'flex', 
-          gap: '8px', 
-          marginBottom: '24px',
-          borderBottom: `1px solid ${borderColor}`,
-          paddingBottom: '12px',
-          flexWrap: 'wrap'
-        }}>
-          {[
-            { id: 'dashboard', label: 'Dashboard' },
-            { id: 'chart-of-accounts', label: 'Chart of Accounts' },
-            { id: 'transactions', label: 'Transactions' },
-            { id: 'general-ledger', label: 'General Ledger' },
-            { id: 'profit-loss', label: 'Profit & Loss' },
-            { id: 'balance-sheet', label: 'Balance Sheet' },
-            { id: 'cash-flow', label: 'Cash Flow' },
-            { id: 'invoices', label: 'Invoices' },
-            { id: 'bills', label: 'Bills' },
-            { id: 'customers', label: 'Customers' },
-            { id: 'vendors', label: 'Vendors' },
-            { id: 'reports', label: 'Reports' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+        {/* Tabs – single line, scroll with gradient fade (like Tables page) */}
+        <div style={{ marginBottom: '24px', borderBottom: `1px solid ${borderColor}`, paddingBottom: '16px' }}>
+          <div style={{ position: 'relative' }}>
+            <div
+              className="accounting-tabs-scroll"
               style={{
-                padding: '10px 20px',
-                border: 'none',
-                borderRadius: '8px',
-                backgroundColor: activeTab === tab.id ? themeColor : 'transparent',
-                color: activeTab === tab.id ? 'white' : textColor,
-                cursor: 'pointer',
-                fontWeight: activeTab === tab.id ? 600 : 400,
-                fontSize: '14px',
-                transition: 'all 0.2s ease'
+                display: 'flex',
+                gap: '8px',
+                flexWrap: 'nowrap',
+                overflowX: 'auto',
+                paddingBottom: '4px',
+                scrollbarWidth: 'none',
+                msOverflowStyle: 'none'
               }}
             >
-              {tab.label}
-            </button>
-          ))}
+              {[
+                { id: 'dashboard', label: 'Dashboard' },
+                { id: 'settings', label: 'Settings' },
+                { id: 'chart-of-accounts', label: 'Chart of Accounts' },
+                { id: 'transactions', label: 'Transactions' },
+                { id: 'general-ledger', label: 'General Ledger' },
+                { id: 'profit-loss', label: 'Profit & Loss' },
+                { id: 'balance-sheet', label: 'Balance Sheet' },
+                { id: 'cash-flow', label: 'Cash Flow' },
+                { id: 'invoices', label: 'Invoices' },
+                { id: 'bills', label: 'Bills' },
+                { id: 'customers', label: 'Customers' },
+                { id: 'vendors', label: 'Vendors' },
+                { id: 'reports', label: 'Reports' }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  style={{
+                    padding: '8px 16px',
+                    height: '36px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                    border: 'none',
+                    borderRadius: '8px',
+                    backgroundColor: activeTab === tab.id ? themeColor : 'transparent',
+                    color: activeTab === tab.id ? 'white' : textColor,
+                    cursor: 'pointer',
+                    fontWeight: activeTab === tab.id ? 600 : 400,
+                    fontSize: '14px',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            {/* Left gradient fade */}
+            <div style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: '4px',
+              width: '20px',
+              background: `linear-gradient(to right, ${cardBackgroundColor} 0%, ${isDarkMode ? 'rgba(42, 42, 42, 0.3)' : 'rgba(255, 255, 255, 0.3)'} 50%, transparent 100%)`,
+              pointerEvents: 'none',
+              zIndex: 1
+            }} />
+            {/* Right gradient fade */}
+            <div style={{
+              position: 'absolute',
+              right: 0,
+              top: 0,
+              bottom: '4px',
+              width: '20px',
+              background: `linear-gradient(to left, ${cardBackgroundColor} 0%, ${isDarkMode ? 'rgba(42, 42, 42, 0.3)' : 'rgba(255, 255, 255, 0.3)'} 50%, transparent 100%)`,
+              pointerEvents: 'none',
+              zIndex: 1
+            }} />
+          </div>
         </div>
 
         {/* Error Display */}
@@ -189,6 +235,7 @@ function Accounting() {
 
         {/* Tab Content */}
         {activeTab === 'dashboard' && <DashboardTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
+        {activeTab === 'settings' && <SettingsTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'chart-of-accounts' && <ChartOfAccountsTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'transactions' && <TransactionsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
         {activeTab === 'general-ledger' && <GeneralLedgerTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
@@ -222,15 +269,16 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders }) {
   const loadDashboard = async () => {
     try {
       setLoading(true)
-      // Call new accounting API endpoints
-      const [trialBalanceRes, pnlRes] = await Promise.all([
+      const [trialBalanceRes, pnlRes, dashboardRes] = await Promise.all([
         fetch(`/api/accounting/trial-balance?as_of_date=${dateRange.end_date}`, { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : null),
-        fetch(`/api/accounting/profit-loss?start_date=${dateRange.start_date}&end_date=${dateRange.end_date}`, { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : null)
+        fetch(`/api/accounting/profit-loss?start_date=${dateRange.start_date}&end_date=${dateRange.end_date}`, { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : null),
+        fetch(`/api/accounting/dashboard?start_date=${dateRange.start_date}&end_date=${dateRange.end_date}`, { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : null)
       ])
-      // Normalize: trial-balance returns { data: { accounts: [...] } }; profit-loss returns { data: { revenue, expenses, net_income, ... } }
       const trialBalanceRows = Array.isArray(trialBalanceRes?.data?.accounts) ? trialBalanceRes.data.accounts : []
       const pnlData = pnlRes?.data || {}
-      setData({ trialBalance: trialBalanceRows, pnl: pnlData })
+      const dashboardData = dashboardRes?.pos_summary != null ? dashboardRes : null
+      const laborData = dashboardRes?.labor_summary != null ? dashboardRes.labor_summary : { total_hours: 0, total_labor_cost: 0, entries: [] }
+      setData({ trialBalance: trialBalanceRows, pnl: pnlData, dashboard: dashboardData, labor: laborData })
     } catch (err) {
       console.error('Error loading dashboard:', err)
     } finally {
@@ -289,6 +337,58 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders }) {
           textColor={textColor}
         />
       </div>
+
+      {/* POS Summary – transactions from actual POS */}
+      {data?.dashboard?.pos_summary && (
+        <div style={{ marginTop: '24px' }}>
+          <h3 style={{ color: textColor, marginBottom: '12px' }}>POS Summary (date range)</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+            <MetricCard title="Transactions" value={String(data.dashboard.pos_summary.transaction_count ?? 0)} color="#6366f1" cardBackgroundColor={cardBg} borderColor={borderColor} textColor={textColor} />
+            <MetricCard title="Revenue" value={formatCurrency(data.dashboard.pos_summary.revenue)} color="#10b981" cardBackgroundColor={cardBg} borderColor={borderColor} textColor={textColor} />
+            <MetricCard title="Tax Collected" value={formatCurrency(data.dashboard.pos_summary.tax_collected)} color="#3b82f6" cardBackgroundColor={cardBg} borderColor={borderColor} textColor={textColor} />
+            <MetricCard title="CC/Processing Fees" value={formatCurrency(data.dashboard.pos_summary.transaction_fees)} color="#f59e0b" cardBackgroundColor={cardBg} borderColor={borderColor} textColor={textColor} />
+            <MetricCard title="Returns" value={formatCurrency(data.dashboard.pos_summary.returns_total)} color="#ef4444" cardBackgroundColor={cardBg} borderColor={borderColor} textColor={textColor} />
+            <MetricCard title="COGS" value={formatCurrency(data.dashboard.pos_summary.cogs)} color="#8b5cf6" cardBackgroundColor={cardBg} borderColor={borderColor} textColor={textColor} />
+            <MetricCard title="Margin (Price − Cost)" value={formatCurrency(data.dashboard.pos_summary.margin)} color={((data.dashboard.pos_summary.margin || 0) >= 0) ? '#10b981' : '#ef4444'} cardBackgroundColor={cardBg} borderColor={borderColor} textColor={textColor} />
+          </div>
+        </div>
+      )}
+
+      {/* Labor – hours worked and labor cost */}
+      {data?.labor && (data.labor.total_hours > 0 || data.labor.entries?.length > 0) && (
+        <div style={{ marginTop: '24px' }}>
+          <h3 style={{ color: textColor, marginBottom: '12px' }}>Labor (hours worked)</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+            <MetricCard title="Total Hours" value={String(data.labor.total_hours ?? 0)} color="#0ea5e9" cardBackgroundColor={cardBg} borderColor={borderColor} textColor={textColor} />
+            <MetricCard title="Labor Cost" value={formatCurrency(data.labor.total_labor_cost)} color="#06b6d4" cardBackgroundColor={cardBg} borderColor={borderColor} textColor={textColor} />
+          </div>
+          <p style={{ color: textColor, opacity: 0.8, fontSize: '13px' }}>Configure hourly wage per employee in <strong>Employees</strong>.</p>
+          {Array.isArray(data.labor.entries) && data.labor.entries.length > 0 && (
+            <div style={{ overflowX: 'auto', marginTop: '8px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${borderColor}` }}>
+                    <th style={{ textAlign: 'left', padding: '8px', color: textColor }}>Employee</th>
+                    <th style={{ textAlign: 'right', padding: '8px', color: textColor }}>Hours</th>
+                    <th style={{ textAlign: 'right', padding: '8px', color: textColor }}>Hourly rate</th>
+                    <th style={{ textAlign: 'right', padding: '8px', color: textColor }}>Labor cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.labor.entries.map((e, i) => (
+                    <tr key={i} style={{ borderBottom: `1px solid ${borderColor}` }}>
+                      <td style={{ padding: '8px', color: textColor }}>{e.employee_name || `Employee ${e.employee_id}`}</td>
+                      <td style={{ padding: '8px', textAlign: 'right', color: textColor }}>{e.hours}</td>
+                      <td style={{ padding: '8px', textAlign: 'right', color: textColor }}>{formatCurrency(e.hourly_rate)}</td>
+                      <td style={{ padding: '8px', textAlign: 'right', color: textColor }}>{formatCurrency(e.labor_cost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
       
       <div style={{ 
         padding: '20px',
@@ -309,6 +409,143 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders }) {
           <br />• Financial Reports (Trial Balance, P&L, Balance Sheet)
           <br />• Complete audit trail
         </p>
+      </div>
+    </div>
+  )
+}
+
+// Settings tab: sales tax %, transaction fee rates, note about hourly wages
+function SettingsTab({ formatCurrency, getAuthHeaders }) {
+  const [settings, setSettings] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState(null)
+  const [edit, setEdit] = useState({ default_sales_tax_pct: '', transaction_fee_rates: {} })
+  const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
+  const cardBg = isDarkMode ? '#1f1f1f' : '#f9f9f9'
+  const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
+
+  useEffect(() => {
+    loadSettings()
+  }, [])
+
+  const loadSettings = async () => {
+    try {
+      setLoading(true)
+      const res = await fetch('/api/accounting/settings', { headers: getAuthHeaders() })
+      const json = await res.json()
+      if (json.success && json.data) {
+        setSettings(json.data)
+        setEdit({
+          default_sales_tax_pct: String(json.data.default_sales_tax_pct ?? 8),
+          transaction_fee_rates: { ...(json.data.transaction_fee_rates || {}) }
+        })
+      }
+    } catch (err) {
+      console.error('Error loading settings:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSave = async () => {
+    try {
+      setSaving(true)
+      setMessage(null)
+      const payload = {
+        default_sales_tax_pct: parseFloat(edit.default_sales_tax_pct) || 0,
+        transaction_fee_rates: edit.transaction_fee_rates
+      }
+      const res = await fetch('/api/accounting/settings', {
+        method: 'PATCH',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const json = await res.json()
+      if (json.success) {
+        setSettings(json.data)
+        setMessage({ type: 'success', text: 'Settings saved.' })
+      } else {
+        setMessage({ type: 'error', text: json.message || 'Failed to save' })
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || 'Failed to save' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const setFeeRate = (method, value) => {
+    setEdit(prev => ({
+      ...prev,
+      transaction_fee_rates: { ...prev.transaction_fee_rates, [method]: parseFloat(value) || 0 }
+    }))
+  }
+
+  if (loading) return <div style={{ color: textColor, padding: '40px', textAlign: 'center' }}>Loading settings...</div>
+
+  const rates = edit.transaction_fee_rates || {}
+  const feeMethods = ['credit_card', 'debit_card', 'mobile_payment', 'cash', 'check', 'store_credit']
+
+  return (
+    <div>
+      {message && (
+        <div style={{
+          padding: '12px', marginBottom: '16px', borderRadius: '8px',
+          backgroundColor: message.type === 'success' ? (isDarkMode ? '#064e3b' : '#d1fae5') : (isDarkMode ? '#7f1d1d' : '#fee2e2'),
+          color: message.type === 'success' ? '#10b981' : '#ef4444'
+        }}>
+          {message.text}
+        </div>
+      )}
+      <div style={{ padding: '20px', backgroundColor: cardBg, border: `1px solid ${borderColor}`, borderRadius: '8px', maxWidth: '560px' }}>
+        <h3 style={{ color: textColor, marginBottom: '16px' }}>Store accounting settings</h3>
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ display: 'block', color: textColor, marginBottom: '6px', fontWeight: 500 }}>Default sales tax (%)</label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={edit.default_sales_tax_pct}
+            onChange={e => setEdit(prev => ({ ...prev, default_sales_tax_pct: e.target.value }))}
+            style={{ padding: '8px 12px', border: `1px solid ${borderColor}`, borderRadius: '6px', backgroundColor: isDarkMode ? '#1a1a1a' : 'white', color: textColor, width: '120px' }}
+          />
+          <span style={{ marginLeft: '8px', color: textColor, opacity: 0.8 }}>% (e.g. 8 for 8%)</span>
+        </div>
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ display: 'block', color: textColor, marginBottom: '8px', fontWeight: 500 }}>Transaction fee rates (card/processing)</label>
+          <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginBottom: '8px' }}>As decimal (e.g. 0.029 = 2.9%). Cash/check/store credit typically 0.</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+            {feeMethods.map(method => (
+              <div key={method} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <label style={{ color: textColor, minWidth: '110px', fontSize: '13px' }}>{method.replace(/_/g, ' ')}</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.001"
+                  value={rates[method] ?? 0}
+                  onChange={e => setFeeRate(method, e.target.value)}
+                  style={{ padding: '6px 8px', border: `1px solid ${borderColor}`, borderRadius: '6px', backgroundColor: isDarkMode ? '#1a1a1a' : 'white', color: textColor, width: '80px' }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: isDarkMode ? '#1a1a1a' : '#f3f4f6', borderRadius: '8px' }}>
+          <strong style={{ color: textColor }}>Hourly wage</strong>
+          <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginTop: '4px' }}>Set each employee’s hourly rate in <strong>Employees</strong>. Labor cost on the Dashboard uses time clock hours × hourly rate.</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          style={{ padding: '10px 20px', backgroundColor: borderColor, color: textColor, border: 'none', borderRadius: '8px', cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 500 }}
+        >
+          {saving ? 'Saving…' : 'Save settings'}
+        </button>
       </div>
     </div>
   )
@@ -1183,16 +1420,20 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
 
   const buildGeneralLedgerRows = () => {
     const headers = ['Date', 'Transaction #', 'Account', 'Description', 'Debit', 'Credit']
-    const rows = entries.map(entry => [
-      new Date(entry.transaction_date).toLocaleDateString(),
-      entry.transaction_number,
-      `${entry.account_number || ''} ${entry.account_name}`.trim(),
-      entry.line_description,
-      entry.debit_amount > 0 ? entry.debit_amount.toFixed(2) : '',
-      entry.credit_amount > 0 ? entry.credit_amount.toFixed(2) : '',
-    ])
-    const totalDebits = entries.reduce((sum, e) => sum + (e.debit_amount || 0), 0)
-    const totalCredits = entries.reduce((sum, e) => sum + (e.credit_amount || 0), 0)
+    const rows = entries.map(entry => {
+      const debit = parseFloat(entry.debit_amount) || 0
+      const credit = parseFloat(entry.credit_amount) || 0
+      return [
+        new Date(entry.transaction_date).toLocaleDateString(),
+        entry.transaction_number,
+        `${entry.account_number || ''} ${entry.account_name}`.trim(),
+        entry.line_description,
+        debit > 0 ? debit.toFixed(2) : '',
+        credit > 0 ? credit.toFixed(2) : '',
+      ]
+    })
+    const totalDebits = entries.reduce((sum, e) => sum + (parseFloat(e.debit_amount) || 0), 0)
+    const totalCredits = entries.reduce((sum, e) => sum + (parseFloat(e.credit_amount) || 0), 0)
     rows.push(['', '', '', 'TOTALS', totalDebits.toFixed(2), totalCredits.toFixed(2)])
     return [headers, ...rows]
   }
@@ -1245,8 +1486,8 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
     return account ? `${account.account_number || ''} ${account.account_name}`.trim() : 'Unknown Account'
   }
 
-  const totalDebits = entries.reduce((sum, e) => sum + (e.debit_amount || 0), 0)
-  const totalCredits = entries.reduce((sum, e) => sum + (e.credit_amount || 0), 0)
+  const totalDebits = entries.reduce((sum, e) => sum + (parseFloat(e.debit_amount) || 0), 0)
+  const totalCredits = entries.reduce((sum, e) => sum + (parseFloat(e.credit_amount) || 0), 0)
 
   return (
     <div>
@@ -1782,8 +2023,13 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
     setLoading(true)
     try {
       if (filters.comparison_type === 'none') {
-        const data = await reportService.getProfitLoss(filters.start_date, filters.end_date)
-        setReportData(data)
+        const res = await fetch(
+          `/api/accounting/profit-loss?start_date=${encodeURIComponent(filters.start_date)}&end_date=${encodeURIComponent(filters.end_date)}`,
+          { headers: getAuthHeaders() }
+        )
+        const json = await res.json()
+        if (!res.ok || !json.success) throw new Error(json.message || 'Failed to load report')
+        setReportData(json.data)
         setComparativeData(null)
       } else {
         let priorPeriod
@@ -1792,22 +2038,22 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
         } else {
           priorPeriod = reportService.calculatePriorYear(filters.start_date, filters.end_date)
         }
-
-        const data = await reportService.getComparativeProfitLoss(
-          filters.start_date,
-          filters.end_date,
-          priorPeriod.start,
-          priorPeriod.end
-        )
-        
-        setComparativeData(data)
-        setReportData(data.current)
+        const params = new URLSearchParams({
+          current_start: filters.start_date,
+          current_end: filters.end_date,
+          prior_start: priorPeriod.start,
+          prior_end: priorPeriod.end
+        })
+        const res = await fetch(`/api/accounting/profit-loss/comparative?${params}`, { headers: getAuthHeaders() })
+        const json = await res.json()
+        if (!res.ok || !json.success) throw new Error(json.message || 'Failed to load report')
+        setComparativeData(json.data)
+        setReportData(json.data.current)
       }
-      
       showAlert('success', 'Report generated successfully')
     } catch (error) {
       console.error('Error generating report:', error)
-      showAlert('error', error.response?.data?.message || 'Failed to generate report')
+      showAlert('error', error.message || error.response?.data?.message || 'Failed to generate report')
     } finally {
       setLoading(false)
     }
@@ -1828,15 +2074,16 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
       ['REVENUE'],
     ]
 
+    const num = (v) => (Number(v) || 0)
     reportData.revenue.forEach(account => {
       rows.push([
         `  ${account.account_number || ''} ${account.account_name}`,
-        account.balance.toFixed(2),
-        (account.percentage_of_revenue || 0).toFixed(1) + '%'
+        num(account.balance).toFixed(2),
+        num(account.percentage_of_revenue).toFixed(1) + '%'
       ])
     })
 
-    rows.push(['Total Revenue', reportData.total_revenue.toFixed(2), '100.0%'])
+    rows.push(['Total Revenue', num(reportData.total_revenue).toFixed(2), '100.0%'])
     rows.push([])
 
     if (reportData.cost_of_goods_sold && reportData.cost_of_goods_sold.length > 0) {
@@ -1844,12 +2091,12 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
       reportData.cost_of_goods_sold.forEach(account => {
         rows.push([
           `  ${account.account_number || ''} ${account.account_name}`,
-          account.balance.toFixed(2),
-          (account.percentage_of_revenue || 0).toFixed(1) + '%'
+          num(account.balance).toFixed(2),
+          num(account.percentage_of_revenue).toFixed(1) + '%'
         ])
       })
-      rows.push(['Total Cost of Goods Sold', reportData.total_cogs.toFixed(2), ((reportData.total_cogs / reportData.total_revenue) * 100).toFixed(1) + '%'])
-      rows.push(['GROSS PROFIT', reportData.gross_profit.toFixed(2), ((reportData.gross_profit / reportData.total_revenue) * 100).toFixed(1) + '%'])
+      rows.push(['Total Cost of Goods Sold', num(reportData.total_cogs).toFixed(2), (num(reportData.total_cogs) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
+      rows.push(['GROSS PROFIT', num(reportData.gross_profit).toFixed(2), (num(reportData.gross_profit) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
       rows.push([])
     }
 
@@ -1857,14 +2104,14 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
     reportData.expenses.forEach(account => {
       rows.push([
         `  ${account.account_number || ''} ${account.account_name}`,
-        account.balance.toFixed(2),
-        (account.percentage_of_revenue || 0).toFixed(1) + '%'
+        num(account.balance).toFixed(2),
+        num(account.percentage_of_revenue).toFixed(1) + '%'
       ])
     })
 
-    rows.push(['Total Expenses', reportData.total_expenses.toFixed(2), ((reportData.total_expenses / reportData.total_revenue) * 100).toFixed(1) + '%'])
+    rows.push(['Total Expenses', num(reportData.total_expenses).toFixed(2), (num(reportData.total_expenses) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
     rows.push([])
-    rows.push(['NET INCOME', reportData.net_income.toFixed(2), ((reportData.net_income / reportData.total_revenue) * 100).toFixed(1) + '%'])
+    rows.push(['NET INCOME', num(reportData.net_income).toFixed(2), (num(reportData.net_income) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
 
     const csvContent = rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv' })
@@ -1891,27 +2138,28 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
       [],
       ['REVENUE'],
     ]
+    const num = (v) => (Number(v) || 0)
     reportData.revenue.forEach(account => {
-      rows.push([`  ${account.account_number || ''} ${account.account_name}`, account.balance.toFixed(2), (account.percentage_of_revenue || 0).toFixed(1) + '%'])
+      rows.push([`  ${account.account_number || ''} ${account.account_name}`, num(account.balance).toFixed(2), num(account.percentage_of_revenue).toFixed(1) + '%'])
     })
-    rows.push(['Total Revenue', reportData.total_revenue.toFixed(2), '100.0%'])
+    rows.push(['Total Revenue', num(reportData.total_revenue).toFixed(2), '100.0%'])
     rows.push([])
     if (reportData.cost_of_goods_sold?.length > 0) {
       rows.push(['COST OF GOODS SOLD'])
       reportData.cost_of_goods_sold.forEach(account => {
-        rows.push([`  ${account.account_number || ''} ${account.account_name}`, account.balance.toFixed(2), (account.percentage_of_revenue || 0).toFixed(1) + '%'])
+        rows.push([`  ${account.account_number || ''} ${account.account_name}`, num(account.balance).toFixed(2), num(account.percentage_of_revenue).toFixed(1) + '%'])
       })
-      rows.push(['Total Cost of Goods Sold', reportData.total_cogs.toFixed(2), ((reportData.total_cogs / reportData.total_revenue) * 100).toFixed(1) + '%'])
-      rows.push(['GROSS PROFIT', reportData.gross_profit.toFixed(2), ((reportData.gross_profit / reportData.total_revenue) * 100).toFixed(1) + '%'])
+      rows.push(['Total Cost of Goods Sold', num(reportData.total_cogs).toFixed(2), (num(reportData.total_cogs) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
+      rows.push(['GROSS PROFIT', num(reportData.gross_profit).toFixed(2), (num(reportData.gross_profit) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
       rows.push([])
     }
     rows.push(['EXPENSES'])
     reportData.expenses.forEach(account => {
-      rows.push([`  ${account.account_number || ''} ${account.account_name}`, account.balance.toFixed(2), (account.percentage_of_revenue || 0).toFixed(1) + '%'])
+      rows.push([`  ${account.account_number || ''} ${account.account_name}`, num(account.balance).toFixed(2), num(account.percentage_of_revenue).toFixed(1) + '%'])
     })
-    rows.push(['Total Expenses', reportData.total_expenses.toFixed(2), ((reportData.total_expenses / reportData.total_revenue) * 100).toFixed(1) + '%'])
+    rows.push(['Total Expenses', num(reportData.total_expenses).toFixed(2), (num(reportData.total_expenses) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
     rows.push([])
-    rows.push(['NET INCOME', reportData.net_income.toFixed(2), ((reportData.net_income / reportData.total_revenue) * 100).toFixed(1) + '%'])
+    rows.push(['NET INCOME', num(reportData.net_income).toFixed(2), (num(reportData.net_income) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
     try {
       await downloadExcel(rows, `profit-loss-${filters.start_date}-to-${filters.end_date}.xlsx`)
       showAlert('success', 'Report exported to Excel')
@@ -2087,20 +2335,28 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
     setLoading(true)
     try {
       if (filters.comparison_type === 'none') {
-        const data = await reportService.getBalanceSheet(filters.as_of_date)
-        setReportData(data)
+        const res = await fetch(
+          `/api/accounting/balance-sheet?as_of_date=${encodeURIComponent(filters.as_of_date)}`,
+          { headers: getAuthHeaders() }
+        )
+        const json = await res.json()
+        if (!res.ok || !json.success) throw new Error(json.message || 'Failed to load report')
+        setReportData(json.data)
         setComparativeData(null)
       } else {
         const priorDate = filters.comparison_type === 'previous_month'
           ? reportService.calculatePriorMonth(filters.as_of_date)
           : reportService.calculatePriorYearDate(filters.as_of_date)
-        const data = await reportService.getComparativeBalanceSheet(filters.as_of_date, priorDate)
-        setComparativeData(data)
-        setReportData(data.current)
+        const params = new URLSearchParams({ current_date: filters.as_of_date, prior_date: priorDate })
+        const res = await fetch(`/api/accounting/balance-sheet/comparative?${params}`, { headers: getAuthHeaders() })
+        const json = await res.json()
+        if (!res.ok || !json.success) throw new Error(json.message || 'Failed to load report')
+        setComparativeData(json.data)
+        setReportData(json.data.current)
       }
       showAlert('success', 'Report generated successfully')
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to generate report')
+      showAlert('error', error.message || error.response?.data?.message || 'Failed to generate report')
     } finally {
       setLoading(false)
     }
@@ -2117,42 +2373,43 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
       [],
       ['ASSETS']
     ]
+    const num = (v) => (Number(v) || 0)
     if (reportData.assets.current_assets?.length > 0) {
       rows.push(['Current Assets'])
-      reportData.assets.current_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-      rows.push(['Total Current Assets', reportData.assets.total_current_assets.toFixed(2)])
+      reportData.assets.current_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+      rows.push(['Total Current Assets', num(reportData.assets.total_current_assets).toFixed(2)])
     }
     if (reportData.assets.fixed_assets?.length > 0) {
       rows.push(['Fixed Assets'])
-      reportData.assets.fixed_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-      rows.push(['Total Fixed Assets', reportData.assets.total_fixed_assets.toFixed(2)])
+      reportData.assets.fixed_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+      rows.push(['Total Fixed Assets', num(reportData.assets.total_fixed_assets).toFixed(2)])
     }
     if (reportData.assets.other_assets?.length > 0) {
       rows.push(['Other Assets'])
-      reportData.assets.other_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-      rows.push(['Total Other Assets', reportData.assets.total_other_assets.toFixed(2)])
+      reportData.assets.other_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+      rows.push(['Total Other Assets', num(reportData.assets.total_other_assets).toFixed(2)])
     }
-    rows.push(['TOTAL ASSETS', reportData.assets.total_assets.toFixed(2)])
+    rows.push(['TOTAL ASSETS', num(reportData.assets.total_assets).toFixed(2)])
     rows.push([])
     rows.push(['LIABILITIES'])
     if (reportData.liabilities.current_liabilities?.length > 0) {
       rows.push(['Current Liabilities'])
-      reportData.liabilities.current_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-      rows.push(['Total Current Liabilities', reportData.liabilities.total_current_liabilities.toFixed(2)])
+      reportData.liabilities.current_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+      rows.push(['Total Current Liabilities', num(reportData.liabilities.total_current_liabilities).toFixed(2)])
     }
     if (reportData.liabilities.long_term_liabilities?.length > 0) {
       rows.push(['Long-term Liabilities'])
-      reportData.liabilities.long_term_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-      rows.push(['Total Long-term Liabilities', reportData.liabilities.total_long_term_liabilities.toFixed(2)])
+      reportData.liabilities.long_term_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+      rows.push(['Total Long-term Liabilities', num(reportData.liabilities.total_long_term_liabilities).toFixed(2)])
     }
-    rows.push(['TOTAL LIABILITIES', reportData.liabilities.total_liabilities.toFixed(2)])
+    rows.push(['TOTAL LIABILITIES', num(reportData.liabilities.total_liabilities).toFixed(2)])
     rows.push([])
     rows.push(['EQUITY'])
-    reportData.equity.equity_accounts?.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-    rows.push(['Current Year Earnings', reportData.equity.current_year_earnings.toFixed(2)])
-    rows.push(['TOTAL EQUITY', reportData.equity.total_equity.toFixed(2)])
+    reportData.equity.equity_accounts?.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+    rows.push(['Current Year Earnings', num(reportData.equity.current_year_earnings).toFixed(2)])
+    rows.push(['TOTAL EQUITY', num(reportData.equity.total_equity).toFixed(2)])
     rows.push([])
-    rows.push(['TOTAL LIABILITIES AND EQUITY', (reportData.liabilities.total_liabilities + reportData.equity.total_equity).toFixed(2)])
+    rows.push(['TOTAL LIABILITIES AND EQUITY', (num(reportData.liabilities.total_liabilities) + num(reportData.equity.total_equity)).toFixed(2)])
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = window.URL.createObjectURL(blob)
@@ -2175,42 +2432,43 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
       [],
       ['ASSETS']
     ]
+    const num = (v) => (Number(v) || 0)
     if (reportData.assets.current_assets?.length > 0) {
       rows.push(['Current Assets'])
-      reportData.assets.current_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-      rows.push(['Total Current Assets', reportData.assets.total_current_assets.toFixed(2)])
+      reportData.assets.current_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+      rows.push(['Total Current Assets', num(reportData.assets.total_current_assets).toFixed(2)])
     }
     if (reportData.assets.fixed_assets?.length > 0) {
       rows.push(['Fixed Assets'])
-      reportData.assets.fixed_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-      rows.push(['Total Fixed Assets', reportData.assets.total_fixed_assets.toFixed(2)])
+      reportData.assets.fixed_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+      rows.push(['Total Fixed Assets', num(reportData.assets.total_fixed_assets).toFixed(2)])
     }
     if (reportData.assets.other_assets?.length > 0) {
       rows.push(['Other Assets'])
-      reportData.assets.other_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-      rows.push(['Total Other Assets', reportData.assets.total_other_assets.toFixed(2)])
+      reportData.assets.other_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+      rows.push(['Total Other Assets', num(reportData.assets.total_other_assets).toFixed(2)])
     }
-    rows.push(['TOTAL ASSETS', reportData.assets.total_assets.toFixed(2)])
+    rows.push(['TOTAL ASSETS', num(reportData.assets.total_assets).toFixed(2)])
     rows.push([])
     rows.push(['LIABILITIES'])
     if (reportData.liabilities.current_liabilities?.length > 0) {
       rows.push(['Current Liabilities'])
-      reportData.liabilities.current_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-      rows.push(['Total Current Liabilities', reportData.liabilities.total_current_liabilities.toFixed(2)])
+      reportData.liabilities.current_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+      rows.push(['Total Current Liabilities', num(reportData.liabilities.total_current_liabilities).toFixed(2)])
     }
     if (reportData.liabilities.long_term_liabilities?.length > 0) {
       rows.push(['Long-term Liabilities'])
-      reportData.liabilities.long_term_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-      rows.push(['Total Long-term Liabilities', reportData.liabilities.total_long_term_liabilities.toFixed(2)])
+      reportData.liabilities.long_term_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+      rows.push(['Total Long-term Liabilities', num(reportData.liabilities.total_long_term_liabilities).toFixed(2)])
     }
-    rows.push(['TOTAL LIABILITIES', reportData.liabilities.total_liabilities.toFixed(2)])
+    rows.push(['TOTAL LIABILITIES', num(reportData.liabilities.total_liabilities).toFixed(2)])
     rows.push([])
     rows.push(['EQUITY'])
-    reportData.equity.equity_accounts?.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, a.balance.toFixed(2)]))
-    rows.push(['Current Year Earnings', reportData.equity.current_year_earnings.toFixed(2)])
-    rows.push(['TOTAL EQUITY', reportData.equity.total_equity.toFixed(2)])
+    reportData.equity.equity_accounts?.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+    rows.push(['Current Year Earnings', num(reportData.equity.current_year_earnings).toFixed(2)])
+    rows.push(['TOTAL EQUITY', num(reportData.equity.total_equity).toFixed(2)])
     rows.push([])
-    rows.push(['TOTAL LIABILITIES AND EQUITY', (reportData.liabilities.total_liabilities + reportData.equity.total_equity).toFixed(2)])
+    rows.push(['TOTAL LIABILITIES AND EQUITY', (num(reportData.liabilities.total_liabilities) + num(reportData.equity.total_equity)).toFixed(2)])
     try {
       await downloadExcel(rows, `balance-sheet-${filters.as_of_date}.xlsx`)
       showAlert('success', 'Report exported to Excel')
@@ -2322,25 +2580,33 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }
     setLoading(true)
     try {
       if (filters.comparison_type === 'none') {
-        const data = await reportService.getCashFlow(filters.start_date, filters.end_date)
-        setReportData(data)
+        const res = await fetch(
+          `/api/accounting/cash-flow?start_date=${encodeURIComponent(filters.start_date)}&end_date=${encodeURIComponent(filters.end_date)}`,
+          { headers: getAuthHeaders() }
+        )
+        const json = await res.json()
+        if (!res.ok || !json.success) throw new Error(json.message || 'Failed to load report')
+        setReportData(json.data)
         setComparativeData(null)
       } else {
         const prior = filters.comparison_type === 'previous_period'
           ? reportService.calculatePriorPeriod(filters.start_date, filters.end_date)
           : reportService.calculatePriorYear(filters.start_date, filters.end_date)
-        const data = await reportService.getComparativeCashFlow(
-          filters.start_date,
-          filters.end_date,
-          prior.start,
-          prior.end
-        )
-        setComparativeData(data)
-        setReportData(data.current)
+        const params = new URLSearchParams({
+          current_start: filters.start_date,
+          current_end: filters.end_date,
+          prior_start: prior.start,
+          prior_end: prior.end
+        })
+        const res = await fetch(`/api/accounting/cash-flow/comparative?${params}`, { headers: getAuthHeaders() })
+        const json = await res.json()
+        if (!res.ok || !json.success) throw new Error(json.message || 'Failed to load report')
+        setComparativeData(json.data)
+        setReportData(json.data.current)
       }
       showAlert('success', 'Report generated successfully')
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to generate report')
+      showAlert('error', error.message || error.response?.data?.message || 'Failed to generate report')
     } finally {
       setLoading(false)
     }
@@ -2354,30 +2620,31 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }
     const op = reportData.operating_activities || {}
     const inv = reportData.investing_activities || {}
     const fin = reportData.financing_activities || {}
+    const num = (v) => (Number(v) || 0)
     const rows = [
       ['Cash Flow Statement'],
       [`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`],
       [],
       ['OPERATING ACTIVITIES'],
-      ['Net Income', (op.net_income ?? 0).toFixed(2)]
+      ['Net Income', num(op.net_income).toFixed(2)]
     ]
-    ;(op.adjustments || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
-    ;(op.working_capital_changes || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
-    rows.push(['Net Cash from Operating Activities', (op.net_cash_from_operations ?? 0).toFixed(2)])
+    ;(op.adjustments || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
+    ;(op.working_capital_changes || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
+    rows.push(['Net Cash from Operating Activities', num(op.net_cash_from_operations).toFixed(2)])
     rows.push([])
     rows.push(['INVESTING ACTIVITIES'])
     if ((inv.items || []).length === 0) rows.push(['  No investing activities'])
-    else (inv.items || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
-    rows.push(['Net Cash from Investing Activities', (inv.net_cash_from_investing ?? 0).toFixed(2)])
+    else (inv.items || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
+    rows.push(['Net Cash from Investing Activities', num(inv.net_cash_from_investing).toFixed(2)])
     rows.push([])
     rows.push(['FINANCING ACTIVITIES'])
     if ((fin.items || []).length === 0) rows.push(['  No financing activities'])
-    else (fin.items || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
-    rows.push(['Net Cash from Financing Activities', (fin.net_cash_from_financing ?? 0).toFixed(2)])
+    else (fin.items || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
+    rows.push(['Net Cash from Financing Activities', num(fin.net_cash_from_financing).toFixed(2)])
     rows.push([])
-    rows.push(['NET CHANGE IN CASH', (reportData.net_change_in_cash ?? 0).toFixed(2)])
-    rows.push(['Beginning Cash', (reportData.beginning_cash ?? 0).toFixed(2)])
-    rows.push(['ENDING CASH', (reportData.ending_cash ?? 0).toFixed(2)])
+    rows.push(['NET CHANGE IN CASH', num(reportData.net_change_in_cash).toFixed(2)])
+    rows.push(['Beginning Cash', num(reportData.beginning_cash).toFixed(2)])
+    rows.push(['ENDING CASH', num(reportData.ending_cash).toFixed(2)])
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = window.URL.createObjectURL(blob)
@@ -2397,30 +2664,31 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }
     const op = reportData.operating_activities || {}
     const inv = reportData.investing_activities || {}
     const fin = reportData.financing_activities || {}
+    const num = (v) => (Number(v) || 0)
     const rows = [
       ['Cash Flow Statement'],
       [`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`],
       [],
       ['OPERATING ACTIVITIES'],
-      ['Net Income', (op.net_income ?? 0).toFixed(2)]
+      ['Net Income', num(op.net_income).toFixed(2)]
     ]
-    ;(op.adjustments || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
-    ;(op.working_capital_changes || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
-    rows.push(['Net Cash from Operating Activities', (op.net_cash_from_operations ?? 0).toFixed(2)])
+    ;(op.adjustments || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
+    ;(op.working_capital_changes || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
+    rows.push(['Net Cash from Operating Activities', num(op.net_cash_from_operations).toFixed(2)])
     rows.push([])
     rows.push(['INVESTING ACTIVITIES'])
     if ((inv.items || []).length === 0) rows.push(['  No investing activities'])
-    else (inv.items || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
-    rows.push(['Net Cash from Investing Activities', (inv.net_cash_from_investing ?? 0).toFixed(2)])
+    else (inv.items || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
+    rows.push(['Net Cash from Investing Activities', num(inv.net_cash_from_investing).toFixed(2)])
     rows.push([])
     rows.push(['FINANCING ACTIVITIES'])
     if ((fin.items || []).length === 0) rows.push(['  No financing activities'])
-    else (fin.items || []).forEach((item) => rows.push([`  ${item.description}`, item.amount.toFixed(2)]))
-    rows.push(['Net Cash from Financing Activities', (fin.net_cash_from_financing ?? 0).toFixed(2)])
+    else (fin.items || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
+    rows.push(['Net Cash from Financing Activities', num(fin.net_cash_from_financing).toFixed(2)])
     rows.push([])
-    rows.push(['NET CHANGE IN CASH', (reportData.net_change_in_cash ?? 0).toFixed(2)])
-    rows.push(['Beginning Cash', (reportData.beginning_cash ?? 0).toFixed(2)])
-    rows.push(['ENDING CASH', (reportData.ending_cash ?? 0).toFixed(2)])
+    rows.push(['NET CHANGE IN CASH', num(reportData.net_change_in_cash).toFixed(2)])
+    rows.push(['Beginning Cash', num(reportData.beginning_cash).toFixed(2)])
+    rows.push(['ENDING CASH', num(reportData.ending_cash).toFixed(2)])
     try {
       await downloadExcel(rows, `cash-flow-${filters.start_date}-to-${filters.end_date}.xlsx`)
       showAlert('success', 'Report exported to Excel')

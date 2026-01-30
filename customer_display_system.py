@@ -31,6 +31,13 @@ class CustomerDisplaySystem:
                 pass
             
             establishment_id = get_current_establishment()
+            if establishment_id is None:
+                cursor.execute("SELECT establishment_id FROM establishments ORDER BY establishment_id LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    establishment_id = row['establishment_id'] if isinstance(row, dict) else row[0]
+                if establishment_id is None:
+                    raise Exception('No establishment found. Please ensure the database has at least one establishment.')
             
             # Calculate subtotal, tax, and total properly
             subtotal = 0.0

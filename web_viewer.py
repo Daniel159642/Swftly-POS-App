@@ -42,7 +42,8 @@ from database import (
     get_store_location_settings, update_store_location_settings,
     get_customer_rewards_settings, update_customer_rewards_settings, calculate_rewards,
     add_customer, search_customers, get_customer_rewards_detail,
-    # Accounting functions
+    # Accounting / store settings
+    get_establishment_settings, update_establishment_settings, get_labor_summary,
     generate_balance_sheet, generate_income_statement,
     generate_trial_balance,
     add_product, create_or_get_category_with_hierarchy,
@@ -1801,18 +1802,27 @@ def api_create_order():
         
         data = request.json
         from database import create_order
-        
+        settings = get_establishment_settings(None)
+        # Use store default sales tax % when tax_rate not provided or zero
+        tax_rate = data.get('tax_rate')
+        if tax_rate is None or (isinstance(tax_rate, (int, float)) and float(tax_rate) == 0):
+            pct = float(settings.get('default_sales_tax_pct') or 0)
+            tax_rate = pct / 100.0
+        else:
+            tax_rate = float(tax_rate)
+        fee_rates = settings.get('transaction_fee_rates')
         result = create_order(
             employee_id=data.get('employee_id'),
             items=data.get('items', []),
             payment_method=data.get('payment_method', 'cash'),
-            tax_rate=data.get('tax_rate', 0.0),
+            tax_rate=tax_rate,
             discount=data.get('discount', 0.0),
             customer_id=data.get('customer_id'),
             tip=data.get('tip', 0.0),
             order_type=data.get('order_type'),
             customer_info=data.get('customer_info'),
-            points_used=int(data.get('points_used', 0) or 0)
+            points_used=int(data.get('points_used', 0) or 0),
+            transaction_fee_rates=fee_rates
         )
         
         # Post to accounting (accounting.transactions) so Accounting page reflects the sale
@@ -1824,14 +1834,26 @@ def api_create_order():
                     session_data = verify_session(session_token)
                     if session_data and session_data.get('valid'):
                         employee_id = session_data.get('employee_id')
+            if not employee_id:
+                try:
+                    conn = get_connection()
+                    cur = conn.cursor()
+                    cur.execute("SELECT employee_id FROM employees WHERE is_active = 1 ORDER BY employee_id LIMIT 1")
+                    row = cur.fetchone()
+                    conn.close()
+                    employee_id = row[0] if row and isinstance(row, tuple) else (row.get('employee_id') if isinstance(row, dict) else None)
+                except Exception:
+                    employee_id = None
             if employee_id:
                 try:
                     from pos_accounting_bridge import journalize_sale_to_accounting
-                    jr = journalize_sale_to_accounting(result['order_id'], employee_id)
+                    jr = journalize_sale_to_accounting(result['order_id'], int(employee_id))
                     if not jr.get('success'):
                         print(f"Accounting journalize_sale (order {result['order_id']}): {jr.get('message', 'unknown')}")
                 except Exception as je:
+                    import traceback
                     print(f"Accounting journalize_sale error (order {result['order_id']}): {je}")
+                    traceback.print_exc()
         
         return jsonify(result)
     except Exception as e:
@@ -8103,6 +8125,31 @@ if _ACCOUNTING_BACKEND_AVAILABLE:
     def api_v1_bill_payments_check_data(payment_id):
         return bill_payment_controller.get_payment_check_data(payment_id)
 
+    # ---------- /api/v1/reports (P&L, Balance Sheet, Cash Flow - same data as /api/accounting, used by reportService) ----------
+    @app.route('/api/v1/reports/profit-loss', methods=['GET'])
+    def api_v1_reports_profit_loss():
+        return report_controller.get_profit_loss()
+
+    @app.route('/api/v1/reports/profit-loss/comparative', methods=['GET'])
+    def api_v1_reports_profit_loss_comparative():
+        return report_controller.get_comparative_profit_loss()
+
+    @app.route('/api/v1/reports/balance-sheet', methods=['GET'])
+    def api_v1_reports_balance_sheet():
+        return report_controller.get_balance_sheet()
+
+    @app.route('/api/v1/reports/balance-sheet/comparative', methods=['GET'])
+    def api_v1_reports_balance_sheet_comparative():
+        return report_controller.get_comparative_balance_sheet()
+
+    @app.route('/api/v1/reports/cash-flow', methods=['GET'])
+    def api_v1_reports_cash_flow():
+        return report_controller.get_cash_flow()
+
+    @app.route('/api/v1/reports/cash-flow/comparative', methods=['GET'])
+    def api_v1_reports_cash_flow_comparative():
+        return report_controller.get_comparative_cash_flow()
+
     # ---------- /api/accounting reports (trial-balance, P&L, balance-sheet) ----------
     @app.route('/api/accounting/trial-balance', methods=['GET'])
     def api_accounting_trial_balance():
@@ -8126,9 +8173,25 @@ if _ACCOUNTING_BACKEND_AVAILABLE:
     def api_accounting_profit_loss():
         return report_controller.get_profit_loss()
 
+    @app.route('/api/accounting/profit-loss/comparative', methods=['GET'])
+    def api_accounting_profit_loss_comparative():
+        return report_controller.get_comparative_profit_loss()
+
     @app.route('/api/accounting/balance-sheet', methods=['GET'])
     def api_accounting_balance_sheet():
         return report_controller.get_balance_sheet()
+
+    @app.route('/api/accounting/balance-sheet/comparative', methods=['GET'])
+    def api_accounting_balance_sheet_comparative():
+        return report_controller.get_comparative_balance_sheet()
+
+    @app.route('/api/accounting/cash-flow', methods=['GET'])
+    def api_accounting_cash_flow():
+        return report_controller.get_cash_flow()
+
+    @app.route('/api/accounting/cash-flow/comparative', methods=['GET'])
+    def api_accounting_cash_flow_comparative():
+        return report_controller.get_comparative_cash_flow()
 
     @app.route('/api/accounting/aging', methods=['GET'])
     def api_accounting_aging():
@@ -8295,6 +8358,73 @@ if _ACCOUNTING_BACKEND_AVAILABLE:
             print(f"Accounting vendors error: {e}")
         return jsonify({'success': True, 'data': data}), 200
 
+@app.route('/api/accounting/settings', methods=['GET', 'PATCH'])
+def api_accounting_settings():
+    """Get or update store accounting settings (sales tax %, transaction fee rates)."""
+    try:
+        session_token = request.headers.get('X-Session-Token') or request.args.get('session_token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        employee_id = session_result.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID not found'}), 401
+        employee_role = get_employee_role(employee_id)
+        if employee_role not in ['manager', 'admin']:
+            return jsonify({'success': False, 'message': 'Manager or Admin required'}), 403
+
+        if request.method == 'GET':
+            settings = get_establishment_settings(None)
+            return jsonify({'success': True, 'data': settings}), 200
+
+        # PATCH
+        data = request.get_json() or {}
+        updates = {}
+        if 'default_sales_tax_pct' in data:
+            updates['default_sales_tax_pct'] = float(data['default_sales_tax_pct'])
+        if 'transaction_fee_rates' in data:
+            updates['transaction_fee_rates'] = dict(data['transaction_fee_rates'])
+        if not updates:
+            return jsonify({'success': False, 'message': 'No settings to update'}), 400
+        ok = update_establishment_settings(None, updates)
+        if not ok:
+            return jsonify({'success': False, 'message': 'Failed to update settings'}), 500
+        settings = get_establishment_settings(None)
+        return jsonify({'success': True, 'data': settings}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/accounting/labor-summary', methods=['GET'])
+def api_accounting_labor_summary():
+    """Hours worked and labor cost from time_clock + employees (hourly_rate)."""
+    try:
+        session_token = request.headers.get('X-Session-Token') or request.args.get('session_token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        employee_id = session_result.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID not found'}), 401
+        employee_role = get_employee_role(employee_id)
+        if employee_role not in ['manager', 'admin']:
+            return jsonify({'success': False, 'message': 'Manager or Admin required'}), 403
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        if not start_date or not end_date:
+            return jsonify({'success': False, 'message': 'start_date and end_date required'}), 400
+        result = get_labor_summary(start_date, end_date, None)
+        return jsonify({'success': True, 'data': result}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/accounting/dashboard', methods=['GET'])
 def api_accounting_dashboard():
     """Get accounting dashboard data"""
@@ -8327,29 +8457,72 @@ def api_accounting_dashboard():
         
         conn = get_connection()
         cursor = conn.cursor()
-        
-        # Calculate total revenue from orders
-        cursor.execute("""
-            SELECT COALESCE(SUM(total_amount), 0) as total_revenue
-            FROM orders
-            WHERE order_date >= %s AND order_date <= %s
-        """, (start_date, end_date))
-        revenue_result = cursor.fetchone()
-        total_revenue = float(revenue_result[0]) if revenue_result and revenue_result[0] else 0.0
-        
-        # Calculate total expenses (from shipments/costs)
-        cursor.execute("""
-            SELECT COALESCE(SUM(si.quantity_received * si.unit_cost), 0) as total_expenses
-            FROM shipments s
-            JOIN shipment_items si ON s.shipment_id = si.shipment_id
-            WHERE s.received_date >= %s AND s.received_date <= %s
-        """, (start_date, end_date))
-        expenses_result = cursor.fetchone()
-        total_expenses = float(expenses_result[0]) if expenses_result and expenses_result[0] else 0.0
-        
-        # Calculate total payroll (from employee schedules/hours if available)
-        # For now, return 0 if payroll table doesn't exist
-        total_payroll = 0.0
+        transaction_count = 0
+        total_revenue = 0.0
+        total_tax_collected = 0.0
+        total_transaction_fees = 0.0
+        try:
+            cursor.execute("""
+                SELECT COALESCE(COUNT(*), 0) as cnt,
+                       COALESCE(SUM(total), 0) as total_revenue,
+                       COALESCE(SUM(tax_amount), 0) as total_tax,
+                       COALESCE(SUM(transaction_fee), 0) as total_fees
+                FROM orders
+                WHERE order_date >= %s AND order_date <= %s AND order_status != 'voided'
+            """, (start_date, end_date))
+            row = cursor.fetchone()
+            transaction_count = int(row[0]) if row and row[0] else 0
+            total_revenue = float(row[1]) if row and row[1] else 0.0
+            total_tax_collected = float(row[2]) if row and row[2] else 0.0
+            total_transaction_fees = float(row[3]) if row and row[3] else 0.0
+        except Exception:
+            pass
+
+        # Returns (approved) in date range
+        try:
+            cursor.execute("""
+                SELECT COALESCE(SUM(total_refund_amount), 0) as returns_total
+                FROM pending_returns
+                WHERE status = 'approved' AND approved_date >= %s AND approved_date <= %s
+            """, (start_date, end_date))
+            ret_row = cursor.fetchone()
+            returns_total = float(ret_row[0]) if ret_row and ret_row[0] else 0.0
+        except Exception:
+            returns_total = 0.0
+
+        # COGS for orders in range (order_items qty * inventory product_cost)
+        try:
+            cursor.execute("""
+                SELECT COALESCE(SUM(oi.quantity * i.product_cost), 0) as cogs
+                FROM order_items oi
+                JOIN inventory i ON i.product_id = oi.product_id
+                JOIN orders o ON o.order_id = oi.order_id
+                WHERE o.order_date >= %s AND o.order_date <= %s AND o.order_status != 'voided'
+            """, (start_date, end_date))
+            cogs_row = cursor.fetchone()
+            total_cogs = float(cogs_row[0]) if cogs_row and cogs_row[0] else 0.0
+        except Exception:
+            total_cogs = 0.0
+        # Margin = revenue - cogs (product sale price vs cost)
+        margin = total_revenue - total_cogs
+
+        # Expenses (shipments) - table may not exist
+        total_expenses = 0.0
+        try:
+            cursor.execute("""
+                SELECT COALESCE(SUM(si.quantity_received * si.unit_cost), 0) as total_expenses
+                FROM shipments s
+                JOIN shipment_items si ON s.shipment_id = si.shipment_id
+                WHERE s.received_date >= %s AND s.received_date <= %s
+            """, (start_date, end_date))
+            expenses_result = cursor.fetchone()
+            total_expenses = float(expenses_result[0]) if expenses_result and expenses_result[0] else 0.0
+        except Exception:
+            pass
+
+        # Payroll: prefer time_clock + hourly_rate labor summary
+        labor = get_labor_summary(start_date, end_date, None)
+        total_payroll = float(labor.get('total_labor_cost') or 0.0)
         try:
             cursor.execute("""
                 SELECT COALESCE(SUM(amount), 0) as total_payroll
@@ -8357,36 +8530,27 @@ def api_accounting_dashboard():
                 WHERE pay_period_start >= %s AND pay_period_end <= %s
             """, (start_date, end_date))
             payroll_result = cursor.fetchone()
-            total_payroll = float(payroll_result[0]) if payroll_result and payroll_result[0] else 0.0
-        except:
-            pass  # Payroll table may not exist
-        
-        # Calculate net income
-        net_income = total_revenue - total_expenses - total_payroll
-        
-        # Calculate cash balance (from orders and cash transactions)
-        cursor.execute("""
-            SELECT COALESCE(SUM(total_amount), 0) as cash_balance
-            FROM orders
-            WHERE payment_method = 'cash' AND order_date <= %s
-        """, (end_date,))
-        cash_result = cursor.fetchone()
-        cash_balance = float(cash_result[0]) if cash_result and cash_result[0] else 0.0
-        
-        # Calculate total tax collected
-        cursor.execute("""
-            SELECT COALESCE(SUM(tax_amount), 0) as total_tax_collected
-            FROM orders
-            WHERE order_date >= %s AND order_date <= %s
-        """, (start_date, end_date))
-        tax_result = cursor.fetchone()
-        total_tax_collected = float(tax_result[0]) if tax_result and tax_result[0] else 0.0
-        
-        # Outstanding taxes (same as collected for now, can be enhanced later)
-        outstanding_taxes = total_tax_collected
-        
+            if payroll_result and payroll_result[0]:
+                total_payroll = float(payroll_result[0])
+        except Exception:
+            pass
+
+        net_income = total_revenue - total_expenses - total_payroll - returns_total
+
+        cash_balance = 0.0
+        try:
+            cursor.execute("""
+                SELECT COALESCE(SUM(total), 0) as cash_balance
+                FROM orders
+                WHERE payment_method = 'cash' AND order_date <= %s AND order_status != 'voided'
+            """, (end_date,))
+            cash_result = cursor.fetchone()
+            cash_balance = float(cash_result[0]) if cash_result and cash_result[0] else 0.0
+        except Exception:
+            pass
+
         conn.close()
-        
+
         return jsonify({
             'total_revenue': total_revenue,
             'total_expenses': total_expenses,
@@ -8394,7 +8558,17 @@ def api_accounting_dashboard():
             'net_income': net_income,
             'cash_balance': cash_balance,
             'total_tax_collected': total_tax_collected,
-            'outstanding_taxes': outstanding_taxes
+            'outstanding_taxes': total_tax_collected,
+            'pos_summary': {
+                'transaction_count': transaction_count,
+                'revenue': total_revenue,
+                'tax_collected': total_tax_collected,
+                'transaction_fees': total_transaction_fees,
+                'returns_total': returns_total,
+                'cogs': total_cogs,
+                'margin': margin
+            },
+            'labor_summary': labor
         }), 200
         
     except Exception as e:
