@@ -4,6 +4,12 @@ import { useTheme } from '../contexts/ThemeContext'
 import BarcodeScanner from '../components/BarcodeScanner'
 import { Truck, List, Clock, CheckCircle, Plus, FileText, ChevronDown, ScanBarcode, PackageOpen, X, Save, Minus, PanelLeft, AlertTriangle, Check, Camera, Package } from 'lucide-react'
 import { FormTitle, FormLabel, FormField, inputBaseStyle, getInputFocusHandlers, formLabelStyle } from '../components/FormStyles'
+import { Document, Page, pdfjs } from 'react-pdf'
+import 'react-pdf/dist/Page/AnnotationLayer.css'
+import 'react-pdf/dist/Page/TextLayer.css'
+
+// Configure PDF.js worker (must be in same module as Document/Page usage)
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 
 function ShipmentVerificationDashboard() {
   const { themeMode, themeColor } = useTheme()
@@ -3224,6 +3230,10 @@ function UploadShipmentForm({ onClose, onSuccess }) {
   const [draftId, setDraftId] = useState(null) // ID of draft being edited
   const [savingDraft, setSavingDraft] = useState(false)
   const [minimizedItems, setMinimizedItems] = useState(new Set()) // Set of minimized item indices
+  const [pdfNumPages, setPdfNumPages] = useState(null)
+  const pdfViewerRef = useRef(null)
+  const [pdfViewerWidth, setPdfViewerWidth] = useState(600)
+  const [pdfZoom, setPdfZoom] = useState(100) // percent, 50–200
   
   // Convert hex to RGB
   const hexToRgb = (hex) => {
@@ -3360,6 +3370,20 @@ function UploadShipmentForm({ onClose, onSuccess }) {
         URL.revokeObjectURL(previewData.fileUrl)
       }
     }
+  }, [previewData])
+
+  // Measure PDF viewer container width for responsive page width
+  useEffect(() => {
+    if (!previewData?.filename?.toLowerCase().endsWith('.pdf')) return
+    const el = pdfViewerRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width
+      if (typeof w === 'number' && w > 0) setPdfViewerWidth(w)
+    })
+    ro.observe(el)
+    setPdfViewerWidth(el.getBoundingClientRect().width || 600)
+    return () => ro.disconnect()
   }, [previewData])
 
   const loadVendors = async () => {
@@ -3585,6 +3609,8 @@ function UploadShipmentForm({ onClose, onSuccess }) {
     }
     setPreviewData(null)
     setEditingItems([])
+    setPdfNumPages(null)
+    setPdfZoom(100)
   }
 
   const updateItem = (index, field, value) => {
@@ -3695,6 +3721,10 @@ function UploadShipmentForm({ onClose, onSuccess }) {
   return (
     <>
         <style>{`
+          .file-preview-container .react-pdf__Page__textContent,
+          .file-preview-container .textLayer {
+            user-select: text !important;
+          }
           .excel-preview table {
             width: 100%;
             border-collapse: collapse;
@@ -4323,15 +4353,142 @@ function UploadShipmentForm({ onClose, onSuccess }) {
               padding: isPdf ? '0' : '16px'
             }}>
               {isPdf ? (
-                <iframe
-                  src={previewData.fileUrl}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    border: 'none'
-                  }}
-                  title="Document preview"
-                />
+                <>
+                  <div style={{
+                    padding: '8px 16px',
+                    borderBottom: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#eee'}`,
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    flexWrap: 'wrap'
+                  }}>
+                    <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666' }}>
+                      {pdfNumPages != null ? `${pdfNumPages} page${pdfNumPages !== 1 ? 's' : ''}` : 'Loading…'}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button
+                        type="button"
+                        aria-label="Zoom out"
+                        onClick={() => setPdfZoom(z => Math.max(50, z - 25))}
+                        style={{
+                          width: '32px',
+                          height: '28px',
+                          padding: 0,
+                          border: `1px solid ${isDarkMode ? '#555' : '#ccc'}`,
+                          borderRadius: '6px',
+                          background: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+                          color: isDarkMode ? '#fff' : '#333',
+                          fontSize: '18px',
+                          lineHeight: 1,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        −
+                      </button>
+                      <span style={{
+                        minWidth: '52px',
+                        fontSize: '13px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                        textAlign: 'center'
+                      }}>
+                        {pdfZoom}%
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Zoom in"
+                        onClick={() => setPdfZoom(z => Math.min(200, z + 25))}
+                        style={{
+                          width: '32px',
+                          height: '28px',
+                          padding: 0,
+                          border: `1px solid ${isDarkMode ? '#555' : '#ccc'}`,
+                          borderRadius: '6px',
+                          background: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+                          color: isDarkMode ? '#fff' : '#333',
+                          fontSize: '18px',
+                          lineHeight: 1,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
+                    <a
+                      href={previewData.fileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontSize: '13px',
+                        color: `rgba(${themeColorRgb}, 1)`,
+                        textDecoration: 'none',
+                        fontWeight: 500
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        window.open(previewData.fileUrl, '_blank', 'noopener')
+                      }}
+                    >
+                      Open in new tab
+                    </a>
+                  </div>
+                  <div
+                    ref={pdfViewerRef}
+                    style={{
+                      flex: 1,
+                      height: 'calc(100% - 41px)',
+                      overflow: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      padding: '16px 0',
+                      backgroundColor: isDarkMode ? '#525252' : '#888',
+                      userSelect: 'text'
+                    }}
+                  >
+                    <Document
+                      file={formData.document}
+                      onLoadSuccess={({ numPages }) => setPdfNumPages(numPages)}
+                      loading={
+                        <div style={{
+                          padding: '40px',
+                          color: isDarkMode ? '#fff' : '#333',
+                          textAlign: 'center'
+                        }}>
+                          Loading document…
+                        </div>
+                      }
+                      error={
+                        <div style={{
+                          padding: '40px',
+                          color: isDarkMode ? '#ff6b6b' : '#c62828',
+                          textAlign: 'center'
+                        }}>
+                          Failed to load PDF. Use &quot;Open in new tab&quot; to view.
+                        </div>
+                      }
+                    >
+                      {Array.from(new Array(pdfNumPages || 0), (_, i) => {
+                        const baseWidth = Math.min(pdfViewerWidth - 32, 800)
+                        const scaledWidth = baseWidth * (pdfZoom / 100)
+                        return (
+                          <Page
+                            key={i}
+                            pageNumber={i + 1}
+                            width={scaledWidth}
+                            renderTextLayer={true}
+                            renderAnnotationLayer={true}
+                            style={{
+                              marginBottom: '16px',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                            }}
+                          />
+                        )
+                      })}
+                    </Document>
+                  </div>
+                </>
               ) : isExcel ? (
                 excelHtml ? (
                   <div 

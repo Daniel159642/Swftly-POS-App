@@ -577,12 +577,13 @@ def assign_category_to_product(
                 INSERT INTO product_metadata (product_id, category_id, category_confidence, updated_at)
                 VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
             """, (product_id, category_id, confidence))
-        cursor.execute("SELECT category_name FROM categories WHERE category_id = %s", (category_id,))
-        row = cursor.fetchone()
-        leaf_name = (row[0] if row else None) or (parts[-1] if parts else str(category_id))
+        # Store full category path in inventory.category so master category filters include subcategories
+        cats = list_categories(include_path=True)
+        full_path = next((c.get("category_path") for c in cats if c.get("category_id") == category_id), None)
+        display_category = (full_path if full_path else None) or (parts[-1] if parts else str(category_id))
         cursor.execute("""
             UPDATE inventory SET category = %s, updated_at = NOW() WHERE product_id = %s
-        """, (leaf_name, product_id))
+        """, (display_category, product_id))
         conn.commit()
         return True
     except Exception as e:
@@ -682,28 +683,28 @@ def extract_metadata_for_product(product_id: int, auto_sync_category: bool = Tru
                             if cat_id is None:
                                 print(f"⚠ Failed to create/get category '{suggested_category}' for product {product_id}")
                             else:
-                                parts = _normalize_category_path(suggested_category)
-                                most_specific = parts[-1] if parts else suggested_category
+                                # Store full path in inventory.category so master category filter includes subcategories
+                                display_category = suggested_category
                                 # Get current category from database (not from cached product dict)
                                 cursor.execute("SELECT category FROM inventory WHERE product_id = %s", (product_id,))
                                 current_row = cursor.fetchone()
                                 current_category = current_row[0] if current_row else None
                                 
-                                if current_category != most_specific:
+                                if current_category != display_category:
                                     cursor.execute("""
                                         UPDATE inventory
                                         SET category = %s, updated_at = NOW()
                                         WHERE product_id = %s
-                                    """, (most_specific, product_id))
+                                    """, (display_category, product_id))
                                     conn.commit()
-                                    print(f"✓ Updated category for product {product_id}: '{current_category}' -> '{most_specific}'")
+                                    print(f"✓ Updated category for product {product_id}: '{current_category}' -> '{display_category}'")
                                     # Verify the update
                                     cursor.execute("SELECT category FROM inventory WHERE product_id = %s", (product_id,))
                                     verify_row = cursor.fetchone()
                                     verified_category = verify_row[0] if verify_row else None
                                     print(f"  Verified category in DB: '{verified_category}'")
                                 else:
-                                    print(f"✓ Category already set for product {product_id}: '{most_specific}'")
+                                    print(f"✓ Category already set for product {product_id}: '{display_category}'")
                         except Exception as e:
                             print(f"⚠ Error syncing category for product {product_id}: {e}")
                             import traceback

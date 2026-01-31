@@ -91,7 +91,7 @@ function Inventory() {
   const cropContainerRef = useRef(null)
 
   const MIN_CROP = 20
-  const [createCategoryData, setCreateCategoryData] = useState({ category_name: '' })
+  const [createCategoryData, setCreateCategoryData] = useState({ parent_path: '', category_name: '' })
   const [createVendorData, setCreateVendorData] = useState({
     vendor_name: '',
     contact_person: '',
@@ -1062,10 +1062,12 @@ function Inventory() {
     handleCloseBarcodePreview()
     
     setEditingCategory(category)
-    // Prefer category_path for editing (full path like "Food & Beverage > Produce > Vegetables")
-    // Fall back to category_name if path not available
+    // Parse full path into parent + name for dropdown UX (e.g. "Food & Beverage > Fruit" -> parent "Food & Beverage", name "Fruit")
     const categoryPath = category.category_path || category.category_name || category.name || ''
-    setCreateCategoryData({ category_name: categoryPath })
+    const lastGt = categoryPath.lastIndexOf(' > ')
+    const parent_path = lastGt > 0 ? categoryPath.slice(0, lastGt) : ''
+    const category_name = lastGt > 0 ? categoryPath.slice(lastGt + 3) : categoryPath
+    setCreateCategoryData({ parent_path, category_name })
     setShowCreateCategory(true)
     setCreateError(null)
     setCreateSuccess(false)
@@ -1083,12 +1085,15 @@ function Inventory() {
         : '/api/categories'
       const method = editingCategory ? 'PUT' : 'POST'
 
+      const path = createCategoryData.parent_path
+        ? (createCategoryData.parent_path + ' > ' + createCategoryData.category_name)
+        : createCategoryData.category_name
       const response = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ category_name: createCategoryData.category_name })
+        body: JSON.stringify({ category_name: path })
       })
 
       const result = await response.json()
@@ -1098,7 +1103,7 @@ function Inventory() {
       }
 
       setCreateSuccess(true)
-      setCreateCategoryData({ category_name: '' })
+      setCreateCategoryData({ parent_path: '', category_name: '' })
       setEditingCategory(null)
       setTimeout(() => {
         loadInventory()
@@ -1353,9 +1358,14 @@ function Inventory() {
     return nameMatch || skuMatch || barcodeMatch || categoryMatch || vendorMatch || keywordMatch || tagMatch || attributeMatch
   })
 
-  // Get items by category
+  // Get items by category (master category includes all subcategories, e.g. "Electronics" includes "Electronics > Phones")
   const getItemsByCategory = (category) => {
-    return filteredInventory.filter(item => item.category === category)
+    return filteredInventory.filter(item => {
+      const itemCat = item.category || ''
+      if (itemCat === category) return true
+      if (category && itemCat.startsWith(category + ' >')) return true
+      return false
+    })
   }
 
   // Get items by vendor
@@ -2549,13 +2559,45 @@ function Inventory() {
                       color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
                       fontFamily: '"Product Sans", sans-serif'
                     }}>
-                      {editingCategory ? 'Category Path' : 'Category Name'}
+                      Parent category
+                    </label>
+                    <CustomDropdown
+                      value={createCategoryData.parent_path}
+                      onChange={(e) => setCreateCategoryData(prev => ({ ...prev, parent_path: e.target.value }))}
+                      options={[
+                        { value: '', label: 'Top level (no parent)' },
+                        ...allCategories
+                          .map(c => c.category_path || c.category_name || c.name)
+                          .filter(Boolean)
+                          .filter(p => {
+                            const current = editingCategory && (editingCategory.category_path || editingCategory.category_name || editingCategory.name)
+                            return !current || p !== current
+                          })
+                          .sort()
+                          .map(path => ({ value: path, label: path }))
+                      ]}
+                      placeholder="Top level (no parent)"
+                      isDarkMode={isDarkMode}
+                      themeColorRgb={themeColorRgb}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      marginBottom: '4px',
+                      fontSize: '11px',
+                      fontWeight: 500,
+                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
+                      fontFamily: '"Product Sans", sans-serif'
+                    }}>
+                      Category name
                     </label>
                     <input
                       type="text"
                       value={createCategoryData.category_name}
-                      onChange={(e) => setCreateCategoryData({ category_name: e.target.value })}
-                      placeholder={editingCategory ? "Category Path * (e.g., Food & Beverage > Produce > Vegetables)" : "Category Name * (e.g., Electronics > Phones or just Electronics)"}
+                      onChange={(e) => setCreateCategoryData(prev => ({ ...prev, category_name: e.target.value }))}
+                      placeholder={createCategoryData.parent_path ? 'e.g. Fruit, Produce' : 'e.g. Food & Beverage, Electronics'}
                       required
                       style={{
                         width: '100%',
@@ -2568,9 +2610,11 @@ function Inventory() {
                         boxSizing: 'border-box'
                       }}
                     />
-                    <p style={{ marginTop: '6px', fontSize: '11px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>
-                      Use &quot;&gt;&quot; to create subcategories (e.g., &quot;Electronics &gt; Phones&quot;)
-                    </p>
+                    {createCategoryData.parent_path && (
+                      <p style={{ marginTop: '6px', fontSize: '11px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>
+                        Full path: {createCategoryData.parent_path} &gt; {createCategoryData.category_name || '…'}
+                      </p>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', gap: '8px' }}>
@@ -2580,7 +2624,7 @@ function Inventory() {
                         setShowCreateCategory(false)
                         setCreateError(null)
                         setCreateSuccess(false)
-                        setCreateCategoryData({ category_name: '' })
+                        setCreateCategoryData({ parent_path: '', category_name: '' })
                         setEditingCategory(null)
                       }}
                       disabled={createLoading}
@@ -2613,7 +2657,7 @@ function Inventory() {
                         fontWeight: 500
                       }}
                     >
-                      {createLoading ? 'Creating...' : 'Create'}
+                      {createLoading ? (editingCategory ? 'Updating...' : 'Creating...') : (editingCategory ? 'Update' : 'Create')}
                     </button>
                   </div>
                 </div>
@@ -3555,7 +3599,7 @@ function Inventory() {
                       setEditingProduct(null)
                       setEditingCategory(null)
                       setEditingVendor(null)
-                      setCreateCategoryData({ category_name: '' })
+                      setCreateCategoryData({ parent_path: '', category_name: '' })
                       handleCloseBarcodePreview()
                     }}
                     style={{

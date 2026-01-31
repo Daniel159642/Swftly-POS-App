@@ -520,6 +520,16 @@ def api_inventory():
                 rows = cursor.fetchall()
                 columns = list(rows[0].keys()) if rows else []
                 data = [dict(r) for r in rows]
+                # Use full category path for each item so master category filter includes subcategories
+                try:
+                    cats = list_categories(include_path=True)
+                    category_id_to_path = {c['category_id']: c.get('category_path') or c.get('category_name') for c in cats if c.get('category_id')}
+                    for row in data:
+                        cid = row.get('metadata_category_id')
+                        if cid and cid in category_id_to_path and category_id_to_path[cid]:
+                            row['category'] = category_id_to_path[cid]
+                except Exception:
+                    pass
                 include_variants = request.args.get('include_variants', '').lower() in ('1', 'true', 'yes')
                 if include_variants and data:
                     try:

@@ -1,5 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import {
+  LayoutDashboard,
+  Settings as SettingsIcon,
+  BookOpen,
+  ArrowLeftRight,
+  Library,
+  TrendingUp,
+  Wallet,
+  Workflow,
+  FileText,
+  Receipt,
+  Users,
+  Truck,
+  FileBarChart,
+  PanelLeft
+} from 'lucide-react'
 import accountService from '../services/accountService'
 import transactionService from '../services/transactionService'
 import AccountTable from '../components/accounts/AccountTable'
@@ -47,23 +63,37 @@ function Accounting() {
     start_date: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
     end_date: new Date().toISOString().split('T')[0]
   })
+  const [sidebarMinimized, setSidebarMinimized] = useState(false)
+  const [hoveringAccounting, setHoveringAccounting] = useState(false)
+  const [showTooltip, setShowTooltip] = useState(false)
+  const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 })
+  const [isInitialMount, setIsInitialMount] = useState(true)
+  const accountingHeaderRef = useRef(null)
 
-  const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  useEffect(() => {
+    const timer = setTimeout(() => setIsInitialMount(false), 0)
+    return () => clearTimeout(timer)
+  }, [])
+
+  const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains('dark-theme'))
+  useEffect(() => {
+    const checkDarkMode = () => setIsDarkMode(document.documentElement.classList.contains('dark-theme'))
+    checkDarkMode()
+    const observer = new MutationObserver(checkDarkMode)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [themeMode])
+
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+  }
+  const themeColorRgb = hexToRgb(themeColor)
   const backgroundColor = isDarkMode ? '#1a1a1a' : '#f5f5f5'
   const cardBackgroundColor = isDarkMode ? '#2a2a2a' : 'white'
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const boxShadow = isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
-
-  // Hide scrollbar for tab strip (same pattern as Tables page)
-  useEffect(() => {
-    const style = document.createElement('style')
-    style.textContent = `
-      .accounting-tabs-scroll::-webkit-scrollbar { display: none; }
-    `
-    document.head.appendChild(style)
-    return () => { document.head.removeChild(style) }
-  }, [])
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('sessionToken')
@@ -81,30 +111,154 @@ function Accounting() {
     }).format(amount || 0)
   }
 
+  const accountingSections = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'settings', label: 'Settings', icon: SettingsIcon },
+    { id: 'chart-of-accounts', label: 'Chart of Accounts', icon: BookOpen },
+    { id: 'transactions', label: 'Transactions', icon: ArrowLeftRight },
+    { id: 'general-ledger', label: 'General Ledger', icon: Library },
+    { id: 'profit-loss', label: 'Profit & Loss', icon: TrendingUp },
+    { id: 'balance-sheet', label: 'Balance Sheet', icon: Wallet },
+    { id: 'cash-flow', label: 'Cash Flow', icon: Workflow },
+    { id: 'invoices', label: 'Invoices', icon: FileText },
+    { id: 'bills', label: 'Bills', icon: Receipt },
+    { id: 'customers', label: 'Customers', icon: Users },
+    { id: 'vendors', label: 'Vendors', icon: Truck },
+    { id: 'reports', label: 'Reports', icon: FileBarChart }
+  ]
+
   return (
-    <div style={{ 
-      padding: '32px 24px', 
-      backgroundColor: backgroundColor, 
-      minHeight: 'calc(100vh - 200px)',
-      maxWidth: '1400px',
-      margin: '0 auto',
-      transition: 'background-color 0.3s ease'
-    }}>
+    <div style={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
+      {/* Sidebar Navigation - same as Profile */}
       <div style={{
-        border: `1px solid ${borderColor}`,
-        borderRadius: '12px',
-        padding: '28px',
-        backgroundColor: cardBackgroundColor,
-        boxShadow: boxShadow,
-        transition: 'background-color 0.3s ease, border-color 0.3s ease'
+        position: 'fixed',
+        left: 0,
+        top: '56px',
+        zIndex: 100,
+        width: sidebarMinimized ? '60px' : '25%',
+        height: 'calc(100vh - 56px)',
+        backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+        padding: sidebarMinimized ? '32px 10px 48px 10px' : '32px 10px 48px 10px',
+        borderRight: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`,
+        transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), padding 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+        overflowY: 'auto',
+        overflowX: 'hidden'
       }}>
-        <h1 style={{ 
-          margin: '0 0 24px 0', 
-          fontSize: '28px', 
-          fontWeight: 600,
-          color: textColor,
-          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-        }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}>
+          {/* Accounting Header */}
+          <div
+            ref={accountingHeaderRef}
+            style={{ position: 'relative' }}
+            onMouseEnter={() => {
+              setHoveringAccounting(true)
+              setShowTooltip(true)
+              if (accountingHeaderRef.current) {
+                const rect = accountingHeaderRef.current.getBoundingClientRect()
+                setTooltipPosition(sidebarMinimized
+                  ? { top: rect.top + rect.height / 2, left: rect.right + 8 }
+                  : { top: rect.bottom + 4, left: rect.left }
+                )
+              }
+            }}
+            onMouseLeave={() => { setHoveringAccounting(false); setShowTooltip(false) }}
+          >
+            <button
+              onClick={() => setSidebarMinimized(!sidebarMinimized)}
+              style={{
+                width: sidebarMinimized ? '40px' : '100%',
+                height: '40px',
+                padding: 0,
+                margin: 0,
+                border: 'none',
+                backgroundColor: isDarkMode ? 'rgba(59, 130, 246, 0.1)' : 'rgba(59, 130, 246, 0.08)',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: sidebarMinimized ? 'center' : 'flex-start',
+                transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), justifyContent 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                position: 'relative',
+                overflow: 'hidden'
+              }}
+            >
+              <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px' }}>
+                {sidebarMinimized ? <PanelLeft size={20} /> : (hoveringAccounting ? <PanelLeft size={20} /> : <LayoutDashboard size={20} />)}
+              </div>
+              {!sidebarMinimized && (
+                <span style={{ marginLeft: '48px', fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', whiteSpace: 'nowrap' }}>
+                  Accounting
+                </span>
+              )}
+            </button>
+          </div>
+          {showTooltip && (
+            <div style={{
+              position: 'fixed',
+              top: `${tooltipPosition.top}px`,
+              left: `${tooltipPosition.left}px`,
+              transform: sidebarMinimized ? 'translateY(-50%)' : 'none',
+              padding: '4px 8px',
+              backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.9)' : 'rgba(0, 0, 0, 0.85)',
+              color: 'white',
+              fontSize: '12px',
+              borderRadius: '4px',
+              whiteSpace: 'nowrap',
+              zIndex: 10000,
+              pointerEvents: 'none'
+            }}>
+              {sidebarMinimized ? 'Open sidebar' : 'Close sidebar'}
+            </div>
+          )}
+          {accountingSections.map((section) => {
+            const Icon = section.icon
+            const isActive = activeTab === section.id
+            return (
+              <button
+                key={section.id}
+                onClick={() => setActiveTab(section.id)}
+                style={{
+                  width: sidebarMinimized ? '40px' : '100%',
+                  height: '40px',
+                  padding: 0,
+                  margin: 0,
+                  border: 'none',
+                  backgroundColor: isActive ? (isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)') : 'transparent',
+                  borderRadius: isActive ? '6px' : 0,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: sidebarMinimized ? 'center' : 'flex-start',
+                  transition: isInitialMount ? 'backgroundColor 0.2s ease, borderRadius 0.2s ease' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), justifyContent 0.4s cubic-bezier(0.4, 0, 0.2, 1), backgroundColor 0.2s ease, borderRadius 0.2s ease',
+                  position: 'relative',
+                  overflow: 'hidden',
+                  color: isActive ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333') : (isDarkMode ? 'var(--text-secondary, #ccc)' : '#666')
+                }}
+              >
+                <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px' }}>
+                  <Icon size={20} />
+                </div>
+                {!sidebarMinimized && (
+                  <span style={{ marginLeft: '48px', fontSize: '14px', fontWeight: isActive ? 600 : 'normal', whiteSpace: 'nowrap' }}>
+                    {section.label}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Main Content - same as Profile */}
+      <div style={{
+        marginLeft: sidebarMinimized ? '60px' : '25%',
+        width: sidebarMinimized ? 'calc(100% - 60px)' : '75%',
+        flex: 1,
+        padding: '48px 64px 64px 64px',
+        backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+        maxWidth: sidebarMinimized ? 'none' : '1200px',
+        transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+      }}>
+        <h1 style={{ margin: '0 0 24px 0', fontSize: '28px', fontWeight: 600, color: textColor, fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif' }}>
           Accounting System
         </h1>
 
@@ -115,120 +269,20 @@ function Accounting() {
             type="date"
             value={dateRange.start_date}
             onChange={(e) => setDateRange({ ...dateRange, start_date: e.target.value })}
-            style={{
-              padding: '8px 12px',
-              border: `1px solid ${borderColor}`,
-              borderRadius: '6px',
-              backgroundColor: isDarkMode ? '#1a1a1a' : 'white',
-              color: textColor,
-              fontSize: '14px'
-            }}
+            style={{ padding: '8px 12px', border: `1px solid ${borderColor}`, borderRadius: '6px', backgroundColor: isDarkMode ? '#1a1a1a' : 'white', color: textColor, fontSize: '14px' }}
           />
           <span style={{ color: textColor }}>to</span>
           <input
             type="date"
             value={dateRange.end_date}
             onChange={(e) => setDateRange({ ...dateRange, end_date: e.target.value })}
-            style={{
-              padding: '8px 12px',
-              border: `1px solid ${borderColor}`,
-              borderRadius: '6px',
-              backgroundColor: isDarkMode ? '#1a1a1a' : 'white',
-              color: textColor,
-              fontSize: '14px'
-            }}
+            style={{ padding: '8px 12px', border: `1px solid ${borderColor}`, borderRadius: '6px', backgroundColor: isDarkMode ? '#1a1a1a' : 'white', color: textColor, fontSize: '14px' }}
           />
-        </div>
-
-        {/* Tabs – single line, scroll with gradient fade (like Tables page) */}
-        <div style={{ marginBottom: '24px', borderBottom: `1px solid ${borderColor}`, paddingBottom: '16px' }}>
-          <div style={{ position: 'relative' }}>
-            <div
-              className="accounting-tabs-scroll"
-              style={{
-                display: 'flex',
-                gap: '8px',
-                flexWrap: 'nowrap',
-                overflowX: 'auto',
-                paddingBottom: '4px',
-                scrollbarWidth: 'none',
-                msOverflowStyle: 'none'
-              }}
-            >
-              {[
-                { id: 'dashboard', label: 'Dashboard' },
-                { id: 'settings', label: 'Settings' },
-                { id: 'chart-of-accounts', label: 'Chart of Accounts' },
-                { id: 'transactions', label: 'Transactions' },
-                { id: 'general-ledger', label: 'General Ledger' },
-                { id: 'profit-loss', label: 'Profit & Loss' },
-                { id: 'balance-sheet', label: 'Balance Sheet' },
-                { id: 'cash-flow', label: 'Cash Flow' },
-                { id: 'invoices', label: 'Invoices' },
-                { id: 'bills', label: 'Bills' },
-                { id: 'customers', label: 'Customers' },
-                { id: 'vendors', label: 'Vendors' },
-                { id: 'reports', label: 'Reports' }
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  style={{
-                    padding: '8px 16px',
-                    height: '36px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0,
-                    border: 'none',
-                    borderRadius: '8px',
-                    backgroundColor: activeTab === tab.id ? themeColor : 'transparent',
-                    color: activeTab === tab.id ? 'white' : textColor,
-                    cursor: 'pointer',
-                    fontWeight: activeTab === tab.id ? 600 : 400,
-                    fontSize: '14px',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            {/* Left gradient fade */}
-            <div style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              bottom: '4px',
-              width: '20px',
-              background: `linear-gradient(to right, ${cardBackgroundColor} 0%, ${isDarkMode ? 'rgba(42, 42, 42, 0.3)' : 'rgba(255, 255, 255, 0.3)'} 50%, transparent 100%)`,
-              pointerEvents: 'none',
-              zIndex: 1
-            }} />
-            {/* Right gradient fade */}
-            <div style={{
-              position: 'absolute',
-              right: 0,
-              top: 0,
-              bottom: '4px',
-              width: '20px',
-              background: `linear-gradient(to left, ${cardBackgroundColor} 0%, ${isDarkMode ? 'rgba(42, 42, 42, 0.3)' : 'rgba(255, 255, 255, 0.3)'} 50%, transparent 100%)`,
-              pointerEvents: 'none',
-              zIndex: 1
-            }} />
-          </div>
         </div>
 
         {/* Error Display */}
         {error && (
-          <div style={{
-            padding: '16px',
-            marginBottom: '20px',
-            backgroundColor: isDarkMode ? '#4a1a1a' : '#fee',
-            border: `1px solid ${isDarkMode ? '#6a2a2a' : '#fcc'}`,
-            borderRadius: '8px',
-            color: isDarkMode ? '#ff6b6b' : '#c33'
-          }}>
+          <div style={{ padding: '16px', marginBottom: '20px', backgroundColor: isDarkMode ? '#4a1a1a' : '#fee', border: `1px solid ${isDarkMode ? '#6a2a2a' : '#fcc'}`, borderRadius: '8px', color: isDarkMode ? '#ff6b6b' : '#c33' }}>
             Error: {error}
           </div>
         )}
