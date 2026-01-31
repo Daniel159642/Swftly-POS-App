@@ -11,7 +11,7 @@ try:
 except ImportError:
     print("Warning: python-dotenv not installed. Environment variables must be set manually.")
 
-from flask import Flask, render_template, jsonify, send_from_directory, request, Response
+from flask import Flask, render_template, jsonify, send_from_directory, request, Response, make_response
 from werkzeug.utils import secure_filename
 
 # Socket.IO support
@@ -41,7 +41,7 @@ from database import (
     clock_in, clock_out, get_current_clock_status, get_schedule,
     get_store_location_settings, update_store_location_settings,
     get_customer_rewards_settings, update_customer_rewards_settings, calculate_rewards,
-    add_customer, search_customers, get_customer_rewards_detail,
+    add_customer, get_customer, update_customer, add_customer_points, search_customers, get_customer_rewards_detail,
     # Accounting / store settings
     get_establishment_settings, update_establishment_settings, get_labor_summary,
     generate_balance_sheet, generate_income_statement,
@@ -2420,6 +2420,61 @@ def api_customers():
             return jsonify({'success': False, 'message': str(e)}), 400
     columns, data = get_table_data('customers')
     return jsonify({'columns': columns, 'data': data})
+
+
+@app.route('/api/customers/<int:customer_id>', methods=['GET', 'PUT'])
+def api_customer_by_id(customer_id):
+    """Get one customer (GET) or update customer (PUT)."""
+    if request.method == 'GET':
+        try:
+            customer = get_customer(customer_id)
+            if not customer:
+                return jsonify({'success': False, 'message': 'Customer not found'}), 404
+            return jsonify({'success': True, 'data': customer})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+    # PUT
+    try:
+        data = request.get_json() or {}
+        ok = update_customer(
+            customer_id,
+            customer_name=data.get('customer_name'),
+            email=data.get('email'),
+            phone=data.get('phone'),
+            address=data.get('address')
+        )
+        if not ok:
+            return jsonify({'success': False, 'message': 'Customer not found or no changes'}), 404
+        customer = get_customer(customer_id)
+        return jsonify({'success': True, 'data': customer})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 400
+
+
+@app.route('/api/customers/<int:customer_id>/points', methods=['POST'])
+def api_customer_add_points(customer_id):
+    """Add or subtract loyalty points (body: points (int), optional reason)."""
+    try:
+        data = request.get_json() or {}
+        points = data.get('points')
+        if points is None:
+            return jsonify({'success': False, 'message': 'points required'}), 400
+        try:
+            points = int(points)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': 'points must be an integer'}), 400
+        new_balance = add_customer_points(customer_id, points, reason=data.get('reason'))
+        if new_balance is None:
+            return jsonify({'success': False, 'message': 'Customer not found'}), 404
+        return jsonify({'success': True, 'data': {'loyalty_points': new_balance}})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @app.route('/api/customers/search')
@@ -6167,35 +6222,33 @@ if SOCKETIO_AVAILABLE and socketio:
 
 @app.route('/api/transaction/start', methods=['POST'])
 def start_transaction():
-    """Start new transaction"""
+    """Start new transaction. Returns a single Response (no tuple) to avoid CORS/Flask issues."""
     try:
         session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        data = request.get_json(silent=True) if request.is_json else request.json
+        if not session_token and data:
+            session_token = data.get('session_token')
         if not session_token:
-            session_token = request.json.get('session_token')
-        
-        if not session_token:
-            return jsonify({'success': False, 'message': 'Authentication required'}), 401
-        
+            return make_response(jsonify({'success': False, 'message': 'Authentication required'}), 401)
         session_data = verify_session(session_token)
         if not session_data.get('valid'):
-            return jsonify({'success': False, 'message': 'Invalid session'}), 401
-        
+            return make_response(jsonify({'success': False, 'message': 'Invalid session'}), 401)
+        if not data or not isinstance(data, dict):
+            return make_response(jsonify({'success': False, 'message': 'Invalid request body'}), 400)
+        items = data.get('items')
+        if not items:
+            return make_response(jsonify({'success': False, 'message': 'items required'}), 400)
         employee_id = session_data['employee_id']
-        data = request.json
-        
+        customer_id = data.get('customer_id')
         from customer_display_system import CustomerDisplaySystem
         cds = CustomerDisplaySystem()
-        
-        result = cds.start_transaction(employee_id, data['items'], data.get('customer_id'))
-        
-        # Emit Socket.IO event for customer display
+        result = cds.start_transaction(employee_id, items, customer_id)
         if SOCKETIO_AVAILABLE and socketio:
             socketio.emit('transaction_started', result, room='customer_display')
-        
-        return jsonify({'success': True, 'data': result})
+        return make_response(jsonify({'success': True, 'data': result}))
     except Exception as e:
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return make_response(jsonify({'success': False, 'message': str(e)}), 500)
 
 @app.route('/api/transaction/<int:transaction_id>', methods=['GET'])
 def get_transaction(transaction_id):
@@ -6976,33 +7029,97 @@ def api_update_customer_rewards_settings():
             if not is_admin and not has_permission:
                 return jsonify({'success': False, 'message': 'Permission denied. Admin access or manage_settings permission required.'}), 403
         
-        # Update settings
-        update_fields = {
+        # Ensure customer_rewards_settings has points_enabled, percentage_enabled, fixed_enabled (migrate if missing)
+        conn, cursor = _pg_conn()
+        try:
+            for col, typ in [('points_enabled', 'INTEGER DEFAULT 1'), ('percentage_enabled', 'INTEGER DEFAULT 0'), ('fixed_enabled', 'INTEGER DEFAULT 0')]:
+                cursor.execute("""
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'customer_rewards_settings' AND column_name = %s
+                """, (col,))
+                if cursor.fetchone() is None:
+                    try:
+                        cursor.execute(f"ALTER TABLE customer_rewards_settings ADD COLUMN {col} {typ}")
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+        except Exception as mig_err:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        finally:
+            conn.close()
+
+        # Update settings - run UPDATE here so we never touch database.py (avoids cached code)
+        allowed_keys = {
+            'enabled', 'require_email', 'require_phone', 'require_both',
+            'reward_type', 'points_per_dollar', 'points_redemption_value',
+            'percentage_discount', 'fixed_discount', 'minimum_spend'
+        }
+        raw = {
             'enabled': data.get('enabled'),
             'require_email': data.get('require_email'),
             'require_phone': data.get('require_phone'),
             'require_both': data.get('require_both'),
             'reward_type': data.get('reward_type'),
-            'points_enabled': data.get('points_enabled'),
-            'percentage_enabled': data.get('percentage_enabled'),
-            'fixed_enabled': data.get('fixed_enabled'),
             'points_per_dollar': data.get('points_per_dollar'),
+            'points_redemption_value': data.get('points_redemption_value'),
             'percentage_discount': data.get('percentage_discount'),
             'fixed_discount': data.get('fixed_discount'),
             'minimum_spend': data.get('minimum_spend')
         }
+        update_fields = {k: v for k, v in raw.items() if k in allowed_keys and v is not None}
         
-        # Remove None values
-        update_fields = {k: v for k, v in update_fields.items() if v is not None}
-        
-        if update_fields:
-            success = update_customer_rewards_settings(**update_fields)
-            if success:
-                return jsonify({'success': True, 'message': 'Customer rewards settings updated successfully'})
-            else:
-                return jsonify({'success': False, 'message': 'Failed to update settings'}), 500
-        else:
+        if not update_fields:
             return jsonify({'success': False, 'message': 'No fields to update'}), 400
+
+        conn, cursor = _pg_conn()
+        try:
+            cursor.execute("SELECT COUNT(*) AS c FROM customer_rewards_settings")
+            count = cursor.fetchone()['c']
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'customer_rewards_settings'
+            """)
+            existing_cols = {r['column_name'] for r in cursor.fetchall()}
+            # Only columns that exist (no points_enabled etc. unless migrated)
+            base_cols = [
+                'enabled', 'require_email', 'require_phone', 'require_both',
+                'reward_type', 'points_per_dollar', 'points_redemption_value',
+                'percentage_discount', 'fixed_discount', 'minimum_spend'
+            ]
+            cols_that_exist = [c for c in base_cols if c in existing_cols]
+            defaults = {
+                'enabled': 0, 'require_email': 0, 'require_phone': 0, 'require_both': 0,
+                'reward_type': 'points', 'points_per_dollar': 1.0, 'points_redemption_value': 0.01,
+                'percentage_discount': 0.0, 'fixed_discount': 0.0, 'minimum_spend': 0.0
+            }
+            if count == 0:
+                vals = [update_fields.get(c, defaults.get(c)) for c in cols_that_exist]
+                placeholders = ', '.join(['%s'] * len(cols_that_exist))
+                cursor.execute(
+                    f"INSERT INTO customer_rewards_settings ({', '.join(cols_that_exist)}) VALUES ({placeholders})",
+                    vals
+                )
+            else:
+                set_cols = [k for k in update_fields if k in existing_cols]
+                if set_cols:
+                    set_clause = ', '.join(f"{c} = %s" for c in set_cols)
+                    params = [update_fields[c] for c in set_cols]
+                    cursor.execute(f"""
+                        UPDATE customer_rewards_settings
+                        SET {set_clause}, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = (SELECT id FROM customer_rewards_settings ORDER BY id DESC LIMIT 1)
+                    """, params)
+            conn.commit()
+            return jsonify({'success': True, 'message': 'Customer rewards settings updated successfully'})
+        except Exception as db_err:
+            conn.rollback()
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(db_err)}), 500
+        finally:
+            conn.close()
             
     except Exception as e:
         traceback.print_exc()
@@ -7379,16 +7496,27 @@ def api_sms_templates():
 
 @app.route('/api/sms/stores', methods=['GET'])
 def api_sms_stores():
-    """Get all stores"""
+    """Get all stores. Returns empty list if stores table does not exist."""
+    conn = None
     try:
         conn, cursor = _pg_conn()
-        cursor.execute("SELECT * FROM stores WHERE is_active = 1 ORDER BY store_name")
-        rows = cursor.fetchall()
-        conn.close()
-        return jsonify([dict(row) for row in rows])
+        try:
+            cursor.execute("SELECT * FROM stores WHERE is_active = 1 ORDER BY store_name")
+            rows = cursor.fetchall()
+            return jsonify([dict(row) for row in rows])
+        except Exception as db_err:
+            if 'does not exist' in str(db_err) or 'UndefinedTable' in type(db_err).__name__:
+                return jsonify([])
+            raise
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 # ============================================================================
 # CASH REGISTER CONTROL API ENDPOINTS

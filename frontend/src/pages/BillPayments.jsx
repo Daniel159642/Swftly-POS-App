@@ -9,7 +9,7 @@ import BillPaymentFilters from '../components/billPayments/BillPaymentFilters'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
 import LoadingSpinner from '../components/common/LoadingSpinner'
-import Alert from '../components/common/Alert'
+import { useToast } from '../contexts/ToastContext'
 
 function BillPaymentDetailView({ payment }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
@@ -187,6 +187,7 @@ function BillPaymentDetailView({ payment }) {
 function BillPayments() {
   const location = useLocation()
   const locationState = location.state
+  const { show: showToast } = useToast()
 
   const [payments, setPayments] = useState([])
   const [vendors, setVendors] = useState([])
@@ -198,8 +199,6 @@ function BillPayments() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [selectedPayment, setSelectedPayment] = useState(null)
-  
-  const [alert, setAlert] = useState(null)
 
   useEffect(() => {
     fetchInitialData()
@@ -233,7 +232,7 @@ function BillPayments() {
       )
       setBankAccounts(bankAndCash)
     } catch (error) {
-      showAlert('error', 'Failed to fetch initial data')
+      showToast('Failed to fetch initial data', 'error')
     }
   }
 
@@ -244,7 +243,7 @@ function BillPayments() {
       setPayments(result.payments || [])
       setPagination(result.pagination || { total: 0, page: 1, totalPages: 1 })
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to fetch bill payments')
+      showToast(error.response?.data?.message || 'Failed to fetch bill payments', 'error')
     } finally {
       setLoading(false)
     }
@@ -268,10 +267,10 @@ function BillPayments() {
 
     try {
       await billPaymentService.voidPayment(payment.payment.id, reason)
-      showAlert('success', 'Bill payment voided successfully')
+      showToast('Bill payment voided successfully', 'success')
       fetchPayments()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to void payment')
+      showToast(error.response?.data?.message || 'Failed to void payment', 'error')
     }
   }
 
@@ -282,10 +281,10 @@ function BillPayments() {
 
     try {
       await billPaymentService.deletePayment(payment.payment.id)
-      showAlert('success', 'Bill payment deleted successfully')
+      showToast('Bill payment deleted successfully', 'success')
       fetchPayments()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to delete payment')
+      showToast(error.response?.data?.message || 'Failed to delete payment', 'error')
     }
   }
 
@@ -293,15 +292,10 @@ function BillPayments() {
     try {
       const checkData = await billPaymentService.getCheckData(payment.payment.id)
       console.log('Check data:', checkData)
-      showAlert('error', 'Check printing not yet implemented')
+      showToast('Check printing not yet implemented', 'error')
     } catch (error) {
-      showAlert('error', 'Failed to get check data')
+      showToast('Failed to get check data', 'error')
     }
-  }
-
-  const showAlert = (type, message) => {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   const handleClearFilters = () => {
@@ -331,14 +325,6 @@ function BillPayments() {
         </div>
         <Button onClick={() => setIsCreateModalOpen(true)}>+ Pay Bills</Button>
       </div>
-
-      {alert && (
-        <Alert
-          type={alert.type}
-          message={alert.message}
-          onClose={() => setAlert(null)}
-        />
-      )}
 
       <BillPaymentFilters
         filters={filters}

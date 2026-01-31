@@ -9,7 +9,7 @@ import InvoiceFilters from '../components/invoices/InvoiceFilters'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
 import LoadingSpinner from '../components/common/LoadingSpinner'
-import Alert from '../components/common/Alert'
+import { useToast } from '../contexts/ToastContext'
 
 function InvoiceDetailView({ invoice }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
@@ -169,6 +169,7 @@ function InvoiceDetailView({ invoice }) {
 function Invoices() {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const navigate = useNavigate()
+  const { show: showToast } = useToast()
   const [invoices, setInvoices] = useState([])
   const [customers, setCustomers] = useState([])
   const [revenueAccounts, setRevenueAccounts] = useState([])
@@ -180,7 +181,6 @@ function Invoices() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [selectedInvoice, setSelectedInvoice] = useState(null)
-  const [alert, setAlert] = useState(null)
 
   useEffect(() => {
     fetchInitialData()
@@ -201,7 +201,7 @@ function Invoices() {
       setRevenueAccounts(Array.isArray(accountsData) ? accountsData : [])
       setTaxRates(Array.isArray(_taxRates) ? _taxRates : [])
     } catch (err) {
-      showAlert('error', 'Failed to fetch initial data')
+      showToast('Failed to fetch initial data', 'error')
     }
   }
 
@@ -213,7 +213,7 @@ function Invoices() {
       setPagination(result.pagination || { total: 0, page: 1, total_pages: 1 })
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to fetch invoices'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     } finally {
       setLoading(false)
     }
@@ -224,15 +224,15 @@ function Invoices() {
       const created = await invoiceService.createInvoice(data)
       if (sendImmediately) {
         await invoiceService.markAsSent(created.invoice?.id ?? created.id)
-        showAlert('success', 'Invoice created and marked as sent')
+        showToast('Invoice created and marked as sent', 'success')
       } else {
-        showAlert('success', 'Invoice created successfully')
+        showToast('Invoice created successfully', 'success')
       }
       setIsCreateModalOpen(false)
       fetchInvoices()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to create invoice'
-      showAlert('error', msg)
+      showToast(msg, 'error')
       throw err
     }
   }
@@ -242,13 +242,13 @@ function Invoices() {
     const inv = selectedInvoice.invoice || selectedInvoice
     try {
       await invoiceService.updateInvoice(inv.id, data)
-      showAlert('success', 'Invoice updated successfully')
+      showToast('Invoice updated successfully', 'success')
       setIsEditModalOpen(false)
       setSelectedInvoice(null)
       fetchInvoices()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to update invoice'
-      showAlert('error', msg)
+      showToast(msg, 'error')
       throw err
     }
   }
@@ -258,11 +258,11 @@ function Invoices() {
     if (!window.confirm(`Are you sure you want to delete invoice ${inv.invoice_number}?`)) return
     try {
       await invoiceService.deleteInvoice(inv.id)
-      showAlert('success', 'Invoice deleted successfully')
+      showToast('Invoice deleted successfully', 'success')
       fetchInvoices()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to delete invoice'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     }
   }
 
@@ -271,11 +271,11 @@ function Invoices() {
     if (!window.confirm(`Mark invoice ${inv.invoice_number} as sent?`)) return
     try {
       await invoiceService.markAsSent(inv.id)
-      showAlert('success', 'Invoice marked as sent')
+      showToast('Invoice marked as sent', 'success')
       fetchInvoices()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to send invoice'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     }
   }
 
@@ -285,11 +285,11 @@ function Invoices() {
     if (!reason || !reason.trim()) return
     try {
       await invoiceService.voidInvoice(inv.id, reason.trim())
-      showAlert('success', 'Invoice voided successfully')
+      showToast('Invoice voided successfully', 'success')
       fetchInvoices()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to void invoice'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     }
   }
 
@@ -299,11 +299,6 @@ function Invoices() {
     navigate('/payments', {
       state: { openPaymentForm: true, customerId: inv.customer_id, invoiceId: inv.id }
     })
-  }
-
-  function showAlert(type, message) {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   function handleClearFilters() {
@@ -335,8 +330,6 @@ function Invoices() {
         </div>
         <Button onClick={() => setIsCreateModalOpen(true)}>+ New Invoice</Button>
       </div>
-
-      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
 
       <InvoiceFilters filters={filters} customers={customers} onFilterChange={setFilters} onClearFilters={handleClearFilters} />
 

@@ -3915,6 +3915,70 @@ def add_customer(
         conn.close()
 
 
+def update_customer(
+    customer_id: int,
+    customer_name: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    address: Optional[str] = None
+) -> bool:
+    """Update an existing customer. Only non-None fields are updated."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'customers'
+        """)
+        allowed_cols = {r[0] for r in cursor.fetchall()}
+        updates = []
+        params = []
+        if customer_name is not None and 'customer_name' in allowed_cols:
+            updates.append("customer_name = %s")
+            params.append(customer_name)
+        if email is not None and 'email' in allowed_cols:
+            updates.append("email = %s")
+            params.append(email)
+        if phone is not None and 'phone' in allowed_cols:
+            updates.append("phone = %s")
+            params.append(phone)
+        if address is not None and 'address' in allowed_cols:
+            updates.append("address = %s")
+            params.append(address)
+        if not updates:
+            return True
+        params.append(customer_id)
+        cursor.execute(
+            "UPDATE customers SET " + ", ".join(updates) + " WHERE customer_id = %s",
+            params
+        )
+        conn.commit()
+        return cursor.rowcount >= 1
+    finally:
+        conn.close()
+
+
+def add_customer_points(customer_id: int, points: int, reason: Optional[str] = None) -> Optional[int]:
+    """Add (or subtract) loyalty points for a customer. Returns new balance or None if not found."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE customers
+            SET loyalty_points = GREATEST(COALESCE(loyalty_points, 0) + %s, 0)
+            WHERE customer_id = %s
+            RETURNING loyalty_points
+        """, (points, customer_id))
+        row = cursor.fetchone()
+        conn.commit()
+        if not row:
+            return None
+        val = row['loyalty_points'] if isinstance(row, dict) else row[0]
+        return int(val) if val is not None else 0
+    finally:
+        conn.close()
+
+
 def search_customers(establishment_id: Optional[int], q: str, limit: int = 20) -> List[Dict[str, Any]]:
     """Search customers by name, email, or phone (establishment-scoped). Returns list with loyalty_points."""
     conn = get_connection()
@@ -4017,15 +4081,18 @@ def award_rewards_for_purchase(cursor, customer_id: int, amount_for_rewards: flo
 
 
 def get_customer(customer_id: int) -> Optional[Dict[str, Any]]:
-    """Get customer by ID"""
+    """Get customer by ID. Returns dict with column names."""
     conn = get_connection()
     cursor = conn.cursor()
-    
-    cursor.execute("SELECT * FROM customers WHERE customer_id = %s", (customer_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    return dict(row) if row else None
+    try:
+        cursor.execute("SELECT * FROM customers WHERE customer_id = %s", (customer_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        colnames = [d[0] for d in cursor.description]
+        return dict(zip(colnames, row))
+    finally:
+        conn.close()
 
 # ============================================================================
 # ORDER PROCESSING FUNCTIONS
@@ -9239,7 +9306,15 @@ def get_customer_rewards_settings() -> Optional[Dict[str, Any]]:
     return d
 
 def update_customer_rewards_settings(**kwargs) -> bool:
-    """Update customer rewards settings"""
+    """Update customer rewards settings. Writes only these columns (table may have points_enabled etc. for read-only)."""
+    # Only columns we ever write - do NOT include points_enabled, percentage_enabled, fixed_enabled
+    SAFE_COLUMNS = (
+        'enabled', 'require_email', 'require_phone', 'require_both',
+        'reward_type', 'points_per_dollar', 'points_redemption_value',
+        'percentage_discount', 'fixed_discount', 'minimum_spend'
+    )
+    kwargs = {k: v for k, v in kwargs.items() if k in SAFE_COLUMNS}
+
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -9264,69 +9339,97 @@ def update_customer_rewards_settings(**kwargs) -> bool:
         """)
         conn.commit()
         
+        # Ensure optional columns exist (some callers may send points_enabled, percentage_enabled, fixed_enabled)
+        for col, typ in [('points_enabled', 'INTEGER DEFAULT 1'), ('percentage_enabled', 'INTEGER DEFAULT 0'), ('fixed_enabled', 'INTEGER DEFAULT 0')]:
+            try:
+                cursor.execute(f"""
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'customer_rewards_settings' AND column_name = %s
+                """, (col,))
+                if cursor.fetchone() is None:
+                    cursor.execute(f"ALTER TABLE customer_rewards_settings ADD COLUMN {col} {typ}")
+                    conn.commit()
+            except Exception:
+                conn.rollback()
+        
         # Check if settings exist
         cursor.execute("SELECT COUNT(*) FROM customer_rewards_settings")
         count = cursor.fetchone()[0]
         
-        allowed_fields = [
-            'enabled', 'require_email', 'require_phone', 'require_both',
-            'reward_type', 'points_enabled', 'percentage_enabled', 'fixed_enabled',
-            'points_per_dollar', 'points_redemption_value',
-            'percentage_discount', 'fixed_discount', 'minimum_spend'
-        ]
-        
         if count == 0:
-            # Create new settings with defaults
-            insert_fields = []
-            insert_placeholders = []
-            insert_values = []
-            
+            # Create new settings with defaults - use all safe columns
+            insert_fields = list(SAFE_COLUMNS)
+            insert_placeholders = ['%s'] * len(insert_fields)
             defaults = {
                 'enabled': 0,
                 'require_email': 0,
                 'require_phone': 0,
                 'require_both': 0,
                 'reward_type': 'points',
-                'points_enabled': 1,
-                'percentage_enabled': 0,
-                'fixed_enabled': 0,
                 'points_per_dollar': 1.0,
                 'points_redemption_value': 0.01,
                 'percentage_discount': 0.0,
                 'fixed_discount': 0.0,
                 'minimum_spend': 0.0
             }
-            
-            for field in allowed_fields:
-                insert_fields.append(field)
-                insert_placeholders.append('%s')
-                insert_values.append(kwargs.get(field, defaults.get(field)))
-            
+            insert_values = [kwargs.get(f, defaults.get(f)) for f in insert_fields]
             cursor.execute(f"""
                 INSERT INTO customer_rewards_settings ({', '.join(insert_fields)})
                 VALUES ({', '.join(insert_placeholders)})
             """, insert_values)
         else:
-            # Update existing settings
-            updates = []
-            params = []
-            
-            for field in allowed_fields:
-                if field in kwargs:
-                    updates.append(f"{field} = %s")
-                    params.append(kwargs[field])
-            
-            if updates:
-                updates.append("updated_at = CURRENT_TIMESTAMP")
-                cursor.execute(f"""
-                    UPDATE customer_rewards_settings 
-                    SET {', '.join(updates)}
-                    WHERE id = (SELECT id FROM customer_rewards_settings ORDER BY id DESC LIMIT 1)
-                """, params)
+            # Update existing - only set columns that exist in the table (query schema)
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'customer_rewards_settings'
+            """)
+            existing_cols = {r[0] for r in cursor.fetchall()}
+            allowed_fields = [f for f in SAFE_COLUMNS if f in kwargs and f in existing_cols]
+            if not allowed_fields:
+                conn.commit()
+                return True
+            updates = [f"{f} = %s" for f in allowed_fields]
+            params = [kwargs[f] for f in allowed_fields]
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            cursor.execute(f"""
+                UPDATE customer_rewards_settings 
+                SET {', '.join(updates)}
+                WHERE id = (SELECT id FROM customer_rewards_settings ORDER BY id DESC LIMIT 1)
+            """, params)
         
         conn.commit()
         return True
     except Exception as e:
+        err_msg = str(e)
+        if 'points_enabled' in err_msg or 'UndefinedColumn' in err_msg or 'does not exist' in err_msg:
+            conn.rollback()
+            try:
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'customer_rewards_settings'
+                """)
+                existing_cols = {r[0] for r in cursor.fetchall()}
+                base_only = [
+                    'enabled', 'require_email', 'require_phone', 'require_both',
+                    'reward_type', 'points_per_dollar', 'points_redemption_value',
+                    'percentage_discount', 'fixed_discount', 'minimum_spend'
+                ]
+                allowed_fields = [f for f in base_only if f in kwargs and f in existing_cols]
+                if allowed_fields:
+                    updates = [f"{f} = %s" for f in allowed_fields]
+                    params = [kwargs[f] for f in allowed_fields]
+                    updates.append("updated_at = CURRENT_TIMESTAMP")
+                    cursor.execute(f"""
+                        UPDATE customer_rewards_settings
+                        SET {', '.join(updates)}
+                        WHERE id = (SELECT id FROM customer_rewards_settings ORDER BY id DESC LIMIT 1)
+                    """, params)
+                    conn.commit()
+                    return True
+            except Exception as retry_e:
+                print(f"Retry failed: {retry_e}")
+                conn.rollback()
+                return False
         print(f"Error updating customer rewards settings: {e}")
         import traceback
         traceback.print_exc()

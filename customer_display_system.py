@@ -103,6 +103,74 @@ class CustomerDisplaySystem:
                 order_id = order_result[0]
                 order_number = order_result[1] if len(order_result) > 1 else order_number
             
+            # Ensure transactions table exists and has establishment_id (migrate if missing)
+            cursor.execute("""
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'transactions'
+            """)
+            if cursor.fetchone() is None:
+                cursor.execute("""
+                    CREATE TABLE public.transactions (
+                        transaction_id SERIAL PRIMARY KEY,
+                        establishment_id INTEGER NOT NULL REFERENCES public.establishments(establishment_id) ON DELETE CASCADE,
+                        order_id INTEGER REFERENCES public.orders(order_id) ON DELETE SET NULL,
+                        employee_id INTEGER NOT NULL REFERENCES public.employees(employee_id),
+                        customer_id INTEGER REFERENCES public.customers(customer_id),
+                        subtotal NUMERIC(10,2) NOT NULL DEFAULT 0,
+                        tax NUMERIC(10,2) NOT NULL DEFAULT 0,
+                        total NUMERIC(10,2) NOT NULL DEFAULT 0,
+                        tip NUMERIC(10,2) DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'completed', 'cancelled')),
+                        payment_status TEXT CHECK(payment_status IN ('pending', 'paid', 'partial', 'refunded')),
+                        amount_paid NUMERIC(10,2),
+                        change_amount NUMERIC(10,2) DEFAULT 0,
+                        signature TEXT,
+                        completed_at TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        updated_at TIMESTAMP DEFAULT NOW()
+                    )
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_establishment ON public.transactions(establishment_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_order_id ON public.transactions(order_id)")
+            else:
+                # Ensure all columns required for INSERT exist (add any missing)
+                required_columns = [
+                    ('establishment_id', 'INTEGER'),
+                    ('order_id', 'INTEGER'),
+                    ('employee_id', 'INTEGER'),
+                    ('customer_id', 'INTEGER'),
+                    ('subtotal', 'NUMERIC(10,2) DEFAULT 0'),
+                    ('tax', 'NUMERIC(10,2) DEFAULT 0'),
+                    ('total', 'NUMERIC(10,2) DEFAULT 0'),
+                    ('status', 'TEXT DEFAULT \'pending\''),
+                ]
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'transactions'
+                """)
+                existing = {row['column_name'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                for col_name, col_type in required_columns:
+                    if col_name not in existing:
+                        cursor.execute(
+                            "ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS %s %s" % (col_name, col_type)
+                        )
+                if 'establishment_id' not in existing:
+                    cursor.execute("""
+                        UPDATE public.transactions t
+                        SET establishment_id = (SELECT establishment_id FROM public.establishments ORDER BY establishment_id LIMIT 1)
+                        WHERE t.establishment_id IS NULL
+                    """)
+                    cursor.execute("ALTER TABLE public.transactions ALTER COLUMN establishment_id SET NOT NULL")
+                    try:
+                        cursor.execute("""
+                            ALTER TABLE public.transactions
+                            ADD CONSTRAINT transactions_establishment_id_fkey
+                            FOREIGN KEY (establishment_id) REFERENCES public.establishments(establishment_id) ON DELETE CASCADE
+                        """)
+                    except Exception:
+                        pass
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_establishment ON public.transactions(establishment_id)")
+            
             # Now create transaction linked to order
             cursor.execute("""
                 INSERT INTO transactions

@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
 import { usePermissions } from '../contexts/PermissionContext'
 import { useTheme } from '../contexts/ThemeContext'
+import { useToast } from '../contexts/ToastContext'
 
 function CashRegister() {
   const { hasPermission } = usePermissions()
   const { themeColor } = useTheme()
+  const { show: showToast } = useToast()
   const [sessionToken, setSessionToken] = useState(localStorage.getItem('sessionToken'))
   const [currentSession, setCurrentSession] = useState(null)
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState(null)
   const [showOpenModal, setShowOpenModal] = useState(false)
   const [showCloseModal, setShowCloseModal] = useState(false)
   const [showTransactionModal, setShowTransactionModal] = useState(false)
@@ -61,12 +62,11 @@ function CashRegister() {
 
   const handleOpenRegister = async () => {
     if (!startingCash || parseFloat(startingCash) < 0) {
-      setMessage({ type: 'error', text: 'Please enter a valid starting cash amount' })
+      showToast('Please enter a valid starting cash amount', 'error')
       return
     }
 
     setLoading(true)
-    setMessage(null)
 
     try {
       const response = await fetch('/api/register/open', {
@@ -82,17 +82,17 @@ function CashRegister() {
 
       const data = await response.json()
       if (data.success) {
-        setMessage({ type: 'success', text: data.message })
+        showToast(data.message, 'success')
         setShowOpenModal(false)
         setStartingCash('0.00')
         setNotes('')
         loadCurrentSession()
         loadRecentSessions()
       } else {
-        setMessage({ type: 'error', text: data.message })
+        showToast(data.message, 'error')
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to open register' })
+      showToast('Failed to open register', 'error')
     } finally {
       setLoading(false)
     }
@@ -100,12 +100,11 @@ function CashRegister() {
 
   const handleCloseRegister = async () => {
     if (!endingCash || parseFloat(endingCash) < 0) {
-      setMessage({ type: 'error', text: 'Please enter a valid ending cash amount' })
+      showToast('Please enter a valid ending cash amount', 'error')
       return
     }
 
     setLoading(true)
-    setMessage(null)
 
     try {
       const response = await fetch('/api/register/close', {
@@ -121,20 +120,17 @@ function CashRegister() {
 
       const data = await response.json()
       if (data.success) {
-        setMessage({ 
-          type: 'success', 
-          text: `Register closed. Discrepancy: $${data.discrepancy.toFixed(2)}` 
-        })
+        showToast(`Register closed. Discrepancy: $${data.discrepancy.toFixed(2)}`, 'success')
         setShowCloseModal(false)
         setEndingCash('')
         setNotes('')
         loadCurrentSession()
         loadRecentSessions()
       } else {
-        setMessage({ type: 'error', text: data.message })
+        showToast(data.message, 'error')
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to close register' })
+      showToast('Failed to close register', 'error')
     } finally {
       setLoading(false)
     }
@@ -142,17 +138,16 @@ function CashRegister() {
 
   const handleAddTransaction = async () => {
     if (!transactionAmount || parseFloat(transactionAmount) <= 0) {
-      setMessage({ type: 'error', text: 'Please enter a valid transaction amount' })
+      showToast('Please enter a valid transaction amount', 'error')
       return
     }
 
     if (!currentSession) {
-      setMessage({ type: 'error', text: 'No open register session' })
+      showToast('No open register session', 'error')
       return
     }
 
     setLoading(true)
-    setMessage(null)
 
     try {
       const response = await fetch('/api/register/transaction', {
@@ -170,17 +165,17 @@ function CashRegister() {
 
       const data = await response.json()
       if (data.success) {
-        setMessage({ type: 'success', text: 'Transaction recorded successfully' })
+        showToast('Transaction recorded successfully', 'success')
         setShowTransactionModal(false)
         setTransactionAmount('')
         setTransactionReason('')
         setNotes('')
         loadCurrentSession()
       } else {
-        setMessage({ type: 'error', text: data.message })
+        showToast(data.message, 'error')
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to record transaction' })
+      showToast('Failed to record transaction', 'error')
     } finally {
       setLoading(false)
     }
@@ -188,17 +183,16 @@ function CashRegister() {
 
   const handleAddBaseCash = async () => {
     if (!baseCashAmount || parseFloat(baseCashAmount) <= 0) {
-      setMessage({ type: 'error', text: 'Please enter a valid base cash amount' })
+      showToast('Please enter a valid base cash amount', 'error')
       return
     }
 
     if (!currentSession) {
-      setMessage({ type: 'error', text: 'No open register session' })
+      showToast('No open register session', 'error')
       return
     }
 
     setLoading(true)
-    setMessage(null)
 
     try {
       const response = await fetch('/api/register/transaction', {
@@ -216,16 +210,16 @@ function CashRegister() {
 
       const data = await response.json()
       if (data.success) {
-        setMessage({ type: 'success', text: `Base cash of ${formatCurrency(parseFloat(baseCashAmount))} added successfully` })
+        showToast(`Base cash of ${formatCurrency(parseFloat(baseCashAmount))} added successfully`, 'success')
         setShowBaseCashModal(false)
         setBaseCashAmount('')
         setNotes('')
         loadCurrentSession()
       } else {
-        setMessage({ type: 'error', text: data.message })
+        showToast(data.message, 'error')
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to add base cash' })
+      showToast('Failed to add base cash', 'error')
     } finally {
       setLoading(false)
     }
@@ -242,10 +236,10 @@ function CashRegister() {
         setSessionSummary(data)
         setShowSummaryModal(true)
       } else {
-        setMessage({ type: 'error', text: data.message })
+        showToast(data.message, 'error')
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to load summary' })
+      showToast('Failed to load summary', 'error')
     } finally {
       setLoading(false)
     }
@@ -266,19 +260,6 @@ function CashRegister() {
   return (
     <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
       <h1 style={{ marginBottom: '20px', color: themeColor }}>Cash Register Control</h1>
-
-      {message && (
-        <div style={{
-          padding: '10px',
-          marginBottom: '20px',
-          borderRadius: '4px',
-          backgroundColor: message.type === 'success' ? '#d4edda' : '#f8d7da',
-          color: message.type === 'success' ? '#155724' : '#721c24',
-          border: `1px solid ${message.type === 'success' ? '#c3e6cb' : '#f5c6cb'}`
-        }}>
-          {message.text}
-        </div>
-      )}
 
       {/* Current Session Card */}
       <div style={{

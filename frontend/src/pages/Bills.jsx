@@ -10,7 +10,7 @@ import BillFilters from '../components/bills/BillFilters'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
 import LoadingSpinner from '../components/common/LoadingSpinner'
-import Alert from '../components/common/Alert'
+import { useToast } from '../contexts/ToastContext'
 
 function BillDetailView({ bill }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
@@ -161,6 +161,7 @@ function BillDetailView({ bill }) {
 function Bills() {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const navigate = useNavigate()
+  const { show: showToast } = useToast()
 
   const [bills, setBills] = useState([])
   const [vendors, setVendors] = useState([])
@@ -174,7 +175,6 @@ function Bills() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [selectedBill, setSelectedBill] = useState(null)
-  const [alert, setAlert] = useState(null)
 
   useEffect(() => {
     fetchInitialData()
@@ -201,7 +201,7 @@ function Bills() {
       setCustomers(custRes.customers || [])
       setTaxRates(Array.isArray(_taxRates) ? _taxRates : [])
     } catch (err) {
-      showAlert('error', 'Failed to fetch initial data')
+      showToast('Failed to fetch initial data', 'error')
     }
   }
 
@@ -218,7 +218,7 @@ function Bills() {
       })
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to fetch bills'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     } finally {
       setLoading(false)
     }
@@ -227,12 +227,12 @@ function Bills() {
   async function handleCreateBill(data) {
     try {
       await billService.createBill(data)
-      showAlert('success', 'Bill created successfully')
+      showToast('Bill created successfully', 'success')
       setIsCreateModalOpen(false)
       fetchBills()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to create bill'
-      showAlert('error', msg)
+      showToast(msg, 'error')
       throw err
     }
   }
@@ -242,13 +242,13 @@ function Bills() {
     const b = selectedBill.bill || selectedBill
     try {
       await billService.updateBill(b.id, data)
-      showAlert('success', 'Bill updated successfully')
+      showToast('Bill updated successfully', 'success')
       setIsEditModalOpen(false)
       setSelectedBill(null)
       fetchBills()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to update bill'
-      showAlert('error', msg)
+      showToast(msg, 'error')
       throw err
     }
   }
@@ -258,11 +258,11 @@ function Bills() {
     if (!window.confirm(`Are you sure you want to delete bill ${b.bill_number}?`)) return
     try {
       await billService.deleteBill(b.id)
-      showAlert('success', 'Bill deleted successfully')
+      showToast('Bill deleted successfully', 'success')
       fetchBills()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to delete bill'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     }
   }
 
@@ -272,11 +272,11 @@ function Bills() {
     if (!reason || !reason.trim()) return
     try {
       await billService.voidBill(b.id, reason.trim())
-      showAlert('success', 'Bill voided successfully')
+      showToast('Bill voided successfully', 'success')
       fetchBills()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to void bill'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     }
   }
 
@@ -284,11 +284,6 @@ function Bills() {
     navigate('/bill-payments', {
       state: { openPaymentForm: true, vendorId: (item.bill || item).vendor_id, billId: (item.bill || item).id }
     })
-  }
-
-  function showAlert(type, message) {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   function handleClearFilters() {
@@ -320,8 +315,6 @@ function Bills() {
         </div>
         <Button onClick={() => setIsCreateModalOpen(true)}>+ New Bill</Button>
       </div>
-
-      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
 
       <BillFilters filters={filters} vendors={vendors} onFilterChange={setFilters} onClearFilters={handleClearFilters} />
 

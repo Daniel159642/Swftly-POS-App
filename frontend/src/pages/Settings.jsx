@@ -1117,6 +1117,7 @@ function Settings() {
     percentage_enabled: false,
     fixed_enabled: false,
     points_per_dollar: 1.0,
+    points_redemption_value: 0.01,
     percentage_discount: 0.0,
     fixed_discount: 0.0,
     minimum_spend: 0.0
@@ -1534,6 +1535,7 @@ function Settings() {
           percentage_enabled: s.percentage_enabled === 1 || s.percentage_enabled === true,
           fixed_enabled: s.fixed_enabled === 1 || s.fixed_enabled === true,
           points_per_dollar: s.points_per_dollar ?? 1.0,
+          points_redemption_value: s.points_redemption_value ?? 0.01,
           percentage_discount: s.percentage_discount ?? 0.0,
           fixed_discount: s.fixed_discount ?? 0.0,
           minimum_spend: s.minimum_spend ?? 0.0
@@ -2220,11 +2222,9 @@ function Settings() {
           require_email: rewardsSettings.require_email ? 1 : 0,
           require_phone: rewardsSettings.require_phone ? 1 : 0,
           require_both: rewardsSettings.require_both ? 1 : 0,
-          reward_type: rewardsSettings.reward_type,
-          points_enabled: rewardsSettings.points_enabled ? 1 : 0,
-          percentage_enabled: rewardsSettings.percentage_enabled ? 1 : 0,
-          fixed_enabled: rewardsSettings.fixed_enabled ? 1 : 0,
+          reward_type: rewardsSettings.reward_type || 'points',
           points_per_dollar: parseFloat(rewardsSettings.points_per_dollar) || 1.0,
+          points_redemption_value: parseFloat(rewardsSettings.points_redemption_value) ?? 0.01,
           percentage_discount: parseFloat(rewardsSettings.percentage_discount) || 0.0,
           fixed_discount: parseFloat(rewardsSettings.fixed_discount) || 0.0,
           minimum_spend: parseFloat(rewardsSettings.minimum_spend) || 0.0

@@ -7,10 +7,11 @@ import VendorDetailModal from '../components/vendors/VendorDetailModal'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
 import LoadingSpinner from '../components/common/LoadingSpinner'
-import Alert from '../components/common/Alert'
+import { useToast } from '../contexts/ToastContext'
 
 function Vendors() {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const { show: showToast } = useToast()
   const [vendors, setVendors] = useState([])
   const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState({ page: 1, limit: 50 })
@@ -20,7 +21,6 @@ function Vendors() {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [selectedVendor, setSelectedVendor] = useState(null)
   const [vendorBalance, setVendorBalance] = useState(null)
-  const [alert, setAlert] = useState(null)
 
   useEffect(() => {
     fetchVendors()
@@ -34,7 +34,7 @@ function Vendors() {
       setPagination(result.pagination || { total: 0, page: 1, total_pages: 1 })
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to fetch vendors'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     } finally {
       setLoading(false)
     }
@@ -43,12 +43,12 @@ function Vendors() {
   async function handleCreateVendor(data) {
     try {
       await vendorService.createVendor(data)
-      showAlert('success', 'Vendor created successfully')
+      showToast('Vendor created successfully', 'success')
       setIsCreateModalOpen(false)
       fetchVendors()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to create vendor'
-      showAlert('error', msg)
+      showToast(msg, 'error')
       throw err
     }
   }
@@ -57,13 +57,13 @@ function Vendors() {
     if (!selectedVendor) return
     try {
       await vendorService.updateVendor(selectedVendor.id, data)
-      showAlert('success', 'Vendor updated successfully')
+      showToast('Vendor updated successfully', 'success')
       setIsEditModalOpen(false)
       setSelectedVendor(null)
       fetchVendors()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to update vendor'
-      showAlert('error', msg)
+      showToast(msg, 'error')
       throw err
     }
   }
@@ -72,22 +72,22 @@ function Vendors() {
     if (!window.confirm(`Are you sure you want to delete "${vendor.vendor_name}"?`)) return
     try {
       await vendorService.deleteVendor(vendor.id)
-      showAlert('success', 'Vendor deleted successfully')
+      showToast('Vendor deleted successfully', 'success')
       fetchVendors()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to delete vendor'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     }
   }
 
   async function handleToggleStatus(vendor) {
     try {
       await vendorService.toggleVendorStatus(vendor.id)
-      showAlert('success', `Vendor ${vendor.is_active ? 'deactivated' : 'activated'} successfully`)
+      showToast(`Vendor ${vendor.is_active ? 'deactivated' : 'activated'} successfully`, 'success')
       fetchVendors()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to toggle vendor status'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     }
   }
 
@@ -98,13 +98,8 @@ function Vendors() {
       setSelectedVendor(vendor)
       setIsViewModalOpen(true)
     } catch (err) {
-      showAlert('error', 'Failed to fetch vendor details')
+      showToast('Failed to fetch vendor details', 'error')
     }
-  }
-
-  function showAlert(type, message) {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   function handleClearFilters() {
@@ -136,8 +131,6 @@ function Vendors() {
         </div>
         <Button onClick={() => setIsCreateModalOpen(true)}>+ New Vendor</Button>
       </div>
-
-      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
 
       <VendorFilters filters={filters} onFilterChange={setFilters} onClearFilters={handleClearFilters} />
 

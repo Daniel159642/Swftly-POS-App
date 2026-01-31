@@ -9,7 +9,7 @@ import PaymentFilters from '../components/payments/PaymentFilters'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
 import LoadingSpinner from '../components/common/LoadingSpinner'
-import Alert from '../components/common/Alert'
+import { useToast } from '../contexts/ToastContext'
 
 function PaymentDetailView({ payment }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
@@ -144,6 +144,7 @@ function Payments() {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const location = useLocation()
   const locationState = location.state || {}
+  const { show: showToast } = useToast()
 
   const [payments, setPayments] = useState([])
   const [customers, setCustomers] = useState([])
@@ -154,7 +155,6 @@ function Payments() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [selectedPayment, setSelectedPayment] = useState(null)
-  const [alert, setAlert] = useState(null)
 
   useEffect(() => {
     fetchInitialData()
@@ -187,7 +187,7 @@ function Payments() {
       })
       setBankAccounts(bankAndCash)
     } catch (err) {
-      showAlert('error', 'Failed to fetch initial data')
+      showToast('Failed to fetch initial data', 'error')
     }
   }
 
@@ -199,7 +199,7 @@ function Payments() {
       setPagination(result.pagination || { total: 0, page: 1, total_pages: 1 })
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to fetch payments'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     } finally {
       setLoading(false)
     }
@@ -208,12 +208,12 @@ function Payments() {
   async function handleCreatePayment(data) {
     try {
       await paymentService.createPayment(data)
-      showAlert('success', 'Payment recorded successfully')
+      showToast('Payment recorded successfully', 'success')
       setIsCreateModalOpen(false)
       fetchPayments()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to create payment'
-      showAlert('error', msg)
+      showToast(msg, 'error')
       throw err
     }
   }
@@ -224,11 +224,11 @@ function Payments() {
     if (!reason || !reason.trim()) return
     try {
       await paymentService.voidPayment(pmt.id, reason.trim())
-      showAlert('success', 'Payment voided successfully')
+      showToast('Payment voided successfully', 'success')
       fetchPayments()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to void payment'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     }
   }
 
@@ -237,17 +237,12 @@ function Payments() {
     if (!window.confirm(`Are you sure you want to delete payment ${pmt.payment_number}?`)) return
     try {
       await paymentService.deletePayment(pmt.id)
-      showAlert('success', 'Payment deleted successfully')
+      showToast('Payment deleted successfully', 'success')
       fetchPayments()
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to delete payment'
-      showAlert('error', msg)
+      showToast(msg, 'error')
     }
-  }
-
-  function showAlert(type, message) {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   function handleClearFilters() {
@@ -279,8 +274,6 @@ function Payments() {
         </div>
         <Button onClick={() => setIsCreateModalOpen(true)}>+ Record Payment</Button>
       </div>
-
-      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
 
       <PaymentFilters filters={filters} customers={customers} onFilterChange={setFilters} onClearFilters={handleClearFilters} />
 

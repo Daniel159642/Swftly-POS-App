@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePermissions, ProtectedComponent } from '../contexts/PermissionContext'
 import { useTheme } from '../contexts/ThemeContext'
+import { useToast } from '../contexts/ToastContext'
 import BarcodeScanner from './BarcodeScanner'
 import CustomerDisplayPopup from './CustomerDisplayPopup'
 import { ScanBarcode, UserPlus, CheckCircle, Gift, X, AlertCircle } from 'lucide-react'
@@ -11,6 +12,7 @@ function POS({ employeeId, employeeName }) {
   const navigate = useNavigate()
   const { hasPermission } = usePermissions()
   const { themeColor, themeMode } = useTheme()
+  const { show: showToast } = useToast()
   
   // Convert hex to RGB for rgba usage
   const hexToRgb = (hex) => {
@@ -51,8 +53,6 @@ function POS({ employeeId, employeeName }) {
   const [taxRate, setTaxRate] = useState(0.08) // Default 8% tax
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [processing, setProcessing] = useState(false)
-  const [message, setMessage] = useState(null)
-  const [toast, setToast] = useState(null) // { message, type: 'success'|'warning', action?: { label, onClick } }
   const [showPaymentForm, setShowPaymentForm] = useState(false)
   const [amountPaid, setAmountPaid] = useState('')
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
@@ -96,14 +96,6 @@ function POS({ employeeId, employeeName }) {
   const canApplyDiscount = hasPermission('apply_discount')
   const canVoidTransaction = hasPermission('void_transaction')
 
-  // Auto-dismiss toast after 4 seconds (longer if it has an action button)
-  useEffect(() => {
-    if (!toast) return
-    const delay = toast.action ? 10000 : 4000
-    const t = setTimeout(() => setToast(null), delay)
-    return () => clearTimeout(t)
-  }, [toast])
-
   const checkRegisterOpen = async () => {
     const sessionToken = localStorage.getItem('sessionToken')
     if (!sessionToken) return false
@@ -136,7 +128,7 @@ function POS({ employeeId, employeeName }) {
           exchange_credit_id: credit.credit_id,
           exchange_return_id: credit.return_id
         }])
-        setToast({ message: `Exchange credit of $${credit.amount.toFixed(2)} added to cart`, type: 'success' })
+        showToast(`Exchange credit of $${credit.amount.toFixed(2)} added to cart`, 'success')
         // Clear from localStorage after adding
         localStorage.removeItem('exchangeCredit')
       } catch (e) {
@@ -468,7 +460,6 @@ function POS({ employeeId, employeeName }) {
 
   const handleBarcodeScan = async (barcode) => {
     setLoading(true)
-    setMessage(null)
     
     try {
       // Always fetch fresh data from API to include newly created products
@@ -559,9 +550,7 @@ function POS({ employeeId, employeeName }) {
           addToCart(product)
           console.log('Cart updated with product:', product.product_name)
           // Keep scanner open for continuous scanning
-          setMessage({ type: 'success', text: `Added ${product.product_name} to cart` })
-          // Auto-dismiss message after 2 seconds
-          setTimeout(() => setMessage(null), 2000)
+          showToast(`Added ${product.product_name} to cart`, 'success')
           return
         }
         
@@ -576,8 +565,7 @@ function POS({ employeeId, employeeName }) {
               // Check if credit is already in cart
               const existingCredit = cart.find(item => item.is_exchange_credit && item.exchange_credit_id === credit.transaction_id)
               if (existingCredit) {
-                setMessage({ type: 'error', text: 'Exchange credit already in cart' })
-                setTimeout(() => setMessage(null), 3000)
+                showToast('Exchange credit already in cart', 'error')
                 return
               }
               
@@ -594,8 +582,7 @@ function POS({ employeeId, employeeName }) {
                 exchange_return_id: credit.return_id
               }])
               
-              setMessage({ type: 'success', text: `Exchange credit of $${credit.amount.toFixed(2)} added to cart` })
-              setTimeout(() => setMessage(null), 3000)
+              showToast(`Exchange credit of $${credit.amount.toFixed(2)} added to cart`, 'success')
               return
             }
           } catch (creditErr) {
@@ -606,16 +593,11 @@ function POS({ employeeId, employeeName }) {
       
       // If not found locally, show error
       console.log('Product not found for barcode:', barcode)
-      setMessage({ 
-        type: 'error', 
-        text: `Product with barcode "${barcode}" not found. Try taking a photo for image-based identification.` 
-      })
-      setTimeout(() => setMessage(null), 4000)
+      showToast(`Product with barcode "${barcode}" not found. Try taking a photo for image-based identification.`, 'error')
       
     } catch (err) {
       console.error('Barcode scan error:', err)
-      setMessage({ type: 'error', text: 'Error looking up product. Please try again.' })
-      setTimeout(() => setMessage(null), 4000)
+      showToast('Error looking up product. Please try again.', 'error')
     } finally {
       setLoading(false)
     }
@@ -623,7 +605,6 @@ function POS({ employeeId, employeeName }) {
 
   const handleImageScan = async (imageFile) => {
     setLoading(true)
-    setMessage(null)
     
     try {
       const formData = new FormData()
@@ -652,27 +633,18 @@ function POS({ employeeId, employeeName }) {
           const product = productData.data.find(p => p.product_id === match.product_id)
           if (product) {
             addToCart(product) // Will show variant modal if product has variants
-            setMessage({ 
-              type: 'success', 
-              text: `Added ${product.product_name} to cart (${(match.confidence * 100).toFixed(0)}% confidence)` 
-            })
+            showToast(`Added ${product.product_name} to cart (${(match.confidence * 100).toFixed(0)}% confidence)`, 'success')
             setShowBarcodeScanner(false)
-            setTimeout(() => setMessage(null), 3000)
             return
           }
         }
       }
       
-      setMessage({ 
-        type: 'error', 
-        text: data.message || 'Product not identified. Please try again or search manually.' 
-      })
-      setTimeout(() => setMessage(null), 4000)
+      showToast(data.message || 'Product not identified. Please try again or search manually.', 'error')
       
     } catch (err) {
       console.error('Image scan error:', err)
-      setMessage({ type: 'error', text: 'Error identifying product. Please try again.' })
-      setTimeout(() => setMessage(null), 4000)
+      showToast('Error identifying product. Please try again.', 'error')
     } finally {
       setLoading(false)
     }
@@ -892,7 +864,9 @@ function POS({ employeeId, employeeName }) {
   }
 
   const checkCustomerInfoRequirements = () => {
-    // Check rewards settings requirements
+    // If a customer was selected from the database, their record is sufficient—don't block payment
+    if (selectedCustomer?.customer_id) return true
+    // Check rewards settings requirements for walk-in / new customer (customerInfo only)
     if (rewardsSettings.enabled) {
       if (rewardsSettings.require_both) {
         return customerInfo.name && customerInfo.email && customerInfo.phone
@@ -960,7 +934,7 @@ function POS({ employeeId, employeeName }) {
     if (!selectedCustomer || isNaN(p) || p <= 0) return
     const available = (customerRewardsDetail?.loyalty_points ?? selectedCustomer.loyalty_points ?? 0) || 0
     if (p > available) {
-      setToast({ message: `Customer has ${available} points`, type: 'error' })
+      showToast(`Customer has ${available} points`, 'error')
       return
     }
     const value = rewardsSettings.points_redemption_value || 0.01
@@ -986,14 +960,14 @@ function POS({ employeeId, employeeName }) {
         points_used: p
       }])
     }
-    setToast({ message: `${p} points ($${discountAmount.toFixed(2)}) added to cart`, type: 'success' })
+    showToast(`${p} points ($${discountAmount.toFixed(2)}) added to cart`, 'success')
     setShowRewardsModal(false)
     setPointsToUse('')
   }
 
   const removePointsRedemptionFromCart = () => {
     setCart(prev => prev.filter(item => !item.is_points_redemption))
-    setToast({ message: 'Points redemption removed from cart', type: 'success' })
+    showToast('Points redemption removed from cart', 'success')
   }
 
   const handleCreateCustomer = () => {
@@ -1030,12 +1004,12 @@ function POS({ employeeId, employeeName }) {
   const processOrder = async () => {
     // Check permission
     if (!canProcessSale) {
-      setMessage({ type: 'error', text: 'You do not have permission to process sales' })
+      showToast('You do not have permission to process sales', 'error')
       return
     }
     
     if (cart.length === 0) {
-      setMessage({ type: 'error', text: 'Cart is empty' })
+      showToast('Cart is empty', 'error')
       return
     }
 
@@ -1043,13 +1017,12 @@ function POS({ employeeId, employeeName }) {
       const paid = parseFloat(amountPaid) || 0
       const total = calculateTotal()
       if (paid < total) {
-        setMessage({ type: 'error', text: 'Amount paid is insufficient' })
+        showToast('Amount paid is insufficient', 'error')
         return
       }
     }
 
     setProcessing(true)
-    setMessage(null)
 
     try {
       // Get exchange credit info if present
@@ -1167,7 +1140,7 @@ function POS({ employeeId, employeeName }) {
             const successMessage = orderNumber 
               ? `Order ${orderNumber} processed successfully!`
               : 'Order processed successfully!'
-            setToast({ message: successMessage, type: 'success' })
+            showToast(successMessage, 'success')
             
             // Try to get order_id from payment_transactions if not already available
             let foundOrderId = currentOrderId
@@ -1246,7 +1219,7 @@ function POS({ employeeId, employeeName }) {
             // Clear active transaction
             sessionStorage.removeItem('activeTransaction')
           } else {
-            setMessage({ type: 'error', text: result.data?.error || 'Failed to process payment' })
+            showToast(result.data?.error || 'Failed to process payment', 'error')
           }
         } else {
           // Fall back to old system
@@ -1289,7 +1262,7 @@ function POS({ employeeId, employeeName }) {
               }
             }
             
-            setToast({ message: `Order ${result.order_number} processed successfully!`, type: 'success' })
+            showToast(`Order ${result.order_number} processed successfully!`, 'success')
             setPaymentCompleted(true)
             
             // Store order information for receipt generation
@@ -1320,7 +1293,7 @@ function POS({ employeeId, employeeName }) {
               setShowPaymentForm(false)
             }
           } else {
-            setMessage({ type: 'error', text: result.message || 'Failed to process order' })
+            showToast(result.message || 'Failed to process order', 'error')
           }
         }
       } else {
@@ -1361,7 +1334,7 @@ function POS({ employeeId, employeeName }) {
               console.error('Error applying exchange credit:', err)
             }
           }
-          setToast({ message: `Order ${result.order_number} processed successfully!`, type: 'success' })
+          showToast(`Order ${result.order_number} processed successfully!`, 'success')
           setPaymentCompleted(true)
           if (result.order_id) {
             setCurrentOrderId(result.order_id)
@@ -1383,11 +1356,11 @@ function POS({ employeeId, employeeName }) {
             setShowPaymentForm(false)
           }
         } else {
-          setMessage({ type: 'error', text: result.message || 'Failed to process order' })
+          showToast(result.message || 'Failed to process order', 'error')
         }
       }
     } catch (err) {
-      setMessage({ type: 'error', text: 'Error processing order. Please try again.' })
+      showToast('Error processing order. Please try again.', 'error')
       console.error('Order error:', err)
     } finally {
       setProcessing(false)
@@ -1701,56 +1674,6 @@ function POS({ employeeId, employeeName }) {
                       {processing ? 'Processing...' : 'Process'}
                     </button>
                   </div>
-
-                  {/* Message */}
-                  {message && (
-                    <div style={{
-                      marginTop: '10px',
-                      padding: '10px',
-                      borderRadius: '4px',
-                      backgroundColor: message.type === 'success' ? '#e8f5e9' : '#ffebee',
-                      color: message.type === 'success' ? '#2e7d32' : '#d32f2f',
-                      fontSize: '12px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '10px'
-                    }}>
-                      <div>{message.text}</div>
-                      {paymentCompleted && paymentMethod !== 'cash' && message.type === 'success' && (
-                        <button
-                          onClick={() => {
-                            setShowCustomerDisplay(true)
-                            setShowSummary(false)
-                          }}
-                          style={{
-                            padding: '12px 24px',
-                            backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                            backdropFilter: 'blur(10px)',
-                            WebkitBackdropFilter: 'blur(10px)',
-                            color: '#fff',
-                            border: '1px solid rgba(255, 255, 255, 0.2)',
-                            borderRadius: '8px',
-                            fontSize: '14px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            alignSelf: 'flex-start',
-                            boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                            transition: 'all 0.3s ease'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.9)`
-                            e.currentTarget.style.transform = 'scale(1.02)'
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
-                            e.currentTarget.style.transform = 'scale(1)'
-                          }}
-                        >
-                          Show Receipt Options
-                        </button>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
               
@@ -2290,16 +2213,9 @@ function POS({ employeeId, employeeName }) {
                   if (!showPaymentForm) {
                     const registerOpen = await checkRegisterOpen()
                     if (!registerOpen) {
-                      setToast({
-                        message: 'Register is closed. Open the register to process payments.',
-                        type: 'warning',
-                        action: {
-                          label: 'Open Register',
-                          onClick: () => {
-                            setToast(null)
-                            navigate('/settings?tab=cash')
-                          }
-                        }
+                      showToast('Register is closed. Open the register to process payments.', 'warning', {
+                        label: 'Open Register',
+                        onClick: () => navigate('/settings?tab=cash')
                       })
                       return
                     }
@@ -2649,56 +2565,6 @@ function POS({ employeeId, employeeName }) {
                   </button>
                 </div>
               </div>
-
-            {/* Message */}
-            {message && (
-              <div style={{
-                padding: '12px',
-                marginBottom: '12px',
-                borderRadius: '4px',
-                backgroundColor: message.type === 'success' ? '#e8f5e9' : '#ffebee',
-                color: message.type === 'success' ? '#2e7d32' : '#d32f2f',
-                fontSize: '14px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px'
-              }}>
-                <div>{message.text}</div>
-                {paymentCompleted && paymentMethod !== 'cash' && message.type === 'success' && (
-                  <button
-                    onClick={() => {
-                      setShowCustomerDisplay(true)
-                      setShowSummary(false)
-                    }}
-                    style={{
-                      padding: '12px 24px',
-                      backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                      backdropFilter: 'blur(10px)',
-                      WebkitBackdropFilter: 'blur(10px)',
-                      color: '#fff',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      alignSelf: 'flex-start',
-                      boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                      transition: 'all 0.3s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.9)`
-                      e.currentTarget.style.transform = 'scale(1.02)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
-                      e.currentTarget.style.transform = 'scale(1)'
-                    }}
-                  >
-                    Show Receipt Options
-                  </button>
-                )}
-              </div>
-            )}
 
             {/* Process Order Button */}
             <div style={{ display: 'flex', gap: '12px', width: '100%', marginTop: 'auto' }}>
@@ -3310,19 +3176,19 @@ function POS({ employeeId, employeeName }) {
                             phone: customerInfo.phone,
                             address: customerInfo.address
                           })
-                          setMessage({ type: 'success', text: 'Customer added successfully' })
+                          showToast('Customer added successfully', 'success')
                           setShowCustomerInfoModal(false)
                           setShowCreateCustomer(false)
                           setCustomerInfo({ name: '', email: '', phone: '', address: '' })
                         } else {
-                          alert(data.message || 'Failed to create customer')
+                          showToast(data.message || 'Failed to create customer', 'error')
                         }
                       } catch (err) {
                         console.error('Error creating customer:', err)
-                        alert('Error creating customer. Please try again.')
+                        showToast('Error creating customer. Please try again.', 'error')
                       }
                     } else {
-                      alert(errorMessage)
+                      showToast(errorMessage, 'error')
                     }
                     return
                   }
@@ -3526,83 +3392,6 @@ function POS({ employeeId, employeeName }) {
           onClose={() => setShowBarcodeScanner(false)}
           themeColor={themeColor}
         />
-      )}
-
-      {/* Message Display */}
-      {message && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: '20px',
-            right: '20px',
-            padding: '16px 24px',
-            backgroundColor: message.type === 'success' ? '#4caf50' : '#f44336',
-            color: '#fff',
-            borderRadius: '4px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-            zIndex: 2000,
-            maxWidth: '400px',
-            animation: 'slideIn 0.3s ease-out'
-          }}
-          onClick={() => setMessage(null)}
-        >
-          {message.text}
-        </div>
-      )}
-
-      {/* Toast notification for order success or register closed */}
-      {toast && (
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            position: 'fixed',
-            bottom: '24px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            padding: '12px 20px',
-            backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-            border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
-            borderRadius: '12px',
-            boxShadow: isDarkMode ? '0 4px 20px rgba(0,0,0,0.4)' : '0 4px 20px rgba(0,0,0,0.15)',
-            zIndex: 10001,
-            fontSize: '14px',
-            fontWeight: 500,
-            maxWidth: '90vw'
-          }}
-          onClick={(e) => { if (!toast.action) setToast(null); e.stopPropagation() }}
-        >
-          {toast.type === 'warning' ? (
-            <AlertCircle size={20} style={{ flexShrink: 0, color: 'var(--warning, #e6a800)' }} />
-          ) : (
-            <CheckCircle size={20} style={{ flexShrink: 0, color: `rgb(${themeColorRgb})` }} />
-          )}
-          <span style={{ flex: 1 }}>{toast.message}</span>
-          {toast.action && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); toast.action?.onClick?.() }}
-              style={{
-                flexShrink: 0,
-                padding: '8px 16px',
-                backgroundColor: `rgba(${themeColorRgb}, 0.9)`,
-                color: '#fff',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {toast.action.label}
-            </button>
-          )}
-        </div>
       )}
     </div>
   )

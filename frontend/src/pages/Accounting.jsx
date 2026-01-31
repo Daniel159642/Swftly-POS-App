@@ -43,7 +43,7 @@ import reportService from '../services/reportService'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
 import LoadingSpinner from '../components/common/LoadingSpinner'
-import Alert from '../components/common/Alert'
+import { useToast } from '../contexts/ToastContext'
 
 /** Download an array-of-arrays as Excel (.xlsx) using SheetJS */
 async function downloadExcel(rows, filename) {
@@ -470,10 +470,10 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders }) {
 
 // Settings tab: sales tax %, transaction fee rates, note about hourly wages
 function SettingsTab({ formatCurrency, getAuthHeaders }) {
+  const { show: showToast } = useToast()
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState(null)
   const [edit, setEdit] = useState({ default_sales_tax_pct: '', transaction_fee_rates: {} })
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
@@ -506,7 +506,6 @@ function SettingsTab({ formatCurrency, getAuthHeaders }) {
   const handleSave = async () => {
     try {
       setSaving(true)
-      setMessage(null)
       const payload = {
         default_sales_tax_pct: parseFloat(edit.default_sales_tax_pct) || 0,
         transaction_fee_rates: edit.transaction_fee_rates
@@ -519,12 +518,12 @@ function SettingsTab({ formatCurrency, getAuthHeaders }) {
       const json = await res.json()
       if (json.success) {
         setSettings(json.data)
-        setMessage({ type: 'success', text: 'Settings saved.' })
+        showToast('Settings saved.', 'success')
       } else {
-        setMessage({ type: 'error', text: json.message || 'Failed to save' })
+        showToast(json.message || 'Failed to save', 'error')
       }
     } catch (err) {
-      setMessage({ type: 'error', text: err.message || 'Failed to save' })
+      showToast(err.message || 'Failed to save', 'error')
     } finally {
       setSaving(false)
     }
@@ -544,15 +543,6 @@ function SettingsTab({ formatCurrency, getAuthHeaders }) {
 
   return (
     <div>
-      {message && (
-        <div style={{
-          padding: '12px', marginBottom: '16px', borderRadius: '8px',
-          backgroundColor: message.type === 'success' ? (isDarkMode ? '#064e3b' : '#d1fae5') : (isDarkMode ? '#7f1d1d' : '#fee2e2'),
-          color: message.type === 'success' ? '#10b981' : '#ef4444'
-        }}>
-          {message.text}
-        </div>
-      )}
       <div style={{ padding: '20px', backgroundColor: cardBg, border: `1px solid ${borderColor}`, borderRadius: '8px', maxWidth: '560px' }}>
         <h3 style={{ color: textColor, marginBottom: '16px' }}>Store accounting settings</h3>
         <div style={{ marginBottom: '16px' }}>
@@ -637,6 +627,7 @@ function MetricCard({ title, value, color, cardBackgroundColor, borderColor, tex
 
 // Chart of Accounts Tab - New Implementation with Full CRUD
 function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
+  const { show: showToast } = useToast()
   const [accounts, setAccounts] = useState([])
   const [filteredAccounts, setFilteredAccounts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -647,8 +638,6 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
   const [isBalanceModalOpen, setIsBalanceModalOpen] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState(null)
   const [accountBalance, setAccountBalance] = useState(null)
-  
-  const [alert, setAlert] = useState(null)
   
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
@@ -671,7 +660,7 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
       setFilteredAccounts(Array.isArray(data) ? data : [])
     } catch (err) {
       console.error('Error loading accounts:', err)
-      showAlert('error', err.response?.data?.message || 'Failed to fetch accounts')
+      showToast(err.response?.data?.message || 'Failed to fetch accounts', 'error')
     } finally {
       setLoading(false)
     }
@@ -703,11 +692,11 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
   const handleCreateAccount = async (data) => {
     try {
       await accountService.createAccount(data)
-      showAlert('success', 'Account created successfully')
+      showToast('Account created successfully', 'success')
       setIsCreateModalOpen(false)
       loadAccounts()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to create account')
+      showToast(error.response?.data?.message || 'Failed to create account', 'error')
       throw error
     }
   }
@@ -717,12 +706,12 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
     
     try {
       await accountService.updateAccount(selectedAccount.id, data)
-      showAlert('success', 'Account updated successfully')
+      showToast('Account updated successfully', 'success')
       setIsEditModalOpen(false)
       setSelectedAccount(null)
       loadAccounts()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to update account')
+      showToast(error.response?.data?.message || 'Failed to update account', 'error')
       throw error
     }
   }
@@ -734,20 +723,20 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
 
     try {
       await accountService.deleteAccount(account.id)
-      showAlert('success', 'Account deleted successfully')
+      showToast('Account deleted successfully', 'success')
       loadAccounts()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to delete account')
+      showToast(error.response?.data?.message || 'Failed to delete account', 'error')
     }
   }
 
   const handleToggleStatus = async (account) => {
     try {
       await accountService.toggleAccountStatus(account.id)
-      showAlert('success', `Account ${account.is_active ? 'deactivated' : 'activated'} successfully`)
+      showToast(`Account ${account.is_active ? 'deactivated' : 'activated'} successfully`, 'success')
       loadAccounts()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to toggle account status')
+      showToast(error.response?.data?.message || 'Failed to toggle account status', 'error')
     }
   }
 
@@ -758,13 +747,8 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
       setSelectedAccount(account)
       setIsBalanceModalOpen(true)
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to fetch account balance')
+      showToast(error.response?.data?.message || 'Failed to fetch account balance', 'error')
     }
-  }
-
-  const showAlert = (type, message) => {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   const handleClearFilters = () => {
@@ -795,14 +779,6 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
           + New Account
         </Button>
       </div>
-
-      {alert && (
-        <Alert
-          type={alert.type}
-          message={alert.message}
-          onClose={() => setAlert(null)}
-        />
-      )}
 
       <AccountFilters
         filters={filters}
@@ -938,6 +914,7 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders }) {
 
 // Transactions Tab - New Implementation with Full CRUD
 function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
+  const { show: showToast } = useToast()
   const [transactions, setTransactions] = useState([])
   const [accounts, setAccounts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -953,8 +930,6 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [selectedTransaction, setSelectedTransaction] = useState(null)
-  
-  const [alert, setAlert] = useState(null)
   
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
@@ -995,7 +970,7 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
       setPagination(result.pagination || { total: 0, page: 1, totalPages: 1 })
     } catch (err) {
       console.error('Error loading transactions:', err)
-      showAlert('error', err.response?.data?.message || 'Failed to fetch transactions')
+      showToast(err.response?.data?.message || 'Failed to fetch transactions', 'error')
     } finally {
       setLoading(false)
     }
@@ -1007,15 +982,15 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
       
       if (postImmediately) {
         await transactionService.postTransaction(transaction.transaction.id)
-        showAlert('success', 'Transaction created and posted successfully')
+        showToast('Transaction created and posted successfully', 'success')
       } else {
-        showAlert('success', 'Transaction created successfully')
+        showToast('Transaction created successfully', 'success')
       }
       
       setIsCreateModalOpen(false)
       loadTransactions()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to create transaction')
+      showToast(error.response?.data?.message || 'Failed to create transaction', 'error')
       throw error
     }
   }
@@ -1025,12 +1000,12 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
     
     try {
       await transactionService.updateTransaction(selectedTransaction.transaction.id, data)
-      showAlert('success', 'Transaction updated successfully')
+      showToast('Transaction updated successfully', 'success')
       setIsEditModalOpen(false)
       setSelectedTransaction(null)
       loadTransactions()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to update transaction')
+      showToast(error.response?.data?.message || 'Failed to update transaction', 'error')
       throw error
     }
   }
@@ -1042,10 +1017,10 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
 
     try {
       await transactionService.deleteTransaction(transaction.transaction.id)
-      showAlert('success', 'Transaction deleted successfully')
+      showToast('Transaction deleted successfully', 'success')
       loadTransactions()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to delete transaction')
+      showToast(error.response?.data?.message || 'Failed to delete transaction', 'error')
     }
   }
 
@@ -1056,10 +1031,10 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
 
     try {
       await transactionService.postTransaction(transaction.transaction.id)
-      showAlert('success', 'Transaction posted successfully')
+      showToast('Transaction posted successfully', 'success')
       loadTransactions()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to post transaction')
+      showToast(error.response?.data?.message || 'Failed to post transaction', 'error')
     }
   }
 
@@ -1070,10 +1045,10 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
 
     try {
       await transactionService.unpostTransaction(transaction.transaction.id)
-      showAlert('success', 'Transaction unposted successfully')
+      showToast('Transaction unposted successfully', 'success')
       loadTransactions()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to unpost transaction')
+      showToast(error.response?.data?.message || 'Failed to unpost transaction', 'error')
     }
   }
 
@@ -1083,16 +1058,11 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
 
     try {
       await transactionService.voidTransaction(transaction.transaction.id, reason)
-      showAlert('success', 'Transaction voided successfully')
+      showToast('Transaction voided successfully', 'success')
       loadTransactions()
     } catch (error) {
-      showAlert('error', error.response?.data?.message || 'Failed to void transaction')
+      showToast(error.response?.data?.message || 'Failed to void transaction', 'error')
     }
-  }
-
-  const showAlert = (type, message) => {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   const handleClearFilters = () => {
@@ -1125,14 +1095,6 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders }) {
         </div>
         <Button onClick={() => setIsCreateModalOpen(true)}>+ New Transaction</Button>
       </div>
-
-      {alert && (
-        <Alert
-          type={alert.type}
-          message={alert.message}
-          onClose={() => setAlert(null)}
-        />
-      )}
 
       <TransactionFilters
         filters={filters}
@@ -1416,8 +1378,7 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [selectedTransaction, setSelectedTransaction] = useState(null)
   
-  const [alert, setAlert] = useState(null)
-  
+  const { show: showToast } = useToast()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
@@ -1456,7 +1417,7 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
       setEntries(Array.isArray(data) ? data : [])
     } catch (err) {
       console.error('Error loading ledger:', err)
-      showAlert('error', err.response?.data?.message || 'Failed to fetch ledger entries')
+      showToast(err.response?.data?.message || 'Failed to fetch ledger entries', 'error')
     } finally {
       setLoading(false)
     }
@@ -1468,7 +1429,7 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
       setSelectedTransaction(transaction)
       setIsViewModalOpen(true)
     } catch (err) {
-      showAlert('error', 'Failed to fetch transaction details')
+      showToast('Failed to fetch transaction details', 'error')
     }
   }
 
@@ -1494,7 +1455,7 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
 
   const handleExport = () => {
     if (entries.length === 0) {
-      showAlert('error', 'No data to export')
+      showToast('No data to export', 'error')
       return
     }
     const allRows = buildGeneralLedgerRows()
@@ -1506,25 +1467,20 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
     a.download = `general-ledger-${new Date().toISOString().split('T')[0]}.csv`
     a.click()
     window.URL.revokeObjectURL(url)
-    showAlert('success', 'Ledger exported to CSV')
+    showToast('Ledger exported to CSV', 'success')
   }
 
   const handleExportExcel = async () => {
     if (entries.length === 0) {
-      showAlert('error', 'No data to export')
+      showToast('No data to export', 'error')
       return
     }
     try {
       await downloadExcel(buildGeneralLedgerRows(), `general-ledger-${new Date().toISOString().split('T')[0]}.xlsx`)
-      showAlert('success', 'Ledger exported to Excel')
+      showToast('Ledger exported to Excel', 'success')
     } catch (e) {
-      showAlert('error', 'Excel export failed')
+      showToast('Excel export failed', 'error')
     }
-  }
-
-  const showAlert = (type, message) => {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   const handleClearFilters = () => {
@@ -1553,14 +1509,6 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders }) {
           View all posted accounting transactions
         </p>
       </div>
-
-      {alert && (
-        <Alert
-          type={alert.type}
-          message={alert.message}
-          onClose={() => setAlert(null)}
-        />
-      )}
 
       <GeneralLedgerFilters
         filters={filters}
@@ -1727,8 +1675,7 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [selectedTransaction, setSelectedTransaction] = useState(null)
   
-  const [alert, setAlert] = useState(null)
-  
+  const { show: showToast } = useToast()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
@@ -1760,7 +1707,7 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
       setLedgerData(data)
     } catch (err) {
       console.error('Error loading account ledger:', err)
-      showAlert('error', err.response?.data?.message || 'Failed to fetch account ledger')
+      showToast(err.response?.data?.message || 'Failed to fetch account ledger', 'error')
     } finally {
       setLoading(false)
     }
@@ -1772,7 +1719,7 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
       setSelectedTransaction(transaction)
       setIsViewModalOpen(true)
     } catch (err) {
-      showAlert('error', 'Failed to fetch transaction details')
+      showToast('Failed to fetch transaction details', 'error')
     }
   }
 
@@ -1797,7 +1744,7 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
 
   const handleExport = () => {
     if (!ledgerData || ledgerData.entries.length === 0) {
-      showAlert('error', 'No data to export')
+      showToast('No data to export', 'error')
       return
     }
     const allRows = buildAccountLedgerRows()
@@ -1809,25 +1756,20 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
     a.download = `account-ledger-${accountId}-${new Date().toISOString().split('T')[0]}.csv`
     a.click()
     window.URL.revokeObjectURL(url)
-    showAlert('success', 'Account ledger exported to CSV')
+    showToast('Account ledger exported to CSV', 'success')
   }
 
   const handleExportExcel = async () => {
     if (!ledgerData || ledgerData.entries.length === 0) {
-      showAlert('error', 'No data to export')
+      showToast('No data to export', 'error')
       return
     }
     try {
       await downloadExcel(buildAccountLedgerRows(), `account-ledger-${accountId}-${new Date().toISOString().split('T')[0]}.xlsx`)
-      showAlert('success', 'Account ledger exported to Excel')
+      showToast('Account ledger exported to Excel', 'success')
     } catch (e) {
-      showAlert('error', 'Excel export failed')
+      showToast('Excel export failed', 'error')
     }
-  }
-
-  const showAlert = (type, message) => {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   const handleFilterChange = (e) => {
@@ -1847,8 +1789,8 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
 
   if (!accountId) {
     return (
-      <div>
-        <Alert type="error" message="No account selected. Please select an account from Chart of Accounts." />
+      <div style={{ padding: '16px', color: textColor, backgroundColor: isDarkMode ? 'rgba(239,68,68,0.1)' : '#fee2e2', border: `1px solid ${isDarkMode ? 'rgba(239,68,68,0.3)' : '#fecaca'}`, borderRadius: '8px' }}>
+        No account selected. Please select an account from Chart of Accounts.
       </div>
     )
   }
@@ -1859,8 +1801,8 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
 
   if (!ledgerData) {
     return (
-      <div>
-        <Alert type="error" message="Failed to load account ledger" />
+      <div style={{ padding: '16px', color: textColor, backgroundColor: isDarkMode ? 'rgba(239,68,68,0.1)' : '#fee2e2', border: `1px solid ${isDarkMode ? 'rgba(239,68,68,0.3)' : '#fecaca'}`, borderRadius: '8px' }}>
+        Failed to load account ledger
       </div>
     )
   }
@@ -1888,14 +1830,6 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
           </p>
         </div>
       </div>
-
-      {alert && (
-        <Alert
-          type={alert.type}
-          message={alert.message}
-          onClose={() => setAlert(null)}
-        />
-      )}
 
       <AccountLedgerCard
         ledgerData={ledgerData}
@@ -2048,6 +1982,7 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
 
 // Profit & Loss Tab
 function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }) {
+  const { show: showToast } = useToast()
   const [reportData, setReportData] = useState(null)
   const [comparativeData, setComparativeData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -2056,8 +1991,6 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
     end_date: dateRange.end_date,
     comparison_type: 'none',
   })
-  
-  const [alert, setAlert] = useState(null)
   
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
@@ -2104,10 +2037,10 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
         setComparativeData(json.data)
         setReportData(json.data.current)
       }
-      showAlert('success', 'Report generated successfully')
+      showToast('Report generated successfully', 'success')
     } catch (error) {
       console.error('Error generating report:', error)
-      showAlert('error', error.message || error.response?.data?.message || 'Failed to generate report')
+      showToast(error.message || error.response?.data?.message || 'Failed to generate report', 'error')
     } finally {
       setLoading(false)
     }
@@ -2115,7 +2048,7 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
 
   const handleExport = () => {
     if (!reportData) {
-      showAlert('error', 'No report data to export')
+      showToast('No report data to export', 'error')
       return
     }
 
@@ -2176,12 +2109,12 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
     a.click()
     window.URL.revokeObjectURL(url)
 
-    showAlert('success', 'Report exported to CSV')
+    showToast('Report exported to CSV', 'success')
   }
 
   const handleExportExcel = async () => {
     if (!reportData) {
-      showAlert('error', 'No report data to export')
+      showToast('No report data to export', 'error')
       return
     }
     const rows = [
@@ -2216,20 +2149,15 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
     rows.push(['NET INCOME', num(reportData.net_income).toFixed(2), (num(reportData.net_income) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
     try {
       await downloadExcel(rows, `profit-loss-${filters.start_date}-to-${filters.end_date}.xlsx`)
-      showAlert('success', 'Report exported to Excel')
+      showToast('Report exported to Excel', 'success')
     } catch (e) {
-      showAlert('error', 'Excel export failed')
+      showToast('Excel export failed', 'error')
     }
   }
 
   const handleAccountClick = (accountId) => {
     sessionStorage.setItem('selectedAccountId', accountId)
     setActiveTab('account-ledger')
-  }
-
-  const showAlert = (type, message) => {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   const getPeriodLabel = () => {
@@ -2251,14 +2179,6 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
           Income statement showing revenue, expenses, and net income
         </p>
       </div>
-
-      {alert && (
-        <Alert
-          type={alert.type}
-          message={alert.message}
-          onClose={() => setAlert(null)}
-        />
-      )}
 
       <ProfitLossFilters
         filters={filters}
@@ -2372,6 +2292,7 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
 
 // Balance Sheet Tab
 function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }) {
+  const { show: showToast } = useToast()
   const [reportData, setReportData] = useState(null)
   const [comparativeData, setComparativeData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -2379,7 +2300,6 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
     as_of_date: new Date().toISOString().split('T')[0],
     comparison_type: 'none'
   })
-  const [alert, setAlert] = useState(null)
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
@@ -2408,9 +2328,9 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
         setComparativeData(json.data)
         setReportData(json.data.current)
       }
-      showAlert('success', 'Report generated successfully')
+      showToast('Report generated successfully', 'success')
     } catch (error) {
-      showAlert('error', error.message || error.response?.data?.message || 'Failed to generate report')
+      showToast(error.message || error.response?.data?.message || 'Failed to generate report', 'error')
     } finally {
       setLoading(false)
     }
@@ -2418,7 +2338,7 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
 
   const handleExport = () => {
     if (!reportData) {
-      showAlert('error', 'No report data to export')
+      showToast('No report data to export', 'error')
       return
     }
     const rows = [
@@ -2472,12 +2392,12 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
     a.download = `balance-sheet-${filters.as_of_date}.csv`
     a.click()
     window.URL.revokeObjectURL(url)
-    showAlert('success', 'Report exported to CSV')
+    showToast('Report exported to CSV', 'success')
   }
 
   const handleExportExcel = async () => {
     if (!reportData) {
-      showAlert('error', 'No report data to export')
+      showToast('No report data to export', 'error')
       return
     }
     const rows = [
@@ -2525,20 +2445,15 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
     rows.push(['TOTAL LIABILITIES AND EQUITY', (num(reportData.liabilities.total_liabilities) + num(reportData.equity.total_equity)).toFixed(2)])
     try {
       await downloadExcel(rows, `balance-sheet-${filters.as_of_date}.xlsx`)
-      showAlert('success', 'Report exported to Excel')
+      showToast('Report exported to Excel', 'success')
     } catch (e) {
-      showAlert('error', 'Excel export failed')
+      showToast('Excel export failed', 'error')
     }
   }
 
   const handleAccountClick = (accountId) => {
     sessionStorage.setItem('selectedAccountId', accountId)
     setActiveTab('account-ledger')
-  }
-
-  const showAlert = (type, message) => {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   const getAsOfLabel = () => new Date(filters.as_of_date).toLocaleDateString()
@@ -2552,7 +2467,6 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
           Statement of financial position showing assets, liabilities, and equity
         </p>
       </div>
-      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
       <BalanceSheetFilters
         filters={filters}
         onFilterChange={setFilters}
@@ -2616,6 +2530,7 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
 
 // Cash Flow Tab
 function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }) {
+  const { show: showToast } = useToast()
   const [reportData, setReportData] = useState(null)
   const [comparativeData, setComparativeData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -2624,7 +2539,6 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }
     end_date: new Date().toISOString().split('T')[0],
     comparison_type: 'none'
   })
-  const [alert, setAlert] = useState(null)
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
@@ -2658,9 +2572,9 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }
         setComparativeData(json.data)
         setReportData(json.data.current)
       }
-      showAlert('success', 'Report generated successfully')
+      showToast('Report generated successfully', 'success')
     } catch (error) {
-      showAlert('error', error.message || error.response?.data?.message || 'Failed to generate report')
+      showToast(error.message || error.response?.data?.message || 'Failed to generate report', 'error')
     } finally {
       setLoading(false)
     }
@@ -2668,7 +2582,7 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }
 
   const handleExport = () => {
     if (!reportData) {
-      showAlert('error', 'No report data to export')
+      showToast('No report data to export', 'error')
       return
     }
     const op = reportData.operating_activities || {}
@@ -2707,12 +2621,12 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }
     a.download = `cash-flow-${filters.start_date}-to-${filters.end_date}.csv`
     a.click()
     window.URL.revokeObjectURL(url)
-    showAlert('success', 'Report exported to CSV')
+    showToast('Report exported to CSV', 'success')
   }
 
   const handleExportExcel = async () => {
     if (!reportData) {
-      showAlert('error', 'No report data to export')
+      showToast('No report data to export', 'error')
       return
     }
     const op = reportData.operating_activities || {}
@@ -2745,20 +2659,15 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }
     rows.push(['ENDING CASH', num(reportData.ending_cash).toFixed(2)])
     try {
       await downloadExcel(rows, `cash-flow-${filters.start_date}-to-${filters.end_date}.xlsx`)
-      showAlert('success', 'Report exported to Excel')
+      showToast('Report exported to Excel', 'success')
     } catch (e) {
-      showAlert('error', 'Excel export failed')
+      showToast('Excel export failed', 'error')
     }
   }
 
   const handleAccountClick = (accountId) => {
     sessionStorage.setItem('selectedAccountId', accountId)
     setActiveTab('account-ledger')
-  }
-
-  const showAlert = (type, message) => {
-    setAlert({ type, message })
-    setTimeout(() => setAlert(null), 5000)
   }
 
   const getPeriodLabel = () => `${new Date(filters.start_date).toLocaleDateString()} - ${new Date(filters.end_date).toLocaleDateString()}`
@@ -2776,7 +2685,6 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab }
           Statement of cash flows showing operating, investing, and financing activities
         </p>
       </div>
-      {alert && <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />}
       <CashFlowFilters filters={filters} onFilterChange={setFilters} onGenerate={handleGenerateReport} loading={loading} />
       {loading && <LoadingSpinner size="lg" text="Generating report..." />}
       {!loading && reportData && (
