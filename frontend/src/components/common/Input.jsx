@@ -16,7 +16,7 @@ function Input({
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const inputStyle = {
     width: '100%',
-    padding: '8px 12px',
+    padding: '5px 12px',
     border: error ? '1px solid #ef4444' : `1px solid ${isDarkMode ? '#3a3a3a' : '#d1d5db'}`,
     borderRadius: '6px',
     backgroundColor: disabled ? (isDarkMode ? '#2a2a2a' : '#f3f4f6') : (isDarkMode ? '#1f1f1f' : 'white'),

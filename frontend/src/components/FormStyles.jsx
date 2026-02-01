@@ -27,7 +27,7 @@ export const formLabelStyle = (isDarkMode) => ({
 // Input container style (base)
 export const inputBaseStyle = (isDarkMode, themeColorRgb, isFocused = false) => ({
   width: '100%',
-  padding: '8px 14px',
+  padding: '5px 14px',
   border: isFocused 
     ? `1px solid rgba(${themeColorRgb}, 0.5)`
     : (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd'),

@@ -1,9 +1,16 @@
 import React, { useState } from 'react'
-import Select from '../common/Select'
+import { useTheme } from '../../contexts/ThemeContext'
+import CustomDropdown from '../common/CustomDropdown'
 import Input from '../common/Input'
 
 function TransactionLineInput({ line, lineIndex, accounts, onChange, onRemove, canRemove }) {
+  const { themeColor } = useTheme()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+  }
+  const themeColorRgb = hexToRgb(themeColor)
   const [errors, setErrors] = useState({})
 
   const handleChange = (field, value) => {
@@ -26,12 +33,15 @@ function TransactionLineInput({ line, lineIndex, accounts, onChange, onRemove, c
     }
   }
 
-  const accountOptions = accounts
-    .filter((acc) => acc.is_active)
-    .map((acc) => ({
-      value: acc.id,
-      label: `${acc.account_number ? acc.account_number + ' - ' : ''}${acc.account_name}`
-    }))
+  const accountOptions = [
+    { value: '', label: 'Select account' },
+    ...accounts
+      .filter((acc) => acc.is_active)
+      .map((acc) => ({
+        value: acc.id,
+        label: `${acc.account_number ? acc.account_number + ' - ' : ''}${acc.account_name}`
+      }))
+  ]
 
   const containerStyle = {
     display: 'grid',
@@ -73,13 +83,13 @@ function TransactionLineInput({ line, lineIndex, accounts, onChange, onRemove, c
       </div>
 
       <div>
-        <Select
-          name={`account_${lineIndex}`}
-          value={line.account_id || ''}
-          onChange={(e) => handleChange('account_id', parseInt(e.target.value))}
+        <CustomDropdown
+          value={line.account_id ?? ''}
+          onChange={(e) => handleChange('account_id', e.target.value === '' || e.target.value == null ? undefined : Number(e.target.value))}
           options={accountOptions}
           placeholder="Select account"
-          required
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
           error={errors.account_id}
         />
       </div>

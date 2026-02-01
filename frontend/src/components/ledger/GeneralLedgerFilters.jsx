@@ -1,10 +1,17 @@
 import React from 'react'
+import { useTheme } from '../../contexts/ThemeContext'
 import Input from '../common/Input'
-import Select from '../common/Select'
+import CustomDropdown from '../common/CustomDropdown'
 import Button from '../common/Button'
 
 function GeneralLedgerFilters({ filters, accounts, onFilterChange, onClearFilters, onExport, onExportExcel, loading = false }) {
+  const { themeColor } = useTheme()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+  }
+  const themeColorRgb = hexToRgb(themeColor)
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -65,12 +72,15 @@ function GeneralLedgerFilters({ filters, accounts, onFilterChange, onClearFilter
       
       <div style={gridStyle}>
         <div style={{ gridColumn: 'span 2' }}>
-          <Select
+          <CustomDropdown
             label="Account"
             name="account_id"
-            value={filters.account_id || ''}
+            value={filters.account_id ?? ''}
             onChange={handleChange}
             options={accountOptions}
+            placeholder="All Accounts"
+            isDarkMode={isDarkMode}
+            themeColorRgb={themeColorRgb}
           />
         </div>
 
@@ -95,7 +105,7 @@ function GeneralLedgerFilters({ filters, accounts, onFilterChange, onClearFilter
         {onExport && (
           <Button
             type="button"
-            variant="secondary"
+            variant="primary"
             onClick={onExport}
             disabled={loading}
           >
@@ -105,7 +115,7 @@ function GeneralLedgerFilters({ filters, accounts, onFilterChange, onClearFilter
         {onExportExcel && (
           <Button
             type="button"
-            variant="secondary"
+            variant="primary"
             onClick={onExportExcel}
             disabled={loading}
           >
@@ -114,7 +124,7 @@ function GeneralLedgerFilters({ filters, accounts, onFilterChange, onClearFilter
         )}
         <Button
           type="button"
-          variant="secondary"
+          variant="primary"
           onClick={onClearFilters}
           disabled={loading}
         >

@@ -1,10 +1,17 @@
 import React from 'react'
+import { useTheme } from '../../contexts/ThemeContext'
 import Input from '../common/Input'
-import Select from '../common/Select'
+import CustomDropdown from '../common/CustomDropdown'
 import Button from '../common/Button'
 
 function TransactionFilters({ filters, onFilterChange, onClearFilters }) {
+  const { themeColor } = useTheme()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+  }
+  const themeColorRgb = hexToRgb(themeColor)
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -72,32 +79,42 @@ function TransactionFilters({ filters, onFilterChange, onClearFilters }) {
           onChange={handleChange}
         />
 
-        <Select
+        <CustomDropdown
           name="transaction_type"
           label="Type"
           value={filters.transaction_type || ''}
           onChange={handleChange}
           options={transactionTypeOptions}
+          placeholder="All Types"
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
         />
 
-        <Select
+        <CustomDropdown
           name="is_posted"
           label="Status"
           value={filters.is_posted === undefined ? '' : String(filters.is_posted)}
           onChange={handleChange}
           options={statusOptions}
+          placeholder="All Status"
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
         />
 
-        <Select
+        <CustomDropdown
           name="is_void"
           label="Void Status"
           value={filters.is_void === undefined ? '' : String(filters.is_void)}
           onChange={handleChange}
           options={voidOptions}
+          placeholder="Include All"
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
         />
 
-        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-          <Button type="button" variant="secondary" onClick={onClearFilters} style={{ width: '100%' }}>
+        <div style={{ marginBottom: 0 }}>
+          <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, marginBottom: '4px', visibility: 'hidden', lineHeight: 1.2 }} aria-hidden>Clear</label>
+          <Button type="button" variant="primary" onClick={onClearFilters} style={{ width: '100%' }}>
             Clear Filters
           </Button>
         </div>

@@ -1,10 +1,17 @@
 import React, { useState, useEffect } from 'react'
+import { useTheme } from '../../contexts/ThemeContext'
 import Input from '../common/Input'
-import Select from '../common/Select'
+import CustomDropdown from '../common/CustomDropdown'
 import Button from '../common/Button'
 
 function AccountForm({ account, accounts, onSubmit, onCancel }) {
+  const { themeColor } = useTheme()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+  }
+  const themeColorRgb = hexToRgb(themeColor)
   
   const [formData, setFormData] = useState({
     account_name: '',
@@ -135,7 +142,7 @@ function AccountForm({ account, accounts, onSubmit, onCancel }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-        <Select
+        <CustomDropdown
           label="Account Type"
           name="account_type"
           value={formData.account_type}
@@ -144,9 +151,11 @@ function AccountForm({ account, accounts, onSubmit, onCancel }) {
           placeholder="Select account type"
           required
           error={errors.account_type}
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
         />
 
-        <Select
+        <CustomDropdown
           label="Balance Type"
           name="balance_type"
           value={formData.balance_type}
@@ -155,6 +164,8 @@ function AccountForm({ account, accounts, onSubmit, onCancel }) {
           placeholder="Select balance type"
           required
           error={errors.balance_type}
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
         />
       </div>
 
@@ -166,12 +177,15 @@ function AccountForm({ account, accounts, onSubmit, onCancel }) {
         placeholder="e.g., Current Asset, Fixed Asset"
       />
 
-      <Select
+      <CustomDropdown
         label="Parent Account"
         name="parent_account_id"
-        value={formData.parent_account_id || ''}
+        value={formData.parent_account_id ?? ''}
         onChange={handleChange}
         options={parentAccountOptions}
+        placeholder="None (Top Level)"
+        isDarkMode={isDarkMode}
+        themeColorRgb={themeColorRgb}
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>

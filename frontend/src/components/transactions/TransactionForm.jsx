@@ -1,11 +1,18 @@
 import React, { useState, useEffect } from 'react'
+import { useTheme } from '../../contexts/ThemeContext'
 import Input from '../common/Input'
-import Select from '../common/Select'
+import CustomDropdown from '../common/CustomDropdown'
 import Button from '../common/Button'
 import TransactionLineInput from './TransactionLineInput'
 
 function TransactionForm({ transaction, accounts, onSubmit, onCancel }) {
+  const { themeColor } = useTheme()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+  }
+  const themeColorRgb = hexToRgb(themeColor)
   
   const [formData, setFormData] = useState({
     transaction_date: new Date().toISOString().split('T')[0],
@@ -196,13 +203,16 @@ function TransactionForm({ transaction, accounts, onSubmit, onCancel }) {
             error={errors.transaction_date}
           />
 
-          <Select
+          <CustomDropdown
             label="Transaction Type"
             name="transaction_type"
             value={formData.transaction_type}
             onChange={handleChange}
             options={transactionTypeOptions}
+            placeholder="Journal Entry"
             required
+            isDarkMode={isDarkMode}
+            themeColorRgb={themeColorRgb}
           />
 
           <Input

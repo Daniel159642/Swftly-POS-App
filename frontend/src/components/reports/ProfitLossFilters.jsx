@@ -1,10 +1,17 @@
 import React from 'react'
+import { useTheme } from '../../contexts/ThemeContext'
 import Input from '../common/Input'
-import Select from '../common/Select'
+import CustomDropdown from '../common/CustomDropdown'
 import Button from '../common/Button'
 
 function ProfitLossFilters({ filters, onFilterChange, onGenerate, loading = false }) {
+  const { themeColor } = useTheme()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+  }
+  const themeColorRgb = hexToRgb(themeColor)
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -81,14 +88,21 @@ function ProfitLossFilters({ filters, onFilterChange, onGenerate, loading = fals
     borderTop: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`
   }
 
-  const quickLinkStyle = {
+  const quickSelectButtonStyle = {
+    padding: '4px 16px',
+    height: '28px',
+    display: 'flex',
+    alignItems: 'center',
+    whiteSpace: 'nowrap',
+    backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+    border: `1px solid rgba(${themeColorRgb}, 0.5)`,
+    borderRadius: '8px',
     fontSize: '14px',
-    color: '#6366f1',
-    background: 'none',
-    border: 'none',
+    fontWeight: 600,
+    color: '#fff',
     cursor: 'pointer',
-    textDecoration: 'underline',
-    padding: 0
+    transition: 'all 0.3s ease',
+    boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3)`
   }
 
   return (
@@ -121,15 +135,19 @@ function ProfitLossFilters({ filters, onFilterChange, onGenerate, loading = fals
           required
         />
 
-        <Select
+        <CustomDropdown
           label="Compare To"
           name="comparison_type"
           value={filters.comparison_type || 'none'}
           onChange={handleChange}
           options={comparisonOptions}
+          placeholder="No Comparison"
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
         />
 
-        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, marginBottom: '4px', visibility: 'hidden', lineHeight: 1.2 }} aria-hidden>Generate</label>
           <Button
             type="button"
             onClick={onGenerate}
@@ -145,19 +163,19 @@ function ProfitLossFilters({ filters, onFilterChange, onGenerate, loading = fals
         <span style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginRight: '8px' }}>
           Quick Select:
         </span>
-        <button type="button" onClick={() => setPresetPeriod('this_month')} style={quickLinkStyle}>
+        <button type="button" onClick={() => setPresetPeriod('this_month')} style={quickSelectButtonStyle}>
           This Month
         </button>
-        <button type="button" onClick={() => setPresetPeriod('last_month')} style={quickLinkStyle}>
+        <button type="button" onClick={() => setPresetPeriod('last_month')} style={quickSelectButtonStyle}>
           Last Month
         </button>
-        <button type="button" onClick={() => setPresetPeriod('this_quarter')} style={quickLinkStyle}>
+        <button type="button" onClick={() => setPresetPeriod('this_quarter')} style={quickSelectButtonStyle}>
           This Quarter
         </button>
-        <button type="button" onClick={() => setPresetPeriod('this_year')} style={quickLinkStyle}>
+        <button type="button" onClick={() => setPresetPeriod('this_year')} style={quickSelectButtonStyle}>
           This Year
         </button>
-        <button type="button" onClick={() => setPresetPeriod('last_year')} style={quickLinkStyle}>
+        <button type="button" onClick={() => setPresetPeriod('last_year')} style={quickSelectButtonStyle}>
           Last Year
         </button>
       </div>

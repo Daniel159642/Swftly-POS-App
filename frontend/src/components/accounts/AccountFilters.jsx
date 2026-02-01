@@ -1,10 +1,17 @@
 import React from 'react'
-import Select from '../common/Select'
+import { useTheme } from '../../contexts/ThemeContext'
+import CustomDropdown from '../common/CustomDropdown'
 import Input from '../common/Input'
 import Button from '../common/Button'
 
 function AccountFilters({ filters, onFilterChange, onClearFilters }) {
+  const { themeColor } = useTheme()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+  }
+  const themeColorRgb = hexToRgb(themeColor)
   
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -52,25 +59,34 @@ function AccountFilters({ filters, onFilterChange, onClearFilters }) {
           style={{ marginBottom: 0 }}
         />
 
-        <Select
+        <CustomDropdown
           name="account_type"
           value={filters.account_type || ''}
           onChange={handleChange}
           options={accountTypeOptions}
+          placeholder="All Types"
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
           style={{ marginBottom: 0 }}
         />
 
-        <Select
+        <CustomDropdown
           name="is_active"
           value={filters.is_active === undefined ? '' : String(filters.is_active)}
           onChange={handleChange}
           options={statusOptions}
+          placeholder="All Status"
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
           style={{ marginBottom: 0 }}
         />
 
-        <Button type="button" variant="secondary" onClick={onClearFilters} style={{ width: '100%' }}>
-          Clear Filters
-        </Button>
+        <div style={{ marginBottom: 0 }}>
+          <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, marginBottom: '4px', visibility: 'hidden', lineHeight: 1.2 }} aria-hidden>Clear</label>
+          <Button type="button" variant="primary" onClick={onClearFilters} style={{ width: '100%' }}>
+            Clear Filters
+          </Button>
+        </div>
       </div>
     </div>
   )
