@@ -66,6 +66,11 @@ function POS({ employeeId, employeeName }) {
   const [showSummary, setShowSummary] = useState(false) // Show transaction summary before payment
   const [selectedTip, setSelectedTip] = useState(0) // Tip amount selected by customer
   const [orderType, setOrderType] = useState(null) // 'pickup', 'delivery', or null
+  const [payAtPickupOrDelivery, setPayAtPickupOrDelivery] = useState(false) // true = pay when pickup/delivery (order placed with payment pending)
+  const [orderPlacedPayLater, setOrderPlacedPayLater] = useState(null) // { orderId, orderNumber, total } after placing pay-later order
+  const [orderToPayFromScan, setOrderToPayFromScan] = useState(null) // legacy: modal "Mark as paid (cash)" only
+  const [payingForOrderId, setPayingForOrderId] = useState(null) // when set: order loaded in POS for payment (cart + customer); complete via checkout UI
+  const [payingForOrderNumber, setPayingForOrderNumber] = useState(null)
   const [showCustomerInfoModal, setShowCustomerInfoModal] = useState(false) // Show customer info modal
   const [customerInfo, setCustomerInfo] = useState({
     name: '',
@@ -604,9 +609,14 @@ function POS({ employeeId, employeeName }) {
         
         // Normalize scanned barcode - remove all whitespace and convert to string
         const normalizedScannedBarcode = barcode.toString().replace(/\s+/g, '')
+        const rawBarcode = barcode.toString().trim()
+        // Extract order number from scan (scanners may send ORD# or wrong chars): keep only letters, digits, dashes
+        const cleanedOrderBarcode = rawBarcode.replace(/[^A-Za-z0-9-]/g, '')
+        const orderNumberMatch = rawBarcode.match(/(ORD-?\d{4}-?\d{2}-?\d{2}-?\d+)/i) || cleanedOrderBarcode.match(/(ORD-?\d{8}-?\d+)/i)
+        const extractedOrderNumber = orderNumberMatch ? orderNumberMatch[1].toUpperCase().replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : null
         
         // Debug logging
-        console.log('Scanned barcode:', barcode, 'Normalized:', normalizedScannedBarcode, 'Length:', normalizedScannedBarcode.length)
+        console.log('Scanned barcode:', barcode, 'Normalized:', normalizedScannedBarcode, 'Cleaned:', cleanedOrderBarcode, 'Extracted:', extractedOrderNumber)
         
         // Helper function to normalize barcode for comparison
         const normalizeBarcode = (barcodeValue) => {
@@ -677,6 +687,91 @@ function POS({ employeeId, employeeName }) {
           // Keep scanner open for continuous scanning
           showToast(`Added ${product.product_name} to cart`, 'success')
           return
+        }
+
+        // Check if barcode is an order number (pay-later order to complete payment)
+        // Scanners often corrupt chars (e.g. "ORD#,4:"!/-, (" instead of ORD-20250201-0001); try digits-only as order_id
+        const digitsOnly = (rawBarcode.replace(/\D/g, '') || '')
+        const looksLikeOrderNumber = /ORD/i.test(rawBarcode) || /^\d+$/.test(cleanedOrderBarcode) || extractedOrderNumber || (digitsOnly.length > 0 && digitsOnly.length <= 12)
+        const orderSearchVariants = []
+        if (extractedOrderNumber) orderSearchVariants.push({ type: 'order_number', value: extractedOrderNumber })
+        if (cleanedOrderBarcode && cleanedOrderBarcode.toUpperCase().startsWith('ORD')) orderSearchVariants.push({ type: 'order_number', value: cleanedOrderBarcode })
+        orderSearchVariants.push({ type: 'order_number', value: rawBarcode })
+        if (digitsOnly) orderSearchVariants.push({ type: 'order_id', value: digitsOnly })
+        if (/^\d+$/.test(cleanedOrderBarcode)) orderSearchVariants.push({ type: 'order_id', value: cleanedOrderBarcode })
+        if (looksLikeOrderNumber) {
+          for (const { type, value } of orderSearchVariants) {
+            if (!value) continue
+            if (type === 'order_id' ? value.length < 1 : value.length < 3) continue
+            try {
+              const searchParam = type === 'order_id' ? `order_id=${encodeURIComponent(value)}` : `order_number=${encodeURIComponent(value)}`
+              const orderRes = await fetch(`/api/orders/search?${searchParam}`)
+              const orderData = await orderRes.json()
+              const order = Array.isArray(orderData.data) && orderData.data.length > 0 ? orderData.data[0] : orderData.data
+              if (order) {
+                if ((order.payment_status || 'completed').toLowerCase() === 'pending') {
+                  setShowBarcodeScanner(false)
+                  try {
+                    const itemsRes = await fetch(`/api/order_items?order_id=${order.order_id}`)
+                    const itemsData = await itemsRes.json()
+                    const orderItems = itemsData.data || []
+                    const cartItems = orderItems.map(oi => ({
+                      product_id: oi.product_id,
+                      product_name: oi.product_name || `Product ${oi.product_id}`,
+                      sku: oi.sku || '',
+                      unit_price: parseFloat(oi.unit_price) || 0,
+                      quantity: parseInt(oi.quantity) || 1,
+                      available_quantity: 0,
+                      variant_id: oi.variant_id != null ? Number(oi.variant_id) : null,
+                      variant_name: oi.variant_name || null,
+                      notes: oi.notes || null,
+                      discount: parseFloat(oi.discount) || 0,
+                      tax_rate: parseFloat(oi.tax_rate) != null ? parseFloat(oi.tax_rate) : 0.08
+                    }))
+                    setCart(cartItems)
+                    setPayingForOrderId(order.order_id)
+                    setPayingForOrderNumber(order.order_number || String(order.order_id))
+                    if (order.order_type) setOrderType(order.order_type)
+                    setShowCustomerDisplay(true)
+                    if (order.customer_id) {
+                      const custRes = await fetch(`/api/customers/${order.customer_id}`)
+                      const custJson = await custRes.json()
+                      const cust = custJson?.data || custJson
+                      if (cust && (cust.customer_id != null || custJson.success)) {
+                        setSelectedCustomer({
+                          customer_id: cust.customer_id ?? order.customer_id,
+                          customer_name: cust.customer_name || order.customer_name || 'Customer',
+                          email: cust.email,
+                          phone: cust.phone,
+                          loyalty_points: cust.loyalty_points
+                        })
+                        setCustomerInfo({
+                          name: cust.customer_name || '',
+                          email: cust.email || '',
+                          phone: cust.phone || '',
+                          address: cust.address || ''
+                        })
+                      } else {
+                        setSelectedCustomer({ customer_id: order.customer_id, customer_name: order.customer_name || 'Customer' })
+                      }
+                    } else {
+                      setSelectedCustomer(null)
+                      setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                    }
+                    showToast(`Order #${order.order_number || order.order_id} loaded — add items if needed, then press Pay to complete payment`, 'success')
+                  } catch (loadErr) {
+                    console.error('Error loading order into POS:', loadErr)
+                    showToast('Failed to load order', 'error')
+                  }
+                  return
+                }
+                showToast(`Order #${order.order_number || order.order_id} is already paid`, 'success')
+                return
+              }
+            } catch (orderErr) {
+              console.error('Order lookup error:', orderErr)
+            }
+          }
         }
         
         // Check if barcode is an exchange credit (starts with EXC-)
@@ -1132,6 +1227,84 @@ function POS({ employeeId, employeeName }) {
     }
   }
 
+  const placeOrderPayLater = async () => {
+    if (!canProcessSale) {
+      showToast('You do not have permission to process sales', 'error')
+      return
+    }
+    if (cart.length === 0) {
+      showToast('Cart is empty', 'error')
+      return
+    }
+    if (!customerInfo.name || !customerInfo.phone) {
+      showToast('Name and phone required for pickup/delivery', 'error')
+      return
+    }
+    if (orderType === 'delivery' && !customerInfo.address) {
+      showToast('Address required for delivery', 'error')
+      return
+    }
+    setProcessing(true)
+    try {
+      const items = cart
+        .filter(item => !item.is_exchange_credit && item.product_id !== 'EXCHANGE_CREDIT' && !item.is_points_redemption && item.product_id !== 'POINTS_REDEMPTION')
+        .map(item => ({
+          product_id: item.product_id,
+          quantity: parseInt(item.quantity) || 1,
+          unit_price: parseFloat(item.unit_price) || 0,
+          discount: parseFloat(item.discount) || 0,
+          tax_rate: parseFloat(item.tax_rate) || taxRate || 0.08,
+          ...(item.variant_id ? { variant_id: item.variant_id } : {}),
+          ...(item.notes ? { notes: item.notes } : {})
+        }))
+      const empId = employeeId ?? (localStorage.getItem('employeeId') ? parseInt(localStorage.getItem('employeeId'), 10) : null)
+      const customerId = selectedCustomer?.customer_id || null
+      const customerInfoToSave = customerInfo.name ? customerInfo : null
+      const res = await fetch('/api/create_order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(localStorage.getItem('sessionToken') && { Authorization: `Bearer ${localStorage.getItem('sessionToken')}` })
+        },
+        body: JSON.stringify({
+          employee_id: empId,
+          items,
+          payment_method: 'cash',
+          tax_rate: taxRate,
+          tip: selectedTip || 0,
+          discount: 0,
+          order_type: orderType,
+          customer_info: customerInfoToSave,
+          customer_id: customerId,
+          points_used: 0,
+          payment_status: 'pending',
+          order_status: 'placed'
+        })
+      })
+      const result = await res.json()
+      if (result.success) {
+        const total = calculateTotal()
+        showToast(`Order ${result.order_number} placed. Customer will pay when ${orderType === 'pickup' ? 'they pick up' : 'delivered'}.`, 'success')
+        setOrderPlacedPayLater({
+          orderId: result.order_id,
+          orderNumber: result.order_number,
+          total
+        })
+        setCart([])
+        setPayAtPickupOrDelivery(false)
+        setShowSummary(false)
+        setShowPaymentForm(false)
+      } else {
+        showToast(result.message || 'Failed to place order', 'error')
+      }
+    } catch (err) {
+      console.error(err)
+      showToast('Failed to place order', 'error')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
   const processOrder = async () => {
     // Check permission
     if (!canProcessSale) {
@@ -1156,6 +1329,42 @@ function POS({ employeeId, employeeName }) {
     setProcessing(true)
 
     try {
+      // Paying for a scanned pay-later order: UPDATE the existing order (mark paid/complete), do NOT create a new order
+      if (payingForOrderId) {
+        const token = localStorage.getItem('sessionToken')
+        const res = await fetch(`/api/orders/${payingForOrderId}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
+          body: JSON.stringify({
+            order_status: 'completed',
+            payment_status: 'completed',
+            payment_method: paymentMethod === 'credit_card' ? 'credit_card' : paymentMethod === 'debit_card' ? 'debit_card' : 'cash'
+          })
+        })
+        const result = await res.json()
+        if (result.success) {
+          showToast(`Order ${payingForOrderNumber || payingForOrderId} paid successfully`, 'success')
+          setPaymentCompleted(true)
+          setCurrentOrderId(payingForOrderId)
+          setCurrentOrderNumber(payingForOrderNumber || String(payingForOrderId))
+          setCart([])
+          setPayingForOrderId(null)
+          setPayingForOrderNumber(null)
+          if (paymentMethod === 'cash') {
+            const change = (parseFloat(amountPaid) || 0) - calculateTotal()
+            setChangeAmount(change > 0 ? change : 0)
+            setShowChangeScreen(true)
+          }
+          setShowPaymentForm(false)
+          setShowSummary(false)
+        } else {
+          showToast(result.message || 'Failed to complete payment', 'error')
+        }
+        setProcessing(false)
+        return // do not fall through – we updated the existing order; never create_order or transaction/start
+      }
+
+      // New sale: create order / start transaction (only when NOT paying for an existing scanned order)
       // Get exchange credit info if present
       const exchangeCreditItem = cart.find(item => item.is_exchange_credit)
       const exchangeCreditAmount = exchangeCreditItem ? Math.abs(parseFloat(exchangeCreditItem.unit_price) * exchangeCreditItem.quantity) : 0
@@ -1819,6 +2028,8 @@ function POS({ employeeId, employeeName }) {
                   onClick={() => {
                     setShowCustomerDisplay(false)
                     setShowSummary(false)
+                    setPayingForOrderId(null)
+                    setPayingForOrderNumber(null)
                   }}
                   style={{
                     padding: '6px 12px',
@@ -1857,6 +2068,8 @@ function POS({ employeeId, employeeName }) {
                   setShowPaymentForm(false)
                   setShowSummary(false)
                   setAmountPaid('')
+                  setPayingForOrderId(null)
+                  setPayingForOrderNumber(null)
                 }}
                 onTipSelect={handleTipSelect}
                 onReceiptSelect={handleReceiptSelect}
@@ -1882,8 +2095,8 @@ function POS({ employeeId, employeeName }) {
                 employeeId={employeeId}
                 paymentCompleted={paymentCompleted}
                 transactionId={currentTransactionId}
-                orderId={currentOrderId}
-                orderNumber={currentOrderNumber}
+                orderId={payingForOrderId || currentOrderId}
+                orderNumber={payingForOrderNumber || currentOrderNumber}
               />
             </div>
           </div>
@@ -2022,6 +2235,7 @@ function POS({ employeeId, employeeName }) {
                   if (!showPaymentForm) {
                     if (orderType === 'pickup') {
                       setOrderType(null)
+                      setPayAtPickupOrDelivery(false)
                       setCustomerInfo({ name: '', email: '', phone: '', address: '' })
                       setSelectedCustomer(null)
                     } else {
@@ -2051,6 +2265,7 @@ function POS({ employeeId, employeeName }) {
                   if (!showPaymentForm) {
                     if (orderType === 'delivery') {
                       setOrderType(null)
+                      setPayAtPickupOrDelivery(false)
                       setCustomerInfo({ name: '', email: '', phone: '', address: '' })
                       setSelectedCustomer(null)
                     } else {
@@ -2082,6 +2297,32 @@ function POS({ employeeId, employeeName }) {
                 {orderType === 'delivery' && customerInfo.address && (
                   <div style={{ marginTop: '4px' }}><strong>Address:</strong> {customerInfo.address}</div>
                 )}
+              </div>
+            )}
+            {/* Pay now vs Pay when pickup/delivery */}
+            {orderType && (orderType === 'pickup' || orderType === 'delivery') && (
+              <div style={{ marginTop: '12px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13px', color: isDarkMode ? '#ccc' : '#555' }}>Payment:</span>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
+                  <input
+                    type="radio"
+                    name="payWhen"
+                    checked={!payAtPickupOrDelivery}
+                    onChange={() => setPayAtPickupOrDelivery(false)}
+                    style={{ accentColor: themeColor }}
+                  />
+                  Pay now
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
+                  <input
+                    type="radio"
+                    name="payWhen"
+                    checked={payAtPickupOrDelivery}
+                    onChange={() => setPayAtPickupOrDelivery(true)}
+                    style={{ accentColor: themeColor }}
+                  />
+                  {orderType === 'pickup' ? 'Pay when you pick up' : 'Pay on delivery'}
+                </label>
               </div>
             )}
           </div>
@@ -2347,6 +2588,11 @@ function POS({ employeeId, employeeName }) {
               <button
                 onClick={async () => {
                   if (!showPaymentForm) {
+                    // Pay when pickup/delivery: place order without payment
+                    if (orderType && payAtPickupOrDelivery) {
+                      placeOrderPayLater()
+                      return
+                    }
                     const registerOpen = await checkRegisterOpen()
                     if (!registerOpen) {
                       showToast('Register is closed. Open the register to process payments.', 'warning', {
@@ -2364,7 +2610,7 @@ function POS({ employeeId, employeeName }) {
                     setShowCustomerDisplay(true)
                   }
                 }}
-                disabled={cart.length === 0 || showPaymentForm}
+                disabled={cart.length === 0 || showPaymentForm || (orderType && payAtPickupOrDelivery && processing)}
                 style={{
                   flex: 1,
                   padding: '16px',
@@ -2382,7 +2628,7 @@ function POS({ employeeId, employeeName }) {
                   opacity: showPaymentForm ? 0.3 : 1
                 }}
               >
-                Pay
+                {orderType && payAtPickupOrDelivery ? (processing ? 'Placing…' : 'Place order') : 'Pay'}
               </button>
             </ProtectedComponent>
             <ProtectedComponent permission="apply_discount" fallback={null}>
@@ -3591,6 +3837,154 @@ function POS({ employeeId, employeeName }) {
                 )}
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Order placed (pay later) - show receipt with barcode + Print button */}
+      {orderPlacedPayLater && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1600
+        }}>
+          <div style={{
+            backgroundColor: '#fff',
+            borderRadius: '12px',
+            padding: '24px',
+            maxWidth: '400px',
+            width: '90%',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            textAlign: 'center'
+          }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: '18px', color: '#333' }}>Order placed</h3>
+            <p style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 600, color: '#333' }}>
+              #{orderPlacedPayLater.orderNumber}
+            </p>
+            <p style={{ margin: '0 0 20px', fontSize: '14px', color: '#666' }}>
+              Total: ${(orderPlacedPayLater.total || 0).toFixed(2)} — Customer will pay at pickup/delivery
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (orderPlacedPayLater.orderId) {
+                    window.open(`/api/receipt/${orderPlacedPayLater.orderId}`, '_blank', 'noopener')
+                  }
+                }}
+                style={{
+                  padding: '12px 20px',
+                  borderRadius: '8px',
+                  border: `2px solid ${themeColor}`,
+                  backgroundColor: 'transparent',
+                  color: themeColor,
+                  fontWeight: 600,
+                  fontSize: '15px',
+                  cursor: 'pointer'
+                }}
+              >
+                Print receipt (with barcode)
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrderPlacedPayLater(null)}
+                style={{
+                  padding: '12px 20px',
+                  borderRadius: '8px',
+                  border: '1px solid #ddd',
+                  backgroundColor: '#f5f5f5',
+                  color: '#333',
+                  fontWeight: 600,
+                  fontSize: '15px',
+                  cursor: 'pointer'
+                }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pay for order (scanned barcode = order number) */}
+      {orderToPayFromScan && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1600
+        }}>
+          <div style={{
+            backgroundColor: '#fff',
+            borderRadius: '12px',
+            padding: '24px',
+            maxWidth: '400px',
+            width: '90%',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            textAlign: 'center'
+          }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: '18px', color: '#333' }}>Pay for order</h3>
+            <p style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 600, color: '#333' }}>
+              #{orderToPayFromScan.orderNumber}
+            </p>
+            <p style={{ margin: '0 0 20px', fontSize: '14px', color: '#666' }}>
+              Total: ${(orderToPayFromScan.total || 0).toFixed(2)}
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  const token = localStorage.getItem('sessionToken')
+                  const res = await fetch(`/api/orders/${orderToPayFromScan.orderId}/status`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
+                    body: JSON.stringify({ order_status: 'completed', payment_status: 'completed', payment_method: 'cash' })
+                  })
+                  const result = await res.json()
+                  if (result.success) {
+                    showToast(`Order ${orderToPayFromScan.orderNumber} marked as paid`, 'success')
+                    setOrderToPayFromScan(null)
+                  } else {
+                    showToast(result.message || 'Failed to mark as paid', 'error')
+                  }
+                }}
+                style={{
+                  padding: '12px 20px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: themeColor,
+                  color: '#fff',
+                  fontWeight: 600,
+                  fontSize: '15px',
+                  cursor: 'pointer'
+                }}
+              >
+                Mark as paid (cash)
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrderToPayFromScan(null)}
+                style={{
+                  padding: '12px 20px',
+                  borderRadius: '8px',
+                  border: '1px solid #ddd',
+                  backgroundColor: '#f5f5f5',
+                  color: '#333',
+                  fontWeight: 600,
+                  fontSize: '15px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

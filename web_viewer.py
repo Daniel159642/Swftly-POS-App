@@ -1829,8 +1829,39 @@ def api_create_order():
         else:
             tax_rate = float(tax_rate)
         fee_rates = settings.get('transaction_fee_rates')
+        # Resolve employee_id: request body, then session, then first active employee
+        employee_id = data.get('employee_id')
+        if not employee_id and request.headers.get('Authorization'):
+            session_token = request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+            if session_token:
+                session_data = verify_session(session_token)
+                if session_data and session_data.get('valid'):
+                    employee_id = session_data.get('employee_id')
+        if not employee_id:
+            try:
+                conn = get_connection()
+                cur = conn.cursor()
+                cur.execute("SELECT employee_id FROM employees WHERE is_active = 1 ORDER BY employee_id LIMIT 1")
+                row = cur.fetchone()
+                conn.close()
+                employee_id = row[0] if row and isinstance(row, tuple) else (row.get('employee_id') if isinstance(row, dict) else None)
+            except Exception:
+                employee_id = None
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID or session required'}), 401
+        # Pay-later: for pickup/delivery always pass payment_status and order_status so order is saved as not paid
+        order_type = (data.get('order_type') or '').strip().lower()
+        is_pickup_delivery = order_type in ('pickup', 'delivery')
+        pay_status = data.get('payment_status')
+        order_status_val = data.get('order_status')
+        if is_pickup_delivery:
+            pay_status = (pay_status or 'pending').strip().lower() if pay_status else 'pending'
+            order_status_val = (order_status_val or 'placed').strip().lower() if order_status_val else 'placed'
+        elif order_status_val == 'placed' or pay_status == 'pending':
+            pay_status = pay_status or 'pending'
+            order_status_val = order_status_val or 'placed'
         result = create_order(
-            employee_id=data.get('employee_id'),
+            employee_id=employee_id,
             items=data.get('items', []),
             payment_method=data.get('payment_method', 'cash'),
             tax_rate=tax_rate,
@@ -1840,29 +1871,14 @@ def api_create_order():
             order_type=data.get('order_type'),
             customer_info=data.get('customer_info'),
             points_used=int(data.get('points_used', 0) or 0),
-            transaction_fee_rates=fee_rates
+            transaction_fee_rates=fee_rates,
+            payment_status=pay_status,
+            order_status_override=order_status_val
         )
         
-        # Post to accounting (accounting.transactions) so Accounting page reflects the sale
-        if result.get('success') and result.get('order_id'):
-            employee_id = data.get('employee_id')
-            if not employee_id and request.headers.get('Authorization'):
-                session_token = request.headers.get('Authorization', '').replace('Bearer ', '').strip()
-                if session_token:
-                    session_data = verify_session(session_token)
-                    if session_data and session_data.get('valid'):
-                        employee_id = session_data.get('employee_id')
-            if not employee_id:
-                try:
-                    conn = get_connection()
-                    cur = conn.cursor()
-                    cur.execute("SELECT employee_id FROM employees WHERE is_active = 1 ORDER BY employee_id LIMIT 1")
-                    row = cur.fetchone()
-                    conn.close()
-                    employee_id = row[0] if row and isinstance(row, tuple) else (row.get('employee_id') if isinstance(row, dict) else None)
-                except Exception:
-                    employee_id = None
-            if employee_id:
+        # Post to accounting only when order was paid (not pay-later)
+        if (result.get('success') and result.get('order_id') and employee_id
+                and pay_status != 'pending'):
                 try:
                     from pos_accounting_bridge import journalize_sale_to_accounting
                     jr = journalize_sale_to_accounting(result['order_id'], int(employee_id))
@@ -2334,9 +2350,24 @@ def api_search_orders():
                     LEFT JOIN customers c ON o.customer_id = c.customer_id
                     WHERE o.order_id = %s
                 """, (int(order_id),))
+                rows = cursor.fetchall()
+                data = [dict(r) for r in rows]
             else:
-                # Search by order_number (exact match, case-insensitive, or partial)
-                cursor.execute("""
+                # Search by order_number: exact, partial, or fuzzy (barcode scanners may send ORD# or wrong chars)
+                import re
+                cleaned = re.sub(r'[^A-Za-z0-9-]', '', (order_number or ''))
+                digits_only = re.sub(r'[^0-9]', '', (order_number or ''))
+                pattern = f'%{order_number}%'
+                params = [pattern, order_number]
+                fuzzy_pattern = None
+                if cleaned.upper().startswith('ORD'):
+                    digits = re.sub(r'[^0-9]', '', cleaned)
+                    if len(digits) >= 9:
+                        date_part = digits[:8]
+                        seq_part = digits[8:]
+                        fuzzy_pattern = f'%ORD%{date_part}%{seq_part}%'
+                        params.append(fuzzy_pattern)
+                sql = """
                     SELECT 
                         o.*,
                         e.first_name || ' ' || e.last_name as employee_name,
@@ -2346,12 +2377,28 @@ def api_search_orders():
                     LEFT JOIN customers c ON o.customer_id = c.customer_id
                     WHERE o.order_number::text ILIKE %s
                        OR o.order_number::text = %s
-                    ORDER BY o.order_date DESC
-                    LIMIT 10
-                """, (f'%{order_number}%', order_number))
-            
-            rows = cursor.fetchall()
-            data = [dict(r) for r in rows]
+                """
+                if fuzzy_pattern:
+                    sql += " OR o.order_number::text ILIKE %s"
+                sql += " ORDER BY o.order_date DESC LIMIT 10"
+                cursor.execute(sql, params)
+                rows = cursor.fetchall()
+                data = [dict(r) for r in rows]
+                # If no match and barcode looked like order (e.g. "ORD#,4:" -> digits 4), try order_id
+                if not data and digits_only and digits_only.isdigit():
+                    cursor.execute("""
+                        SELECT 
+                            o.*,
+                            e.first_name || ' ' || e.last_name as employee_name,
+                            c.customer_name
+                        FROM orders o
+                        LEFT JOIN employees e ON o.employee_id = e.employee_id
+                        LEFT JOIN customers c ON o.customer_id = c.customer_id
+                        WHERE o.order_id = %s
+                    """, (int(digits_only),))
+                    rows = cursor.fetchall()
+                    data = [dict(r) for r in rows]
+
             return jsonify({'data': data})
         finally:
             conn.close()
@@ -2378,6 +2425,44 @@ def api_void_order(order_id):
             return jsonify({'success': False, 'message': 'Employee ID or session required'}), 401
         from database import void_order
         result = void_order(order_id=order_id, employee_id=employee_id, reason=data.get('reason'))
+        if result.get('success'):
+            return jsonify(result), 200
+        return jsonify(result), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/orders/<int:order_id>/status', methods=['PATCH'])
+def api_update_order_status(order_id):
+    """Update order_status and optionally payment_status (e.g. mark as paid)."""
+    try:
+        data = request.get_json() or {}
+        order_status = data.get('order_status')
+        if not order_status:
+            return jsonify({'success': False, 'message': 'order_status required'}), 400
+        employee_id = None
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '').strip() or data.get('session_token')
+        if session_token:
+            session_data = verify_session(session_token)
+            if session_data and session_data.get('valid'):
+                employee_id = session_data.get('employee_id')
+        if not employee_id:
+            employee_id = data.get('employee_id')
+        from database import update_order_status
+        result = update_order_status(
+            order_id=order_id,
+            order_status=order_status.strip(),
+            payment_status=data.get('payment_status'),
+            payment_method=data.get('payment_method'),
+            employee_id=employee_id
+        )
+        if result.get('success') and data.get('payment_status') == 'completed' and employee_id:
+            try:
+                from pos_accounting_bridge import journalize_sale_to_accounting
+                journalize_sale_to_accounting(order_id, int(employee_id))
+            except Exception as je:
+                print(f"Accounting journalize_sale (order {order_id}) after mark-paid: {je}")
         if result.get('success'):
             return jsonify(result), 200
         return jsonify(result), 400
@@ -8705,6 +8790,8 @@ def api_accounting_settings():
             updates['default_sales_tax_pct'] = float(data['default_sales_tax_pct'])
         if 'transaction_fee_rates' in data:
             updates['transaction_fee_rates'] = dict(data['transaction_fee_rates'])
+        if 'delivery_pay_on_delivery_cash_only' in data:
+            updates['delivery_pay_on_delivery_cash_only'] = bool(data['delivery_pay_on_delivery_cash_only'])
         if not updates:
             return jsonify({'success': False, 'message': 'No settings to update'}), 400
         ok = update_establishment_settings(None, updates)

@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useToast } from '../contexts/ToastContext'
 import { useTheme } from '../contexts/ThemeContext'
-import { UserPlus } from 'lucide-react'
+import { UserPlus, MoreVertical } from 'lucide-react'
 import { formLabelStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel } from '../components/FormStyles'
 
 const isDark = () => document.documentElement.classList.contains('dark-theme')
@@ -24,6 +25,45 @@ export default function Customers() {
   const [saving, setSaving] = useState(false)
   const [editForm, setEditForm] = useState({ customer_name: '', email: '', phone: '', address: '' })
   const [pointsForm, setPointsForm] = useState({ points: '', reason: '' })
+  const [actionsOpenFor, setActionsOpenFor] = useState(null)
+  const [dropdownAnchor, setDropdownAnchor] = useState(null)
+  const actionsMenuRef = useRef(null)
+  const dropdownRef = useRef(null)
+  const tableContainerRef = useRef(null)
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (!actionsOpenFor) return
+      const inTrigger = actionsMenuRef.current?.contains(e.target)
+      const inDropdown = dropdownRef.current?.contains(e.target)
+      if (!inTrigger && !inDropdown) {
+        setActionsOpenFor(null)
+        setDropdownAnchor(null)
+      }
+    }
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [actionsOpenFor])
+
+  // Reposition dropdown on scroll/resize so it stays anchored to the button
+  useEffect(() => {
+    if (!actionsOpenFor || !dropdownAnchor) return
+    const updatePosition = () => {
+      const el = actionsMenuRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      setDropdownAnchor({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+    }
+    window.addEventListener('scroll', updatePosition, true)
+    window.addEventListener('resize', updatePosition)
+    const container = tableContainerRef.current
+    if (container) container.addEventListener('scroll', updatePosition)
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true)
+      window.removeEventListener('resize', updatePosition)
+      if (container) container.removeEventListener('scroll', updatePosition)
+    }
+  }, [actionsOpenFor, dropdownAnchor])
 
   const loadCustomers = useCallback(async () => {
     setLoading(true)
@@ -273,7 +313,7 @@ export default function Customers() {
         </div>
       </div>
 
-      <div style={{ backgroundColor: '#fff', borderRadius: '4px', overflowX: 'auto', overflowY: 'visible', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', width: '100%' }}>
+      <div ref={tableContainerRef} style={{ backgroundColor: '#fff', borderRadius: '4px', overflowX: 'auto', overflowY: 'visible', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', width: '100%' }}>
         {loading ? (
           <div style={{ padding: '48px', textAlign: 'center', color: '#6b7280' }}>
             Loading customers...
@@ -290,7 +330,7 @@ export default function Customers() {
                 <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Email</th>
                 <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Phone</th>
                 <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Points</th>
-                <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '200px' }}>Actions</th>
+                <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '56px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -306,27 +346,38 @@ export default function Customers() {
                     {c.loyalty_points != null ? Number(c.loyalty_points) : 0}
                   </td>
                   <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', textAlign: 'right' }}>
-                    <button
-                      type="button"
-                      onClick={() => openView(c)}
-                      style={{ marginRight: '8px', background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
-                    >
-                      View
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openEdit(c)}
-                      style={{ marginRight: '8px', background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openPoints(c)}
-                      style={{ background: 'none', border: 'none', color: '#059669', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
-                    >
-                      Give points / coupon
-                    </button>
+                    <div ref={actionsOpenFor === c.customer_id ? actionsMenuRef : null} style={{ display: 'inline-block' }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (actionsOpenFor === c.customer_id) {
+                            setActionsOpenFor(null)
+                            setDropdownAnchor(null)
+                          } else {
+                            const rect = e.currentTarget.getBoundingClientRect()
+                            setDropdownAnchor({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+                            setActionsOpenFor(c.customer_id)
+                          }
+                        }}
+                        aria-label="Actions"
+                        style={{
+                          padding: '6px',
+                          background: 'none',
+                          border: 'none',
+                          color: '#6b7280',
+                          cursor: 'pointer',
+                          borderRadius: '6px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f3f4f6'; e.currentTarget.style.color = '#374151' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#6b7280' }}
+                      >
+                        <MoreVertical size={18} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -334,6 +385,96 @@ export default function Customers() {
           </table>
         )}
       </div>
+
+      {/* Actions dropdown (portal so it isn't clipped by table overflow) */}
+      {actionsOpenFor && dropdownAnchor && (() => {
+        const customer = filtered.find((c) => c.customer_id === actionsOpenFor)
+        if (!customer) return null
+        const close = () => {
+          setActionsOpenFor(null)
+          setDropdownAnchor(null)
+        }
+        return createPortal(
+          <div
+            ref={dropdownRef}
+            style={{
+              position: 'fixed',
+              top: dropdownAnchor.top,
+              right: dropdownAnchor.right,
+              minWidth: '180px',
+              backgroundColor: '#fff',
+              border: '1px solid #e5e7eb',
+              borderRadius: '8px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              zIndex: 9999,
+              overflow: 'hidden'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => { close(); openView(customer) }}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '10px 14px',
+                textAlign: 'left',
+                border: 'none',
+                background: 'none',
+                color: '#333',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: 'pointer'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f3f4f6' }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
+            >
+              View
+            </button>
+            <button
+              type="button"
+              onClick={() => { close(); openEdit(customer) }}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '10px 14px',
+                textAlign: 'left',
+                border: 'none',
+                background: 'none',
+                color: '#333',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: 'pointer'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f3f4f6' }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => { close(); openPoints(customer) }}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '10px 14px',
+                textAlign: 'left',
+                border: 'none',
+                background: 'none',
+                color: '#333',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: 'pointer'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f3f4f6' }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
+            >
+              Give points / coupon
+            </button>
+          </div>,
+          document.body
+        )
+      })()}
 
       {/* View modal */}
       {modal === 'view' && selected && (

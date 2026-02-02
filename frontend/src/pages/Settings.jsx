@@ -946,6 +946,7 @@ function Settings() {
     num_registers: 1,
     register_type: 'one_screen'
   })
+  const [deliveryPayOnDeliveryCashOnly, setDeliveryPayOnDeliveryCashOnly] = useState(false)
   const [receiptOptionsOffered, setReceiptOptionsOffered] = useState({
     print: true,
     email: true,
@@ -1274,6 +1275,38 @@ function Settings() {
   const themeColorRgb = hexToRgb(themeColor)
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
 
+  const loadEstablishmentSettings = async () => {
+    try {
+      const token = localStorage.getItem('sessionToken')
+      const res = await fetch('/api/accounting/settings', { headers: token ? { 'X-Session-Token': token } : {} })
+      const json = await res.json()
+      if (json.success && json.data && 'delivery_pay_on_delivery_cash_only' in json.data) {
+        setDeliveryPayOnDeliveryCashOnly(!!json.data.delivery_pay_on_delivery_cash_only)
+      }
+    } catch (e) {
+      console.warn('Could not load establishment settings:', e)
+    }
+  }
+  const saveDeliveryPayOnDeliveryCashOnly = async (value) => {
+    try {
+      const token = localStorage.getItem('sessionToken')
+      const res = await fetch('/api/accounting/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Session-Token': token } : {}) },
+        body: JSON.stringify({ delivery_pay_on_delivery_cash_only: value })
+      })
+      const json = await res.json()
+      if (json.success) {
+        setDeliveryPayOnDeliveryCashOnly(!!value)
+        setMessage({ type: 'success', text: 'Delivery payment setting saved.' })
+      } else {
+        setMessage({ type: 'error', text: json.message || 'Failed to save' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to save delivery setting' })
+    }
+  }
+
   useEffect(() => {
     const loadAllSettings = async () => {
       try {
@@ -1284,6 +1317,7 @@ function Settings() {
           loadDisplaySettings(),
           loadRewardsSettings(),
           loadPosSettings(),
+          loadEstablishmentSettings(),
           loadSmsSettings(),
           loadSmsStores(),
           loadCashSettings(),
@@ -2218,7 +2252,7 @@ function Settings() {
         },
         body: JSON.stringify({
           session_token: sessionToken,
-          enabled: rewardsSettings.enabled ? 1 : 0,
+          enabled: 1,
           require_email: rewardsSettings.require_email ? 1 : 0,
           require_phone: rewardsSettings.require_phone ? 1 : 0,
           require_both: rewardsSettings.require_both ? 1 : 0,
@@ -2686,14 +2720,13 @@ function Settings() {
         {/* Content */}
         <div>
           {/* Save Button - Hidden for location, cash, and pos tabs (pos has its own at bottom) */}
-          {activeTab !== 'location' && activeTab !== 'cash' && activeTab !== 'pos' && (
+          {activeTab !== 'location' && activeTab !== 'cash' && activeTab !== 'pos' && activeTab !== 'rewards' && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button
                 type="button"
                 className="button-26 button-26--header"
                 role="button"
                 onClick={
-                  activeTab === 'rewards' ? saveRewardsSettings :
                   activeTab === 'sms' ? saveSmsSettings :
                   null
                 }
@@ -2706,8 +2739,8 @@ function Settings() {
                 <div className="button-26__content">
                   <span className="button-26__text text">
                     {saving 
-                      ? (activeTab === 'rewards' ? 'Saving Rewards Settings...' : activeTab === 'sms' ? 'Saving...' : 'Saving...')
-                      : (activeTab === 'rewards' ? 'Save Rewards Settings' : activeTab === 'sms' ? 'Save SMS Settings' : 'Save')
+                      ? (activeTab === 'sms' ? 'Saving...' : 'Saving...')
+                      : (activeTab === 'sms' ? 'Save SMS Settings' : 'Save')
                     }
                   </span>
                 </div>
@@ -3242,7 +3275,7 @@ function Settings() {
             }
 
             .checkbox-wrapper-2 .ikxBAC:checked {
-              background-color: #6e79d6;
+              background-color: var(--theme-color, #6ba3f0);
             }
 
             .checkbox-wrapper-2 .ikxBAC:checked::after {
@@ -3255,7 +3288,7 @@ function Settings() {
             }
 
             .checkbox-wrapper-2 .ikxBAC:checked:hover {
-              background-color: #535db3;
+              filter: brightness(0.9);
             }
           `}</style>
           <h2 style={{
@@ -3352,15 +3385,8 @@ function Settings() {
                   />
                 </FormField>
 
-                {/* Points - own form with switch, always visible, disabled when off */}
-                <FormField style={{
-                  marginBottom: '16px',
-                  padding: '16px',
-                  borderRadius: '12px',
-                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
-                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #1f1f1f)' : '#f9f9f9',
-                  opacity: rewardsSettings.points_enabled ? 1 : 0.7
-                }}>
+                {/* Points - switch + input, no container */}
+                <div style={{ marginBottom: '16px', opacity: rewardsSettings.points_enabled ? 1 : 0.7 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
                     <div className="checkbox-wrapper-2">
                       <input
@@ -3387,17 +3413,10 @@ function Settings() {
                       disabled={!rewardsSettings.points_enabled}
                     />
                   </div>
-                </FormField>
+                </div>
 
-                {/* Percentage discount - own form with switch */}
-                <FormField style={{
-                  marginBottom: '16px',
-                  padding: '16px',
-                  borderRadius: '12px',
-                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
-                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #1f1f1f)' : '#f9f9f9',
-                  opacity: rewardsSettings.percentage_enabled ? 1 : 0.7
-                }}>
+                {/* Percentage discount */}
+                <div style={{ marginBottom: '16px', opacity: rewardsSettings.percentage_enabled ? 1 : 0.7 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
                     <div className="checkbox-wrapper-2">
                       <input
@@ -3425,17 +3444,10 @@ function Settings() {
                       disabled={!rewardsSettings.percentage_enabled}
                     />
                   </div>
-                </FormField>
+                </div>
 
-                {/* Fixed discount - own form with switch */}
-                <FormField style={{
-                  marginBottom: '16px',
-                  padding: '16px',
-                  borderRadius: '12px',
-                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
-                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #1f1f1f)' : '#f9f9f9',
-                  opacity: rewardsSettings.fixed_enabled ? 1 : 0.7
-                }}>
+                {/* Fixed discount */}
+                <div style={{ marginBottom: '16px', opacity: rewardsSettings.fixed_enabled ? 1 : 0.7 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
                     <div className="checkbox-wrapper-2">
                       <input
@@ -3462,7 +3474,7 @@ function Settings() {
                       disabled={!rewardsSettings.fixed_enabled}
                     />
                   </div>
-                </FormField>
+                </div>
 
                 {/* Rewards campaigns / Promotions */}
                 <div style={{
@@ -3549,36 +3561,6 @@ function Settings() {
                       ))}
                     </ul>
                   )}
-                </div>
-
-                {/* Enable Rewards */}
-                <div style={{
-                  marginTop: '24px',
-                  paddingTop: '12px',
-                  borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
-                }}>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    cursor: 'pointer'
-                  }}>
-                    <div className="checkbox-wrapper-2">
-                      <input
-                        type="checkbox"
-                        className="sc-gJwTLC ikxBAC"
-                        checked={rewardsSettings.enabled}
-                        onChange={(e) => setRewardsSettings({ ...rewardsSettings, enabled: e.target.checked })}
-                      />
-                    </div>
-                    <span style={{
-                      fontSize: '14px',
-                      fontWeight: 600,
-                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                    }}>
-                      Enable Customer Rewards Program
-                    </span>
-                  </label>
                 </div>
 
                 {/* Save Button */}
@@ -3873,6 +3855,44 @@ function Settings() {
                   {displaySettings.require_signature === 'required'
                     ? 'Print, no receipt, and email cannot be used without signing first.'
                     : 'Print, no receipt, and email can be used without signing.'}
+                </p>
+              </FormField>
+            </div>
+
+            {/* Orders / Delivery: pay on delivery cash only */}
+            <div style={{
+              marginTop: '16px',
+              paddingTop: '16px',
+              borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`
+            }}>
+              <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 600 }}>
+                Orders &amp; Delivery
+              </FormTitle>
+              <FormField>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={deliveryPayOnDeliveryCashOnly}
+                    onChange={(e) => saveDeliveryPayOnDeliveryCashOnly(e.target.checked)}
+                    style={{ width: '18px', height: '18px', accentColor: themeColor }}
+                  />
+                  <span>Delivery: allow only cash when customer pays on delivery</span>
+                </label>
+                <p style={{
+                  marginTop: '6px',
+                  marginLeft: '28px',
+                  fontSize: '13px',
+                  color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                  lineHeight: 1.4
+                }}>
+                  When enabled, delivery orders that are &quot;pay on delivery&quot; can only be marked as paid with cash.
                 </p>
               </FormField>
             </div>

@@ -1307,6 +1307,7 @@ def get_establishment_settings(establishment_id: Optional[int] = None) -> Dict[s
                 'cash': 0.0, 'check': 0.0, 'store_credit': 0.0
             },
             'pos_search_filters': s.get('pos_search_filters'),
+            'delivery_pay_on_delivery_cash_only': bool(s.get('delivery_pay_on_delivery_cash_only', False)),
         }
     except Exception:
         try:
@@ -1322,7 +1323,8 @@ def _default_store_settings() -> Dict[str, Any]:
         'transaction_fee_rates': {
             'credit_card': 0.029, 'debit_card': 0.015, 'mobile_payment': 0.026,
             'cash': 0.0, 'check': 0.0, 'store_credit': 0.0
-        }
+        },
+        'delivery_pay_on_delivery_cash_only': False,
     }
 
 
@@ -1352,6 +1354,8 @@ def update_establishment_settings(establishment_id: Optional[int], settings: Dic
             current['transaction_fee_rates'] = dict(settings['transaction_fee_rates'])
         if 'pos_search_filters' in settings:
             current['pos_search_filters'] = settings['pos_search_filters']
+        if 'delivery_pay_on_delivery_cash_only' in settings:
+            current['delivery_pay_on_delivery_cash_only'] = bool(settings['delivery_pay_on_delivery_cash_only'])
         import json
         cursor.execute(
             "UPDATE establishments SET settings = %s::jsonb WHERE establishment_id = %s",
@@ -4172,7 +4176,9 @@ def create_order(
     tip: float = 0.0,
     order_type: Optional[str] = None,
     customer_info: Optional[Dict[str, str]] = None,
-    points_used: int = 0
+    points_used: int = 0,
+    payment_status: Optional[str] = None,
+    order_status_override: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Create a new order and process payment
@@ -4372,34 +4378,43 @@ def create_order(
         print(f"Order date being set: {current_datetime}")
         print(f"System local time: {local_time.tm_year}-{local_time.tm_mon:02d}-{local_time.tm_mday:02d} {local_time.tm_hour:02d}:{local_time.tm_min:02d}:{local_time.tm_sec:02d}")
         
+        # Pay-later (pickup/delivery): payment_status='pending', order_status='placed'
+        pstatus = (payment_status or 'completed').strip().lower() if payment_status else 'completed'
+        ostatus = (order_status_override or 'completed').strip().lower() if order_status_override else 'completed'
+        if pstatus not in ('pending', 'completed'):
+            pstatus = 'completed'
+        if ostatus not in ('placed', 'being_made', 'ready', 'out_for_delivery', 'delivered', 'completed', 'voided', 'returned'):
+            ostatus = 'completed'
+        print(f"Creating order: payment_status={pstatus!r}, order_status={ostatus!r}, order_type={order_type!r}")
+
         if has_tip and has_order_type:
             cursor.execute("""
                 INSERT INTO orders (
                     establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
                     discount, transaction_fee, tip, total, payment_method, payment_status, order_status, order_type, notes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'completed', 'completed', %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING order_id
             """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
-                  discount, transaction_fee, tip, total, payment_method, order_type, notes))
+                  discount, transaction_fee, tip, total, payment_method, pstatus, ostatus, order_type, notes))
         elif has_tip:
             cursor.execute("""
                 INSERT INTO orders (
                     establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
                     discount, transaction_fee, tip, total, payment_method, payment_status, order_status, notes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'completed', 'completed', %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING order_id
             """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
-                  discount, transaction_fee, tip, total, payment_method, notes))
+                  discount, transaction_fee, tip, total, payment_method, pstatus, ostatus, notes))
         else:
             # Fallback for older schema (no tip or order_type)
             cursor.execute("""
                 INSERT INTO orders (
                     establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
                     discount, transaction_fee, total, payment_method, payment_status, order_status, notes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'completed', 'completed', %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING order_id
             """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
-                  discount, transaction_fee, total, payment_method, notes))
+                  discount, transaction_fee, total, payment_method, pstatus, ostatus, notes))
         
         result = cursor.fetchone()
         if isinstance(result, dict):
@@ -4508,54 +4523,53 @@ def create_order(
             if cursor.rowcount == 0:
                 print(f"Warning: Inventory update affected 0 rows for product_id {product_id}, establishment_id {item_establishment_id}")
         
-        # Record payment transaction with fee details and tip
-        # Check if tip and employee_id columns exist
-        cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = \'payment_transactions\' AND table_schema = 'public'")
-        columns = [col[0] for col in cursor.fetchall()]
-        has_tip = 'tip' in columns
-        has_employee_id = 'employee_id' in columns
-        
-        if has_tip and has_employee_id:
-            cursor.execute("""
-                INSERT INTO payment_transactions (
-                    establishment_id, order_id, payment_method, amount, transaction_fee, transaction_fee_rate,
-                    net_amount, status, tip, employee_id
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved', %s, %s)
-                RETURNING transaction_id
-            """, (establishment_id, order_id, payment_method, pre_fee_total, transaction_fee, 
-                  fee_calc['fee_rate'], fee_calc['net_amount'], tip, employee_id))
-        else:
-            # Fallback for older schema
-            cursor.execute("""
-                INSERT INTO payment_transactions (
-                    establishment_id, order_id, payment_method, amount, transaction_fee, transaction_fee_rate,
-                    net_amount, status
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved')
-                RETURNING transaction_id
-            """, (establishment_id, order_id, payment_method, pre_fee_total, transaction_fee, 
-                  fee_calc['fee_rate'], fee_calc['net_amount']))
-        
-        result = cursor.fetchone()
-        if isinstance(result, dict):
-            transaction_id = result.get('transaction_id')
-        else:
-            transaction_id = result[0] if result else None
-        
-        # Record tip in employee_tips table if tip exists
-        if tip > 0:
-            cursor.execute("""
-                SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'employee_tips'
-            """)
-            if cursor.fetchone():
+        # Record payment transaction only when payment is completed (skip for pay-at-pickup/delivery)
+        transaction_id = None
+        if pstatus == 'completed':
+            cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = \'payment_transactions\' AND table_schema = 'public'")
+            columns = [col[0] for col in cursor.fetchall()]
+            has_tip = 'tip' in columns
+            has_employee_id = 'employee_id' in columns
+            
+            if has_tip and has_employee_id:
                 cursor.execute("""
-                    INSERT INTO employee_tips (
-                        employee_id, order_id, transaction_id, tip_amount, payment_method
-                    ) VALUES (%s, %s, %s, %s, %s)
-                """, (employee_id, order_id, transaction_id, tip, payment_method))
+                    INSERT INTO payment_transactions (
+                        establishment_id, order_id, payment_method, amount, transaction_fee, transaction_fee_rate,
+                        net_amount, status, tip, employee_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved', %s, %s)
+                    RETURNING transaction_id
+                """, (establishment_id, order_id, payment_method, pre_fee_total, transaction_fee, 
+                      fee_calc['fee_rate'], fee_calc['net_amount'], tip, employee_id))
+            else:
+                cursor.execute("""
+                    INSERT INTO payment_transactions (
+                        establishment_id, order_id, payment_method, amount, transaction_fee, transaction_fee_rate,
+                        net_amount, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved')
+                    RETURNING transaction_id
+                """, (establishment_id, order_id, payment_method, pre_fee_total, transaction_fee, 
+                      fee_calc['fee_rate'], fee_calc['net_amount']))
+            
+            result = cursor.fetchone()
+            if isinstance(result, dict):
+                transaction_id = result.get('transaction_id')
+            else:
+                transaction_id = result[0] if result else None
+            
+            if tip > 0 and transaction_id is not None:
+                cursor.execute("""
+                    SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'employee_tips'
+                """)
+                if cursor.fetchone():
+                    cursor.execute("""
+                        INSERT INTO employee_tips (
+                            employee_id, order_id, transaction_id, tip_amount, payment_method
+                        ) VALUES (%s, %s, %s, %s, %s)
+                    """, (employee_id, order_id, transaction_id, tip, payment_method))
         
-        # Track customer spending and award rewards if customer_id exists
+        # Track customer spending and award rewards only when payment completed
         rewards_info = {'points_earned': 0, 'discount_amount': 0.0, 'reward_type': 'points'}
-        if customer_id:
+        if pstatus == 'completed' and customer_id:
             try:
                 # Get rewards settings
                 rewards_settings = get_customer_rewards_settings()
@@ -4699,6 +4713,111 @@ def get_order_details(order_id: int) -> Optional[Dict[str, Any]]:
         'items': items,
         'payments': payments
     }
+
+
+def update_order_status(
+    order_id: int,
+    order_status: str,
+    payment_status: Optional[str] = None,
+    payment_method: Optional[str] = None,
+    employee_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Update order_status and optionally payment_status.
+    When marking as paid (payment_status='completed') on a previously pending order,
+    pass payment_method and employee_id to record the payment_transaction and rewards.
+    """
+    valid_statuses = {'placed', 'being_made', 'ready', 'out_for_delivery', 'delivered', 'completed', 'voided', 'returned'}
+    if order_status not in valid_statuses:
+        return {'success': False, 'message': f'Invalid order_status: {order_status}'}
+    from psycopg2.extras import RealDictCursor
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT order_id, payment_status, payment_method, total, subtotal, tax_amount, discount, transaction_fee, tip, establishment_id, customer_id, employee_id
+            FROM orders WHERE order_id = %s
+        """, (order_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return {'success': False, 'message': 'Order not found'}
+        order = dict(row)
+        current_payment_status = order.get('payment_status') or 'completed'
+        new_payment_status = payment_status if payment_status is not None else current_payment_status
+
+        cursor.execute("""
+            UPDATE orders SET order_status = %s, payment_status = %s
+            WHERE order_id = %s
+        """, (order_status, new_payment_status, order_id))
+
+        # If marking as paid (payment_status completed) and was pending, record payment
+        if new_payment_status == 'completed' and current_payment_status == 'pending':
+            pay_method = (payment_method or order.get('payment_method') or 'cash').strip()
+            emp_id = employee_id or order.get('employee_id')
+            if not emp_id:
+                cursor.execute("SELECT employee_id FROM employees WHERE is_active = 1 ORDER BY employee_id LIMIT 1")
+                erow = cursor.fetchone()
+                emp_id = erow['employee_id'] if hasattr(erow, 'keys') and erow else (erow[0] if erow else None)
+            total = float(order.get('total') or 0)
+            establishment_id = order.get('establishment_id')
+            customer_id = order.get('customer_id')
+            tip = float(order.get('tip') or 0)
+            pre_fee_total = total - float(order.get('transaction_fee') or 0) - tip
+            fee_rates = get_establishment_settings(establishment_id).get('transaction_fee_rates') or {}
+            fee_calc = calculate_transaction_fee(pay_method, pre_fee_total, fee_rates)
+            transaction_fee = fee_calc['transaction_fee']
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns WHERE table_name = 'payment_transactions' AND table_schema = 'public'
+            """)
+            cols = [c[0] for c in cursor.fetchall()]
+            has_tip = 'tip' in cols
+            has_employee_id = 'employee_id' in cols
+            if has_tip and has_employee_id and emp_id:
+                cursor.execute("""
+                    INSERT INTO payment_transactions (
+                        establishment_id, order_id, payment_method, amount, transaction_fee, transaction_fee_rate,
+                        net_amount, status, tip, employee_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved', %s, %s)
+                    RETURNING transaction_id
+                """, (establishment_id, order_id, pay_method, pre_fee_total, transaction_fee,
+                      fee_calc.get('fee_rate', 0), fee_calc.get('net_amount', pre_fee_total - transaction_fee), tip, emp_id))
+            else:
+                cursor.execute("""
+                    INSERT INTO payment_transactions (
+                        establishment_id, order_id, payment_method, amount, transaction_fee, transaction_fee_rate,
+                        net_amount, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'approved')
+                    RETURNING transaction_id
+                """, (establishment_id, order_id, pay_method, pre_fee_total, transaction_fee,
+                      fee_calc.get('fee_rate', 0), fee_calc.get('net_amount', pre_fee_total - transaction_fee)))
+            if customer_id:
+                rewards_settings = get_customer_rewards_settings()
+                amount_for_rewards = float(order.get('subtotal') or 0) + float(order.get('tax_amount') or 0)
+                try:
+                    rewards_info = calculate_rewards(amount_for_rewards, rewards_settings)
+                    if rewards_info.get('points_earned', 0) > 0:
+                        cursor.execute("""
+                            UPDATE customers SET loyalty_points = COALESCE(loyalty_points, 0) + %s, total_spent = COALESCE(total_spent, 0) + %s
+                            WHERE customer_id = %s
+                        """, (rewards_info['points_earned'], amount_for_rewards, customer_id))
+                except Exception:
+                    pass
+
+        conn.commit()
+        conn.close()
+        return {'success': True, 'message': 'Order status updated'}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return {'success': False, 'message': str(e)}
+
 
 def void_order(order_id: int, employee_id: int, reason: Optional[str] = None) -> Dict[str, Any]:
     """Void an order and return items to inventory"""

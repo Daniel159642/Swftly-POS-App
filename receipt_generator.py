@@ -415,13 +415,28 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
     story.append(Paragraph("-" * 40, header_style))
     story.append(Spacer(1, 0.05*inch))
     
-    # Payment method
-    if settings.get('show_payment_method', 1):
+    # Payment status: always show "NOT PAID" for pay-later orders; otherwise show payment method if enabled
+    payment_status = (order_data.get('payment_status') or 'completed').lower()
+    if payment_status == 'pending':
+        # Always show NOT PAID for pay-at-pickup/delivery so receipt clearly indicates unpaid
+        story.append(Paragraph("<b>NOT PAID - Pay at pickup</b>", ParagraphStyle(
+            'NotPaid',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.black,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )))
+        order_type = (order_data.get('order_type') or '').lower()
+        if order_type == 'delivery':
+            story.append(Paragraph("Pay on delivery", small_style))
+        else:
+            story.append(Paragraph("Customer will pay when they pick up", small_style))
+        story.append(Spacer(1, 0.05*inch))
+    elif settings.get('show_payment_method', 1):
         payment_method = order_data.get('payment_method', 'Unknown')
         payment_method_display = payment_method.replace('_', ' ').title()
         story.append(Paragraph(f"Payment: {payment_method_display}", small_style))
-        
-        # Show amount paid and change for cash payments
         amount_paid = order_data.get('amount_paid')
         change = order_data.get('change', 0)
         payment_method_type = order_data.get('payment_method_type', '')
@@ -429,7 +444,6 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list) -> bytes
             story.append(Paragraph(f"Amount Paid: ${float(amount_paid):.2f}", small_style))
             if change > 0:
                 story.append(Paragraph(f"Change: ${change:.2f}", small_style))
-        
         story.append(Spacer(1, 0.05*inch))
     
     # Barcode - always try to show
@@ -651,6 +665,9 @@ def generate_receipt_with_barcode(order_id: int) -> Optional[bytes]:
         order_data['amount_paid'] = amount_paid
         order_data['change'] = change if change > 0 else 0
         order_data['signature'] = signature
+        # Pay-later: if no payment was found and order is pickup/delivery, treat as pending so receipt shows NOT PAID
+        if amount_paid is None and (order_data.get('order_type') or '').lower() in ('pickup', 'delivery'):
+            order_data['payment_status'] = 'pending'
         return generate_receipt_pdf(order_data, order_items)
     except Exception as e:
         print(f"Error generating receipt: {e}")

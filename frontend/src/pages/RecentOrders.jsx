@@ -24,6 +24,7 @@ function RecentOrders() {
   const [highlightedOrderId, setHighlightedOrderId] = useState(null) // Order ID to highlight in table
   const [scannedOrderId, setScannedOrderId] = useState(null) // Order ID from scanned receipt barcode (filters table to show only this order)
   const [toast, setToast] = useState(null) // { message, type: 'success' | 'error' }
+  const [statusUpdatingOrderId, setStatusUpdatingOrderId] = useState(null) // order_id while PATCH status in progress
   const rowRefs = useRef({}) // Refs for table rows to enable scrolling
   const chipsContainerRef = useRef(null) // Ref for chips container
   
@@ -466,6 +467,8 @@ function RecentOrders() {
       // Get order details from the row data
       const details = {
         employee_id: row.employee_id || row.employeeId || null,
+        employee_name: row.employee_name ?? null,
+        establishment_id: row.establishment_id ?? null,
         customer_id: row.customer_id || row.customerId || null,
         subtotal: parseFloat(row.subtotal) || 0,
         tax_rate: parseFloat(row.tax_rate) || 0,
@@ -474,6 +477,12 @@ function RecentOrders() {
         transaction_fee: parseFloat(row.transaction_fee) || 0,
         notes: row.notes || '',
         tip: parseFloat(row.tip) || 0,
+        order_status: row.order_status ?? 'completed',
+        payment_status: row.payment_status ?? 'completed',
+        order_type: row.order_type ?? row.orderType ?? null,
+        receipt_type: row.receipt_type ?? null,
+        receipt_email: row.receipt_email ?? null,
+        receipt_phone: row.receipt_phone ?? null,
         items: orderItems
       }
 
@@ -492,6 +501,43 @@ function RecentOrders() {
       console.error('Error loading order details:', err)
     } finally {
       setLoadingDetails(prev => ({ ...prev, [normalizedOrderId]: false }))
+    }
+  }
+
+  const updateOrderStatus = async (orderId, order_status, payment_status = null, payment_method = null) => {
+    setStatusUpdatingOrderId(orderId)
+    try {
+      const token = localStorage.getItem('sessionToken')
+      const res = await fetch(`/api/orders/${orderId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
+        body: JSON.stringify({
+          order_status,
+          ...(payment_status != null && { payment_status }),
+          ...(payment_method != null && { payment_method })
+        })
+      })
+      const result = await res.json()
+      if (result.success) {
+        setToast({ message: 'Status updated', type: 'success' })
+        await loadData()
+        setOrderDetails(prev => ({
+          ...prev,
+          [orderId]: prev[orderId] ? {
+            ...prev[orderId],
+            order_status,
+            payment_status: payment_status ?? prev[orderId].payment_status,
+            payment_method: payment_method ?? prev[orderId].payment_method
+          } : prev[orderId]
+        }))
+      } else {
+        setToast({ message: result.message || 'Failed to update status', type: 'error' })
+      }
+    } catch (err) {
+      console.error(err)
+      setToast({ message: 'Failed to update status', type: 'error' })
+    } finally {
+      setStatusUpdatingOrderId(null)
     }
   }
 
@@ -833,11 +879,60 @@ function RecentOrders() {
     })
   }
 
-  // Fields to hide from main table (shown in dropdown)
-  const hiddenFields = ['order_id', 'orderId', 'employee_id', 'employeeId', 'customer_id', 'customerId', 'subtotal', 'tax_rate', 'tax_amount', 'tax', 'discount', 'transaction_fee', 'notes', 'tip']
+  // Format date/time: "Today 2:30 PM", "Yesterday 2:30 PM", or full date
+  const formatOrderDate = (value) => {
+    try {
+      const date = new Date(value)
+      if (isNaN(date.getTime())) return String(value)
+      const now = new Date()
+      const orderDayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+      const todayDayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+      const oneDayMs = 24 * 60 * 60 * 1000
+      const timeStr = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })
+      if (orderDayStart === todayDayStart) return `Today ${timeStr}`
+      if (orderDayStart === todayDayStart - oneDayMs) return `Yesterday ${timeStr}`
+      return date.toLocaleString()
+    } catch {
+      return String(value)
+    }
+  }
+
+  // Fields to hide from main table (shown in dropdown); order_status/payment_* combined into Status column
+  const hiddenFields = ['order_id', 'orderId', 'employee_id', 'employeeId', 'customer_id', 'customerId', 'subtotal', 'tax_rate', 'tax_amount', 'tax', 'discount', 'transaction_fee', 'notes', 'tip', 'receipt_type', 'receipt_email', 'receipt_phone', 'establishment_id', 'employee_name', 'order_status', 'payment_status', 'payment_method']
   
-  // Filter out hidden fields from columns
-  const visibleColumns = data && data.columns ? data.columns.filter(col => !hiddenFields.includes(col)) : []
+  // Phase label for order_status (pickup/delivery flow)
+  const getStatusLabel = (orderStatus, orderType) => {
+    const s = (orderStatus || 'completed').toLowerCase()
+    const type = (orderType || '').toLowerCase()
+    if (s === 'placed') return 'Placed'
+    if (s === 'being_made') return 'Being made'
+    if (s === 'ready') return type === 'pickup' ? 'Ready for pickup' : 'Ready'
+    if (s === 'out_for_delivery') return 'Out for delivery'
+    if (s === 'delivered') return 'Delivered'
+    if (s === 'completed') return 'Paid'
+    if (s === 'voided') return 'Voided'
+    if (s === 'returned') return 'Returned'
+    return (orderStatus || 'Paid').replace(/_/g, ' ')
+  }
+  const getStatusDisplay = (row) => {
+    // Support both snake_case (API) and camelCase
+    const orderType = ((row.order_type ?? row.orderType) ?? '').toLowerCase()
+    const paymentStatus = ((row.payment_status ?? row.paymentStatus) ?? 'completed').toLowerCase()
+    const orderStatus = ((row.order_status ?? row.orderStatus) ?? 'completed').toLowerCase()
+    const label = getStatusLabel(orderStatus, orderType)
+    const isPickupOrDelivery = orderType === 'pickup' || orderType === 'delivery'
+    const paymentPending = paymentStatus === 'pending'
+    const isUnpaidPhase = ['placed', 'being_made', 'ready', 'out_for_delivery', 'delivered'].includes(orderStatus)
+    const needsPayment = isPickupOrDelivery && (paymentPending || (isUnpaidPhase && paymentStatus !== 'completed'))
+    return needsPayment ? `${label} • Needs payment` : label
+  }
+
+  // Filter out hidden fields and insert Status column (replacing order_status / payment_method)
+  const baseVisible = data && data.columns ? data.columns.filter(col => !hiddenFields.includes(col)) : []
+  const orderNumIdx = baseVisible.indexOf('order_number')
+  const visibleColumns = orderNumIdx >= 0
+    ? [...baseVisible.slice(0, orderNumIdx + 1), 'Status', ...baseVisible.slice(orderNumIdx + 1)]
+    : ['Status', ...baseVisible]
   const columnsWithActions = [...visibleColumns, 'Actions']
 
   return (
@@ -1260,39 +1355,43 @@ function RecentOrders() {
                           }}
                         >
                           {visibleColumns.map(col => {
+                            if (col === 'Status') {
+                              return (
+                                <td
+                                  key={col}
+                                  style={{
+                                    padding: '8px 12px',
+                                    borderBottom: '1px solid #eee',
+                                    fontSize: '14px',
+                                    textAlign: 'left'
+                                  }}
+                                >
+                                  {getStatusDisplay(row)}
+                                </td>
+                              )
+                            }
                             const value = row[col]
                             let formattedValue = ''
-                            
                             if (value === null || value === undefined) {
                               formattedValue = ''
-                            } else if (col.includes('price') || col.includes('cost') || col.includes('total') || 
+                            } else if (col.includes('price') || col.includes('cost') || col.includes('total') ||
                                       col.includes('amount') || col.includes('fee')) {
-                              formattedValue = typeof value === 'number' 
-                                ? `$${value.toFixed(2)}` 
+                              formattedValue = typeof value === 'number'
+                                ? `$${value.toFixed(2)}`
                                 : `$${parseFloat(value || 0).toFixed(2)}`
                             } else if (col.includes('date') || col.includes('time')) {
-                              try {
-                                const date = new Date(value)
-                                if (!isNaN(date.getTime())) {
-                                  formattedValue = date.toLocaleString()
-                                } else {
-                                  formattedValue = String(value)
-                                }
-                              } catch {
-                                formattedValue = String(value)
-                              }
+                              formattedValue = formatOrderDate(value)
                             } else {
                               formattedValue = String(value)
                             }
-                            
                             return (
-                              <td 
-                                key={col} 
-                                style={{ 
-                                  padding: '8px 12px', 
+                              <td
+                                key={col}
+                                style={{
+                                  padding: '8px 12px',
                                   borderBottom: '1px solid #eee',
                                   fontSize: '14px',
-                                  textAlign: (col.includes('price') || col.includes('cost') || col.includes('total') || 
+                                  textAlign: (col.includes('price') || col.includes('cost') || col.includes('total') ||
                                              col.includes('amount') || col.includes('fee')) ? 'right' : 'left'
                                 }}
                               >
@@ -1358,6 +1457,16 @@ function RecentOrders() {
                                     <div>
                                       <strong>Employee ID:</strong> {details.employee_id || 'N/A'}
                                     </div>
+                                    {details.employee_name != null && (
+                                      <div>
+                                        <strong>Employee Name:</strong> {details.employee_name}
+                                      </div>
+                                    )}
+                                    {details.establishment_id != null && (
+                                      <div>
+                                        <strong>Establishment ID:</strong> {details.establishment_id}
+                                      </div>
+                                    )}
                                     <div>
                                       <strong>Customer ID:</strong> {details.customer_id || 'N/A'}
                                     </div>
@@ -1379,6 +1488,83 @@ function RecentOrders() {
                                     <div>
                                       <strong>Tip:</strong> ${(parseFloat(details.tip) || 0).toFixed(2)}
                                     </div>
+                                    {/* Status / phase update for pickup & delivery */}
+                                    <div style={{ gridColumn: '1 / -1', marginTop: '8px', paddingTop: '12px', borderTop: '1px solid #dee2e6' }}>
+                                      <strong>Status:</strong> {getStatusLabel(details.order_status, details.order_type)}
+                                      {((details.order_type || '').toLowerCase() === 'pickup' || (details.order_type || '').toLowerCase() === 'delivery') && (details.payment_status || 'completed').toLowerCase() === 'pending' && (
+                                        <span style={{ marginLeft: '6px', color: 'var(--theme-color, #7c3aed)', fontWeight: 600 }}>• Needs payment</span>
+                                      )}
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
+                                        <select
+                                          value={details.order_status || 'completed'}
+                                          onChange={(e) => {
+                                            const v = e.target.value
+                                            if (v && v !== (details.order_status || 'completed')) {
+                                              updateOrderStatus(normalizedOrderId, v)
+                                            }
+                                          }}
+                                          disabled={!!statusUpdatingOrderId}
+                                          style={{
+                                            padding: '6px 10px',
+                                            borderRadius: '6px',
+                                            border: `1px solid ${isDarkMode ? '#444' : '#ddd'}`,
+                                            backgroundColor: isDarkMode ? '#2d2d2d' : '#fff',
+                                            color: isDarkMode ? '#fff' : '#333',
+                                            fontSize: '13px',
+                                            minWidth: '140px'
+                                          }}
+                                        >
+                                          <option value="placed">Placed</option>
+                                          <option value="being_made">Being made</option>
+                                          <option value="ready">{(details.order_type || '').toLowerCase() === 'pickup' ? 'Ready for pickup' : 'Ready'}</option>
+                                          {(details.order_type || '').toLowerCase() === 'delivery' && (
+                                            <>
+                                              <option value="out_for_delivery">Out for delivery</option>
+                                              <option value="delivered">Delivered</option>
+                                            </>
+                                          )}
+                                          <option value="completed">Paid / Complete</option>
+                                        </select>
+                                        {((details.order_type || '').toLowerCase() === 'pickup' || (details.order_type || '').toLowerCase() === 'delivery') && (details.payment_status || 'completed').toLowerCase() === 'pending' && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); updateOrderStatus(normalizedOrderId, 'completed', 'completed', 'cash') }}
+                                            disabled={!!statusUpdatingOrderId}
+                                            style={{
+                                              padding: '6px 14px',
+                                              borderRadius: '8px',
+                                              border: `1px solid rgba(${themeColorRgb}, 0.5)`,
+                                              backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                                              color: '#fff',
+                                              fontWeight: 600,
+                                              fontSize: '13px',
+                                              cursor: statusUpdatingOrderId ? 'not-allowed' : 'pointer'
+                                            }}
+                                          >
+                                            {statusUpdatingOrderId === normalizedOrderId ? 'Updating…' : 'Mark as paid (cash)'}
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {(details.receipt_type != null || details.receipt_email || details.receipt_phone) && (
+                                      <>
+                                        {details.receipt_type != null && (
+                                          <div>
+                                            <strong>Receipt Type:</strong> {String(details.receipt_type)}
+                                          </div>
+                                        )}
+                                        {details.receipt_email && (
+                                          <div>
+                                            <strong>Receipt Email:</strong> {details.receipt_email}
+                                          </div>
+                                        )}
+                                        {details.receipt_phone && (
+                                          <div>
+                                            <strong>Receipt Phone:</strong> {details.receipt_phone}
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
                                     {details.notes && (
                                       <div style={{ gridColumn: '1 / -1' }}>
                                         <strong>Notes:</strong> {details.notes}

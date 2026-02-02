@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Image } from 'lucide-react'
 
 function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, selectedRowIds, onSelectedRowIdsChange, actionsAsEllipsis = false, ellipsisMenuItems }) {
@@ -23,18 +24,45 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
   }, [])
 
   const [openDropdownRowKey, setOpenDropdownRowKey] = useState(null)
+  const [dropdownAnchor, setDropdownAnchor] = useState(null)
   const actionsDropdownRef = useRef(null)
+  const ellipsisDropdownRef = useRef(null)
 
   useEffect(() => {
     if (openDropdownRowKey == null) return
     const handleClickOutside = (e) => {
-      if (actionsDropdownRef.current && !actionsDropdownRef.current.contains(e.target)) {
+      const inTrigger = actionsDropdownRef.current?.contains(e.target)
+      const inMenu = ellipsisDropdownRef.current?.contains(e.target)
+      if (!inTrigger && !inMenu) {
         setOpenDropdownRowKey(null)
+        setDropdownAnchor(null)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [openDropdownRowKey])
+
+  const tableWrapperRef = useRef(null)
+
+  // Reposition dropdown on scroll/resize so it stays anchored to the button
+  useEffect(() => {
+    if (openDropdownRowKey == null || !dropdownAnchor) return
+    const updatePosition = () => {
+      const el = actionsDropdownRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      setDropdownAnchor({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+    }
+    window.addEventListener('scroll', updatePosition, true)
+    window.addEventListener('resize', updatePosition)
+    const wrapper = tableWrapperRef.current
+    if (wrapper) wrapper.addEventListener('scroll', updatePosition)
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true)
+      window.removeEventListener('resize', updatePosition)
+      if (wrapper) wrapper.removeEventListener('scroll', updatePosition)
+    }
+  }, [openDropdownRowKey, dropdownAnchor])
   
   const formatValue = (value, column, row) => {
     if (value === null || value === undefined) return ''
@@ -213,14 +241,17 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
   }
 
   return (
-    <div style={{ 
-      backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff', 
-      borderRadius: '4px', 
-      overflowX: 'auto',
-      overflowY: 'visible',
-      boxShadow: isDarkMode ? '0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.1)',
-      width: '100%'
-    }}>
+    <div
+      ref={tableWrapperRef}
+      style={{ 
+        backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff', 
+        borderRadius: '4px', 
+        overflowX: 'auto',
+        overflowY: 'visible',
+        boxShadow: isDarkMode ? '0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.1)',
+        width: '100%'
+      }}
+    >
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 'max-content' }}>
         <thead>
           <tr style={{ backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa' }}>
@@ -330,7 +361,15 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            setOpenDropdownRowKey(k => k === resolvedGetRowId(row, idx) ? null : resolvedGetRowId(row, idx))
+                            const rowKey = resolvedGetRowId(row, idx)
+                            if (openDropdownRowKey === rowKey) {
+                              setOpenDropdownRowKey(null)
+                              setDropdownAnchor(null)
+                            } else {
+                              const rect = e.currentTarget.getBoundingClientRect()
+                              setDropdownAnchor({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+                              setOpenDropdownRowKey(rowKey)
+                            }
                           }}
                           aria-label="Actions"
                           aria-expanded={openDropdownRowKey === resolvedGetRowId(row, idx)}
@@ -360,57 +399,6 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
                         >
                           ⋮
                         </button>
-                        {openDropdownRowKey === resolvedGetRowId(row, idx) && (
-                          <div
-                            role="menu"
-                            style={{
-                              position: 'absolute',
-                              top: '100%',
-                              right: 0,
-                              marginTop: '4px',
-                              minWidth: '120px',
-                              backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                              border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #dee2e6',
-                              borderRadius: '6px',
-                              boxShadow: isDarkMode ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.15)',
-                              zIndex: 1000,
-                              overflow: 'hidden'
-                            }}
-                          >
-                            {(ellipsisMenuItems ?? [{ label: 'Edit', onClick: (r) => onEdit(r) }]).map((item, i) => (
-                              <button
-                                key={i}
-                                role="menuitem"
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  item.onClick(row)
-                                  setOpenDropdownRowKey(null)
-                                }}
-                                style={{
-                                  display: 'block',
-                                  width: '100%',
-                                  padding: '10px 14px',
-                                  textAlign: 'left',
-                                  border: 'none',
-                                  background: 'none',
-                                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                                  fontSize: '14px',
-                                  cursor: 'pointer',
-                                  transition: 'background-color 0.15s'
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.target.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f0f0f0'
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.target.style.backgroundColor = 'transparent'
-                                }}
-                              >
-                                {item.label}
-                              </button>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     ) : onEdit ? (
                       <button
@@ -460,7 +448,15 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        setOpenDropdownRowKey(k => k === resolvedGetRowId(row, idx) ? null : resolvedGetRowId(row, idx))
+                        const rowKey = resolvedGetRowId(row, idx)
+                        if (openDropdownRowKey === rowKey) {
+                          setOpenDropdownRowKey(null)
+                          setDropdownAnchor(null)
+                        } else {
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setDropdownAnchor({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+                          setOpenDropdownRowKey(rowKey)
+                        }
                       }}
                       aria-label="Actions"
                       aria-expanded={openDropdownRowKey === resolvedGetRowId(row, idx)}
@@ -490,57 +486,6 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
                     >
                       ⋮
                     </button>
-                    {openDropdownRowKey === resolvedGetRowId(row, idx) && (
-                      <div
-                        role="menu"
-                        style={{
-                          position: 'absolute',
-                          top: '100%',
-                          right: 0,
-                          marginTop: '4px',
-                          minWidth: '120px',
-                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                          border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #dee2e6',
-                          borderRadius: '6px',
-                          boxShadow: isDarkMode ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.15)',
-                          zIndex: 1000,
-                          overflow: 'hidden'
-                        }}
-                      >
-                        {(ellipsisMenuItems ?? [{ label: 'Edit', onClick: (r) => onEdit(r) }]).map((item, i) => (
-                          <button
-                            key={i}
-                            role="menuitem"
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              item.onClick(row)
-                              setOpenDropdownRowKey(null)
-                            }}
-                            style={{
-                              display: 'block',
-                              width: '100%',
-                              padding: '10px 14px',
-                              textAlign: 'left',
-                              border: 'none',
-                              background: 'none',
-                              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                              fontSize: '14px',
-                              cursor: 'pointer',
-                              transition: 'background-color 0.15s'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.target.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f0f0f0'
-                            }}
-                            onMouseLeave={(e) => {
-                              e.target.style.backgroundColor = 'transparent'
-                            }}
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 ) : (
                   <button
@@ -569,6 +514,71 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
         ))}
       </tbody>
     </table>
+
+      {/* Ellipsis dropdown (portal so it isn't clipped by table overflow) */}
+      {openDropdownRowKey != null && dropdownAnchor && (() => {
+        const rowIndex = data.findIndex((row, idx) => resolvedGetRowId(row, idx) === openDropdownRowKey)
+        const row = rowIndex >= 0 ? data[rowIndex] : null
+        if (!row) return null
+        const menuItems = ellipsisMenuItems ?? (onEdit ? [{ label: 'Edit', onClick: (r) => onEdit(r) }] : [])
+        const close = () => {
+          setOpenDropdownRowKey(null)
+          setDropdownAnchor(null)
+        }
+        return createPortal(
+          <div
+            ref={ellipsisDropdownRef}
+            role="menu"
+            style={{
+              position: 'fixed',
+              top: dropdownAnchor.top,
+              right: dropdownAnchor.right,
+              minWidth: '120px',
+              backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+              border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #dee2e6',
+              borderRadius: '6px',
+              boxShadow: isDarkMode ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.15)',
+              zIndex: 9999,
+              overflow: 'hidden'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {menuItems.map((item, i) => (
+              <button
+                key={i}
+                role="menuitem"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  item.onClick(row)
+                  close()
+                }}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  padding: '10px 14px',
+                  textAlign: 'left',
+                  border: 'none',
+                  background: 'none',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.15s'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f0f0f0'
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent'
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )
+      })()}
     </div>
   )
 }
