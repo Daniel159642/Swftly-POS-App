@@ -127,7 +127,7 @@ function Vendors() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '28px', fontWeight: 700, color: isDarkMode ? '#fff' : '#111', margin: 0 }}>Vendors</h1>
-          <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Manage your vendor/supplier database</p>
+          <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Vendors are suppliers you purchase from. Track vendor contact info and balances here. Bills you receive are linked to vendors.</p>
         </div>
         <Button onClick={() => setIsCreateModalOpen(true)}>+ New Vendor</Button>
       </div>

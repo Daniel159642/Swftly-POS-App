@@ -1,6 +1,6 @@
 import React from 'react'
 
-function ProfitLossTable({ data, showPercentages = true, onAccountClick }) {
+function ProfitLossTable({ data, showPercentages = true, onAccountClick, periodLabel }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
@@ -182,6 +182,14 @@ function ProfitLossTable({ data, showPercentages = true, onAccountClick }) {
               percentage={netIncomePercentage}
               className="final-total"
             />
+
+            {periodLabel && (
+              <tr style={{ borderBottom: `1px solid ${borderColor}` }}>
+                <td colSpan={showPercentages ? 3 : 2} style={{ padding: '8px 12px', color: textColor, fontSize: '13px', fontStyle: 'italic' }}>
+                  {periodLabel}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

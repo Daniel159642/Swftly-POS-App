@@ -1,26 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useToast } from '../contexts/ToastContext'
+import { useTheme } from '../contexts/ThemeContext'
+import { UserPlus } from 'lucide-react'
+import { formLabelStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel } from '../components/FormStyles'
 
 const isDark = () => document.documentElement.classList.contains('dark-theme')
 
-const tableCell = (dark) => ({
-  padding: '12px 16px',
-  fontSize: '14px',
-  borderBottom: `1px solid ${dark ? '#3a3a3a' : '#e5e7eb'}`,
-  color: dark ? '#e5e7eb' : '#374151'
-})
-const tableTh = (dark) => ({
-  ...tableCell(dark),
-  textAlign: 'left',
-  fontWeight: 600,
-  color: dark ? '#9ca3af' : '#6b7280',
-  fontSize: '12px',
-  textTransform: 'uppercase',
-  backgroundColor: dark ? '#1f1f1f' : '#f9fafb'
-})
+const hexToRgb = (hex) => {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '59, 130, 246'
+}
 
 export default function Customers() {
   const { show: showToast } = useToast()
+  const { themeColor } = useTheme()
+  const themeColorRgb = hexToRgb(themeColor)
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -194,15 +188,6 @@ export default function Customers() {
   }
 
   const dark = isDark()
-  const inputStyle = {
-    width: '100%',
-    padding: '8px 12px',
-    border: `1px solid ${dark ? '#3a3a3a' : '#d1d5db'}`,
-    borderRadius: '8px',
-    backgroundColor: dark ? '#1f1f1f' : '#fff',
-    color: dark ? '#fff' : '#111',
-    fontSize: '14px'
-  }
   const modalOverlay = {
     position: 'fixed',
     inset: 0,
@@ -213,34 +198,41 @@ export default function Customers() {
     zIndex: 1000
   }
   const modalBox = {
-    backgroundColor: dark ? '#1a1a1a' : '#fff',
-    borderRadius: '12px',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+    backgroundColor: '#fff',
+    borderRadius: '8px',
+    padding: '24px',
     maxWidth: '560px',
     width: '90%',
     maxHeight: '90vh',
     overflow: 'auto',
-    padding: '24px'
+    boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
   }
 
   return (
-    <div style={{ padding: '24px 32px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '24px' }}>
-        <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: dark ? '#fff' : '#111' }}>
-          Customers
-        </h1>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <input
-            type="text"
-            placeholder="Search by name, email, or phone..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{
-              ...inputStyle,
-              minWidth: '220px',
-              maxWidth: '320px'
-            }}
-          />
+    <div style={{ padding: '40px', maxWidth: '1400px', margin: '0 auto', backgroundColor: '#ffffff', minHeight: '100vh' }}>
+      <div style={{ marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center' }}>
+            <input
+              type="text"
+              placeholder="Search by name, email, or phone..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                flex: 1,
+                padding: '8px 0',
+                border: 'none',
+                borderBottom: '2px solid #ddd',
+                borderRadius: 0,
+                backgroundColor: 'transparent',
+                outline: 'none',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+                fontFamily: '"Product Sans", sans-serif',
+                color: '#333'
+              }}
+            />
+          </div>
           <button
             type="button"
             onClick={() => {
@@ -248,55 +240,72 @@ export default function Customers() {
               setSelected(null)
               setModal('edit')
             }}
+            title="Add customer"
             style={{
-              padding: '10px 20px',
-              borderRadius: '8px',
-              border: 'none',
-              backgroundColor: dark ? '#3b82f6' : '#2563eb',
+              padding: '4px',
+              width: '40px',
+              height: '40px',
+              backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
               color: '#fff',
-              fontWeight: 600,
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '8px',
               cursor: 'pointer',
-              fontSize: '14px'
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.8)`
+              e.currentTarget.style.boxShadow = `0 4px 20px rgba(${themeColorRgb}, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+              e.currentTarget.style.boxShadow = `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
             }}
           >
-            Add customer
+            <UserPlus size={18} />
           </button>
         </div>
       </div>
 
-      <div style={{ backgroundColor: dark ? '#1f1f1f' : '#fff', borderRadius: '12px', border: `1px solid ${dark ? '#3a3a3a' : '#e5e7eb'}`, overflow: 'hidden' }}>
+      <div style={{ backgroundColor: '#fff', borderRadius: '4px', overflowX: 'auto', overflowY: 'visible', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', width: '100%' }}>
         {loading ? (
-          <div style={{ padding: '48px', textAlign: 'center', color: dark ? '#9ca3af' : '#6b7280' }}>
+          <div style={{ padding: '48px', textAlign: 'center', color: '#6b7280' }}>
             Loading customers...
           </div>
         ) : filtered.length === 0 ? (
-          <div style={{ padding: '48px', textAlign: 'center', color: dark ? '#9ca3af' : '#6b7280' }}>
+          <div style={{ padding: '48px', textAlign: 'center', color: '#6b7280' }}>
             {customers.length === 0 ? 'No customers yet. Add one to get started.' : 'No customers match your search.'}
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 'max-content' }}>
             <thead>
-              <tr>
-                <th style={tableTh(dark)}>Name</th>
-                <th style={tableTh(dark)}>Email</th>
-                <th style={tableTh(dark)}>Phone</th>
-                <th style={{ ...tableTh(dark), textAlign: 'right' }}>Points</th>
-                <th style={{ ...tableTh(dark), textAlign: 'right', width: '200px' }}>Actions</th>
+              <tr style={{ backgroundColor: '#f8f9fa' }}>
+                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Name</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Email</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Phone</th>
+                <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Points</th>
+                <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '200px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c) => (
+              {filtered.map((c, idx) => (
                 <tr
                   key={c.customer_id}
-                  style={{ backgroundColor: dark ? '#252525' : '#fff' }}
+                  style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#fafafa' }}
                 >
-                  <td style={tableCell(dark)}>{c.customer_name || '—'}</td>
-                  <td style={tableCell(dark)}>{c.email || '—'}</td>
-                  <td style={tableCell(dark)}>{c.phone || '—'}</td>
-                  <td style={{ ...tableCell(dark), textAlign: 'right', fontWeight: 600 }}>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.customer_name || '—'}</td>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.email || '—'}</td>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.phone || '—'}</td>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333', textAlign: 'right', fontWeight: 600 }}>
                     {c.loyalty_points != null ? Number(c.loyalty_points) : 0}
                   </td>
-                  <td style={{ ...tableCell(dark), textAlign: 'right' }}>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', textAlign: 'right' }}>
                     <button
                       type="button"
                       onClick={() => openView(c)}
@@ -330,34 +339,78 @@ export default function Customers() {
       {modal === 'view' && selected && (
         <div style={modalOverlay} onClick={closeModal}>
           <div style={modalBox} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ margin: '0 0 16px', fontSize: '18px', color: dark ? '#fff' : '#111' }}>
-              {selected.customer_name || 'Customer'}
-            </h2>
+            <div style={{ marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: '#333' }}>
+                {selected.customer_name || 'Customer'}
+              </h3>
+            </div>
             <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
-              <div><span style={{ color: dark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>Email</span><div style={{ color: dark ? '#e5e7eb' : '#111' }}>{selected.email || '—'}</div></div>
-              <div><span style={{ color: dark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>Phone</span><div style={{ color: dark ? '#e5e7eb' : '#111' }}>{selected.phone || '—'}</div></div>
-              <div><span style={{ color: dark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>Loyalty points</span><div style={{ fontWeight: 700, color: dark ? '#e5e7eb' : '#111' }}>{selected.loyalty_points != null ? Number(selected.loyalty_points) : 0}</div></div>
+              <FormField>
+                <FormLabel isDarkMode={dark}>Email</FormLabel>
+                <div style={{ fontSize: '14px', color: '#333' }}>{selected.email || '—'}</div>
+              </FormField>
+              <FormField>
+                <FormLabel isDarkMode={dark}>Phone</FormLabel>
+                <div style={{ fontSize: '14px', color: '#333' }}>{selected.phone || '—'}</div>
+              </FormField>
+              <FormField>
+                <FormLabel isDarkMode={dark}>Loyalty points</FormLabel>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#333' }}>{selected.loyalty_points != null ? Number(selected.loyalty_points) : 0}</div>
+              </FormField>
               {rewardsDetail && (
                 <>
-                  <div><span style={{ color: dark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>Orders</span><div style={{ color: dark ? '#e5e7eb' : '#111' }}>{rewardsDetail.order_count ?? 0}</div></div>
-                  <div><span style={{ color: dark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>Total spent</span><div style={{ color: dark ? '#e5e7eb' : '#111' }}>${Number(rewardsDetail.total_spent || 0).toFixed(2)}</div></div>
+                  <FormField>
+                    <FormLabel isDarkMode={dark}>Orders</FormLabel>
+                    <div style={{ fontSize: '14px', color: '#333' }}>{rewardsDetail.order_count ?? 0}</div>
+                  </FormField>
+                  <FormField>
+                    <FormLabel isDarkMode={dark}>Total spent</FormLabel>
+                    <div style={{ fontSize: '14px', color: '#333' }}>${Number(rewardsDetail.total_spent || 0).toFixed(2)}</div>
+                  </FormField>
                   {rewardsDetail.popular_items && rewardsDetail.popular_items.length > 0 && (
-                    <div>
-                      <span style={{ color: dark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>Popular items</span>
-                      <ul style={{ margin: '4px 0 0', paddingLeft: '20px', color: dark ? '#e5e7eb' : '#111' }}>
+                    <FormField>
+                      <FormLabel isDarkMode={dark}>Popular items</FormLabel>
+                      <ul style={{ margin: '4px 0 0', paddingLeft: '20px', fontSize: '14px', color: '#333' }}>
                         {rewardsDetail.popular_items.slice(0, 5).map((item, i) => (
                           <li key={i}>{item.product_name || item.product_id} (×{item.qty})</li>
                         ))}
                       </ul>
-                    </div>
+                    </FormField>
                   )}
                 </>
               )}
-              {selected.address && <div><span style={{ color: dark ? '#9ca3af' : '#6b7280', fontSize: '12px' }}>Address</span><div style={{ color: dark ? '#e5e7eb' : '#111' }}>{selected.address}</div></div>}
+              {selected.address && (
+                <FormField>
+                  <FormLabel isDarkMode={dark}>Address</FormLabel>
+                  <div style={{ fontSize: '14px', color: '#333' }}>{selected.address}</div>
+                </FormField>
+              )}
             </div>
-            <button type="button" onClick={closeModal} style={{ padding: '8px 16px', borderRadius: '8px', border: `1px solid ${dark ? '#404040' : '#d1d5db'}`, background: 'none', color: dark ? '#e5e7eb' : '#374151', cursor: 'pointer', fontSize: '14px' }}>
-              Close
-            </button>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '24px' }}>
+              <button
+                type="button"
+                onClick={closeModal}
+                style={{
+                  padding: '4px 16px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  whiteSpace: 'nowrap',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  border: `1px solid ${dark ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: 'none'
+                }}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -366,60 +419,103 @@ export default function Customers() {
       {modal === 'edit' && (
         <div style={modalOverlay} onClick={() => !saving && closeModal()}>
           <div style={modalBox} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ margin: '0 0 20px', fontSize: '18px', color: dark ? '#fff' : '#111' }}>
-              {selected ? 'Edit customer' : 'New customer'}
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: dark ? '#9ca3af' : '#6b7280' }}>Name *</label>
+            <div style={{ marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: '#333' }}>
+                {selected ? 'Edit customer' : 'New customer'}
+              </h3>
+            </div>
+            <div style={{ marginBottom: '20px' }}>
+              <FormField>
+                <FormLabel isDarkMode={dark} required>Name</FormLabel>
                 <input
                   type="text"
                   value={editForm.customer_name}
                   onChange={(e) => setEditForm((f) => ({ ...f, customer_name: e.target.value }))}
                   placeholder="Customer name"
-                  style={inputStyle}
+                  style={inputBaseStyle(dark, themeColorRgb)}
+                  {...getInputFocusHandlers(themeColorRgb, dark)}
                 />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: dark ? '#9ca3af' : '#6b7280' }}>Email</label>
+              </FormField>
+              <FormField>
+                <FormLabel isDarkMode={dark}>Email</FormLabel>
                 <input
                   type="email"
                   value={editForm.email}
                   onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
                   placeholder="email@example.com"
-                  style={inputStyle}
+                  style={inputBaseStyle(dark, themeColorRgb)}
+                  {...getInputFocusHandlers(themeColorRgb, dark)}
                 />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: dark ? '#9ca3af' : '#6b7280' }}>Phone</label>
+              </FormField>
+              <FormField>
+                <FormLabel isDarkMode={dark}>Phone</FormLabel>
                 <input
                   type="tel"
                   value={editForm.phone}
                   onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
                   placeholder="555-0000"
-                  style={inputStyle}
+                  style={inputBaseStyle(dark, themeColorRgb)}
+                  {...getInputFocusHandlers(themeColorRgb, dark)}
                 />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: dark ? '#9ca3af' : '#6b7280' }}>Address</label>
+              </FormField>
+              <FormField>
+                <FormLabel isDarkMode={dark}>Address</FormLabel>
                 <input
                   type="text"
                   value={editForm.address}
                   onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))}
                   placeholder="Street, city, state"
-                  style={inputStyle}
+                  style={inputBaseStyle(dark, themeColorRgb)}
+                  {...getInputFocusHandlers(themeColorRgb, dark)}
                 />
-              </div>
+              </FormField>
             </div>
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => !saving && closeModal()} disabled={saving} style={{ padding: '8px 16px', borderRadius: '8px', border: `1px solid ${dark ? '#404040' : '#d1d5db'}`, background: 'none', color: dark ? '#e5e7eb' : '#374151', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '14px' }}>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '24px' }}>
+              <button
+                type="button"
+                onClick={() => !saving && closeModal()}
+                disabled={saving}
+                style={{
+                  padding: '4px 16px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  whiteSpace: 'nowrap',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  border: `1px solid ${dark ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: 'var(--text-secondary)',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: 'none'
+                }}
+              >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={selected ? handleSaveEdit : handleCreate}
                 disabled={saving}
-                style={{ padding: '8px 20px', borderRadius: '8px', border: 'none', backgroundColor: '#2563eb', color: '#fff', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', fontSize: '14px' }}
+                style={{
+                  padding: '4px 16px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  whiteSpace: 'nowrap',
+                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                  border: `1px solid rgba(${themeColorRgb}, 0.5)`,
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: '#fff',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3)`
+                }}
               >
                 {saving ? 'Saving...' : selected ? 'Save' : 'Create'}
               </button>
@@ -432,43 +528,84 @@ export default function Customers() {
       {modal === 'points' && selected && (
         <div style={modalOverlay} onClick={() => !saving && closeModal()}>
           <div style={modalBox} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ margin: '0 0 20px', fontSize: '18px', color: dark ? '#fff' : '#111' }}>
-              Give points / coupon — {selected.customer_name || 'Customer'}
-            </h2>
-            <p style={{ margin: '0 0 16px', fontSize: '14px', color: dark ? '#9ca3af' : '#6b7280' }}>
+            <div style={{ marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: '#333' }}>
+                Give points / coupon — {selected.customer_name || 'Customer'}
+              </h3>
+            </div>
+            <p style={{ margin: '0 0 16px', fontSize: '14px', color: '#666' }}>
               Current balance: <strong>{selected.loyalty_points != null ? Number(selected.loyalty_points) : 0}</strong> points
             </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: dark ? '#9ca3af' : '#6b7280' }}>Points to add (or negative to subtract) *</label>
+            <div style={{ marginBottom: '20px' }}>
+              <FormField>
+                <FormLabel isDarkMode={dark} required>Points to add (or negative to subtract)</FormLabel>
                 <input
                   type="number"
                   value={pointsForm.points}
                   onChange={(e) => setPointsForm((f) => ({ ...f, points: e.target.value }))}
                   placeholder="e.g. 100 or -50"
-                  style={inputStyle}
+                  style={inputBaseStyle(dark, themeColorRgb)}
+                  {...getInputFocusHandlers(themeColorRgb, dark)}
                 />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', color: dark ? '#9ca3af' : '#6b7280' }}>Reason (optional)</label>
+              </FormField>
+              <FormField>
+                <FormLabel isDarkMode={dark}>Reason (optional)</FormLabel>
                 <input
                   type="text"
                   value={pointsForm.reason}
                   onChange={(e) => setPointsForm((f) => ({ ...f, reason: e.target.value }))}
                   placeholder="e.g. Birthday coupon, Manual adjustment"
-                  style={inputStyle}
+                  style={inputBaseStyle(dark, themeColorRgb)}
+                  {...getInputFocusHandlers(themeColorRgb, dark)}
                 />
-              </div>
+              </FormField>
             </div>
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => !saving && closeModal()} disabled={saving} style={{ padding: '8px 16px', borderRadius: '8px', border: `1px solid ${dark ? '#404040' : '#d1d5db'}`, background: 'none', color: dark ? '#e5e7eb' : '#374151', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '14px' }}>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '24px' }}>
+              <button
+                type="button"
+                onClick={() => !saving && closeModal()}
+                disabled={saving}
+                style={{
+                  padding: '4px 16px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  whiteSpace: 'nowrap',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  border: `1px solid ${dark ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: 'var(--text-secondary)',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: 'none'
+                }}
+              >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleAddPoints}
                 disabled={saving}
-                style={{ padding: '8px 20px', borderRadius: '8px', border: 'none', backgroundColor: '#059669', color: '#fff', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', fontSize: '14px' }}
+                style={{
+                  padding: '4px 16px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  whiteSpace: 'nowrap',
+                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                  border: `1px solid rgba(${themeColorRgb}, 0.5)`,
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: '#fff',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3)`
+                }}
               >
                 {saving ? 'Updating...' : 'Apply'}
               </button>

@@ -294,7 +294,7 @@ function CalendarSubscriptionPage() {
               }}>
                 <div style={{ fontSize: '32px' }}>📅</div>
                 <div style={{ flex: 1 }}>
-                  <h3 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>Google Calendar</h3>
+                  <h3 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>Google </h3>
                   <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>
                     Add to your Google Calendar with one click
                   </p>
@@ -303,17 +303,10 @@ function CalendarSubscriptionPage() {
                   href={urls.google_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#4285f4',
-                    color: '#fff',
-                    textDecoration: 'none',
-                    borderRadius: '4px',
-                    fontSize: '14px',
-                    fontWeight: 500
-                  }}
+                  className="button-2"
+                  role="button"
                 >
-                  Add to Google Calendar
+                  <span className="text">Add to Google</span>
                 </a>
               </div>
 
@@ -334,17 +327,10 @@ function CalendarSubscriptionPage() {
                 </div>
                 <a
                   href={urls.webcal_url}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#000',
-                    color: '#fff',
-                    textDecoration: 'none',
-                    borderRadius: '4px',
-                    fontSize: '14px',
-                    fontWeight: 500
-                  }}
+                  className="button-2"
+                  role="button"
                 >
-                  Add to Apple Calendar
+                  <span className="text">Add to Apple</span>
                 </a>
               </div>
 
@@ -364,19 +350,11 @@ function CalendarSubscriptionPage() {
                   </p>
                 </div>
                 <button
+                  type="button"
+                  className="button-2"
                   onClick={() => setShowInstructions('outlook')}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#0078d4',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    fontSize: '14px',
-                    fontWeight: 500,
-                    cursor: 'pointer'
-                  }}
                 >
-                  Get Instructions
+                  <span className="text">Get Instructions</span>
                 </button>
               </div>
             </div>

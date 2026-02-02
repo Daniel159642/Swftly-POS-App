@@ -1,6 +1,5 @@
 import React from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
-import Input from '../common/Input'
 import CustomDropdown from '../common/CustomDropdown'
 import Button from '../common/Button'
 
@@ -44,72 +43,118 @@ function TransactionFilters({ filters, onFilterChange, onClearFilters }) {
     { value: 'true', label: 'Voided Only' },
   ]
 
-  const containerStyle = {
-    backgroundColor: isDarkMode ? '#2a2a2a' : 'white',
-    padding: '20px',
-    borderRadius: '8px',
-    border: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`,
-    marginBottom: '24px',
-    boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
-  }
-
   const gridStyle = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '16px',
-    marginBottom: '16px'
+    alignItems: 'end'
+  }
+
+  const dateContainerStyle = {
+    padding: '4px 16px',
+    minHeight: '28px',
+    height: '28px',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: 500,
+    backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+    border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
+    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    boxSizing: 'border-box',
+    width: '100%',
+    transition: 'border-color 0.2s ease'
+  }
+
+  const dateInputStyle = {
+    border: 'none',
+    background: 'transparent',
+    color: 'inherit',
+    fontSize: '14px',
+    fontWeight: 500,
+    outline: 'none',
+    cursor: 'pointer',
+    flex: 1,
+    minWidth: 0
   }
 
   return (
-    <div style={containerStyle}>
+    <div style={{ marginBottom: '24px' }}>
       <div style={gridStyle}>
-        <Input
-          name="start_date"
-          type="date"
-          label="Start Date"
-          value={filters.start_date || ''}
-          onChange={handleChange}
-        />
+        <div style={{ ...dateContainerStyle, marginBottom: 0 }}>
+          <span style={{ whiteSpace: 'nowrap', color: isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '13px' }}>Start date</span>
+          <input
+            type="date"
+            name="start_date"
+            value={filters.start_date || ''}
+            onChange={handleChange}
+            style={dateInputStyle}
+            onFocus={(e) => {
+              const container = e.target.closest('div')
+              if (container) container.style.borderColor = `rgba(${themeColorRgb}, 0.5)`
+            }}
+            onBlur={(e) => {
+              const container = e.target.closest('div')
+              if (container) container.style.borderColor = isDarkMode ? '#333' : '#ddd'
+            }}
+          />
+        </div>
 
-        <Input
-          name="end_date"
-          type="date"
-          label="End Date"
-          value={filters.end_date || ''}
-          onChange={handleChange}
-        />
+        <div style={{ ...dateContainerStyle, marginBottom: 0 }}>
+          <span style={{ whiteSpace: 'nowrap', color: isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '13px' }}>End date</span>
+          <input
+            type="date"
+            name="end_date"
+            value={filters.end_date || ''}
+            onChange={handleChange}
+            style={dateInputStyle}
+            onFocus={(e) => {
+              const container = e.target.closest('div')
+              if (container) container.style.borderColor = `rgba(${themeColorRgb}, 0.5)`
+            }}
+            onBlur={(e) => {
+              const container = e.target.closest('div')
+              if (container) container.style.borderColor = isDarkMode ? '#333' : '#ddd'
+            }}
+          />
+        </div>
 
         <CustomDropdown
           name="transaction_type"
-          label="Type"
           value={filters.transaction_type || ''}
           onChange={handleChange}
           options={transactionTypeOptions}
           placeholder="All Types"
           isDarkMode={isDarkMode}
           themeColorRgb={themeColorRgb}
+          triggerVariant="button"
+          style={{ marginBottom: 0 }}
         />
 
         <CustomDropdown
           name="is_posted"
-          label="Status"
           value={filters.is_posted === undefined ? '' : String(filters.is_posted)}
           onChange={handleChange}
           options={statusOptions}
           placeholder="All Status"
           isDarkMode={isDarkMode}
           themeColorRgb={themeColorRgb}
+          triggerVariant="button"
+          style={{ marginBottom: 0 }}
         />
 
         <CustomDropdown
           name="is_void"
-          label="Void Status"
           value={filters.is_void === undefined ? '' : String(filters.is_void)}
           onChange={handleChange}
           options={voidOptions}
           placeholder="Include All"
           isDarkMode={isDarkMode}
           themeColorRgb={themeColorRgb}
+          triggerVariant="button"
+          style={{ marginBottom: 0 }}
         />
 
         <div style={{ marginBottom: 0 }}>
@@ -118,16 +163,6 @@ function TransactionFilters({ filters, onFilterChange, onClearFilters }) {
             Clear Filters
           </Button>
         </div>
-      </div>
-      
-      <div>
-        <Input
-          name="search"
-          label="Search"
-          value={filters.search || ''}
-          onChange={handleChange}
-          placeholder="Search by transaction number or description..."
-        />
       </div>
     </div>
   )

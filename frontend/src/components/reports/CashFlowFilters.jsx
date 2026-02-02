@@ -1,10 +1,8 @@
 import React from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
-import Input from '../common/Input'
 import CustomDropdown from '../common/CustomDropdown'
-import Button from '../common/Button'
 
-function CashFlowFilters({ filters, onFilterChange, onGenerate, loading = false }) {
+function CashFlowFilters({ filters, onFilterChange }) {
   const { themeColor } = useTheme()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const hexToRgb = (hex) => {
@@ -59,20 +57,42 @@ function CashFlowFilters({ filters, onFilterChange, onGenerate, loading = false 
     { value: 'previous_year', label: 'Previous Year' }
   ]
 
-  const containerStyle = {
-    backgroundColor: isDarkMode ? '#2a2a2a' : 'white',
-    padding: '24px',
-    borderRadius: '8px',
-    border: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`,
-    marginBottom: '24px',
-    boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
-  }
-
   const gridStyle = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '16px',
+    alignItems: 'end',
     marginBottom: '16px'
+  }
+
+  const dateContainerStyle = {
+    padding: '4px 16px',
+    minHeight: '28px',
+    height: '28px',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: 500,
+    backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+    border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
+    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    boxSizing: 'border-box',
+    width: '100%',
+    transition: 'border-color 0.2s ease'
+  }
+
+  const dateInputStyle = {
+    border: 'none',
+    background: 'transparent',
+    color: 'inherit',
+    fontSize: '14px',
+    fontWeight: 500,
+    outline: 'none',
+    cursor: 'pointer',
+    flex: 1,
+    minWidth: 0
   }
 
   const quickSelectStyle = {
@@ -80,9 +100,7 @@ function CashFlowFilters({ filters, onFilterChange, onGenerate, loading = false 
     gap: '8px',
     flexWrap: 'wrap',
     alignItems: 'center',
-    marginTop: '16px',
-    paddingTop: '16px',
-    borderTop: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`
+    marginTop: '16px'
   }
 
   const quickSelectButtonStyle = {
@@ -91,27 +109,58 @@ function CashFlowFilters({ filters, onFilterChange, onGenerate, loading = false 
     display: 'flex',
     alignItems: 'center',
     whiteSpace: 'nowrap',
-    backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-    border: `1px solid rgba(${themeColorRgb}, 0.5)`,
+    backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+    border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
     borderRadius: '8px',
     fontSize: '14px',
-    fontWeight: 600,
-    color: '#fff',
+    fontWeight: 500,
+    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
     cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3)`
+    transition: 'all 0.2s ease'
   }
 
   return (
-    <div style={containerStyle}>
-      <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px', color: isDarkMode ? '#fff' : '#1a1a1a' }}>
-        Report Period
-      </h3>
+    <div style={{ marginBottom: '24px' }}>
       <div style={gridStyle}>
-        <Input label="Start Date" name="start_date" type="date" value={filters.start_date || ''} onChange={handleChange} required />
-        <Input label="End Date" name="end_date" type="date" value={filters.end_date || ''} onChange={handleChange} required />
+        <div style={{ ...dateContainerStyle, marginBottom: 0 }}>
+          <span style={{ whiteSpace: 'nowrap', color: isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '13px' }}>Start date</span>
+          <input
+            type="date"
+            name="start_date"
+            value={filters.start_date || ''}
+            onChange={handleChange}
+            style={dateInputStyle}
+            onFocus={(e) => {
+              const container = e.target.closest('div')
+              if (container) container.style.borderColor = `rgba(${themeColorRgb}, 0.5)`
+            }}
+            onBlur={(e) => {
+              const container = e.target.closest('div')
+              if (container) container.style.borderColor = isDarkMode ? '#333' : '#ddd'
+            }}
+          />
+        </div>
+
+        <div style={{ ...dateContainerStyle, marginBottom: 0 }}>
+          <span style={{ whiteSpace: 'nowrap', color: isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '13px' }}>End date</span>
+          <input
+            type="date"
+            name="end_date"
+            value={filters.end_date || ''}
+            onChange={handleChange}
+            style={dateInputStyle}
+            onFocus={(e) => {
+              const container = e.target.closest('div')
+              if (container) container.style.borderColor = `rgba(${themeColorRgb}, 0.5)`
+            }}
+            onBlur={(e) => {
+              const container = e.target.closest('div')
+              if (container) container.style.borderColor = isDarkMode ? '#333' : '#ddd'
+            }}
+          />
+        </div>
+
         <CustomDropdown
-          label="Compare To"
           name="comparison_type"
           value={filters.comparison_type || 'none'}
           onChange={handleChange}
@@ -119,21 +168,12 @@ function CashFlowFilters({ filters, onFilterChange, onGenerate, loading = false 
           placeholder="No Comparison"
           isDarkMode={isDarkMode}
           themeColorRgb={themeColorRgb}
+          triggerVariant="button"
+          style={{ marginBottom: 0 }}
         />
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, marginBottom: '4px', visibility: 'hidden', lineHeight: 1.2 }} aria-hidden>Generate</label>
-          <Button
-            type="button"
-            onClick={onGenerate}
-            disabled={loading || !filters.start_date || !filters.end_date}
-            style={{ width: '100%' }}
-          >
-            {loading ? 'Generating...' : 'Generate Report'}
-          </Button>
-        </div>
       </div>
+
       <div style={quickSelectStyle}>
-        <span style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginRight: '8px' }}>Quick Select:</span>
         <button type="button" onClick={() => setPresetPeriod('this_month')} style={quickSelectButtonStyle}>This Month</button>
         <button type="button" onClick={() => setPresetPeriod('last_month')} style={quickSelectButtonStyle}>Last Month</button>
         <button type="button" onClick={() => setPresetPeriod('this_quarter')} style={quickSelectButtonStyle}>This Quarter</button>

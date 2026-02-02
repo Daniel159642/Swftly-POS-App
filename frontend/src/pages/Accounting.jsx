@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import {
   LayoutDashboard,
@@ -14,7 +14,8 @@ import {
   Users,
   Truck,
   FileBarChart,
-  PanelLeft
+  PanelLeft,
+  Plus
 } from 'lucide-react'
 import accountService from '../services/accountService'
 import transactionService from '../services/transactionService'
@@ -128,7 +129,7 @@ function Accounting() {
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
     { id: 'chart-of-accounts', label: 'Chart of Accounts', icon: BookOpen },
     { id: 'transactions', label: 'Transactions', icon: ArrowLeftRight },
-    { id: 'general-ledger', label: 'General Ledger', icon: Library },
+    { id: 'general-ledger', label: 'Ledger', icon: Library },
     { id: 'financial-statements', label: 'Financial Statements', icon: FileBarChart },
     { id: 'invoices', label: 'Invoices', icon: FileText },
     { id: 'bills', label: 'Bills', icon: Receipt },
@@ -781,23 +782,74 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
 
   return (
     <div>
-      <div style={{ 
-        marginBottom: '24px', 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center' 
-      }}>
-        <div>
-          <h3 style={{ ...formTitleStyle(isDarkMode), margin: 0, fontSize: '24px' }}>
-            Chart of Accounts
-          </h3>
-          <p style={{ color: textColor, opacity: 0.7, marginTop: '4px', fontSize: '14px' }}>
-            Manage your accounting accounts
-          </p>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Chart of Accounts</h1>
+        <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Your chart of accounts lists all ledger accounts (assets, liabilities, equity, revenue, expenses). Organize accounts, track balances, and run reports from here.</p>
+      </div>
+
+      <div style={{ marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center' }}>
+            <input
+              type="text"
+              placeholder="Search accounts..."
+              value={filters.search || ''}
+              onChange={(e) => setFilters({ ...filters, search: e.target.value || undefined })}
+              style={{
+                flex: 1,
+                padding: '8px 0',
+                border: 'none',
+                borderBottom: _isDark ? '2px solid #404040' : '2px solid #ddd',
+                borderRadius: 0,
+                backgroundColor: 'transparent',
+                outline: 'none',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+                color: _isDark ? '#fff' : '#333',
+                transition: 'border-color 0.2s ease'
+              }}
+              onFocus={(e) => {
+                e.target.style.borderBottomColor = `rgba(${themeColorRgb || '59, 130, 246'}, 0.7)`
+              }}
+              onBlur={(e) => {
+                e.target.style.borderBottomColor = _isDark ? '#404040' : '#ddd'
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsCreateModalOpen(true)}
+            title="Create account"
+            style={{
+              padding: '4px',
+              width: '32px',
+              height: '32px',
+              backgroundColor: `rgba(${themeColorRgb || '59, 130, 246'}, 0.7)`,
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              color: '#fff',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              boxShadow: `0 4px 15px rgba(${themeColorRgb || '59, 130, 246'}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb || '59, 130, 246'}, 0.8)`
+              e.currentTarget.style.boxShadow = `0 4px 20px rgba(${themeColorRgb || '59, 130, 246'}, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb || '59, 130, 246'}, 0.7)`
+              e.currentTarget.style.boxShadow = `0 4px 15px rgba(${themeColorRgb || '59, 130, 246'}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+            }}
+          >
+            <Plus size={18} />
+          </button>
         </div>
-        <Button onClick={() => setIsCreateModalOpen(true)} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>
-          + New Account
-        </Button>
       </div>
 
       <AccountFilters
@@ -806,41 +858,43 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
         onClearFilters={handleClearFilters}
       />
 
-      <div style={{
-        backgroundColor: cardBg,
-        borderRadius: '8px',
-        border: `1px solid ${borderColor}`,
-        overflow: 'hidden'
-      }}>
-        <div style={{
-          padding: '16px 24px',
-          borderBottom: `1px solid ${borderColor}`
-        }}>
-          <p style={{
-            fontSize: '14px',
-            color: textColor,
-            opacity: 0.7,
-            margin: 0
-          }}>
+      <div
+        style={{
+          backgroundColor: _isDark ? '#2a2a2a' : 'white',
+          borderRadius: '8px',
+          boxShadow: _isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+          overflow: 'hidden'
+        }}
+      >
+        <div
+          style={{
+            padding: '16px 24px',
+            borderBottom: '1px solid ' + (_isDark ? '#3a3a3a' : '#e5e7eb'),
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '16px'
+          }}
+        >
+          <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>
             Showing {filteredAccounts.length} of {accounts.length} accounts
           </p>
         </div>
-        <div style={{ padding: '24px' }}>
-          <AccountTable
-            accounts={filteredAccounts}
-            onEdit={(account) => {
-              setSelectedAccount(account)
-              setIsEditModalOpen(true)
-            }}
-            onDelete={handleDeleteAccount}
-            onToggleStatus={handleToggleStatus}
-            onViewBalance={handleViewBalance}
-            onViewLedger={(account) => {
-              sessionStorage.setItem('selectedAccountId', account.id)
-              setActiveTab('account-ledger')
-            }}
-          />
-        </div>
+        <AccountTable
+          accounts={filteredAccounts}
+          onEdit={(account) => {
+            setSelectedAccount(account)
+            setIsEditModalOpen(true)
+          }}
+          onDelete={handleDeleteAccount}
+          onToggleStatus={handleToggleStatus}
+          onViewBalance={handleViewBalance}
+          onViewLedger={(account) => {
+            sessionStorage.setItem('selectedAccountId', account.id)
+            setActiveTab('account-ledger')
+          }}
+        />
       </div>
 
       {/* Create Account Modal */}
@@ -1104,16 +1158,74 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <div>
-          <h3 style={{ color: textColor, marginBottom: '8px', fontSize: '24px', fontWeight: '600' }}>
-            Transactions
-          </h3>
-          <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
-            Record and manage journal entries
-          </p>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Transactions</h1>
+        <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Record and manage journal entries</p>
+      </div>
+
+      <div style={{ marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center' }}>
+            <input
+              type="text"
+              placeholder="Search by transaction number or description..."
+              value={filters.search || ''}
+              onChange={(e) => setFilters({ ...filters, search: e.target.value || undefined })}
+              style={{
+                flex: 1,
+                padding: '8px 0',
+                border: 'none',
+                borderBottom: _isDark ? '2px solid #404040' : '2px solid #ddd',
+                borderRadius: 0,
+                backgroundColor: 'transparent',
+                outline: 'none',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+                color: _isDark ? '#fff' : '#333',
+                transition: 'border-color 0.2s ease'
+              }}
+              onFocus={(e) => {
+                e.target.style.borderBottomColor = `rgba(${themeColorRgb || '59, 130, 246'}, 0.7)`
+              }}
+              onBlur={(e) => {
+                e.target.style.borderBottomColor = _isDark ? '#404040' : '#ddd'
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsCreateModalOpen(true)}
+            title="New transaction"
+            style={{
+              padding: '4px',
+              width: '32px',
+              height: '32px',
+              backgroundColor: `rgba(${themeColorRgb || '59, 130, 246'}, 0.7)`,
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              color: '#fff',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              boxShadow: `0 4px 15px rgba(${themeColorRgb || '59, 130, 246'}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb || '59, 130, 246'}, 0.8)`
+              e.currentTarget.style.boxShadow = `0 4px 20px rgba(${themeColorRgb || '59, 130, 246'}, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb || '59, 130, 246'}, 0.7)`
+              e.currentTarget.style.boxShadow = `0 4px 15px rgba(${themeColorRgb || '59, 130, 246'}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+            }}
+          >
+            <Plus size={18} />
+          </button>
         </div>
-        <Button onClick={() => setIsCreateModalOpen(true)} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>+ New Transaction</Button>
       </div>
 
       <TransactionFilters
@@ -1122,20 +1234,26 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
         onClearFilters={handleClearFilters}
       />
 
-      <div style={{ 
-        backgroundColor: cardBg, 
-        borderRadius: '8px', 
-        border: `1px solid ${borderColor}`,
-        boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
-      }}>
-        <div style={{ 
-          padding: '16px 24px', 
-          borderBottom: `1px solid ${borderColor}`, 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center' 
-        }}>
-          <p style={{ fontSize: '14px', color: textColor, opacity: 0.7 }}>
+      <div
+        style={{
+          backgroundColor: _isDark ? '#2a2a2a' : 'white',
+          borderRadius: '8px',
+          boxShadow: _isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+          overflow: 'hidden'
+        }}
+      >
+        <div
+          style={{
+            padding: '16px 24px',
+            borderBottom: '1px solid ' + (_isDark ? '#3a3a3a' : '#e5e7eb'),
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '16px'
+          }}
+        >
+          <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>
             Showing {transactions.length} of {pagination.total} transactions
           </p>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -1149,7 +1267,7 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
             >
               Previous
             </Button>
-            <span style={{ padding: '0 12px', fontSize: '14px', color: textColor }}>
+            <span style={{ padding: '0 12px', fontSize: '14px', color: _isDark ? '#d1d5db' : '#374151' }}>
               Page {pagination.page} of {pagination.totalPages}
             </span>
             <Button
@@ -1164,7 +1282,7 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
             </Button>
           </div>
         </div>
-        
+
         <TransactionTable
           transactions={transactions}
           onView={(transaction) => {
@@ -1343,17 +1461,9 @@ function InvoicesTab({ dateRange, formatCurrency, getAuthHeaders }) {
 
   return (
     <div>
-      <div style={{
-        padding: '20px',
-        backgroundColor: cardBg,
-        border: `1px solid ${borderColor}`,
-        borderRadius: '8px',
-        marginBottom: '24px'
-      }}>
-        <h3 style={{ ...formTitleStyle(isDarkMode), marginBottom: '8px', fontSize: '18px' }}>Invoices</h3>
-        <p style={{ color: textColor, opacity: 0.85, fontSize: '14px', margin: 0, lineHeight: 1.5 }}>
-          Invoices are sales you&apos;ve sent to customers. They appear here for the selected date range. Use this list to track amounts owed and payment status.
-        </p>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Invoices</h1>
+        <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Sales you&apos;ve sent to customers for the selected date range. Track amounts owed and payment status.</p>
       </div>
       <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1540,12 +1650,8 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
   return (
     <div>
       <div style={{ marginBottom: '24px' }}>
-        <h3 style={{ ...formTitleStyle(isDarkMode), marginBottom: '8px', fontSize: '24px' }}>
-          General Ledger
-        </h3>
-        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
-          View all posted accounting transactions
-        </p>
+        <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Ledger</h1>
+        <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>View all posted accounting transactions</p>
       </div>
 
       <GeneralLedgerFilters
@@ -1561,36 +1667,34 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
       {loading ? (
         <LoadingSpinner size="lg" text="Loading ledger entries..." />
       ) : (
-        <>
-          <div style={{ 
-            marginBottom: '16px', 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            alignItems: 'center' 
-          }}>
-            <div>
-              <p style={{ fontSize: '14px', color: textColor, opacity: 0.7 }}>
-                Showing <span style={{ fontWeight: '600' }}>{entries.length}</span> entries
-                {filters.account_id && (
-                  <span> for account: <span style={{ fontWeight: '600' }}>{getSelectedAccountName()}</span></span>
-                )}
-              </p>
-              {filters.start_date && filters.end_date && (
-                <p style={{ fontSize: '12px', color: textColor, opacity: 0.5, marginTop: '4px' }}>
-                  Period: {new Date(filters.start_date).toLocaleDateString()} - {new Date(filters.end_date).toLocaleDateString()}
-                </p>
-              )}
-            </div>
+        <div
+          style={{
+            backgroundColor: _isDark ? '#2a2a2a' : 'white',
+            borderRadius: '8px',
+            boxShadow: _isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+            overflow: 'hidden'
+          }}
+        >
+          <div
+            style={{
+              padding: '16px 24px',
+              borderBottom: '1px solid ' + (_isDark ? '#3a3a3a' : '#e5e7eb'),
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '16px'
+            }}
+          >
+            <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>
+              Showing {entries.length} entries
+              {filters.account_id ? ` for ${getSelectedAccountName()}` : ''}
+              {filters.start_date && filters.end_date && ` · ${new Date(filters.start_date).toLocaleDateString()} – ${new Date(filters.end_date).toLocaleDateString()}`}
+            </p>
             {entries.length > 0 && (
-              <div style={{ fontSize: '14px', color: textColor, opacity: 0.7 }}>
-                <span style={{ fontWeight: '600' }}>
-                  Debits: ${totalDebits.toFixed(2)}
-                </span>
-                {' | '}
-                <span style={{ fontWeight: '600' }}>
-                  Credits: ${totalCredits.toFixed(2)}
-                </span>
-              </div>
+              <span style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280' }}>
+                Debits: ${totalDebits.toFixed(2)} · Credits: ${totalCredits.toFixed(2)}
+              </span>
             )}
           </div>
 
@@ -1599,7 +1703,7 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
             showRunningBalance={false}
             onViewTransaction={handleViewTransaction}
           />
-        </>
+        </div>
       )}
 
       {/* View Transaction Modal */}
@@ -2034,13 +2138,33 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
 // Financial Statements Tab (combined P&L, Balance Sheet, Cash Flow with dropdown)
 function FinancialStatementsTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab, themeColorRgb, isDarkMode }) {
   const [reportType, setReportType] = useState('profit-loss')
-  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
+  const [generateButtonState, setGenerateButtonState] = useState({ loading: false, disabled: true, hasReportData: false })
+  const [exportChoice, setExportChoice] = useState('')
+  const generateReportRef = useRef(null)
+  const _isDark = isDarkMode ?? document.documentElement.classList.contains('dark-theme')
+
+  const exportOptions = [
+    { value: 'csv', label: 'Export to CSV' },
+    { value: 'excel', label: 'Export to Excel' },
+    { value: 'print', label: 'Print' }
+  ]
+  const handleExportSelect = (e) => {
+    const v = e?.target?.value
+    setExportChoice('')
+    if (v === 'csv') generateReportRef.current?.exportToCsv()
+    else if (v === 'excel') generateReportRef.current?.exportToExcel()
+    else if (v === 'print') generateReportRef.current?.print()
+  }
 
   return (
     <div>
-      <div style={{ marginBottom: '24px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px' }}>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Financial Statements</h1>
+        <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Profit & Loss, Balance Sheet, Cash Flow, Trial Balance</p>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
         <CustomDropdown
-          label="Report type"
           value={reportType}
           onChange={(e) => setReportType(e.target.value)}
           options={[
@@ -2049,30 +2173,56 @@ function FinancialStatementsTab({ dateRange, formatCurrency, getAuthHeaders, set
             { value: 'cash-flow', label: 'Cash Flow Statement' },
             { value: 'trial-balance', label: 'Trial Balance' }
           ]}
-          placeholder="Select report type"
+          placeholder="Report type"
           isDarkMode={isDarkMode}
           themeColorRgb={themeColorRgb || '132, 0, 255'}
-          style={{ minWidth: '220px', marginBottom: 0 }}
+          triggerVariant="button"
+          triggerFullWidth
+          style={{ marginBottom: 0, flex: 1, minWidth: 0 }}
+        />
+        <Button
+          type="button"
+          onClick={() => generateReportRef.current?.generateReport()}
+          disabled={generateButtonState.loading || generateButtonState.disabled}
+          themeColorRgb={themeColorRgb}
+          isDarkMode={isDarkMode}
+        >
+          {generateButtonState.loading ? 'Generating...' : 'Generate Report'}
+        </Button>
+        <CustomDropdown
+          value={exportChoice}
+          onChange={handleExportSelect}
+          options={exportOptions}
+          placeholder="Export"
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb || '132, 0, 255'}
+          triggerVariant="button"
+          disabled={!generateButtonState.hasReportData}
+          style={{ marginBottom: 0, width: 'auto' }}
         />
       </div>
+
       {reportType === 'trial-balance' && (
-        <TrialBalanceTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />
+        <TrialBalanceTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />
       )}
       {reportType === 'profit-loss' && (
-        <ProfitLossTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />
+        <ProfitLossTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />
       )}
       {reportType === 'balance-sheet' && (
-        <BalanceSheetTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />
+        <BalanceSheetTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />
       )}
       {reportType === 'cash-flow' && (
-        <CashFlowTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />
+        <CashFlowTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />
       )}
     </div>
   )
 }
 
 // Trial Balance Tab (Financial Statements dropdown)
-function TrialBalanceTab({ dateRange, formatCurrency, getAuthHeaders, hideTitle = false, themeColorRgb, isDarkMode }) {
+const TrialBalanceTab = forwardRef(function TrialBalanceTab(
+  { dateRange, formatCurrency, getAuthHeaders, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange },
+  ref
+) {
   const { show: showToast } = useToast()
   const [filters, setFilters] = useState({ as_of_date: dateRange.end_date })
   const [reportData, setReportData] = useState(null)
@@ -2086,6 +2236,10 @@ function TrialBalanceTab({ dateRange, formatCurrency, getAuthHeaders, hideTitle 
   useEffect(() => {
     setFilters(prev => ({ ...prev, as_of_date: dateRange.end_date }))
   }, [dateRange.end_date])
+
+  useEffect(() => {
+    onGenerateStateChange?.({ loading, disabled: !filters.as_of_date, hasReportData: !!reportData })
+  }, [loading, filters.as_of_date, onGenerateStateChange, reportData])
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -2215,28 +2369,54 @@ function TrialBalanceTab({ dateRange, formatCurrency, getAuthHeaders, hideTitle 
     }
   }
 
-  const containerStyle = {
-    backgroundColor: _isDark ? '#2a2a2a' : 'white',
-    padding: '24px',
-    borderRadius: '8px',
-    border: `1px solid ${borderColor}`,
-    marginBottom: '24px',
-    boxShadow: _isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
-  }
+  useImperativeHandle(ref, () => ({
+    generateReport: handleGenerateReport,
+    exportToCsv: handleExport,
+    exportToExcel: handleExportExcel,
+    print: () => window.print()
+  }), [handleGenerateReport, handleExport, handleExportExcel])
+
   const gridStyle = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '16px',
+    alignItems: 'end',
     marginBottom: '16px'
+  }
+  const dateContainerStyle = {
+    padding: '4px 16px',
+    minHeight: '28px',
+    height: '28px',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: 500,
+    backgroundColor: _isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+    border: _isDark ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
+    color: _isDark ? 'var(--text-primary, #fff)' : '#333',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    boxSizing: 'border-box',
+    width: '100%',
+    transition: 'border-color 0.2s ease'
+  }
+  const dateInputStyle = {
+    border: 'none',
+    background: 'transparent',
+    color: 'inherit',
+    fontSize: '14px',
+    fontWeight: 500,
+    outline: 'none',
+    cursor: 'pointer',
+    flex: 1,
+    minWidth: 0
   }
   const quickSelectStyle = {
     display: 'flex',
     gap: '8px',
     flexWrap: 'wrap',
     alignItems: 'center',
-    marginTop: '16px',
-    paddingTop: '16px',
-    borderTop: `1px solid ${borderColor}`
+    marginTop: '16px'
   }
   const quickSelectButtonStyle = {
     padding: '4px 16px',
@@ -2244,15 +2424,14 @@ function TrialBalanceTab({ dateRange, formatCurrency, getAuthHeaders, hideTitle 
     display: 'flex',
     alignItems: 'center',
     whiteSpace: 'nowrap',
-    backgroundColor: `rgba(${rgb}, 0.7)`,
-    border: `1px solid rgba(${rgb}, 0.5)`,
+    backgroundColor: _isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+    border: _isDark ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
     borderRadius: '8px',
     fontSize: '14px',
-    fontWeight: 600,
-    color: '#fff',
+    fontWeight: 500,
+    color: _isDark ? 'var(--text-primary, #fff)' : '#333',
     cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    boxShadow: `0 4px 15px rgba(${rgb}, 0.3)`
+    transition: 'all 0.2s ease'
   }
 
   return (
@@ -2265,40 +2444,28 @@ function TrialBalanceTab({ dateRange, formatCurrency, getAuthHeaders, hideTitle 
           </p>
         </div>
       )}
-      <div style={containerStyle}>
-        <h3 style={{
-          fontSize: '18px',
-          fontWeight: '600',
-          marginBottom: '16px',
-          color: textColor
-        }}>
-          Report Settings
-        </h3>
+      <div style={{ marginBottom: '24px' }}>
         <div style={gridStyle}>
-          <Input
-            label="As of Date"
-            name="as_of_date"
-            type="date"
-            value={filters.as_of_date || ''}
-            onChange={handleChange}
-            required
+          <div style={{ ...dateContainerStyle, marginBottom: 0 }}>
+            <span style={{ whiteSpace: 'nowrap', color: _isDark ? '#9ca3af' : '#6b7280', fontSize: '13px' }}>As of date</span>
+            <input
+              type="date"
+              name="as_of_date"
+              value={filters.as_of_date || ''}
+              onChange={handleChange}
+              style={dateInputStyle}
+              onFocus={(e) => {
+                const container = e.target.closest('div')
+                if (container) container.style.borderColor = `rgba(${rgb}, 0.5)`
+              }}
+            onBlur={(e) => {
+              const container = e.target.closest('div')
+              if (container) container.style.borderColor = _isDark ? '#333' : '#ddd'
+            }}
           />
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, marginBottom: '4px', visibility: 'hidden', lineHeight: 1.2 }} aria-hidden>Generate</label>
-            <Button
-              type="button"
-              onClick={handleGenerateReport}
-              disabled={loading || !filters.as_of_date}
-              style={{ width: '100%' }}
-            >
-              {loading ? 'Generating...' : 'Generate Report'}
-            </Button>
-          </div>
         </div>
-        <div style={quickSelectStyle}>
-          <span style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginRight: '8px' }}>
-            Quick Select:
-          </span>
+      </div>
+      <div style={quickSelectStyle}>
           <button type="button" onClick={() => setPresetDate('today')} style={quickSelectButtonStyle}>Today</button>
           <button type="button" onClick={() => setPresetDate('end_of_month')} style={quickSelectButtonStyle}>End of Month</button>
           <button type="button" onClick={() => setPresetDate('end_of_last_month')} style={quickSelectButtonStyle}>End of Last Month</button>
@@ -2310,22 +2477,6 @@ function TrialBalanceTab({ dateRange, formatCurrency, getAuthHeaders, hideTitle 
       {loading && <LoadingSpinner size="lg" text="Generating report..." />}
       {!loading && reportData && (
         <div className="accounting-report-print-area">
-          <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-            <h2 style={{ fontSize: '20px', fontWeight: '600', color: textColor }}>
-              As of {reportData?.data?.date ? new Date(reportData.data.date).toLocaleDateString() : filters.as_of_date}
-            </h2>
-            <div className="no-print" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-              <Button variant="primary" onClick={handleExport} themeColorRgb={themeColorRgb} isDarkMode={_isDark}>
-                📊 Export to CSV
-              </Button>
-              <Button variant="primary" onClick={handleExportExcel} themeColorRgb={themeColorRgb} isDarkMode={_isDark}>
-                📗 Export to Excel
-              </Button>
-              <Button variant="primary" onClick={() => window.print()} themeColorRgb={themeColorRgb} isDarkMode={_isDark}>
-                🖨️ Print
-              </Button>
-            </div>
-          </div>
           <div style={{
             backgroundColor: cardBg,
             border: `1px solid ${borderColor}`,
@@ -2352,10 +2503,13 @@ function TrialBalanceTab({ dateRange, formatCurrency, getAuthHeaders, hideTitle 
       )}
     </div>
   )
-}
+})
 
 // Profit & Loss Tab
-function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode }) {
+const ProfitLossTab = forwardRef(function ProfitLossTab(
+  { dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange },
+  ref
+) {
   const { show: showToast } = useToast()
   const [reportData, setReportData] = useState(null)
   const [comparativeData, setComparativeData] = useState(null)
@@ -2379,6 +2533,10 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
       end_date: dateRange.end_date
     }))
   }, [dateRange])
+
+  useEffect(() => {
+    onGenerateStateChange?.({ loading, disabled: !filters.start_date || !filters.end_date, hasReportData: !!reportData })
+  }, [loading, filters.start_date, filters.end_date, onGenerateStateChange, reportData])
 
   const handleGenerateReport = async () => {
     setLoading(true)
@@ -2545,6 +2703,13 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
     return `${new Date(comparativeData.prior.start_date).toLocaleDateString()} - ${new Date(comparativeData.prior.end_date).toLocaleDateString()}`
   }
 
+  useImperativeHandle(ref, () => ({
+    generateReport: handleGenerateReport,
+    exportToCsv: handleExport,
+    exportToExcel: handleExportExcel,
+    print: () => window.print()
+  }), [handleGenerateReport, handleExport, handleExportExcel])
+
   return (
     <div>
       {!hideTitle && (
@@ -2561,43 +2726,12 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
       <ProfitLossFilters
         filters={filters}
         onFilterChange={setFilters}
-        onGenerate={handleGenerateReport}
-        loading={loading}
       />
 
       {loading && <LoadingSpinner size="lg" text="Generating report..." />}
 
       {!loading && reportData && (
         <div className="accounting-report-print-area">
-          <div style={{ 
-            marginBottom: '24px', 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            alignItems: 'center' 
-          }}>
-            <div>
-              <h2 style={{ fontSize: '20px', fontWeight: '600', color: textColor }}>
-                {getPeriodLabel()}
-              </h2>
-              {comparativeData && (
-                <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, marginTop: '4px' }}>
-                  Compared to: {getPriorPeriodLabel()}
-                </p>
-              )}
-            </div>
-            <div className="no-print" style={{ display: 'flex', gap: '12px' }}>
-              <Button variant="primary" onClick={handleExport} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>
-                📊 Export to CSV
-              </Button>
-              <Button variant="primary" onClick={handleExportExcel} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>
-                📗 Export to Excel
-              </Button>
-              <Button variant="primary" onClick={() => window.print()} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>
-                🖨️ Print
-              </Button>
-            </div>
-          </div>
-
           {comparativeData ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <ComparativeProfitLossTable
@@ -2606,44 +2740,35 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
                 priorLabel={getPriorPeriodLabel()}
               />
               
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', 
-                gap: '24px' 
-              }}>
-                <div>
-                  <h3 style={{ 
-                    fontSize: '18px', 
-                    fontWeight: '600', 
-                    marginBottom: '16px',
-                    color: textColor
-                  }}>
-                    Current Period Detail
-                  </h3>
-                  <ProfitLossTable
-                    data={reportData}
-                    showPercentages={true}
-                    onAccountClick={handleAccountClick}
-                  />
-                </div>
-                <ProfitLossChart data={reportData} />
-              </div>
-            </div>
-          ) : (
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', 
-              gap: '24px' 
-            }}>
-              <div style={{ gridColumn: 'span 2' }}>
+              <div style={{ marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px', color: textColor }}>
+                  Current Period Detail
+                </h3>
                 <ProfitLossTable
                   data={reportData}
                   showPercentages={true}
                   onAccountClick={handleAccountClick}
+                  periodLabel={getPeriodLabel() + (comparativeData ? ` — Compared to: ${getPriorPeriodLabel()}` : '')}
                 />
               </div>
-              <ProfitLossChart data={reportData} />
+              <div style={{ width: '100%' }}>
+                <ProfitLossChart data={reportData} />
+              </div>
             </div>
+          ) : (
+            <>
+              <div style={{ marginBottom: '24px', width: '100%' }}>
+                <ProfitLossTable
+                  data={reportData}
+                  showPercentages={true}
+                  onAccountClick={handleAccountClick}
+                  periodLabel={getPeriodLabel()}
+                />
+              </div>
+              <div style={{ width: '100%' }}>
+                <ProfitLossChart data={reportData} />
+              </div>
+            </>
           )}
         </div>
       )}
@@ -2663,10 +2788,13 @@ function ProfitLossTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab
       )}
     </div>
   )
-}
+})
 
 // Balance Sheet Tab
-function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode }) {
+const BalanceSheetTab = forwardRef(function BalanceSheetTab(
+  { dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange },
+  ref
+) {
   const { show: showToast } = useToast()
   const [reportData, setReportData] = useState(null)
   const [comparativeData, setComparativeData] = useState(null)
@@ -2679,6 +2807,10 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
   const textColor = _isDark ? '#ffffff' : '#1a1a1a'
   const borderColor = _isDark ? '#3a3a3a' : '#e0e0e0'
   const cardBg = _isDark ? '#1f1f1f' : '#ffffff'
+
+  useEffect(() => {
+    onGenerateStateChange?.({ loading, disabled: !filters.as_of_date, hasReportData: !!reportData })
+  }, [loading, filters.as_of_date, onGenerateStateChange, reportData])
 
   const handleGenerateReport = async () => {
     setLoading(true)
@@ -2842,6 +2974,13 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
   const getAsOfLabel = () => new Date(filters.as_of_date).toLocaleDateString()
   const getPriorLabel = () => (comparativeData ? new Date(comparativeData.prior.as_of_date).toLocaleDateString() : '')
 
+  useImperativeHandle(ref, () => ({
+    generateReport: handleGenerateReport,
+    exportToCsv: handleExport,
+    exportToExcel: handleExportExcel,
+    print: () => window.print()
+  }), [handleGenerateReport, handleExport, handleExportExcel])
+
   return (
     <div>
       {!hideTitle && (
@@ -2856,27 +2995,10 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
       <BalanceSheetFilters
         filters={filters}
         onFilterChange={setFilters}
-        onGenerate={handleGenerateReport}
-        loading={loading}
       />
       {loading && <LoadingSpinner size="lg" text="Generating report..." />}
       {!loading && reportData && (
         <div className="accounting-report-print-area">
-          <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h2 style={{ fontSize: '20px', fontWeight: '600', color: textColor }}>As of {getAsOfLabel()}</h2>
-              {comparativeData && (
-                <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, marginTop: '4px' }}>
-                  Compared to: {getPriorLabel()}
-                </p>
-              )}
-            </div>
-            <div className="no-print" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-              <Button variant="primary" onClick={handleExport} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>📊 Export to CSV</Button>
-              <Button variant="primary" onClick={handleExportExcel} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>📗 Export to Excel</Button>
-              <Button variant="primary" onClick={() => window.print()} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>🖨️ Print</Button>
-            </div>
-          </div>
           {comparativeData ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <ComparativeBalanceSheetTable
@@ -2884,21 +3006,23 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
                 currentLabel={getAsOfLabel()}
                 priorLabel={getPriorLabel()}
               />
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
-                <div>
-                  <h3 style={{ ...formTitleStyle(isDarkMode), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
-                  <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} />
-                </div>
+              <div style={{ marginBottom: '24px' }}>
+                <h3 style={{ ...formTitleStyle(isDarkMode), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
+                <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} dateLabel={`As of ${getAsOfLabel()} — Compared to: ${getPriorLabel()}`} />
+              </div>
+              <div style={{ width: '100%' }}>
                 <BalanceSheetChart data={reportData} />
               </div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
-              <div style={{ gridColumn: 'span 2' }}>
-                <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} />
+            <>
+              <div style={{ marginBottom: '24px', width: '100%' }}>
+                <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} dateLabel={`As of ${getAsOfLabel()}`} />
               </div>
-              <BalanceSheetChart data={reportData} />
-            </div>
+              <div style={{ width: '100%' }}>
+                <BalanceSheetChart data={reportData} />
+              </div>
+            </>
           )}
         </div>
       )}
@@ -2911,10 +3035,13 @@ function BalanceSheetTab({ dateRange, formatCurrency, getAuthHeaders, setActiveT
       )}
     </div>
   )
-}
+})
 
 // Cash Flow Tab
-function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode }) {
+const CashFlowTab = forwardRef(function CashFlowTab(
+  { dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange },
+  ref
+) {
   const { show: showToast } = useToast()
   const [reportData, setReportData] = useState(null)
   const [comparativeData, setComparativeData] = useState(null)
@@ -2928,6 +3055,10 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab, 
   const textColor = _isDark ? '#ffffff' : '#1a1a1a'
   const borderColor = _isDark ? '#3a3a3a' : '#e0e0e0'
   const cardBg = _isDark ? '#1f1f1f' : '#ffffff'
+
+  useEffect(() => {
+    onGenerateStateChange?.({ loading, disabled: !filters.start_date || !filters.end_date, hasReportData: !!reportData })
+  }, [loading, filters.start_date, filters.end_date, onGenerateStateChange, reportData])
 
   const handleGenerateReport = async () => {
     setLoading(true)
@@ -3064,6 +3195,13 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab, 
     return `${new Date(p.start_date).toLocaleDateString()} - ${new Date(p.end_date).toLocaleDateString()}`
   }
 
+  useImperativeHandle(ref, () => ({
+    generateReport: handleGenerateReport,
+    exportToCsv: handleExport,
+    exportToExcel: handleExportExcel,
+    print: () => window.print()
+  }), [handleGenerateReport, handleExport, handleExportExcel])
+
   return (
     <div>
       {!hideTitle && (
@@ -3074,39 +3212,30 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab, 
           </p>
         </div>
       )}
-      <CashFlowFilters filters={filters} onFilterChange={setFilters} onGenerate={handleGenerateReport} loading={loading} />
+      <CashFlowFilters filters={filters} onFilterChange={setFilters} />
       {loading && <LoadingSpinner size="lg" text="Generating report..." />}
       {!loading && reportData && (
         <div className="accounting-report-print-area">
-          <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h2 style={{ fontSize: '20px', fontWeight: '600', color: textColor }}>{getPeriodLabel()}</h2>
-              {comparativeData && <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, marginTop: '4px' }}>Compared to: {getPriorLabel()}</p>}
-            </div>
-            <div className="no-print" style={{ display: 'flex', gap: '12px' }}>
-              <Button variant="primary" onClick={handleExport} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>📊 Export to CSV</Button>
-              <Button variant="primary" onClick={handleExportExcel} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>📗 Export to Excel</Button>
-              <Button variant="primary" onClick={() => window.print()} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>🖨️ Print</Button>
-            </div>
-          </div>
           {comparativeData ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <ComparativeCashFlowTable data={comparativeData} currentLabel={getPeriodLabel()} priorLabel={getPriorLabel()} />
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
-                <div>
-                  <h3 style={{ ...formTitleStyle(isDarkMode), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
-                  <CashFlowTable data={reportData} onAccountClick={handleAccountClick} />
-                </div>
+              <div style={{ marginBottom: '24px' }}>
+                <h3 style={{ ...formTitleStyle(isDarkMode), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
+                <CashFlowTable data={reportData} onAccountClick={handleAccountClick} periodLabel={`${getPeriodLabel()} — Compared to: ${getPriorLabel()}`} />
+              </div>
+              <div style={{ width: '100%' }}>
                 <CashFlowChart data={reportData} />
               </div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
-              <div style={{ gridColumn: 'span 2' }}>
-                <CashFlowTable data={reportData} onAccountClick={handleAccountClick} />
+            <>
+              <div style={{ marginBottom: '24px', width: '100%' }}>
+                <CashFlowTable data={reportData} onAccountClick={handleAccountClick} periodLabel={getPeriodLabel()} />
               </div>
-              <CashFlowChart data={reportData} />
-            </div>
+              <div style={{ width: '100%' }}>
+                <CashFlowChart data={reportData} />
+              </div>
+            </>
           )}
         </div>
       )}
@@ -3117,7 +3246,7 @@ function CashFlowTab({ dateRange, formatCurrency, getAuthHeaders, setActiveTab, 
       )}
     </div>
   )
-}
+})
 
 // Bills Tab
 function BillsTab({ dateRange, formatCurrency, getAuthHeaders }) {
@@ -3156,17 +3285,9 @@ function BillsTab({ dateRange, formatCurrency, getAuthHeaders }) {
 
   return (
     <div>
-      <div style={{
-        padding: '20px',
-        backgroundColor: cardBg,
-        border: `1px solid ${borderColor}`,
-        borderRadius: '8px',
-        marginBottom: '24px'
-      }}>
-        <h3 style={{ ...formTitleStyle(isDarkMode), marginBottom: '8px', fontSize: '18px' }}>Bills</h3>
-        <p style={{ color: textColor, opacity: 0.85, fontSize: '14px', margin: 0, lineHeight: 1.5 }}>
-          Bills are amounts you owe to vendors (e.g. from purchases or shipments). They appear here for the selected date range. Track due dates and payment status.
-        </p>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Bills</h1>
+        <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Amounts you owe to vendors for the selected date range. Track due dates and payment status.</p>
       </div>
       <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -3259,17 +3380,9 @@ function CustomersTab({ formatCurrency, getAuthHeaders }) {
 
   return (
     <div>
-      <div style={{
-        padding: '20px',
-        backgroundColor: cardBg,
-        border: `1px solid ${borderColor}`,
-        borderRadius: '8px',
-        marginBottom: '24px'
-      }}>
-        <h3 style={{ ...formTitleStyle(isDarkMode), marginBottom: '8px', fontSize: '18px' }}>Customers</h3>
-        <p style={{ color: textColor, opacity: 0.85, fontSize: '14px', margin: 0, lineHeight: 1.5 }}>
-          This list shows the same customers as the main Customers page. Use it for accounting context (e.g. linking to invoices). Manage customer details and rewards from the Customers section in the app.
-        </p>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Customers</h1>
+        <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Same list as the main Customers page. Use for accounting context and linking to invoices.</p>
       </div>
       <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -3341,17 +3454,9 @@ function VendorsTab({ formatCurrency, getAuthHeaders }) {
 
   return (
     <div>
-      <div style={{
-        padding: '20px',
-        backgroundColor: cardBg,
-        border: `1px solid ${borderColor}`,
-        borderRadius: '8px',
-        marginBottom: '24px'
-      }}>
-        <h3 style={{ ...formTitleStyle(isDarkMode), marginBottom: '8px', fontSize: '18px' }}>Vendors</h3>
-        <p style={{ color: textColor, opacity: 0.85, fontSize: '14px', margin: 0, lineHeight: 1.5 }}>
-          Vendors are suppliers you purchase from. Track vendor contact info and balances here. Bills you receive are linked to vendors.
-        </p>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Vendors</h1>
+        <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Suppliers you purchase from. Track contact info and balances. Bills are linked to vendors.</p>
       </div>
       <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -3398,51 +3503,51 @@ function ReportsTabContent({ selectedReport, reportData, formatCurrency, textCol
     const totalCredits = num(payload.total_credits)
     const asOfDate = payload.date ? new Date(payload.date).toLocaleDateString() : '—'
     return (
-      <div>
-        <p style={{ color: textColor, opacity: 0.85, marginBottom: '16px', fontSize: '14px' }}>
-          As of {asOfDate}
-        </p>
-        <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-            <thead>
-              <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
-                <th style={{ padding: '10px 12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Account #</th>
-                <th style={{ padding: '10px 12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Account Name</th>
-                <th style={{ padding: '10px 12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Type</th>
-                <th style={{ padding: '10px 12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Debits</th>
-                <th style={{ padding: '10px 12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Credits</th>
-                <th style={{ padding: '10px 12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
+      <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+          <thead>
+            <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
+              <th style={{ padding: '10px 12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Account #</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Account Name</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Type</th>
+              <th style={{ padding: '10px 12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Debits</th>
+              <th style={{ padding: '10px 12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Credits</th>
+              <th style={{ padding: '10px 12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {accounts.map((row, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${borderColor}` }}>
+                <td style={{ padding: '10px 12px', color: textColor }}>{row.account_number ?? ''}</td>
+                <td style={{ padding: '10px 12px', color: textColor }}>{row.account_name ?? ''}</td>
+                <td style={{ padding: '10px 12px', color: textColor }}>{row.account_type ?? ''}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: textColor }}>{formatCurrency(num(row.total_debits))}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: textColor }}>{formatCurrency(num(row.total_credits))}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: textColor }}>{formatCurrency(num(row.balance))}</td>
               </tr>
-            </thead>
-            <tbody>
-              {accounts.map((row, i) => (
-                <tr key={i} style={{ borderBottom: `1px solid ${borderColor}` }}>
-                  <td style={{ padding: '10px 12px', color: textColor }}>{row.account_number ?? ''}</td>
-                  <td style={{ padding: '10px 12px', color: textColor }}>{row.account_name ?? ''}</td>
-                  <td style={{ padding: '10px 12px', color: textColor }}>{row.account_type ?? ''}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', color: textColor }}>{formatCurrency(num(row.total_debits))}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', color: textColor }}>{formatCurrency(num(row.total_credits))}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', color: textColor }}>{formatCurrency(num(row.balance))}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ backgroundColor: isDarkMode ? '#252525' : '#f0f0f0', fontWeight: 600, borderTop: `2px solid ${borderColor}` }}>
-                <td colSpan={3} style={{ padding: '12px', color: textColor }}>Total</td>
-                <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>{formatCurrency(totalDebits)}</td>
-                <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>{formatCurrency(totalCredits)}</td>
-                <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>—</td>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr style={{ backgroundColor: isDarkMode ? '#252525' : '#f0f0f0', fontWeight: 600, borderTop: `2px solid ${borderColor}` }}>
+              <td colSpan={3} style={{ padding: '12px', color: textColor }}>Total</td>
+              <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>{formatCurrency(totalDebits)}</td>
+              <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>{formatCurrency(totalCredits)}</td>
+              <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>—</td>
+            </tr>
+            {Math.abs(totalDebits - totalCredits) < 0.01 && (
+              <tr>
+                <td colSpan={6} style={{ padding: '8px 12px', color: textColor, fontSize: '13px', fontStyle: 'italic' }}>
+                  ✓ Debits equal credits — trial balance is balanced.
+                </td>
               </tr>
-              {Math.abs(totalDebits - totalCredits) < 0.01 && (
-                <tr>
-                  <td colSpan={6} style={{ padding: '8px 12px', color: textColor, fontSize: '13px', fontStyle: 'italic' }}>
-                    ✓ Debits equal credits — trial balance is balanced.
-                  </td>
-                </tr>
-              )}
-            </tfoot>
-          </table>
-        </div>
+            )}
+            <tr>
+              <td colSpan={6} style={{ padding: '8px 12px', color: textColor, fontSize: '13px', fontStyle: 'italic', borderBottom: `1px solid ${borderColor}` }}>
+                As of {asOfDate}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
     )
   }

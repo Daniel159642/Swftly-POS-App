@@ -94,6 +94,37 @@ function POS({ employeeId, employeeName }) {
   const [searchFilterChips, setSearchFilterChips] = useState([])
   const [posSearchFilters, setPosSearchFilters] = useState(null)
   const [pendingQuantityForChip, setPendingQuantityForChip] = useState(null) // e.g. "½" when user typed "1/2 " before next word
+
+  // Default filter config so intelligent search works even if API fails (sm, roni, 1/2 pep, etc.)
+  const DEFAULT_POS_FILTERS = {
+    filter_groups: [
+      { id: 'size', label: 'Size', options: [
+        { abbrevs: ['sm', 's'], value: 'Small', variant_name: 'Small' },
+        { abbrevs: ['md', 'm', 'med'], value: 'Medium', variant_name: 'Medium' },
+        { abbrevs: ['lg', 'l'], value: 'Large', variant_name: 'Large' },
+        { abbrevs: ['slice', 'sl'], value: 'Slice', variant_name: 'Slice' },
+        { abbrevs: ['10', '10in'], value: '10"', variant_name: '10" Small' },
+        { abbrevs: ['12', '12in'], value: '12"', variant_name: '12" Medium' },
+        { abbrevs: ['14', '14in'], value: '14"', variant_name: '14" Large' },
+      ]},
+      { id: 'topping', label: 'Topping', options: [
+        { abbrevs: ['roni', 'pep'], value: 'Pepperoni' },
+        { abbrevs: ['pep'], value: 'Peppers', quantity_abbrevs: { '1/2': '½', 'half': '½', 'full': 'Full' } },
+        { abbrevs: ['mush'], value: 'Mushrooms' },
+        { abbrevs: ['olive'], value: 'Olives' },
+        { abbrevs: ['saus'], value: 'Sausage' },
+        { abbrevs: ['ham'], value: 'Ham' },
+        { abbrevs: ['bacon'], value: 'Bacon' },
+      ]},
+      { id: 'drink_addin', label: 'Add-in', options: [
+        { abbrevs: ['esp', 'shot'], value: 'Extra shot' },
+        { abbrevs: ['oat'], value: 'Oat milk' },
+        { abbrevs: ['ice'], value: 'Iced' },
+        { abbrevs: ['decaf'], value: 'Decaf' },
+      ]},
+    ],
+  }
+  const effectiveFilters = posSearchFilters && posSearchFilters.filter_groups ? posSearchFilters : DEFAULT_POS_FILTERS
   
   // Check if user can process sales
   const canProcessSale = hasPermission('process_sale')
@@ -198,12 +229,12 @@ function POS({ employeeId, employeeName }) {
     }
   }
 
-  // Resolve a word (and optional pending quantity) to a filter chip using posSearchFilters. Returns { type, label, value, variant_name } or null.
+  // Resolve a word (and optional pending quantity) to a filter chip. Returns { type, label, value, variant_name } or null.
   const resolveFilterWord = (word, pendingQty) => {
     if (!word || typeof word !== 'string') return null
     const w = word.toLowerCase().trim()
     if (!w) return null
-    const config = posSearchFilters?.filter_groups || []
+    const config = effectiveFilters?.filter_groups || []
     for (const group of config) {
       for (const opt of group.options || []) {
         const abbrevs = (opt.abbrevs || []).map(a => (a || '').toLowerCase())
@@ -465,11 +496,19 @@ function POS({ employeeId, employeeName }) {
   const [productForVariant, setProductForVariant] = useState(null)
 
   const addToCart = (product, variant = null, notes = null) => {
-    // If product has variants and we didn't pick one, try to resolve from search filter chips (size) or show variant modal
+    // For any product with variants (drinks, pizza, all sized items): if user has a size chip, use it and skip modal
     if (product.variants && product.variants.length > 0 && !variant) {
       const sizeChip = searchFilterChips.find(c => c.variant_name != null)
       const matchedVariant = sizeChip && product.variants
-        ? product.variants.find(v => (v.variant_name || '').toLowerCase() === (sizeChip.variant_name || '').toLowerCase())
+        ? product.variants.find(v => {
+            const vName = (v.variant_name || '').toLowerCase().replace(/\s+/g, ' ').trim()
+            const chipName = (sizeChip.variant_name || '').toLowerCase().replace(/\s+/g, ' ').trim()
+            if (!chipName) return false
+            // Exact match first (so Small/Large for coffee match correctly)
+            if (vName === chipName) return true
+            // Then variant name contains chip (e.g. "10\" Small" contains "small" for pizza)
+            return vName.includes(chipName)
+          })
         : null
       if (matchedVariant) {
         const noteChips = searchFilterChips.filter(c => c.variant_name == null)
@@ -481,20 +520,27 @@ function POS({ employeeId, employeeName }) {
       setShowVariantModal(true)
       return
     }
-    const unitPrice = variant ? parseFloat(variant.price) : (parseFloat(product.product_price) || 0)
-    const baseName = variant ? `${product.product_name} (${variant.variant_name})` : product.product_name
+    // Use variant price when present (API may return price or unit_price)
+    const variantPrice = variant != null && (variant.price !== undefined || variant.unit_price !== undefined)
+      ? parseFloat(variant.price ?? variant.unit_price)
+      : null
+    const unitPrice = variantPrice != null && !Number.isNaN(variantPrice)
+      ? variantPrice
+      : (parseFloat(product.product_price) || 0)
+    const baseName = variant ? `${product.product_name} (${variant.variant_name || variant.name || 'Size'})` : product.product_name
     const displayName = notes ? `${baseName} — ${notes}` : baseName
     const notesStr = notes && notes.trim() ? notes.trim() : null
+    const variantId = variant?.variant_id != null ? Number(variant.variant_id) : null
     setCart(prevCart => {
       const existingItem = prevCart.find(item =>
         item.product_id === product.product_id &&
-        (item.variant_id || null) === (variant?.variant_id || null) &&
+        (item.variant_id != null ? Number(item.variant_id) : null) === variantId &&
         (item.notes || '') === (notesStr || '')
       )
       if (existingItem) {
         return prevCart.map(item =>
           item.product_id === product.product_id &&
-          (item.variant_id || null) === (variant?.variant_id || null) &&
+          (item.variant_id != null ? Number(item.variant_id) : null) === variantId &&
           (item.notes || '') === (notesStr || '')
             ? { ...item, quantity: item.quantity + 1 }
             : item
@@ -507,8 +553,8 @@ function POS({ employeeId, employeeName }) {
         unit_price: unitPrice,
         quantity: 1,
         available_quantity: product.current_quantity || 0,
-        variant_id: variant?.variant_id || null,
-        variant_name: variant?.variant_name || null,
+        variant_id: variantId,
+        variant_name: variant?.variant_name || variant?.name || null,
         notes: notesStr
       }]
     })
@@ -2709,51 +2755,101 @@ function POS({ employeeId, employeeName }) {
           </>
         ) : (
           <>
-            {/* Search Bar with Scan Button */}
+            {/* Search Bar: chips inside bar + input, then scan button */}
             <div style={{ marginBottom: '20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <input
-                  type="text"
-                  placeholder="Search by name, SKU… Type e.g. sm roni 1/2 pep then space to add filters"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === ' ' && posSearchFilters && searchTerm.length > 0) {
-                      const trimmed = searchTerm.trim()
-                      const segments = trimmed.split(/\s+/)
-                      const word = segments[segments.length - 1]
-                      if (!word) return
-                      const resolved = resolveFilterWord(word, pendingQuantityForChip)
-                      if (resolved) {
-                        e.preventDefault()
-                        if (resolved.isQuantityPrefix) {
-                          setPendingQuantityForChip({ label: resolved.label, word: word })
-                          setSearchTerm(prev => prev.replace(new RegExp('\\s*' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$'), '').trim())
-                          return
-                        }
-                        setSearchFilterChips(prev => [...prev, resolved])
-                        setPendingQuantityForChip(null)
-                        setSearchTerm(prev => prev.replace(new RegExp('\\s*' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$'), '').trim())
-                      }
-                    }
-                  }}
-                  disabled={showPaymentForm}
+                <div
                   style={{
-                  flex: 1,
-                  padding: '8px 0',
-                  border: 'none',
-                  borderBottom: '2px solid #ddd',
-                  borderRadius: '0',
-                  fontSize: '16px',
-                  boxSizing: 'border-box',
-                  backgroundColor: 'transparent',
-                  outline: 'none',
-                  opacity: showPaymentForm ? 0.3 : 1,
-                  cursor: showPaymentForm ? 'not-allowed' : 'text'
-                }}
-                autoFocus={!showPaymentForm}
-              />
-              <button
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '6px',
+                    borderBottom: '2px solid #ddd',
+                    padding: '6px 0',
+                    minHeight: '40px',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  {searchFilterChips.map((chip, idx) => (
+                    <span
+                      key={idx}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        backgroundColor: `rgba(${themeColorRgb}, 0.15)`,
+                        border: `1px solid rgba(${themeColorRgb}, 0.4)`,
+                        color: isDarkMode ? '#fff' : '#333'
+                      }}
+                    >
+                      {chip.label}
+                      <button
+                        type="button"
+                        onClick={(ev) => { ev.preventDefault(); setSearchFilterChips(prev => prev.filter((_, i) => i !== idx)) }}
+                        style={{
+                          padding: 0,
+                          marginLeft: '2px',
+                          border: 'none',
+                          background: 'none',
+                          cursor: 'pointer',
+                          fontSize: '16px',
+                          lineHeight: 1,
+                          color: 'inherit',
+                          opacity: 0.8
+                        }}
+                        aria-label="Remove filter"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    placeholder={searchFilterChips.length ? "Search…" : "Search… sm then space, roni then space for filters"}
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === ' ' && searchTerm.length > 0) {
+                        const trimmed = searchTerm.trim()
+                        const segments = trimmed.split(/\s+/)
+                        const word = segments[segments.length - 1]
+                        if (!word) return
+                        const resolved = resolveFilterWord(word, pendingQuantityForChip)
+                        if (resolved) {
+                          e.preventDefault()
+                          if (resolved.isQuantityPrefix) {
+                            setPendingQuantityForChip({ label: resolved.label, word: word })
+                            setSearchTerm(prev => prev.replace(new RegExp('\\s*' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$'), '').trim())
+                            return
+                          }
+                          setSearchFilterChips(prev => [...prev, resolved])
+                          setPendingQuantityForChip(null)
+                          setSearchTerm(prev => prev.replace(new RegExp('\\s*' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$'), '').trim())
+                        }
+                      }
+                    }}
+                    disabled={showPaymentForm}
+                    style={{
+                      flex: 1,
+                      minWidth: '120px',
+                      padding: '4px 0',
+                      border: 'none',
+                      borderRadius: 0,
+                      fontSize: '16px',
+                      boxSizing: 'border-box',
+                      backgroundColor: 'transparent',
+                      outline: 'none',
+                      opacity: showPaymentForm ? 0.3 : 1,
+                      cursor: showPaymentForm ? 'not-allowed' : 'text'
+                    }}
+                    autoFocus={!showPaymentForm}
+                  />
+                </div>
+                <button
                 onClick={() => setShowBarcodeScanner(true)}
                 disabled={showPaymentForm}
                 style={{
@@ -2793,47 +2889,6 @@ function POS({ employeeId, employeeName }) {
                 <ScanBarcode size={24} />
               </button>
               </div>
-              {/* Filter chips: size, topping, etc. (space turns typed abbrevs into chips) */}
-              {searchFilterChips.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px', alignItems: 'center' }}>
-                  {searchFilterChips.map((chip, idx) => (
-                    <span
-                      key={idx}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        padding: '4px 8px',
-                        borderRadius: '6px',
-                        fontSize: '13px',
-                        backgroundColor: `rgba(${themeColorRgb}, 0.15)`,
-                        border: `1px solid rgba(${themeColorRgb}, 0.4)`,
-                        color: isDarkMode ? '#fff' : '#333'
-                      }}
-                    >
-                      {chip.label}
-                      <button
-                        type="button"
-                        onClick={() => setSearchFilterChips(prev => prev.filter((_, i) => i !== idx))}
-                        style={{
-                          padding: 0,
-                          marginLeft: '2px',
-                          border: 'none',
-                          background: 'none',
-                          cursor: 'pointer',
-                          fontSize: '16px',
-                          lineHeight: 1,
-                          color: 'inherit',
-                          opacity: 0.8
-                        }}
-                        aria-label="Remove filter"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* Category Navigation */}

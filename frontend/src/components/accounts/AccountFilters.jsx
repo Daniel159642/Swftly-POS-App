@@ -1,7 +1,6 @@
 import React from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import CustomDropdown from '../common/CustomDropdown'
-import Input from '../common/Input'
 import Button from '../common/Button'
 
 function AccountFilters({ filters, onFilterChange, onClearFilters }) {
@@ -38,27 +37,13 @@ function AccountFilters({ filters, onFilterChange, onClearFilters }) {
   ]
 
   return (
-    <div style={{
-      backgroundColor: isDarkMode ? '#2a2a2a' : 'white',
-      padding: '16px',
-      borderRadius: '8px',
-      boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-      marginBottom: '24px'
-    }}>
+    <div style={{ marginBottom: '24px' }}>
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
         gap: '16px',
         alignItems: 'end'
       }}>
-        <Input
-          name="search"
-          value={filters.search || ''}
-          onChange={handleChange}
-          placeholder="Search accounts..."
-          style={{ marginBottom: 0 }}
-        />
-
         <CustomDropdown
           name="account_type"
           value={filters.account_type || ''}
@@ -67,6 +52,7 @@ function AccountFilters({ filters, onFilterChange, onClearFilters }) {
           placeholder="All Types"
           isDarkMode={isDarkMode}
           themeColorRgb={themeColorRgb}
+          triggerVariant="button"
           style={{ marginBottom: 0 }}
         />
 
@@ -78,6 +64,7 @@ function AccountFilters({ filters, onFilterChange, onClearFilters }) {
           placeholder="All Status"
           isDarkMode={isDarkMode}
           themeColorRgb={themeColorRgb}
+          triggerVariant="button"
           style={{ marginBottom: 0 }}
         />
 

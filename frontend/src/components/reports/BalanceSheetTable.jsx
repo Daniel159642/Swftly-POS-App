@@ -1,6 +1,6 @@
 import React from 'react'
 
-function BalanceSheetTable({ data, onAccountClick }) {
+function BalanceSheetTable({ data, onAccountClick, dateLabel }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
@@ -153,6 +153,14 @@ function BalanceSheetTable({ data, onAccountClick }) {
               <tr>
                 <td colSpan={2} style={{ padding: '8px 12px', color: textColor, fontSize: '13px', fontStyle: 'italic' }}>
                   ✓ Balance Sheet balances correctly (Assets = Liabilities + Equity)
+                </td>
+              </tr>
+            )}
+
+            {dateLabel && (
+              <tr>
+                <td colSpan={2} style={{ padding: '8px 12px', color: textColor, fontSize: '13px', fontStyle: 'italic', borderBottom: `1px solid ${borderColor}` }}>
+                  {dateLabel}
                 </td>
               </tr>
             )}

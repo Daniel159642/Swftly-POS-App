@@ -52,22 +52,23 @@ function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransac
   }
 
   const thStyle = {
-    padding: '12px 16px',
-    textAlign: 'left',
+    padding: '12px 24px',
     fontSize: '12px',
-    fontWeight: '600',
-    textTransform: 'uppercase',
+    fontWeight: 500,
     color: isDarkMode ? '#9ca3af' : '#6b7280',
-    backgroundColor: isDarkMode ? '#1a1a1a' : '#f9fafb',
-    borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`,
+    textTransform: 'uppercase',
+    textAlign: 'left',
+    borderBottom: '1px solid ' + (isDarkMode ? '#3a3a3a' : '#e5e7eb'),
+    backgroundColor: isDarkMode ? '#1f1f1f' : '#f9fafb',
     cursor: 'pointer'
   }
 
   const tdStyle = {
-    padding: '12px 16px',
+    padding: '12px 24px',
     fontSize: '14px',
-    color: isDarkMode ? '#d1d5db' : '#1a1a1a',
-    borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`
+    verticalAlign: 'middle',
+    borderBottom: '1px solid ' + (isDarkMode ? '#3a3a3a' : '#e5e7eb'),
+    color: isDarkMode ? '#e5e7eb' : '#111'
   }
 
   if (entries.length === 0) {

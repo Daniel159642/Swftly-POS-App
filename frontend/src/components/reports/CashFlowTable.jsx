@@ -1,6 +1,6 @@
 import React from 'react'
 
-function CashFlowTable({ data, onAccountClick }) {
+function CashFlowTable({ data, onAccountClick, periodLabel }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
@@ -150,6 +150,13 @@ function CashFlowTable({ data, onAccountClick }) {
                 ✓ Verification: Beginning Cash ({formatCurrency(data.beginning_cash ?? 0)}) + Net Change ({formatCurrency(data.net_change_in_cash ?? 0)}) = Ending Cash ({formatCurrency(data.ending_cash ?? 0)})
               </td>
             </tr>
+            {periodLabel && (
+              <tr>
+                <td colSpan={2} style={{ padding: '8px 12px', color: textColor, fontSize: '13px', fontStyle: 'italic', borderBottom: `1px solid ${borderColor}` }}>
+                  {periodLabel}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
