@@ -7,7 +7,7 @@ import { useToast } from '../contexts/ToastContext'
 import BarcodeScanner from './BarcodeScanner'
 import CustomerDisplayPopup from './CustomerDisplayPopup'
 import { ScanBarcode, UserPlus, CheckCircle, Gift, X, AlertCircle, Percent, Check, Pencil } from 'lucide-react'
-import { formLabelStyle, formModalStyle, inputBaseStyle, getInputFocusHandlers, FormModalActions } from './FormStyles'
+import { formLabelStyle, formModalStyle, inputBaseStyle, getInputFocusHandlers, FormModalActions, FormField, FormLabel } from './FormStyles'
 
 function POS({ employeeId, employeeName }) {
   const navigate = useNavigate()
@@ -70,6 +70,8 @@ function POS({ employeeId, employeeName }) {
   const [customerInfoConfirmed, setCustomerInfoConfirmed] = useState(false) // when true, hide pickup/delivery form and show summary only
   const [payAtPickupOrDelivery, setPayAtPickupOrDelivery] = useState(false) // true = pay when pickup/delivery (order placed with payment pending)
   const [allowPayAtPickupEnabled, setAllowPayAtPickupEnabled] = useState(false) // from Settings: "Allow pay at pickup" — when false, only "Pay now" is valid
+  const [allowPickup, setAllowPickup] = useState(true) // from Settings: when false, hide Pickup button
+  const [allowDelivery, setAllowDelivery] = useState(true) // from Settings: when false, hide Delivery button
   const [orderPlacedPayLater, setOrderPlacedPayLater] = useState(null) // { orderId, orderNumber, total } after placing pay-later order
   const [orderToPayFromScan, setOrderToPayFromScan] = useState(null) // legacy: modal "Mark as paid (cash)" only
   const [payingForOrderId, setPayingForOrderId] = useState(null) // when set: order loaded in POS for payment (cart + customer); complete via checkout UI
@@ -303,7 +305,7 @@ function POS({ employeeId, employeeName }) {
     return () => { cancelled = true }
   }, [])
 
-  // Load order/delivery settings so "Pay at pickup" option is only shown when enabled in Settings
+  // Load order/delivery settings: allow_pickup, allow_delivery, allow_pay_at_pickup
   useEffect(() => {
     let cancelled = false
     const token = localStorage.getItem('sessionToken')
@@ -313,9 +315,19 @@ function POS({ employeeId, employeeName }) {
         const res = await fetch('/api/order-delivery-settings', { headers: { 'X-Session-Token': token } })
         const data = res.ok ? await res.json() : {}
         if (cancelled) return
-        const enabled = !!data.allow_pay_at_pickup
-        setAllowPayAtPickupEnabled(enabled)
-        if (!enabled) setPayAtPickupOrDelivery(false) // ensure pay-later is off when setting is disabled
+        const payLaterEnabled = !!data.allow_pay_at_pickup
+        const pickupEnabled = data.allow_pickup !== false
+        const deliveryEnabled = data.allow_delivery !== false
+        setAllowPayAtPickupEnabled(payLaterEnabled)
+        setAllowPickup(pickupEnabled)
+        setAllowDelivery(deliveryEnabled)
+        if (!payLaterEnabled) setPayAtPickupOrDelivery(false)
+        // If current order type is disabled, clear it
+        setOrderType(prev => {
+          if (prev === 'pickup' && !pickupEnabled) return null
+          if (prev === 'delivery' && !deliveryEnabled) return null
+          return prev
+        })
       } catch (e) {
         if (!cancelled) {
           setAllowPayAtPickupEnabled(false)
@@ -2524,112 +2536,118 @@ function POS({ employeeId, employeeName }) {
           borderTop: '2px solid #eee',
           paddingTop: '20px'
         }}>
-          {/* Pickup/Delivery Options */}
-          <div style={{ marginBottom: '16px' }}>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                onClick={() => {
-                  if (!showPaymentForm) {
-                    if (orderType === 'pickup') {
-                      setOrderType(null)
-                      setPayAtPickupOrDelivery(false)
-                      setCustomerInfo({ name: '', email: '', phone: '', address: '' })
-                      setSelectedCustomer(null)
-                      setCustomerInfoConfirmed(false)
-                    } else {
-                      setOrderType('pickup')
-                      setCustomerInfoConfirmed(false)
-                      if (selectedCustomer) {
-                        setCustomerInfo(prev => ({
-                          ...prev,
-                          name: selectedCustomer.customer_name || prev.name,
-                          phone: (selectedCustomer.phone || prev.phone || '').replace(/\D/g, '').slice(0, 10),
-                          email: selectedCustomer.email || prev.email
-                        }))
-                      }
-                    }
-                  }
-                }}
-                disabled={showPaymentForm}
-                style={{
-                  flex: 1,
-                  padding: '6px 10px',
-                  border: orderType === 'pickup' ? '2px solid ' + themeColor : '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  fontWeight: orderType === 'pickup' ? 600 : 400,
-                  backgroundColor: orderType === 'pickup' ? `rgba(${themeColorRgb}, 0.1)` : '#fff',
-                  color: orderType === 'pickup' ? themeColor : '#666',
-                  cursor: showPaymentForm ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s',
-                  opacity: showPaymentForm ? 0.3 : 1
-                }}
-              >
-                Pickup
-              </button>
-              <button
-                onClick={async () => {
-                  if (!showPaymentForm) {
-                    if (orderType === 'delivery') {
-                      setOrderType(null)
-                      setPayAtPickupOrDelivery(false)
-                      setCustomerInfo({ name: '', email: '', phone: '', address: '' })
-                      setSelectedCustomer(null)
-                      setCustomerInfoConfirmed(false)
-                    } else {
-                      setOrderType('delivery')
-                      setCustomerInfoConfirmed(false)
-                      if (selectedCustomer) {
-                        const sanitizePhone = (v) => (v || '').replace(/\D/g, '').slice(0, 10)
-                        let info = {
-                          name: selectedCustomer.customer_name || customerInfo.name,
-                          phone: sanitizePhone(selectedCustomer.phone || customerInfo.phone),
-                          email: selectedCustomer.email || customerInfo.email,
-                          address: selectedCustomer.address ?? customerInfo.address ?? ''
+          {/* Pickup/Delivery Options - only show buttons that are enabled in Settings */}
+          {(allowPickup || allowDelivery) && (
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {allowPickup && (
+                  <button
+                    onClick={() => {
+                      if (!showPaymentForm) {
+                        if (orderType === 'pickup') {
+                          setOrderType(null)
+                          setPayAtPickupOrDelivery(false)
+                          setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                          setSelectedCustomer(null)
+                          setCustomerInfoConfirmed(false)
+                        } else {
+                          setOrderType('pickup')
+                          setCustomerInfoConfirmed(false)
+                          if (selectedCustomer) {
+                            setCustomerInfo(prev => ({
+                              ...prev,
+                              name: selectedCustomer.customer_name || prev.name,
+                              phone: (selectedCustomer.phone || prev.phone || '').replace(/\D/g, '').slice(0, 10),
+                              email: selectedCustomer.email || prev.email
+                            }))
+                          }
                         }
-                        if (selectedCustomer.customer_id) {
-                          try {
-                            const res = await fetch(`/api/customers/${selectedCustomer.customer_id}`)
-                            const data = await res.json()
-                            if (data.success && data.data) {
-                              const c = data.data
-                              info = {
-                                name: c.customer_name ?? info.name,
-                                phone: sanitizePhone(c.phone ?? info.phone),
-                                email: c.email ?? info.email,
-                                address: (c.address != null && c.address !== '') ? c.address : info.address
-                              }
-                              if (c.address != null && c.address !== '') {
-                                setSelectedCustomer(prev => prev ? { ...prev, address: c.address } : null)
-                              }
+                      }
+                    }}
+                    disabled={showPaymentForm}
+                    style={{
+                      flex: 1,
+                      padding: '6px 10px',
+                      border: orderType === 'pickup' ? '2px solid ' + themeColor : '1px solid #ddd',
+                      borderRadius: '4px',
+                      fontSize: '14px',
+                      fontWeight: orderType === 'pickup' ? 600 : 400,
+                      backgroundColor: orderType === 'pickup' ? `rgba(${themeColorRgb}, 0.1)` : '#fff',
+                      color: orderType === 'pickup' ? themeColor : '#666',
+                      cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.2s',
+                      opacity: showPaymentForm ? 0.3 : 1
+                    }}
+                  >
+                    Pickup
+                  </button>
+                )}
+                {allowDelivery && (
+                  <button
+                    onClick={async () => {
+                      if (!showPaymentForm) {
+                        if (orderType === 'delivery') {
+                          setOrderType(null)
+                          setPayAtPickupOrDelivery(false)
+                          setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                          setSelectedCustomer(null)
+                          setCustomerInfoConfirmed(false)
+                        } else {
+                          setOrderType('delivery')
+                          setCustomerInfoConfirmed(false)
+                          if (selectedCustomer) {
+                            const sanitizePhone = (v) => (v || '').replace(/\D/g, '').slice(0, 10)
+                            let info = {
+                              name: selectedCustomer.customer_name || customerInfo.name,
+                              phone: sanitizePhone(selectedCustomer.phone || customerInfo.phone),
+                              email: selectedCustomer.email || customerInfo.email,
+                              address: selectedCustomer.address ?? customerInfo.address ?? ''
                             }
-                          } catch (_) { /* keep existing info */ }
+                            if (selectedCustomer.customer_id) {
+                              try {
+                                const res = await fetch(`/api/customers/${selectedCustomer.customer_id}`)
+                                const data = await res.json()
+                                if (data.success && data.data) {
+                                  const c = data.data
+                                  info = {
+                                    name: c.customer_name ?? info.name,
+                                    phone: sanitizePhone(c.phone ?? info.phone),
+                                    email: c.email ?? info.email,
+                                    address: (c.address != null && c.address !== '') ? c.address : info.address
+                                  }
+                                  if (c.address != null && c.address !== '') {
+                                    setSelectedCustomer(prev => prev ? { ...prev, address: c.address } : null)
+                                  }
+                                }
+                              } catch (_) { /* keep existing info */ }
+                            }
+                            setCustomerInfo(info)
+                          }
                         }
-                        setCustomerInfo(info)
                       }
-                    }
-                  }
-                }}
-                disabled={showPaymentForm}
-                style={{
-                  flex: 1,
-                  padding: '6px 10px',
-                  border: orderType === 'delivery' ? '2px solid ' + themeColor : '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  fontWeight: orderType === 'delivery' ? 600 : 400,
-                  backgroundColor: orderType === 'delivery' ? `rgba(${themeColorRgb}, 0.1)` : '#fff',
-                  color: orderType === 'delivery' ? themeColor : '#666',
-                  cursor: showPaymentForm ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s',
-                  opacity: showPaymentForm ? 0.3 : 1
-                }}
-              >
-                Delivery
-              </button>
+                    }}
+                    disabled={showPaymentForm}
+                    style={{
+                      flex: 1,
+                      padding: '6px 10px',
+                      border: orderType === 'delivery' ? '2px solid ' + themeColor : '1px solid #ddd',
+                      borderRadius: '4px',
+                      fontSize: '14px',
+                      fontWeight: orderType === 'delivery' ? 600 : 400,
+                      backgroundColor: orderType === 'delivery' ? `rgba(${themeColorRgb}, 0.1)` : '#fff',
+                      color: orderType === 'delivery' ? themeColor : '#666',
+                      cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.2s',
+                      opacity: showPaymentForm ? 0.3 : 1
+                    }}
+                  >
+                    Delivery
+                  </button>
+                )}
+              </div>
+              {/* Combined delivery/pickup summary is shown in Customer section below when orderType && customerInfoConfirmed */}
             </div>
-            {/* Combined delivery/pickup summary is shown in Customer section below when orderType && customerInfoConfirmed */}
-          </div>
+          )}
 
           {/* Inline Customer Info Form for Pickup/Delivery - hidden after check */}
           {orderType && !customerInfoConfirmed && (
@@ -4132,114 +4150,126 @@ function POS({ employeeId, employeeName }) {
 
       {/* Customer Info Modal */}
       {showCustomerInfoModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'transparent',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 2000
-        }}>
-          <div style={formModalStyle(isDarkMode)}>
-            <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>
-                {showCreateCustomer ? 'Add Customer' : (orderType ? (orderType === 'pickup' ? 'Pickup' : 'Delivery') : 'Customer')} Information
-              </h3>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={formLabelStyle(isDarkMode)}>
-                Name <span style={{ color: '#f44336' }}>*</span>
-              </label>
-              <input
-                type="text"
-                value={customerInfo.name}
-                onChange={(e) => setCustomerInfo({ ...customerInfo, name: e.target.value })}
-                placeholder="Customer name"
-                style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                autoFocus
-              />
-            </div>
-
-            {(rewardsSettings.enabled && (rewardsSettings.require_email || rewardsSettings.require_both)) || orderType || showCreateCustomer ? (
-              <div style={{ marginBottom: '16px' }}>
-                <label style={formLabelStyle(isDarkMode)}>
-                  Email {((rewardsSettings.enabled && rewardsSettings.require_email) || rewardsSettings.require_both) ? <span style={{ color: '#f44336' }}>*</span> : ''}
-                </label>
-                <input
-                  type="email"
-                  value={customerInfo.email}
-                  onChange={(e) => setCustomerInfo({ ...customerInfo, email: e.target.value })}
-                  placeholder="Email address"
-                  style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                  {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                />
-              </div>
-            ) : null}
-
-            {(rewardsSettings.enabled && (rewardsSettings.require_phone || rewardsSettings.require_both)) || orderType || showCreateCustomer ? (
-              <div style={{ marginBottom: '16px' }}>
-                <label style={formLabelStyle(isDarkMode)}>
-                  Phone Number {(orderType || showCreateCustomer || (rewardsSettings.enabled && (rewardsSettings.require_phone || rewardsSettings.require_both))) ? <span style={{ color: '#f44336' }}>*</span> : ''}
-                </label>
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  maxLength={10}
-                  value={customerInfo.phone}
-                  onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
-                  placeholder="Phone number"
-                  style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                  {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                />
-              </div>
-            ) : null}
-
-            {(orderType === 'delivery' || showCreateCustomer) && (
-              <div style={{ marginBottom: '16px' }}>
-                <label style={formLabelStyle(isDarkMode)}>
-                  Address {orderType === 'delivery' ? <span style={{ color: '#f44336' }}>*</span> : ''}
-                </label>
-                <textarea
-                  value={customerInfo.address}
-                  onChange={(e) => setCustomerInfo({ ...customerInfo, address: e.target.value })}
-                  placeholder={orderType === 'delivery' ? 'Delivery address' : 'Address (optional)'}
-                  rows={3}
-                  style={{
-                    ...inputBaseStyle(isDarkMode, themeColorRgb),
-                    fontFamily: 'inherit',
-                    resize: 'vertical'
-                  }}
-                  {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                />
-              </div>
-            )}
-
-            <FormModalActions
-              onCancel={() => {
-                setShowCustomerInfoModal(false)
-                if (showCreateCustomer) {
-                  setShowCreateCustomer(false)
-                  setCustomerInfo({ name: '', email: '', phone: '', address: '' })
-                } else if (!orderType) {
-                  setCustomerInfo({ name: '', email: '', phone: '', address: '' })
-                } else {
-                  setOrderType(null)
-                  setCustomerInfo({ name: '', email: '', phone: '', address: '' })
-                }
+        showCreateCustomer ? (
+          /* Add Customer form — identical to Customers page (New customer modal) */
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 2000
+            }}
+            onClick={() => {
+              setShowCustomerInfoModal(false)
+              setShowCreateCustomer(false)
+              setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                borderRadius: '8px',
+                padding: '24px',
+                maxWidth: '560px',
+                width: '90%',
+                maxHeight: '90vh',
+                overflow: 'auto',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
               }}
-              onPrimary={async () => {
-                let requiredFields = false
-                let errorMessage = ''
-                if (showCreateCustomer) {
-                  requiredFields = customerInfo.name && customerInfo.phone
-                  errorMessage = 'Please fill in name and phone'
-                  if (requiredFields) {
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ marginBottom: '20px' }}>
+                <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                  New customer
+                </h3>
+              </div>
+              <div style={{ marginBottom: '20px' }}>
+                <FormField>
+                  <FormLabel isDarkMode={isDarkMode} required>Name</FormLabel>
+                  <input
+                    type="text"
+                    value={customerInfo.name}
+                    onChange={(e) => setCustomerInfo({ ...customerInfo, name: e.target.value })}
+                    placeholder="Customer name"
+                    style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                    autoFocus
+                  />
+                </FormField>
+                <FormField>
+                  <FormLabel isDarkMode={isDarkMode}>Email</FormLabel>
+                  <input
+                    type="email"
+                    value={customerInfo.email}
+                    onChange={(e) => setCustomerInfo({ ...customerInfo, email: e.target.value })}
+                    placeholder="email@example.com"
+                    style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                  />
+                </FormField>
+                <FormField>
+                  <FormLabel isDarkMode={isDarkMode}>Phone</FormLabel>
+                  <input
+                    type="tel"
+                    value={customerInfo.phone}
+                    onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                    placeholder="555-0000"
+                    maxLength={10}
+                    inputMode="numeric"
+                    style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                  />
+                </FormField>
+                <FormField>
+                  <FormLabel isDarkMode={isDarkMode}>Address</FormLabel>
+                  <input
+                    type="text"
+                    value={customerInfo.address}
+                    onChange={(e) => setCustomerInfo({ ...customerInfo, address: e.target.value })}
+                    placeholder="Street, city, state"
+                    style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                  />
+                </FormField>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '24px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCustomerInfoModal(false)
+                    setShowCreateCustomer(false)
+                    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                  }}
+                  style={{
+                    padding: '4px 16px',
+                    height: '28px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    whiteSpace: 'nowrap',
+                    backgroundColor: isDarkMode ? 'var(--bg-tertiary)' : '#f5f5f5',
+                    border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: isDarkMode ? 'var(--text-secondary)' : '#333',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    boxShadow: 'none'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!customerInfo.name?.trim() || !customerInfo.phone?.trim()) {
+                      showToast('Please fill in name and phone', 'error')
+                      return
+                    }
                     try {
                       const response = await fetch('/api/customers', {
                         method: 'POST',
@@ -4271,49 +4301,172 @@ function POS({ employeeId, employeeName }) {
                       console.error('Error creating customer:', err)
                       showToast('Error creating customer. Please try again.', 'error')
                     }
-                    return
+                  }}
+                  style={{
+                    padding: '4px 16px',
+                    height: '28px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    whiteSpace: 'nowrap',
+                    backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                    border: `1px solid rgba(${themeColorRgb}, 0.5)`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3)`
+                  }}
+                >
+                  Create
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Pickup/Delivery/Customer Information modal (unchanged) */
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'transparent',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2000
+          }}>
+            <div style={formModalStyle(isDarkMode)}>
+              <div style={{ marginBottom: '20px' }}>
+                <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>
+                  {orderType ? (orderType === 'pickup' ? 'Pickup' : 'Delivery') : 'Customer'} Information
+                </h3>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={formLabelStyle(isDarkMode)}>
+                  Name <span style={{ color: '#f44336' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={customerInfo.name}
+                  onChange={(e) => setCustomerInfo({ ...customerInfo, name: e.target.value })}
+                  placeholder="Customer name"
+                  style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                  {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                  autoFocus
+                />
+              </div>
+
+              {(rewardsSettings.enabled && (rewardsSettings.require_email || rewardsSettings.require_both)) || orderType ? (
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={formLabelStyle(isDarkMode)}>
+                    Email {((rewardsSettings.enabled && rewardsSettings.require_email) || rewardsSettings.require_both) ? <span style={{ color: '#f44336' }}>*</span> : ''}
+                  </label>
+                  <input
+                    type="email"
+                    value={customerInfo.email}
+                    onChange={(e) => setCustomerInfo({ ...customerInfo, email: e.target.value })}
+                    placeholder="Email address"
+                    style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                  />
+                </div>
+              ) : null}
+
+              {(rewardsSettings.enabled && (rewardsSettings.require_phone || rewardsSettings.require_both)) || orderType ? (
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={formLabelStyle(isDarkMode)}>
+                    Phone Number {(orderType || (rewardsSettings.enabled && (rewardsSettings.require_phone || rewardsSettings.require_both))) ? <span style={{ color: '#f44336' }}>*</span> : ''}
+                  </label>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={customerInfo.phone}
+                    onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                    placeholder="Phone number"
+                    style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                  />
+                </div>
+              ) : null}
+
+              {orderType === 'delivery' && (
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={formLabelStyle(isDarkMode)}>
+                    Address <span style={{ color: '#f44336' }}>*</span>
+                  </label>
+                  <textarea
+                    value={customerInfo.address}
+                    onChange={(e) => setCustomerInfo({ ...customerInfo, address: e.target.value })}
+                    placeholder="Delivery address"
+                    rows={3}
+                    style={{
+                      ...inputBaseStyle(isDarkMode, themeColorRgb),
+                      fontFamily: 'inherit',
+                      resize: 'vertical'
+                    }}
+                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                  />
+                </div>
+              )}
+
+              <FormModalActions
+                onCancel={() => {
+                  setShowCustomerInfoModal(false)
+                  if (!orderType) {
+                    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                  } else {
+                    setOrderType(null)
+                    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
                   }
-                  showToast(errorMessage, 'error')
-                  return
-                }
-                if (orderType === 'pickup') {
-                  requiredFields = customerInfo.name && customerInfo.phone
-                  errorMessage = 'Please fill in name and phone'
-                } else if (orderType === 'delivery') {
-                  requiredFields = customerInfo.name && customerInfo.phone && customerInfo.address
-                  errorMessage = 'Please fill in name, phone, and address'
-                } else if (rewardsSettings.enabled) {
-                  if (rewardsSettings.require_both) {
-                    requiredFields = customerInfo.name && customerInfo.email && customerInfo.phone
-                    errorMessage = 'Please fill in name, email, and phone'
-                  } else if (rewardsSettings.require_email) {
-                    requiredFields = customerInfo.name && customerInfo.email
-                    errorMessage = 'Please fill in name and email'
-                  } else if (rewardsSettings.require_phone) {
+                }}
+                onPrimary={async () => {
+                  let requiredFields = false
+                  let errorMessage = ''
+                  if (orderType === 'pickup') {
                     requiredFields = customerInfo.name && customerInfo.phone
                     errorMessage = 'Please fill in name and phone'
+                  } else if (orderType === 'delivery') {
+                    requiredFields = customerInfo.name && customerInfo.phone && customerInfo.address
+                    errorMessage = 'Please fill in name, phone, and address'
+                  } else if (rewardsSettings.enabled) {
+                    if (rewardsSettings.require_both) {
+                      requiredFields = customerInfo.name && customerInfo.email && customerInfo.phone
+                      errorMessage = 'Please fill in name, email, and phone'
+                    } else if (rewardsSettings.require_email) {
+                      requiredFields = customerInfo.name && customerInfo.email
+                      errorMessage = 'Please fill in name and email'
+                    } else if (rewardsSettings.require_phone) {
+                      requiredFields = customerInfo.name && customerInfo.phone
+                      errorMessage = 'Please fill in name and phone'
+                    } else {
+                      requiredFields = customerInfo.name
+                      errorMessage = 'Please fill in name'
+                    }
                   } else {
                     requiredFields = customerInfo.name
                     errorMessage = 'Please fill in name'
                   }
-                } else {
-                  requiredFields = customerInfo.name
-                  errorMessage = 'Please fill in name'
-                }
-                if (requiredFields) {
-                  setShowCustomerInfoModal(false)
-                  if (rewardsSettings.enabled && !orderType) {
-                    setShowSummary(true)
-                    setShowCustomerDisplay(true)
+                  if (requiredFields) {
+                    setShowCustomerInfoModal(false)
+                    if (rewardsSettings.enabled && !orderType) {
+                      setShowSummary(true)
+                      setShowCustomerDisplay(true)
+                    }
+                  } else {
+                    alert(errorMessage)
                   }
-                } else {
-                  alert(errorMessage)
-                }
-              }}
-              primaryLabel={showCreateCustomer ? 'Add Customer' : 'Save'}
-            />
+                }}
+                primaryLabel="Save"
+              />
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {/* Customer Rewards Modal - shown when a customer is selected */}

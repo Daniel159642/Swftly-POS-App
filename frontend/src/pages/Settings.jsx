@@ -27,8 +27,11 @@ import {
   Trash2,
   X,
   Undo2,
-  Redo2
+  Redo2,
+  ScanBarcode,
+  Package
 } from 'lucide-react'
+import BarcodeScanner from '../components/BarcodeScanner'
 import { FormTitle, FormLabel, FormField, inputBaseStyle, getInputFocusHandlers } from '../components/FormStyles'
 import Table from '../components/Table'
 import '../components/CustomerDisplay.css'
@@ -1435,7 +1438,10 @@ function Settings() {
     points_redemption_value: 0.01,
     percentage_discount: 0.0,
     fixed_discount: 0.0,
-    minimum_spend: 0.0
+    minimum_spend: 0.0,
+    minimum_spend_points: 0.0,
+    minimum_spend_percentage: 0.0,
+    minimum_spend_fixed: 0.0
   })
   const [rewardsCampaigns, setRewardsCampaigns] = useState(() => {
     try {
@@ -1444,7 +1450,65 @@ function Settings() {
     } catch { return [] }
   })
   const [showCreateCampaignModal, setShowCreateCampaignModal] = useState(false)
-  const [newCampaign, setNewCampaign] = useState({ name: '', type: 'promo_discount', discount_value: '', product_id: null, buy_qty: 1, get_qty: 1 })
+  const [showProductPickerModal, setShowProductPickerModal] = useState(false)
+  const [showBarcodeInPicker, setShowBarcodeInPicker] = useState(false)
+  const [newCampaign, setNewCampaign] = useState({
+    name: '',
+    type: 'promo_discount',
+    discount_value: '',
+    product_id: null,
+    buy_qty: 1,
+    get_qty: 1,
+    audience: 'everyone',
+    start_date: '',
+    end_date: '',
+    minimum_purchase: '',
+    product_ids: [],
+    product_exclude_ids: [],
+    category_ids: [],
+    category_exclude_ids: []
+  })
+  const defaultNewCampaign = () => ({
+    name: '',
+    type: 'promo_discount',
+    discount_value: '',
+    product_id: null,
+    buy_qty: 1,
+    get_qty: 1,
+    audience: 'everyone',
+    start_date: '',
+    end_date: '',
+    minimum_purchase: '',
+    product_ids: [],
+    product_exclude_ids: [],
+    category_ids: [],
+    category_exclude_ids: []
+  })
+  const [pickerProducts, setPickerProducts] = useState([])
+  const [pickerCategories, setPickerCategories] = useState([])
+  const [pickerSearch, setPickerSearch] = useState('')
+  const [pickerIncludeIds, setPickerIncludeIds] = useState([])
+  const [pickerExcludeIds, setPickerExcludeIds] = useState([])
+  const [pickerLimitCategoryIds, setPickerLimitCategoryIds] = useState([])
+  const [pickerExcludeCategoryIds, setPickerExcludeCategoryIds] = useState([])
+  const [pickerLoading, setPickerLoading] = useState(false)
+  useEffect(() => {
+    if (!showProductPickerModal) return
+    setPickerIncludeIds([...(newCampaign.product_ids || [])])
+    setPickerExcludeIds([...(newCampaign.product_exclude_ids || [])])
+    setPickerLimitCategoryIds([...(newCampaign.category_ids || [])])
+    setPickerExcludeCategoryIds([...(newCampaign.category_exclude_ids || [])])
+    setPickerSearch('')
+    setPickerLoading(true)
+    Promise.all([
+      fetch('/api/inventory?item_type=product&limit=2000').then(r => r.json()),
+      fetch('/api/categories').then(r => r.json())
+    ]).then(([invRes, catRes]) => {
+      setPickerProducts(invRes.data || [])
+      setPickerCategories(catRes.data || [])
+      setPickerLoading(false)
+    }).catch(() => setPickerLoading(false))
+  }, [showProductPickerModal])
   const [registers, setRegisters] = useState(() => {
     // Load from localStorage or default to one register
     const saved = localStorage.getItem('cash_registers')
@@ -1732,7 +1796,10 @@ function Settings() {
         points_redemption_value: s.points_redemption_value ?? 0.01,
         percentage_discount: s.percentage_discount ?? 0.0,
         fixed_discount: s.fixed_discount ?? 0.0,
-        minimum_spend: s.minimum_spend ?? 0.0
+        minimum_spend: s.minimum_spend ?? 0.0,
+        minimum_spend_points: s.minimum_spend_points ?? s.minimum_spend ?? 0.0,
+        minimum_spend_percentage: s.minimum_spend_percentage ?? s.minimum_spend ?? 0.0,
+        minimum_spend_fixed: s.minimum_spend_fixed ?? s.minimum_spend ?? 0.0
       })
     }
     if (data.pos_settings) {
@@ -2074,7 +2141,10 @@ function Settings() {
           points_redemption_value: s.points_redemption_value ?? 0.01,
           percentage_discount: s.percentage_discount ?? 0.0,
           fixed_discount: s.fixed_discount ?? 0.0,
-          minimum_spend: s.minimum_spend ?? 0.0
+          minimum_spend: s.minimum_spend ?? 0.0,
+          minimum_spend_points: s.minimum_spend_points ?? s.minimum_spend ?? 0.0,
+          minimum_spend_percentage: s.minimum_spend_percentage ?? s.minimum_spend ?? 0.0,
+          minimum_spend_fixed: s.minimum_spend_fixed ?? s.minimum_spend ?? 0.0
         })
       }
     } catch (error) {
@@ -2580,7 +2650,10 @@ function Settings() {
           points_redemption_value: parseFloat(rewardsSettings.points_redemption_value) ?? 0.01,
           percentage_discount: parseFloat(rewardsSettings.percentage_discount) || 0.0,
           fixed_discount: parseFloat(rewardsSettings.fixed_discount) || 0.0,
-          minimum_spend: parseFloat(rewardsSettings.minimum_spend) || 0.0
+          minimum_spend: parseFloat(rewardsSettings.minimum_spend) || 0.0,
+          minimum_spend_points: parseFloat(rewardsSettings.minimum_spend_points) || 0.0,
+          minimum_spend_percentage: parseFloat(rewardsSettings.minimum_spend_percentage) || 0.0,
+          minimum_spend_fixed: parseFloat(rewardsSettings.minimum_spend_fixed) || 0.0
         })
       })
 
@@ -3134,7 +3207,7 @@ function Settings() {
 
       {/* Store Information Settings Tab */}
       {activeTab === 'location' && (
-        <div>
+        <div style={{ maxWidth: '480px' }}>
           <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
             Store Information
           </FormTitle>
@@ -3635,7 +3708,7 @@ function Settings() {
 
       {/* Customer Rewards Settings Tab */}
       {activeTab === 'rewards' && (
-        <div>
+        <div style={{ maxWidth: '480px' }}>
           <style>{`
             .checkbox-wrapper-2 .ikxBAC {
               appearance: none;
@@ -3775,25 +3848,6 @@ function Settings() {
                   </div>
                 </div>
 
-                {/* Global: Minimum Spend - one field for all reward types */}
-                <FormField style={{ marginBottom: '16px' }}>
-                  <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>
-                    Minimum Spend to Earn Rewards ($)
-                  </FormLabel>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={rewardsSettings.minimum_spend ?? ''}
-                    onChange={(e) => setRewardsSettings({
-                      ...rewardsSettings,
-                      minimum_spend: parseFloat(e.target.value) || 0.0
-                    })}
-                    style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '200px' }}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                </FormField>
-
                 {/* Points - switch + input, no container */}
                 <div style={{ marginBottom: '16px', opacity: rewardsSettings.points_enabled ? 1 : 0.7 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
@@ -3817,6 +3871,33 @@ function Settings() {
                       min="0"
                       value={rewardsSettings.points_per_dollar ?? ''}
                       onChange={(e) => setRewardsSettings({ ...rewardsSettings, points_per_dollar: parseFloat(e.target.value) || 1.0 })}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                      disabled={!rewardsSettings.points_enabled}
+                    />
+                    <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px', marginTop: '12px' }}>Value per point ($)</FormLabel>
+                    <input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      max="1"
+                      placeholder="0.01"
+                      value={rewardsSettings.points_redemption_value ?? ''}
+                      onChange={(e) => setRewardsSettings({ ...rewardsSettings, points_redemption_value: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                      disabled={!rewardsSettings.points_enabled}
+                    />
+                    <p style={{ marginTop: '4px', marginBottom: 0, fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666' }}>
+                      e.g. 0.01 = 1¢ per point (100 points = $1)
+                    </p>
+                    <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px', marginTop: '12px' }}>Minimum spend to earn ($)</FormLabel>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={rewardsSettings.minimum_spend_points ?? ''}
+                      onChange={(e) => setRewardsSettings({ ...rewardsSettings, minimum_spend_points: parseFloat(e.target.value) || 0.0 })}
                       style={inputBaseStyle(isDarkMode, themeColorRgb)}
                       {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                       disabled={!rewardsSettings.points_enabled}
@@ -3852,6 +3933,17 @@ function Settings() {
                       {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                       disabled={!rewardsSettings.percentage_enabled}
                     />
+                    <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px', marginTop: '12px' }}>Minimum spend to earn ($)</FormLabel>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={rewardsSettings.minimum_spend_percentage ?? ''}
+                      onChange={(e) => setRewardsSettings({ ...rewardsSettings, minimum_spend_percentage: parseFloat(e.target.value) || 0.0 })}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                      disabled={!rewardsSettings.percentage_enabled}
+                    />
                   </div>
                 </div>
 
@@ -3878,6 +3970,17 @@ function Settings() {
                       min="0"
                       value={rewardsSettings.fixed_discount ?? ''}
                       onChange={(e) => setRewardsSettings({ ...rewardsSettings, fixed_discount: parseFloat(e.target.value) || 0.0 })}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                      disabled={!rewardsSettings.fixed_enabled}
+                    />
+                    <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px', marginTop: '12px' }}>Minimum spend to earn ($)</FormLabel>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={rewardsSettings.minimum_spend_fixed ?? ''}
+                      onChange={(e) => setRewardsSettings({ ...rewardsSettings, minimum_spend_fixed: parseFloat(e.target.value) || 0.0 })}
                       style={inputBaseStyle(isDarkMode, themeColorRgb)}
                       {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                       disabled={!rewardsSettings.fixed_enabled}
@@ -3909,7 +4012,7 @@ function Settings() {
                   <button
                     type="button"
                     onClick={() => {
-                      setNewCampaign({ name: '', type: 'promo_discount', discount_value: '', product_id: null, buy_qty: 1, get_qty: 1 })
+                      setNewCampaign(defaultNewCampaign())
                       setShowCreateCampaignModal(true)
                     }}
                     style={{
@@ -4009,7 +4112,9 @@ function Settings() {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      zIndex: 10000
+                      zIndex: 10000,
+                      overflow: 'auto',
+                      padding: '24px'
                     }}
                     onClick={() => setShowCreateCampaignModal(false)}
                   >
@@ -4018,8 +4123,10 @@ function Settings() {
                         backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
                         borderRadius: '12px',
                         padding: '24px',
-                        maxWidth: '420px',
-                        width: '90%',
+                        maxWidth: '480px',
+                        width: '100%',
+                        maxHeight: '90vh',
+                        overflow: 'auto',
                         boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
                         border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
                       }}
@@ -4045,6 +4152,41 @@ function Settings() {
                         />
                       </FormField>
                       <FormField style={{ marginBottom: '14px' }}>
+                        <FormLabel isDarkMode={isDarkMode}>Audience</FormLabel>
+                        <select
+                          value={newCampaign.audience ?? 'everyone'}
+                          onChange={(e) => setNewCampaign(prev => ({ ...prev, audience: e.target.value }))}
+                          style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                        >
+                          <option value="everyone">Everyone</option>
+                          <option value="enrolled_only">Enrolled customers only</option>
+                        </select>
+                      </FormField>
+                      <FormField style={{ marginBottom: '14px' }}>
+                        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
+                          <div style={{ flex: 1 }}>
+                            <FormLabel isDarkMode={isDarkMode}>Start date (optional)</FormLabel>
+                            <input
+                              type="date"
+                              value={newCampaign.start_date ?? ''}
+                              onChange={(e) => setNewCampaign(prev => ({ ...prev, start_date: e.target.value }))}
+                              style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                            />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <FormLabel isDarkMode={isDarkMode}>End date (optional)</FormLabel>
+                            <input
+                              type="date"
+                              value={newCampaign.end_date ?? ''}
+                              onChange={(e) => setNewCampaign(prev => ({ ...prev, end_date: e.target.value }))}
+                              style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                            />
+                          </div>
+                        </div>
+                      </FormField>
+                      <FormField style={{ marginBottom: '14px' }}>
                         <FormLabel isDarkMode={isDarkMode}>Promotion type</FormLabel>
                         <select
                           value={newCampaign.type ?? ''}
@@ -4052,9 +4194,22 @@ function Settings() {
                           style={inputBaseStyle(isDarkMode, themeColorRgb)}
                         >
                           <option value="promo_discount">Promo discount (% or $ off order)</option>
-                          <option value="product_discount">Product discount (discount on specific product)</option>
+                          <option value="product_discount">Product discount (discount on specific products)</option>
                           <option value="bogo">Buy one get one (BOGO)</option>
                         </select>
+                      </FormField>
+                      <FormField style={{ marginBottom: '14px' }}>
+                        <FormLabel isDarkMode={isDarkMode}>Minimum purchase ($) — optional</FormLabel>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0"
+                          value={newCampaign.minimum_purchase ?? ''}
+                          onChange={(e) => setNewCampaign(prev => ({ ...prev, minimum_purchase: e.target.value }))}
+                          style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                        />
                       </FormField>
                       {newCampaign.type === 'promo_discount' && (
                         <FormField style={{ marginBottom: '14px' }}>
@@ -4069,26 +4224,44 @@ function Settings() {
                           />
                         </FormField>
                       )}
-                      {newCampaign.type === 'product_discount' && (
+                      {(newCampaign.type === 'product_discount' || newCampaign.type === 'bogo') && (
                         <FormField style={{ marginBottom: '14px' }}>
-                          <FormLabel isDarkMode={isDarkMode}>Product ID or name (optional)</FormLabel>
-                          <input
-                            type="text"
-                            placeholder="Search or enter product ID"
-                            value={newCampaign.product_id ?? ''}
-                            onChange={(e) => setNewCampaign(prev => ({ ...prev, product_id: e.target.value || null }))}
-                            style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          />
-                          <FormLabel isDarkMode={isDarkMode} style={{ marginTop: '8px' }}>Discount value (% or $)</FormLabel>
-                          <input
-                            type="text"
-                            placeholder="e.g. 15% or 2.00"
-                            value={newCampaign.discount_value ?? ''}
-                            onChange={(e) => setNewCampaign(prev => ({ ...prev, discount_value: e.target.value }))}
-                            style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          />
+                          <FormLabel isDarkMode={isDarkMode}>Products & categories</FormLabel>
+                          <button
+                            type="button"
+                            onClick={() => setShowProductPickerModal(true)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              padding: '10px 14px',
+                              borderRadius: '8px',
+                              border: `1px solid ${isDarkMode ? '#444' : '#ddd'}`,
+                              background: isDarkMode ? 'var(--bg-secondary)' : '#f8f8f8',
+                              color: isDarkMode ? 'var(--text-primary)' : '#333',
+                              cursor: 'pointer',
+                              fontSize: '14px',
+                              fontWeight: 500
+                            }}
+                          >
+                            <Package size={18} />
+                            {[].concat(newCampaign.product_ids || [], newCampaign.category_ids || [], newCampaign.product_exclude_ids || [], newCampaign.category_exclude_ids || []).length > 0
+                              ? `Edit selection (${(newCampaign.product_ids || []).length + (newCampaign.product_exclude_ids || []).length} products, ${(newCampaign.category_ids || []).length + (newCampaign.category_exclude_ids || []).length} categories)`
+                              : 'Select products & categories'}
+                          </button>
+                          {newCampaign.type === 'product_discount' && (
+                            <>
+                              <FormLabel isDarkMode={isDarkMode} style={{ marginTop: '8px' }}>Discount value (% or $)</FormLabel>
+                              <input
+                                type="text"
+                                placeholder="e.g. 15% or 2.00"
+                                value={newCampaign.discount_value ?? ''}
+                                onChange={(e) => setNewCampaign(prev => ({ ...prev, discount_value: e.target.value }))}
+                                style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                              />
+                            </>
+                          )}
                         </FormField>
                       )}
                       {newCampaign.type === 'bogo' && (
@@ -4144,7 +4317,15 @@ function Settings() {
                               discount_value: newCampaign.discount_value,
                               product_id: newCampaign.product_id,
                               buy_qty: newCampaign.buy_qty,
-                              get_qty: newCampaign.get_qty
+                              get_qty: newCampaign.get_qty,
+                              audience: newCampaign.audience || 'everyone',
+                              start_date: newCampaign.start_date || null,
+                              end_date: newCampaign.end_date || null,
+                              minimum_purchase: newCampaign.minimum_purchase ? parseFloat(newCampaign.minimum_purchase) : null,
+                              product_ids: newCampaign.product_ids || [],
+                              product_exclude_ids: newCampaign.product_exclude_ids || [],
+                              category_ids: newCampaign.category_ids || [],
+                              category_exclude_ids: newCampaign.category_exclude_ids || []
                             }
                             setRewardsCampaigns(prev => {
                               const next = [...prev, campaign]
@@ -4152,7 +4333,7 @@ function Settings() {
                               return next
                             })
                             setShowCreateCampaignModal(false)
-                            setNewCampaign({ name: '', type: 'promo_discount', discount_value: '', product_id: null, buy_qty: 1, get_qty: 1 })
+                            setNewCampaign(defaultNewCampaign())
                           }}
                           style={{
                             padding: '10px 18px',
@@ -4171,13 +4352,229 @@ function Settings() {
                     </div>
                   </div>
                 )}
+
+                {/* Product & category picker modal (for product_discount / BOGO) */}
+                {showProductPickerModal && (
+                  <div
+                    style={{
+                      position: 'fixed',
+                      inset: 0,
+                      backgroundColor: 'rgba(0,0,0,0.5)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 10001,
+                      padding: '24px',
+                      overflow: 'auto'
+                    }}
+                    onClick={() => setShowProductPickerModal(false)}
+                  >
+                    <div
+                      style={{
+                        backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+                        borderRadius: '12px',
+                        padding: '24px',
+                        maxWidth: '560px',
+                        width: '100%',
+                        maxHeight: '85vh',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+                        border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
+                      }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexShrink: 0 }}>
+                        <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                          Select products & categories
+                        </h3>
+                        <button type="button" onClick={() => setShowProductPickerModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}>
+                          <X size={20} style={{ color: isDarkMode ? '#999' : '#666' }} />
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexShrink: 0 }}>
+                        <input
+                          type="text"
+                          placeholder="Search by name, SKU, or barcode"
+                          value={pickerSearch}
+                          onChange={(e) => setPickerSearch(e.target.value)}
+                          style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), flex: 1 }}
+                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowBarcodeInPicker(true)}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            border: `1px solid ${isDarkMode ? '#444' : '#ddd'}`,
+                            background: isDarkMode ? 'var(--bg-secondary)' : '#f5f5f5',
+                            color: isDarkMode ? 'var(--text-primary)' : '#333',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '13px',
+                            fontWeight: 500
+                          }}
+                        >
+                          <ScanBarcode size={18} /> Scan
+                        </button>
+                      </div>
+                      {showBarcodeInPicker && (
+                        <div style={{ marginBottom: '12px', flexShrink: 0 }}>
+                          <BarcodeScanner
+                            onScan={(barcode) => {
+                              const p = pickerProducts.find(x => (x.barcode || '').toString() === (barcode || '').toString())
+                              if (p && p.product_id) {
+                                setPickerIncludeIds(prev => prev.includes(p.product_id) ? prev : [...prev, p.product_id])
+                                setPickerExcludeIds(prev => prev.filter(x => x !== p.product_id))
+                              }
+                              setShowBarcodeInPicker(false)
+                            }}
+                            onClose={() => setShowBarcodeInPicker(false)}
+                            themeColor={themeColor}
+                          />
+                        </div>
+                      )}
+                      <div style={{ flex: 1, overflow: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        {pickerLoading ? (
+                          <div style={{ padding: '24px', textAlign: 'center', color: isDarkMode ? '#999' : '#666' }}>Loading products…</div>
+                        ) : (
+                          <>
+                            <div>
+                              <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Include products (optional — leave empty for all)</FormLabel>
+                              <div style={{ maxHeight: '140px', overflow: 'auto', border: `1px solid ${isDarkMode ? '#444' : '#ddd'}`, borderRadius: '8px', padding: '8px' }}>
+                                {(pickerSearch.trim() ? pickerProducts.filter(p => {
+                                  const q = pickerSearch.toLowerCase()
+                                  return (p.product_name || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.barcode || '').toString().toLowerCase().includes(q)
+                                }) : pickerProducts).slice(0, 100).map(p => (
+                                  <label key={p.product_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', cursor: 'pointer', fontSize: '13px' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={pickerIncludeIds.includes(p.product_id)}
+                                      onChange={() => {
+                                        setPickerIncludeIds(prev => prev.includes(p.product_id) ? prev.filter(x => x !== p.product_id) : [...prev, p.product_id])
+                                        setPickerExcludeIds(prev => prev.filter(x => x !== p.product_id))
+                                      }}
+                                    />
+                                    <span style={{ color: isDarkMode ? 'var(--text-primary)' : '#333' }}>{p.product_name || p.sku}</span>
+                                    {p.sku && <span style={{ color: isDarkMode ? '#888' : '#666', fontSize: '12px' }}>({p.sku})</span>}
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Exclude products (optional)</FormLabel>
+                              <div style={{ maxHeight: '100px', overflow: 'auto', border: `1px solid ${isDarkMode ? '#444' : '#ddd'}`, borderRadius: '8px', padding: '8px' }}>
+                                {(pickerSearch.trim() ? pickerProducts.filter(p => {
+                                  const q = pickerSearch.toLowerCase()
+                                  return (p.product_name || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.barcode || '').toString().toLowerCase().includes(q)
+                                }) : pickerProducts).slice(0, 100).map(p => (
+                                  <label key={p.product_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', cursor: 'pointer', fontSize: '13px' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={pickerExcludeIds.includes(p.product_id)}
+                                      onChange={() => {
+                                        setPickerExcludeIds(prev => prev.includes(p.product_id) ? prev.filter(x => x !== p.product_id) : [...prev, p.product_id])
+                                        setPickerIncludeIds(prev => prev.filter(x => x !== p.product_id))
+                                      }}
+                                    />
+                                    <span style={{ color: isDarkMode ? 'var(--text-primary)' : '#333' }}>{p.product_name || p.sku}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Limit to categories (optional)</FormLabel>
+                              <div style={{ maxHeight: '100px', overflow: 'auto', border: `1px solid ${isDarkMode ? '#444' : '#ddd'}`, borderRadius: '8px', padding: '8px' }}>
+                                {pickerCategories.map(c => (
+                                  <label key={c.category_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', cursor: 'pointer', fontSize: '13px' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={pickerLimitCategoryIds.includes(c.category_id)}
+                                      onChange={() => {
+                                        setPickerLimitCategoryIds(prev => prev.includes(c.category_id) ? prev.filter(x => x !== c.category_id) : [...prev, c.category_id])
+                                        setPickerExcludeCategoryIds(prev => prev.filter(x => x !== c.category_id))
+                                      }}
+                                    />
+                                    <span style={{ color: isDarkMode ? 'var(--text-primary)' : '#333' }}>{c.category_name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                            <div>
+                              <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Exclude categories (optional)</FormLabel>
+                              <div style={{ maxHeight: '100px', overflow: 'auto', border: `1px solid ${isDarkMode ? '#444' : '#ddd'}`, borderRadius: '8px', padding: '8px' }}>
+                                {pickerCategories.map(c => (
+                                  <label key={c.category_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', cursor: 'pointer', fontSize: '13px' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={pickerExcludeCategoryIds.includes(c.category_id)}
+                                      onChange={() => setPickerExcludeCategoryIds(prev => prev.includes(c.category_id) ? prev.filter(x => x !== c.category_id) : [...prev, c.category_id])}
+                                    />
+                                    <span style={{ color: isDarkMode ? 'var(--text-primary)' : '#333' }}>{c.category_name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowProductPickerModal(false)}
+                          style={{
+                            padding: '10px 18px',
+                            borderRadius: '8px',
+                            border: `1px solid ${isDarkMode ? '#444' : '#ddd'}`,
+                            background: 'transparent',
+                            color: isDarkMode ? 'var(--text-primary)' : '#333',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            fontWeight: 600
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewCampaign(prev => ({
+                              ...prev,
+                              product_ids: pickerIncludeIds,
+                              product_exclude_ids: pickerExcludeIds,
+                              category_ids: pickerLimitCategoryIds,
+                              category_exclude_ids: pickerExcludeCategoryIds
+                            }))
+                            setShowProductPickerModal(false)
+                          }}
+                          style={{
+                            padding: '10px 18px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: `rgba(${themeColorRgb}, 0.9)`,
+                            color: '#fff',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            fontWeight: 600
+                          }}
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
           </div>
         </div>
       )}
 
       {/* POS Settings Tab */}
       {activeTab === 'pos' && (
-        <div>
+        <div style={{ maxWidth: '480px' }}>
           <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
             POS Configuration
           </FormTitle>
@@ -6537,7 +6934,7 @@ function Settings() {
 
       {/* Notifications Tab */}
       {activeTab === 'notifications' && (
-        <div>
+        <div style={{ maxWidth: '480px' }}>
           <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
             Notifications
           </FormTitle>
@@ -6548,7 +6945,7 @@ function Settings() {
       )}
 
       {activeTab === 'cash' && (
-        <div>
+        <div style={{ maxWidth: '480px' }}>
           <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
             Cash Register Management
           </FormTitle>

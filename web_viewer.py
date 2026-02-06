@@ -8505,7 +8505,8 @@ def api_update_customer_rewards_settings():
         allowed_keys = {
             'enabled', 'require_email', 'require_phone', 'require_both',
             'reward_type', 'points_per_dollar', 'points_redemption_value',
-            'percentage_discount', 'fixed_discount', 'minimum_spend'
+            'percentage_discount', 'fixed_discount', 'minimum_spend',
+            'minimum_spend_points', 'minimum_spend_percentage', 'minimum_spend_fixed'
         }
         raw = {
             'enabled': data.get('enabled'),
@@ -8517,7 +8518,10 @@ def api_update_customer_rewards_settings():
             'points_redemption_value': data.get('points_redemption_value'),
             'percentage_discount': data.get('percentage_discount'),
             'fixed_discount': data.get('fixed_discount'),
-            'minimum_spend': data.get('minimum_spend')
+            'minimum_spend': data.get('minimum_spend'),
+            'minimum_spend_points': data.get('minimum_spend_points'),
+            'minimum_spend_percentage': data.get('minimum_spend_percentage'),
+            'minimum_spend_fixed': data.get('minimum_spend_fixed')
         }
         update_fields = {k: v for k, v in raw.items() if k in allowed_keys and v is not None}
         
@@ -8537,13 +8541,15 @@ def api_update_customer_rewards_settings():
             base_cols = [
                 'enabled', 'require_email', 'require_phone', 'require_both',
                 'reward_type', 'points_per_dollar', 'points_redemption_value',
-                'percentage_discount', 'fixed_discount', 'minimum_spend'
+                'percentage_discount', 'fixed_discount', 'minimum_spend',
+                'minimum_spend_points', 'minimum_spend_percentage', 'minimum_spend_fixed'
             ]
             cols_that_exist = [c for c in base_cols if c in existing_cols]
             defaults = {
                 'enabled': 0, 'require_email': 0, 'require_phone': 0, 'require_both': 0,
                 'reward_type': 'points', 'points_per_dollar': 1.0, 'points_redemption_value': 0.01,
-                'percentage_discount': 0.0, 'fixed_discount': 0.0, 'minimum_spend': 0.0
+                'percentage_discount': 0.0, 'fixed_discount': 0.0, 'minimum_spend': 0.0,
+                'minimum_spend_points': 0.0, 'minimum_spend_percentage': 0.0, 'minimum_spend_fixed': 0.0
             }
             if count == 0:
                 vals = [update_fields.get(c, defaults.get(c)) for c in cols_that_exist]

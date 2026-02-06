@@ -9739,7 +9739,10 @@ def get_customer_rewards_settings() -> Optional[Dict[str, Any]]:
             'points_redemption_value': 0.01,
             'percentage_discount': 0.0,
             'fixed_discount': 0.0,
-            'minimum_spend': 0.0
+            'minimum_spend': 0.0,
+            'minimum_spend_points': 0.0,
+            'minimum_spend_percentage': 0.0,
+            'minimum_spend_fixed': 0.0
         }
     # Cursor returns tuple; build dict from column names
     colnames = [desc[0] for desc in cursor.description]
@@ -9747,6 +9750,11 @@ def get_customer_rewards_settings() -> Optional[Dict[str, Any]]:
     conn.close()
     if d.get('points_redemption_value') is None:
         d['points_redemption_value'] = 0.01
+    # Per-type minimum spend: fall back to minimum_spend if new columns missing
+    legacy_min = float(d.get('minimum_spend') or 0.0)
+    d['minimum_spend_points'] = float(d.get('minimum_spend_points') if d.get('minimum_spend_points') is not None else legacy_min)
+    d['minimum_spend_percentage'] = float(d.get('minimum_spend_percentage') if d.get('minimum_spend_percentage') is not None else legacy_min)
+    d['minimum_spend_fixed'] = float(d.get('minimum_spend_fixed') if d.get('minimum_spend_fixed') is not None else legacy_min)
     # Backward compat: derive enabled flags from reward_type if columns missing
     reward_type = d.get('reward_type') or 'points'
     if d.get('points_enabled') is None:
@@ -9763,7 +9771,8 @@ def update_customer_rewards_settings(**kwargs) -> bool:
     SAFE_COLUMNS = (
         'enabled', 'require_email', 'require_phone', 'require_both',
         'reward_type', 'points_per_dollar', 'points_redemption_value',
-        'percentage_discount', 'fixed_discount', 'minimum_spend'
+        'percentage_discount', 'fixed_discount', 'minimum_spend',
+        'minimum_spend_points', 'minimum_spend_percentage', 'minimum_spend_fixed'
     )
     kwargs = {k: v for k, v in kwargs.items() if k in SAFE_COLUMNS}
 
@@ -9807,10 +9816,18 @@ def update_customer_rewards_settings(**kwargs) -> bool:
         # Check if settings exist
         cursor.execute("SELECT COUNT(*) FROM customer_rewards_settings")
         count = cursor.fetchone()[0]
+        cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'customer_rewards_settings'
+        """)
+        existing_cols = {r[0] for r in cursor.fetchall()}
         
         if count == 0:
-            # Create new settings with defaults - use all safe columns
-            insert_fields = list(SAFE_COLUMNS)
+            # Create new settings with defaults - only columns that exist in table
+            insert_fields = [f for f in SAFE_COLUMNS if f in existing_cols]
+            if not insert_fields:
+                conn.close()
+                return False
             insert_placeholders = ['%s'] * len(insert_fields)
             defaults = {
                 'enabled': 0,
@@ -9822,7 +9839,10 @@ def update_customer_rewards_settings(**kwargs) -> bool:
                 'points_redemption_value': 0.01,
                 'percentage_discount': 0.0,
                 'fixed_discount': 0.0,
-                'minimum_spend': 0.0
+                'minimum_spend': 0.0,
+                'minimum_spend_points': 0.0,
+                'minimum_spend_percentage': 0.0,
+                'minimum_spend_fixed': 0.0
             }
             insert_values = [kwargs.get(f, defaults.get(f)) for f in insert_fields]
             cursor.execute(f"""
@@ -9864,7 +9884,8 @@ def update_customer_rewards_settings(**kwargs) -> bool:
                 base_only = [
                     'enabled', 'require_email', 'require_phone', 'require_both',
                     'reward_type', 'points_per_dollar', 'points_redemption_value',
-                    'percentage_discount', 'fixed_discount', 'minimum_spend'
+                    'percentage_discount', 'fixed_discount', 'minimum_spend',
+                    'minimum_spend_points', 'minimum_spend_percentage', 'minimum_spend_fixed'
                 ]
                 allowed_fields = [f for f in base_only if f in kwargs and f in existing_cols]
                 if allowed_fields:
@@ -9906,11 +9927,19 @@ def calculate_rewards(amount_spent: float, settings: Optional[Dict[str, Any]] = 
     if not enabled and not points_on:
         return {'points_earned': 0, 'discount_amount': 0.0, 'reward_type': settings.get('reward_type', 'points')}
     
-    minimum_spend = settings.get('minimum_spend', 0.0)
-    if amount_spent < minimum_spend:
-        return {'points_earned': 0, 'discount_amount': 0.0, 'reward_type': settings.get('reward_type', 'points')}
-    
     reward_type = settings.get('reward_type', 'points')
+    # Per-type minimum spend (fall back to legacy minimum_spend if not set)
+    legacy_min = float(settings.get('minimum_spend') or 0.0)
+    if reward_type == 'points':
+        minimum_spend = float(settings.get('minimum_spend_points') if settings.get('minimum_spend_points') is not None else legacy_min)
+    elif reward_type == 'percentage':
+        minimum_spend = float(settings.get('minimum_spend_percentage') if settings.get('minimum_spend_percentage') is not None else legacy_min)
+    elif reward_type == 'fixed':
+        minimum_spend = float(settings.get('minimum_spend_fixed') if settings.get('minimum_spend_fixed') is not None else legacy_min)
+    else:
+        minimum_spend = legacy_min
+    if amount_spent < minimum_spend:
+        return {'points_earned': 0, 'discount_amount': 0.0, 'reward_type': reward_type}
     
     if reward_type == 'points':
         points_per_dollar = settings.get('points_per_dollar', 1.0)
