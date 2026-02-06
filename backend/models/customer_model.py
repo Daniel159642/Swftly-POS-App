@@ -118,6 +118,20 @@ class CustomerRepository:
             cursor.close()
 
     @staticmethod
+    def find_by_pos_customer_id(pos_customer_id: int) -> Optional[Dict[str, Any]]:
+        """Find accounting customer linked to a POS customer (public.customers.customer_id)."""
+        cursor = get_cursor()
+        try:
+            cursor.execute(
+                f"SELECT * FROM {CustomerRepository.TABLE} WHERE customer_id = %s",
+                (pos_customer_id,),
+            )
+            row = cursor.fetchone()
+            return _row_to_dict(row) if row else None
+        finally:
+            cursor.close()
+
+    @staticmethod
     def find_by_email(email: str, exclude_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         cursor = get_cursor()
         try:
@@ -166,13 +180,41 @@ class CustomerRepository:
             if existing:
                 raise ValueError("Customer number already exists")
 
+        pos_customer_id = data.get("customer_id")
+        if pos_customer_id is not None:
+            existing_link = CustomerRepository.find_by_pos_customer_id(pos_customer_id)
+            if existing_link:
+                raise ValueError(f"POS customer id {pos_customer_id} is already linked to an accounting customer")
+
         display_name = data.get("display_name")
+        first_name = data.get("first_name")
+        last_name = data.get("last_name")
+        email = data.get("email")
+        phone = data.get("phone")
+        if pos_customer_id is not None and (not display_name or not email):
+            cursor = get_cursor()
+            try:
+                cursor.execute(
+                    "SELECT customer_name, email, phone FROM public.customers WHERE customer_id = %s",
+                    (pos_customer_id,),
+                )
+                pos_row = cursor.fetchone()
+                if pos_row:
+                    pos = _row_to_dict(pos_row) if hasattr(pos_row, "keys") else {}
+                    if not display_name and pos.get("customer_name"):
+                        display_name = pos["customer_name"]
+                    if not email and pos.get("email"):
+                        email = pos["email"]
+                    if not phone and pos.get("phone"):
+                        phone = pos["phone"]
+            finally:
+                cursor.close()
         if not display_name:
             if data.get("customer_type") == "business":
                 display_name = data.get("company_name") or customer_number
             else:
                 display_name = (
-                    f"{data.get('first_name') or ''} {data.get('last_name') or ''}".strip() or customer_number
+                    f"{first_name or ''} {last_name or ''}".strip() or customer_number
                 )
 
         cursor = get_cursor()
@@ -181,7 +223,7 @@ class CustomerRepository:
             cursor.execute(
                 f"""
                 INSERT INTO {CustomerRepository.TABLE} (
-                    customer_number, customer_type, company_name, first_name, last_name, display_name,
+                    customer_id, customer_number, customer_type, company_name, first_name, last_name, display_name,
                     email, phone, mobile, website,
                     billing_address_line1, billing_address_line2, billing_city, billing_state,
                     billing_postal_code, billing_country,
@@ -197,14 +239,15 @@ class CustomerRepository:
                 RETURNING *
                 """,
                 (
+                    pos_customer_id,
                     customer_number,
                     data.get("customer_type", "individual"),
                     data.get("company_name"),
-                    data.get("first_name"),
-                    data.get("last_name"),
+                    first_name,
+                    last_name,
                     display_name,
-                    data.get("email"),
-                    data.get("phone"),
+                    email,
+                    phone,
                     data.get("mobile"),
                     data.get("website"),
                     data.get("billing_address_line1"),
@@ -239,7 +282,7 @@ class CustomerRepository:
     @staticmethod
     def update(customer_id: int, data: Dict[str, Any], user_id: int) -> Dict[str, Any]:
         allowed = {
-            "customer_type", "company_name", "first_name", "last_name", "display_name",
+            "customer_id", "customer_type", "company_name", "first_name", "last_name", "display_name",
             "email", "phone", "mobile", "website",
             "billing_address_line1", "billing_address_line2", "billing_city", "billing_state",
             "billing_postal_code", "billing_country",
@@ -253,7 +296,7 @@ class CustomerRepository:
         for k, v in data.items():
             if k not in allowed:
                 continue
-            if v is None and k != "is_active":
+            if v is None and k not in ("is_active", "customer_id"):
                 continue
             if k == "tax_exempt":
                 updates.append("tax_exempt = %s")

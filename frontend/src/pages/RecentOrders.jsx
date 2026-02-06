@@ -1,10 +1,12 @@
 import { useState, useEffect, Fragment, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../contexts/ThemeContext'
 import BarcodeScanner from '../components/BarcodeScanner'
-import { ScanBarcode, CheckCircle, XCircle, ChevronDown } from 'lucide-react'
+import { ScanBarcode, CheckCircle, XCircle, ChevronDown, Pencil, MoreVertical } from 'lucide-react'
 import { formLabelStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel } from '../components/FormStyles'
 import Table from '../components/Table'
+import CustomerDisplayPopup from '../components/CustomerDisplayPopup'
 
 function RecentOrders() {
   const navigate = useNavigate()
@@ -51,8 +53,25 @@ function RecentOrders() {
   const [exchangeTimingDropdownOpen, setExchangeTimingDropdownOpen] = useState(false)
   const returnTypeDropdownRef = useRef(null)
   const exchangeTimingDropdownRef = useRef(null)
+  const [actionsDropdownOrderId, setActionsDropdownOrderId] = useState(null)
+  const actionsDropdownRef = useRef(null)
   const conditionDropdownRefs = useRef({}) // Refs for condition dropdowns per item
   const [openConditionDropdowns, setOpenConditionDropdowns] = useState({}) // Track which condition dropdowns are open
+  const [conditionDropdownRect, setConditionDropdownRect] = useState(null) // { itemId, top, left, width, height } for portal positioning
+  const conditionDropdownPortalRef = useRef(null) // Ref for portal dropdown so click-outside doesn't close when clicking inside
+  const reasonDropdownRefs = useRef({})
+  const [openReasonDropdowns, setOpenReasonDropdowns] = useState({})
+  const [reasonDropdownRect, setReasonDropdownRect] = useState(null)
+  const reasonDropdownPortalRef = useRef(null)
+  const [expandedNoteItemId, setExpandedNoteItemId] = useState(null) // order_item_id for which the note row is expanded
+  const [posReturnSettings, setPosReturnSettings] = useState({ return_transaction_fee_take_loss: false, return_tip_refund: false, require_signature_for_return: false })
+  const [tipRefundFrom, setTipRefundFrom] = useState('store') // 'employee' | 'store' from display settings
+  const [returnProcessedResult, setReturnProcessedResult] = useState(null) // after process: show receipt options or "Show receipt options" (if require_signature)
+  const [returnSignatureStep, setReturnSignatureStep] = useState(false) // legacy: receipt choice before process (no longer used when require_signature)
+  const [returnReceiptChoice, setReturnReceiptChoice] = useState(null)
+  const [showReturnReceiptOptionsModal, setShowReturnReceiptOptionsModal] = useState(false) // opens CustomerDisplayPopup (checkout UI) for sign + print/email/none
+  const [returnReceiptOptionsLoading, setReturnReceiptOptionsLoading] = useState(false)
+  const [returnCheckoutUi, setReturnCheckoutUi] = useState(null) // Checkout UI from API so return receipt screen matches POS Settings from first frame
   
   // Convert hex to RGB for rgba usage
   const hexToRgb = (hex) => {
@@ -125,6 +144,50 @@ function RecentOrders() {
     }
   }, [showBarcodeScanner, isMobile])
 
+  // Load POS return settings (transaction fee take loss, refund tip)
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/pos-settings')
+      .then(res => res.json())
+      .then(data => {
+        if (!cancelled && data.success && data.settings) {
+          setPosReturnSettings({
+            return_transaction_fee_take_loss: !!data.settings.return_transaction_fee_take_loss,
+            return_tip_refund: !!data.settings.return_tip_refund,
+            require_signature_for_return: !!data.settings.require_signature_for_return
+          })
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  // Load display settings for tip_refund_from (deduct from employee vs store absorbs)
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/customer-display/settings')
+      .then(res => res.json())
+      .then(data => {
+        if (!cancelled && data.success && data.data) {
+          const v = data.data.tip_refund_from
+          setTipRefundFrom(v === 'employee' ? 'employee' : 'store')
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  // Clear dropdown and note state when return modal closes
+  useEffect(() => {
+    if (!order) {
+      setConditionDropdownRect(null)
+      setOpenConditionDropdowns({})
+      setReasonDropdownRect(null)
+      setOpenReasonDropdowns({})
+      setExpandedNoteItemId(null)
+    }
+  }, [order])
+
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -137,11 +200,27 @@ function RecentOrders() {
       if (filterDropdownRef.current && !filterDropdownRef.current.contains(event.target)) {
         setFilterDropdownOpen(false)
       }
-      // Close condition dropdowns
+      if (actionsDropdownOrderId != null && actionsDropdownRef.current && !actionsDropdownRef.current.contains(event.target)) {
+        setActionsDropdownOrderId(null)
+      }
+      // Close condition dropdowns (trigger is in ref; dropdown may be in portal)
+      const isInsideConditionPortal = conditionDropdownPortalRef.current?.contains(event.target)
       Object.keys(conditionDropdownRefs.current).forEach(itemId => {
         const ref = conditionDropdownRefs.current[itemId]
-        if (ref && !ref.contains(event.target)) {
+        const isInsideTrigger = ref?.current?.contains(event.target)
+        if (!isInsideTrigger && !isInsideConditionPortal) {
           setOpenConditionDropdowns(prev => ({ ...prev, [itemId]: false }))
+          setConditionDropdownRect(null)
+        }
+      })
+      // Close reason dropdowns
+      const isInsideReasonPortal = reasonDropdownPortalRef.current?.contains(event.target)
+      Object.keys(reasonDropdownRefs.current).forEach(itemId => {
+        const ref = reasonDropdownRefs.current[itemId]
+        const isInsideTrigger = ref?.current?.contains(event.target)
+        if (!isInsideTrigger && !isInsideReasonPortal) {
+          setOpenReasonDropdowns(prev => ({ ...prev, [itemId]: false }))
+          setReasonDropdownRect(null)
         }
       })
     }
@@ -150,7 +229,7 @@ function RecentOrders() {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [])
+  }, [actionsDropdownOrderId])
 
   // Load all order items when products are scanned (for filtering)
   const loadAllOrderItems = async () => {
@@ -325,7 +404,7 @@ function RecentOrders() {
       if (newItems[itemId]) {
         delete newItems[itemId]
       } else {
-        newItems[itemId] = { quantity: 1, condition: 'new', maxQuantity }
+        newItems[itemId] = { quantity: 1, condition: 'new', maxQuantity, reason: '', note: '' }
       }
       return newItems
     })
@@ -348,7 +427,21 @@ function RecentOrders() {
     }))
   }
 
-  const createReturn = async () => {
+  const updateItemReason = (itemId, reason) => {
+    setSelectedItems(prev => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], reason }
+    }))
+  }
+
+  const updateItemNote = (itemId, note) => {
+    setSelectedItems(prev => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], note: note || '' }
+    }))
+  }
+
+  const createReturn = async (receiptAction = null) => {
     if (Object.keys(selectedItems).length === 0) {
       setToast({ message: 'Please select at least one item to return', type: 'error' })
       return
@@ -385,20 +478,40 @@ function RecentOrders() {
       }
     })
     
-    // Calculate processing fee (proportional to original order)
-    if (order.transaction_fee && order.subtotal) {
+    // Proportional order-level discount (deduct from refund)
+    const orderSubtotal = parseFloat(order.subtotal) || 0
+    const orderDiscount = parseFloat(order.discount) || 0
+    const orderTip = parseFloat(order.tip) || 0
+    const returnOrderDiscountDeduction = orderSubtotal > 0 && orderDiscount > 0
+      ? orderDiscount * (returnSubtotal / orderSubtotal)
+      : 0
+    const returnSubtotalAfterOrderDiscount = returnSubtotal - returnOrderDiscountDeduction
+    // Proportional tip by returned item value (returnSubtotal / orderSubtotal * orderTip)
+    const returnTipDeduction = orderSubtotal > 0 && orderTip > 0
+      ? orderTip * (returnSubtotal / orderSubtotal)
+      : 0
+    // Processing fee: only refund when ALL items on the order are being returned
+    const totalOrderQty = orderItems.reduce((sum, i) => sum + (i.quantity || 0), 0)
+    const totalReturnQty = Object.values(selectedItems).reduce((sum, d) => sum + (d.quantity || 0), 0)
+    const isFullReturn = totalOrderQty > 0 && totalReturnQty >= totalOrderQty
+    if (isFullReturn && !posReturnSettings.return_transaction_fee_take_loss && order.transaction_fee && order.subtotal) {
       const feeRate = parseFloat(order.transaction_fee) / parseFloat(order.subtotal)
-      returnProcessingFee = returnSubtotal * feeRate
+      returnProcessingFee = returnSubtotalAfterOrderDiscount * feeRate
     }
-    
-    const returnTotal = returnSubtotal + returnTax - returnProcessingFee
+    const effectiveTipDeduction = posReturnSettings.return_tip_refund ? 0 : returnTipDeduction
+    const returnTotal = returnSubtotalAfterOrderDiscount + returnTax - returnProcessingFee - effectiveTipDeduction
+    // When refunding tip, this is the proportional tip amount being refunded (for accounting: deduct from employee vs store)
+    const returnTipAmount = posReturnSettings.return_tip_refund ? returnTipDeduction : 0
 
-    const itemsToReturn = Object.entries(selectedItems).map(([orderItemId, data]) => ({
-      order_item_id: parseInt(orderItemId),
-      quantity: data.quantity,
-      condition: data.condition,
-      notes: ''
-    }))
+    const itemsToReturn = Object.entries(selectedItems).map(([orderItemId, data]) => {
+      const parts = [data.reason, data.note].filter(Boolean)
+      return {
+        order_item_id: parseInt(orderItemId),
+        quantity: data.quantity,
+        condition: data.condition,
+        notes: parts.length ? parts.join(' — ') : ''
+      }
+    })
 
     try {
       const response = await fetch('/api/process_return', {
@@ -413,51 +526,70 @@ function RecentOrders() {
           notes: notes,
           return_type: returnType === 'store_credit' ? 'exchange' : returnType, // 'exchange', 'store_credit' (mapped to 'exchange'), or 'refund'
           exchange_timing: returnType === 'refund' ? null : exchangeTiming, // 'now' or 'later' (null for refund)
-          return_subtotal: returnSubtotal,
+          return_subtotal: returnSubtotalAfterOrderDiscount,
           return_tax: returnTax,
-          return_processing_fee: returnProcessingFee,
+          return_processing_fee: posReturnSettings.return_transaction_fee_take_loss ? 0 : returnProcessingFee,
           return_total: returnTotal,
-          payment_method: order.payment_method
+          payment_method: order.payment_method,
+          return_tip_amount: returnTipAmount,
+          tip_refund_from: tipRefundFrom
         })
       })
 
       const result = await response.json()
 
       if (result.success) {
-        // Print return receipt
-        if (result.return_receipt_url) {
-          window.open(result.return_receipt_url, '_blank')
+        const doReceiptAction = (action) => {
+          if (action === 'print' && result.return_receipt_url) {
+            window.open(result.return_receipt_url, '_blank')
+          }
+          if (action === 'email' && result.return_receipt_url) {
+            window.open(result.return_receipt_url, '_blank')
+          }
         }
-        
-        // If store credit (use later), print exchange receipt
-        if (returnType === 'store_credit' && result.exchange_receipt_url) {
-          setTimeout(() => {
-            window.open(result.exchange_receipt_url, '_blank')
-          }, 500)
+        if (receiptAction !== null) {
+          doReceiptAction(receiptAction)
+          setReturnSignatureStep(false)
+          if (returnType === 'store_credit' && result.exchange_receipt_url) {
+            setTimeout(() => window.open(result.exchange_receipt_url, '_blank'), 500)
+          }
+          if (returnType === 'exchange') {
+            localStorage.setItem('exchangeCredit', JSON.stringify({
+              credit_id: result.exchange_credit_id,
+              amount: returnTotal,
+              return_id: result.return_id
+            }))
+            navigate('/pos')
+          }
+          setOrder(null)
+          setOrderItems([])
+          setSelectedItems({})
+          setReason('')
+          setNotes('')
+          setReturnType(null)
+          setExchangeTiming(null)
+        } else {
+          setReturnProcessedResult(result)
+          if (returnType === 'exchange') {
+            localStorage.setItem('exchangeCredit', JSON.stringify({
+              credit_id: result.exchange_credit_id,
+              amount: returnTotal,
+              return_id: result.return_id
+            }))
+            // Open POS so customer can use exchange credit (same window)
+            navigate('/pos')
+            setOrder(null)
+            setOrderItems([])
+            setSelectedItems({})
+            setReason('')
+            setNotes('')
+            setReturnType(null)
+            setExchangeTiming(null)
+            setReturnProcessedResult(null)
+          }
         }
-        
-        // If exchange (use now), open POS with credit
-        if (returnType === 'exchange') {
-          // Store exchange credit info for POS
-          localStorage.setItem('exchangeCredit', JSON.stringify({
-            credit_id: result.exchange_credit_id,
-            amount: returnTotal,
-            return_id: result.return_id
-          }))
-          // Navigate to POS or open in new tab
-          window.open('/pos', '_blank')
-        }
-        
         setToast({ message: `Return processed successfully! Return #: ${result.return_number}`, type: 'success' })
-        
-        // Reset form
-        setOrder(null)
-        setOrderItems([])
-        setSelectedItems({})
-        setReason('')
-        setNotes('')
-        setReturnType(null)
-        setExchangeTiming(null)
+        await loadData()
       } else {
         setToast({ message: result.message || 'Failed to process return', type: 'error' })
       }
@@ -514,6 +646,7 @@ function RecentOrders() {
         tax_rate: parseFloat(row.tax_rate) || 0,
         tax_amount: parseFloat(row.tax_amount || row.tax) || 0,
         discount: parseFloat(row.discount) || 0,
+        discount_type: row.discount_type ?? null,
         transaction_fee: parseFloat(row.transaction_fee) || 0,
         notes: row.notes || '',
         tip: parseFloat(row.tip) || 0,
@@ -759,16 +892,16 @@ function RecentOrders() {
     })
   }
 
-  // Progress chips: In progress = placed, being_made, ready (before "Start delivery"). Out for delivery = out_for_delivery (delivery orders only). Completed = voided, paid, delivered, returned.
-  const IN_PROGRESS_STATUSES = ['placed', 'being_made', 'ready']
-  const isOrderInProgress = (orderStatus) => IN_PROGRESS_STATUSES.includes((orderStatus || 'completed').toLowerCase())
+  // Chips: In progress = pickup/delivery placed or being_made. Out for delivery = delivery only, out_for_delivery. Completed = in-person always; pickup/delivery when ready, delivered, or completed.
+  const IN_PROGRESS_STATUSES = ['placed', 'being_made']
   if (selectedStatus !== 'all') {
     filteredData = filteredData.filter(row => {
       const rowStatus = (row.order_status || row.orderStatus || 'completed').toLowerCase()
-      const rowType = (row.order_type || row.orderType || '').toLowerCase()
-      if (selectedStatus === 'in_progress') return isOrderInProgress(rowStatus)
-      if (selectedStatus === 'out_for_delivery') return rowStatus === 'out_for_delivery' && rowType === 'delivery'
-      if (selectedStatus === 'completed') return !isOrderInProgress(rowStatus) && rowStatus !== 'out_for_delivery'
+      const rowType = (row.order_type || row.orderType || '').toLowerCase().replace(/_/g, '-')
+      const isInPerson = rowType === 'in-person' || rowType === 'inperson'
+      if (selectedStatus === 'in_progress') return (rowType === 'pickup' || rowType === 'delivery') && IN_PROGRESS_STATUSES.includes(rowStatus)
+      if (selectedStatus === 'out_for_delivery') return rowType === 'delivery' && rowStatus === 'out_for_delivery'
+      if (selectedStatus === 'completed') return isInPerson || ['ready', 'delivered', 'completed', 'voided', 'returned'].includes(rowStatus)
       return true
     })
   }
@@ -923,7 +1056,7 @@ function RecentOrders() {
       const orderDayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
       const todayDayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
       const oneDayMs = 24 * 60 * 60 * 1000
-      const timeStr = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })
+      const timeStr = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })
       if (orderDayStart === todayDayStart) return `Today ${timeStr}`
       if (orderDayStart === todayDayStart - oneDayMs) return `Yesterday ${timeStr}`
       return date.toLocaleString()
@@ -933,24 +1066,26 @@ function RecentOrders() {
   }
 
   // Fields to hide from main table (shown in dropdown); order_status/payment_* combined into Status column
-  const hiddenFields = ['order_id', 'orderId', 'employee_id', 'employeeId', 'customer_id', 'customerId', 'subtotal', 'tax_rate', 'tax_amount', 'tax', 'discount', 'transaction_fee', 'notes', 'tip', 'receipt_type', 'receipt_email', 'receipt_phone', 'establishment_id', 'employee_name', 'order_status', 'payment_status', 'payment_method']
+  const hiddenFields = ['order_id', 'orderId', 'employee_id', 'employeeId', 'customer_id', 'customerId', 'subtotal', 'tax_rate', 'tax_amount', 'tax', 'discount', 'discount_type', 'transaction_fee', 'notes', 'tip', 'receipt_type', 'receipt_email', 'receipt_phone', 'establishment_id', 'employee_name', 'order_status', 'payment_status', 'payment_method']
   
-  // Phase label for order_status (pickup/delivery flow)
+  // Status: In Progress (pickup/delivery when placed/being_made), Ready, Out for delivery (delivery only), Completed (in-person always; pickup/delivery when done)
   const getStatusLabel = (orderStatus, orderType) => {
     const s = (orderStatus || 'completed').toLowerCase()
-    const type = (orderType || '').toLowerCase()
-    if (s === 'placed') return 'Placed'
-    if (s === 'being_made') return 'Being made'
-    if (s === 'ready') return type === 'pickup' ? 'Ready for pickup' : 'Ready'
-    if (s === 'out_for_delivery') return 'Out for delivery'
-    if (s === 'delivered') return 'Delivered'
-    if (s === 'completed') return 'Paid'
+    const type = (orderType || '').toLowerCase().replace(/_/g, '-')
+    // All in-person orders show as Completed
+    if (type === 'in-person' || type === 'inperson') return 'Completed'
+    // Pickup / delivery
+    if (type === 'pickup' || type === 'delivery') {
+      if (s === 'placed' || s === 'being_made') return 'In Progress'
+      if (s === 'ready') return 'Ready'
+      if (s === 'out_for_delivery') return 'Out for delivery'
+      if (s === 'delivered' || s === 'completed') return 'Completed'
+    }
     if (s === 'voided') return 'Voided'
     if (s === 'returned') return 'Returned'
-    return (orderStatus || 'Paid').replace(/_/g, ' ')
+    return 'Completed'
   }
   const getStatusDisplay = (row) => {
-    // Support both snake_case (API) and camelCase
     const orderType = ((row.order_type ?? row.orderType) ?? '').toLowerCase()
     const paymentStatus = ((row.payment_status ?? row.paymentStatus) ?? 'completed').toLowerCase()
     const orderStatus = ((row.order_status ?? row.orderStatus) ?? 'completed').toLowerCase()
@@ -959,7 +1094,57 @@ function RecentOrders() {
     const paymentPending = paymentStatus === 'pending'
     const isUnpaidPhase = ['placed', 'being_made', 'ready', 'out_for_delivery', 'delivered'].includes(orderStatus)
     const needsPayment = isPickupOrDelivery && (paymentPending || (isUnpaidPhase && paymentStatus !== 'completed'))
-    return needsPayment ? `${label} • Needs payment` : label
+    const paidOrUnpaid = isPickupOrDelivery ? (needsPayment ? ' - Unpaid' : ' - Paid') : ''
+    return `${label}${paidOrUnpaid}`
+  }
+
+  // Void option: only for orders that are unpaid (payment_status === 'pending', not voided).
+  // Prefer `details` when available (from expanded order) for accurate payment_status.
+  const isUnpaidOrder = (row, details = null) => {
+    const source = details || row
+    const paymentStatus = ((source.payment_status ?? source.paymentStatus) ?? 'completed').toLowerCase()
+    const orderStatus = ((source.order_status ?? source.orderStatus) ?? '').toLowerCase()
+    if (orderStatus === 'voided') return false
+    return paymentStatus === 'pending'
+  }
+
+  const handleReprintReceipt = (orderId) => {
+    setActionsDropdownOrderId(null)
+    window.open(`/api/receipt/${orderId}`, '_blank')
+  }
+
+  const handleVoidOrder = (orderId) => {
+    setActionsDropdownOrderId(null)
+    updateOrderStatus(orderId, 'voided')
+  }
+
+  // Pill colors per status (frontend-only)
+  const getStatusPillStyle = (row) => {
+    const label = getStatusLabel((row.order_status ?? row.orderStatus ?? 'completed').toLowerCase(), row.order_type ?? row.orderType)
+    const base = {
+      display: 'inline-block',
+      padding: '5px 12px',
+      borderRadius: '20px',
+      fontSize: '13px',
+      fontWeight: 500
+    }
+    const colors = {
+      'In Progress': { backgroundColor: 'rgba(37, 99, 235, 0.25)', color: '#2563eb', border: '1px solid rgba(37, 99, 235, 0.5)' },
+      'Ready': { backgroundColor: 'rgba(217, 119, 6, 0.25)', color: '#b45309', border: '1px solid rgba(217, 119, 6, 0.5)' },
+      'Out for delivery': { backgroundColor: 'rgba(124, 58, 237, 0.25)', color: '#7c3aed', border: '1px solid rgba(124, 58, 237, 0.5)' },
+      'Completed': { backgroundColor: 'rgba(5, 150, 105, 0.25)', color: '#059669', border: '1px solid rgba(5, 150, 105, 0.5)' },
+      'Voided': { backgroundColor: 'rgba(107, 114, 128, 0.25)', color: '#6b7280', border: '1px solid rgba(107, 114, 128, 0.5)' },
+      'Returned': { backgroundColor: 'rgba(107, 114, 128, 0.25)', color: '#6b7280', border: '1px solid rgba(107, 114, 128, 0.5)' }
+    }
+    const style = colors[label] || colors['Completed']
+    return { ...base, ...style }
+  }
+
+  const getColumnHeaderLabel = (col) => {
+    const formatted = col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+    if (col === 'order_type') return 'Type'
+    if (col === 'customer_name') return 'Customer'
+    return formatted
   }
 
   // Filter out hidden fields and insert Status column (replacing order_status / payment_method)
@@ -1386,19 +1571,18 @@ function RecentOrders() {
                   const isExpanded = expandedRow === normalizedOrderId
                   const details = orderDetails[normalizedOrderId]
                   const isLoading = loadingDetails[normalizedOrderId]
-                  const isHighlighted = highlightedOrderId === normalizedOrderId
                   const totalVal = row.total != null ? row.total : (row.subtotal != null ? row.subtotal : 0)
                   const totalStr = typeof totalVal === 'number' ? `$${totalVal.toFixed(2)}` : `$${parseFloat(totalVal || 0).toFixed(2)}`
                   return (
                     <div
-                      key={normalizedOrderId || idx}
+                      key={`order-${normalizedOrderId ?? 'n/a'}-${idx}`}
                       onClick={() => handleRowClick(row)}
                       style={{
-                        backgroundColor: isHighlighted ? `rgba(${themeColorRgb}, 0.2)` : (isDarkMode ? 'var(--bg-secondary)' : '#fff'),
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary)' : '#fff',
                         borderRadius: '10px',
                         padding: '14px',
                         boxShadow: isDarkMode ? '0 1px 4px rgba(0,0,0,0.2)' : '0 1px 4px rgba(0,0,0,0.08)',
-                        border: isHighlighted ? `2px solid rgba(${themeColorRgb}, 0.6)` : (isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee'),
+                        border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
                         cursor: 'pointer'
                       }}
                     >
@@ -1412,7 +1596,7 @@ function RecentOrders() {
                         <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary)' : '#666' }}>
                           {formatOrderDate(row.order_date || row.orderDate || '')}
                         </span>
-                        <span style={{ fontSize: '12px', fontWeight: 500, color: isDarkMode ? 'var(--text-secondary)' : '#555' }}>
+                        <span style={{ ...getStatusPillStyle(row), padding: '4px 10px', fontSize: '12px' }}>
                           {getStatusDisplay(row)}
                         </span>
                       </div>
@@ -1438,23 +1622,99 @@ function RecentOrders() {
                                   {details.items.length > 5 && <div style={{ color: isDarkMode ? '#999' : '#888', fontSize: '12px' }}>+{details.items.length - 5} more</div>}
                                 </div>
                               )}
-                              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee' }}>
+                              <div
+                                ref={actionsDropdownOrderId === normalizedOrderId ? actionsDropdownRef : null}
+                                style={{ marginTop: '8px', paddingTop: '8px', borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee', position: 'relative' }}
+                              >
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); fetchOrderById(normalizedOrderId) }}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setActionsDropdownOrderId(prev => prev === normalizedOrderId ? null : normalizedOrderId)
+                                  }}
                                   style={{
-                                    width: '100%',
-                                    padding: '10px',
-                                    borderRadius: '8px',
+                                    padding: '6px',
                                     border: 'none',
-                                    backgroundColor: `rgba(${themeColorRgb}, 0.8)`,
-                                    color: '#fff',
-                                    fontWeight: 600,
-                                    fontSize: '14px',
-                                    cursor: 'pointer'
+                                    background: 'none',
+                                    color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
                                   }}
                                 >
-                                  Select
+                                  <MoreVertical size={20} />
                                 </button>
+                                {actionsDropdownOrderId === normalizedOrderId && (
+                                  <div
+                                    style={{
+                                      position: 'absolute',
+                                      top: '100%',
+                                      left: 0,
+                                      right: 0,
+                                      marginTop: '4px',
+                                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#fff',
+                                      border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #dee2e6',
+                                      borderRadius: '8px',
+                                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                      zIndex: 50,
+                                      overflow: 'hidden'
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); setActionsDropdownOrderId(null); fetchOrderById(normalizedOrderId) }}
+                                      style={{
+                                        width: '100%',
+                                        padding: '10px 14px',
+                                        textAlign: 'left',
+                                        border: 'none',
+                                        background: 'none',
+                                        fontSize: '14px',
+                                        color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      Return
+                                    </button>
+                                    {isUnpaidOrder(row, details) && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleVoidOrder(normalizedOrderId) }}
+                                        style={{
+                                          width: '100%',
+                                          padding: '10px 14px',
+                                          textAlign: 'left',
+                                          border: 'none',
+                                          borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
+                                          background: 'none',
+                                          fontSize: '14px',
+                                          color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        Void
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); handleReprintReceipt(normalizedOrderId) }}
+                                      style={{
+                                        width: '100%',
+                                        padding: '10px 14px',
+                                        textAlign: 'left',
+                                        border: 'none',
+                                        borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
+                                        background: 'none',
+                                        fontSize: '14px',
+                                        color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      Reprint
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           ) : null}
@@ -1490,7 +1750,7 @@ function RecentOrders() {
                           letterSpacing: '0.5px'
                         }}
                       >
-                        {col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        {getColumnHeaderLabel(col)}
                       </th>
                     ))}
                   </tr>
@@ -1502,10 +1762,8 @@ function RecentOrders() {
                     const isExpanded = expandedRow === normalizedOrderId
                     const details = orderDetails[normalizedOrderId]
                     const isLoading = loadingDetails[normalizedOrderId]
-                    const isHighlighted = highlightedOrderId === normalizedOrderId
-
                     return (
-                      <Fragment key={normalizedOrderId || idx}>
+                      <Fragment key={`order-${normalizedOrderId ?? 'n/a'}-${idx}`}>
                         <tr 
                           ref={el => {
                             if (normalizedOrderId) {
@@ -1514,11 +1772,9 @@ function RecentOrders() {
                           }}
                           onClick={() => handleRowClick(row)}
                           style={{ 
-                            backgroundColor: isHighlighted 
-                              ? `rgba(${themeColorRgb}, 0.3)`
-                              : (idx % 2 === 0 ? (isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff') : (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#fafafa')),
+                            backgroundColor: idx % 2 === 0 ? (isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff') : (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#fafafa'),
                             cursor: 'pointer',
-                            border: isHighlighted ? `2px solid rgba(${themeColorRgb}, 0.7)` : 'none',
+                            border: 'none',
                             transition: 'all 0.3s ease'
                           }}
                         >
@@ -1534,7 +1790,9 @@ function RecentOrders() {
                                     textAlign: 'left'
                                   }}
                                 >
-                                  {getStatusDisplay(row)}
+                                  <span style={getStatusPillStyle(row)}>
+                                    {getStatusDisplay(row)}
+                                  </span>
                                 </td>
                               )
                             }
@@ -1568,41 +1826,103 @@ function RecentOrders() {
                             )
                           })}
                           <td 
-                            style={{ padding: '8px 12px', borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee' }}
+                            style={{ padding: '8px 12px', borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee', position: 'relative' }}
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                fetchOrderById(normalizedOrderId)
-                              }}
-                              style={{
-                                padding: '6px 16px',
-                                height: '32px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                whiteSpace: 'nowrap',
-                                backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                                border: `1px solid rgba(${themeColorRgb}, 0.5)`,
-                                borderRadius: '8px',
-                                fontSize: '14px',
-                                fontWeight: 600,
-                                color: '#fff',
-                                cursor: 'pointer',
-                                transition: 'all 0.3s ease',
-                                boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3)`
-                              }}
-                              onMouseEnter={(e) => {
-                                e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.8)`
-                                e.target.style.boxShadow = `0 4px 20px rgba(${themeColorRgb}, 0.4)`
-                              }}
-                              onMouseLeave={(e) => {
-                                e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
-                                e.target.style.boxShadow = `0 4px 15px rgba(${themeColorRgb}, 0.3)`
-                              }}
+                            <div
+                              ref={actionsDropdownOrderId === normalizedOrderId ? actionsDropdownRef : null}
+                              style={{ position: 'relative', display: 'inline-block' }}
                             >
-                              Select
-                            </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setActionsDropdownOrderId(prev => prev === normalizedOrderId ? null : normalizedOrderId)
+                                }}
+                                style={{
+                                  padding: '6px',
+                                  border: 'none',
+                                  background: 'none',
+                                  color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                              >
+                                <MoreVertical size={20} />
+                              </button>
+                              {actionsDropdownOrderId === normalizedOrderId && (
+                                <div
+                                  style={{
+                                    position: 'absolute',
+                                    top: '100%',
+                                    right: 0,
+                                    marginTop: '4px',
+                                    minWidth: '140px',
+                                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#fff',
+                                    border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #dee2e6',
+                                    borderRadius: '8px',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                    zIndex: 50,
+                                    overflow: 'hidden'
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setActionsDropdownOrderId(null); fetchOrderById(normalizedOrderId) }}
+                                    style={{
+                                      width: '100%',
+                                      padding: '8px 14px',
+                                      textAlign: 'left',
+                                      border: 'none',
+                                      background: 'none',
+                                      fontSize: '13px',
+                                      color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    Return
+                                  </button>
+                                  {isUnpaidOrder(row, details) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); handleVoidOrder(normalizedOrderId) }}
+                                      style={{
+                                        width: '100%',
+                                        padding: '8px 14px',
+                                        textAlign: 'left',
+                                        border: 'none',
+                                        borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
+                                        background: 'none',
+                                        fontSize: '13px',
+                                        color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      Void
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); handleReprintReceipt(normalizedOrderId) }}
+                                    style={{
+                                      width: '100%',
+                                      padding: '8px 14px',
+                                      textAlign: 'left',
+                                      border: 'none',
+                                      borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
+                                      background: 'none',
+                                      fontSize: '13px',
+                                      color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    Reprint
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </td>
                         </tr>
                         {isExpanded && (
@@ -1651,6 +1971,9 @@ function RecentOrders() {
                                       <strong>Discount:</strong> ${(parseFloat(details.discount) || 0).toFixed(2)}
                                     </div>
                                     <div>
+                                      <strong>Discount Type:</strong> {details.discount_type ? ({ student: 'Student', employee: 'Employee', senior: 'Senior', military: 'Military', other: 'Other' }[details.discount_type] || details.discount_type) : '—'}
+                                    </div>
+                                    <div>
                                       <strong>Transaction Fee:</strong> ${(parseFloat(details.transaction_fee) || 0).toFixed(2)}
                                     </div>
                                     <div>
@@ -1658,10 +1981,7 @@ function RecentOrders() {
                                     </div>
                                     {/* Status / phase update for pickup & delivery */}
                                     <div style={{ gridColumn: '1 / -1', marginTop: '8px', paddingTop: '12px', borderTop: '1px solid #dee2e6' }}>
-                                      <strong>Status:</strong> {getStatusLabel(details.order_status, details.order_type)}
-                                      {((details.order_type || '').toLowerCase() === 'pickup' || (details.order_type || '').toLowerCase() === 'delivery') && (details.payment_status || 'completed').toLowerCase() === 'pending' && (
-                                        <span style={{ marginLeft: '6px', color: 'var(--theme-color, #7c3aed)', fontWeight: 600 }}>• Needs payment</span>
-                                      )}
+                                      <strong>Status:</strong> {getStatusDisplay(details)}
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
                                         <select
                                           value={details.order_status || 'completed'}
@@ -1810,28 +2130,34 @@ function RecentOrders() {
             backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
             borderRadius: '8px',
             padding: isMobile ? '16px' : '30px',
-            maxWidth: '800px',
+            maxWidth: isMobile ? '95%' : '960px',
             width: isMobile ? '95%' : '90%',
             maxHeight: '90vh',
             overflowY: 'auto',
             boxShadow: isDarkMode ? '0 4px 20px rgba(0,0,0,0.5)' : '0 4px 20px rgba(0,0,0,0.3)'
           }}>
-            <div style={{
-              marginBottom: '16px'
-            }}>
-              <h2 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
-                Create Return - Order: {order.order_number}
-              </h2>
-            </div>
-
-            <div style={{ marginBottom: '24px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontSize: '14px' }}>
+            <div style={{ marginBottom: 0, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontSize: '14px' }}>
               <span style={{ marginRight: '16px' }}>Date: {new Date(order.order_date).toLocaleDateString()}</span>
               <span style={{ marginRight: '16px' }}>Total: ${parseFloat(order.total || 0).toFixed(2)}</span>
-              <span>Payment: {order.payment_method ? (order.payment_method === 'cash' ? 'Cash' : 'Card') : 'N/A'}</span>
+              <span style={{ marginRight: '16px' }}>Payment: {order.payment_method ? (order.payment_method === 'cash' ? 'Cash' : 'Card') : 'N/A'}</span>
+              <span style={{ color: isDarkMode ? 'var(--text-tertiary, #666)' : '#999', fontWeight: 400 }}>Order: {order.order_number}</span>
             </div>
 
+            {orderItems.length > 0 && (
+            <div style={{
+              display: 'flex',
+              flexDirection: isMobile ? 'column' : 'row',
+              gap: '24px',
+              alignItems: 'flex-start'
+            }}>
+              {/* Left column: return type, reason, summary, actions */}
+              <div style={{
+                flex: isMobile ? 'none' : '0 0 280px',
+                width: isMobile ? '100%' : '280px',
+                minWidth: 0
+              }}>
             {/* Return Type Selection */}
-            <div style={{ marginBottom: '12px' }}>
+            <div style={{ marginTop: '13px', marginBottom: '12px' }}>
               <FormField>
                 <FormLabel isDarkMode={isDarkMode}>Return Type:</FormLabel>
                 <div ref={returnTypeDropdownRef} style={{ position: 'relative', width: '100%' }}>
@@ -1841,7 +2167,7 @@ function RecentOrders() {
                     style={{
                       ...inputBaseStyle(isDarkMode, themeColorRgb, returnTypeDropdownOpen),
                       width: '100%',
-                      padding: '8px 14px',
+                      padding: '5px 14px',
                       fontSize: '14px',
                       cursor: 'pointer',
                       display: 'flex',
@@ -1978,15 +2304,130 @@ function RecentOrders() {
               </FormField>
             </div>
 
-            {orderItems.length > 0 && (
-              <div style={{ marginBottom: '24px' }}>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <FormField>
+                  <FormLabel isDarkMode={isDarkMode}>Reason:</FormLabel>
+                  <input
+                    type="text"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="Reason for return"
+                    style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                  />
+                </FormField>
+
+                {/* Return Amount Summary - discount and tip aware */}
+                {(() => {
+                  let returnSubtotal = 0
+                  let returnTax = 0
+                  let returnProcessingFee = 0
+                  Object.entries(selectedItems).forEach(([itemId, data]) => {
+                    const item = orderItems.find(i => i.order_item_id === parseInt(itemId))
+                    if (item) {
+                      const itemSubtotal = parseFloat(item.unit_price || 0) * data.quantity
+                      const itemDiscount = parseFloat(item.discount || 0) * (data.quantity / item.quantity)
+                      const itemSubtotalAfterDiscount = itemSubtotal - itemDiscount
+                      const itemTaxRate = parseFloat(item.tax_rate || order.tax_rate || 0.08)
+                      const itemTax = itemSubtotalAfterDiscount * itemTaxRate
+                      returnSubtotal += itemSubtotalAfterDiscount
+                      returnTax += itemTax
+                    }
+                  })
+                  const orderSubtotal = parseFloat(order.subtotal) || 0
+                  const orderDiscount = parseFloat(order.discount) || 0
+                  const orderTip = parseFloat(order.tip) || 0
+                  const returnOrderDiscountDeduction = orderSubtotal > 0 && orderDiscount > 0
+                    ? orderDiscount * (returnSubtotal / orderSubtotal)
+                    : 0
+                  const returnSubtotalAfterOrderDiscount = returnSubtotal - returnOrderDiscountDeduction
+                  const returnTipDeduction = orderSubtotal > 0 && orderTip > 0
+                    ? orderTip * (returnSubtotal / orderSubtotal)
+                    : 0
+                  const totalOrderQtySummary = orderItems.reduce((s, i) => s + (i.quantity || 0), 0)
+                  const totalReturnQtySummary = Object.values(selectedItems).reduce((s, d) => s + (d.quantity || 0), 0)
+                  const isFullReturnSummary = totalOrderQtySummary > 0 && totalReturnQtySummary >= totalOrderQtySummary
+                  if (isFullReturnSummary && order.transaction_fee && order.subtotal) {
+                    const feeRate = parseFloat(order.transaction_fee) / parseFloat(order.subtotal)
+                    returnProcessingFee = returnSubtotalAfterOrderDiscount * feeRate
+                  }
+                  const effectiveFee = posReturnSettings.return_transaction_fee_take_loss ? 0 : (isFullReturnSummary ? returnProcessingFee : 0)
+                  const effectiveTip = posReturnSettings.return_tip_refund ? 0 : returnTipDeduction
+                  const returnTotal = returnSubtotalAfterOrderDiscount + returnTax - effectiveFee - effectiveTip
+                  return (
+                    <div style={{
+                      marginTop: '16px',
+                      marginBottom: '16px',
+                      padding: '16px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa',
+                      borderRadius: '8px'
+                    }}>
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr auto',
+                        gap: '8px',
+                        fontSize: '14px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                      }}>
+                        <span>Return Subtotal:</span>
+                        <span style={{ fontWeight: 500 }}>${returnSubtotal.toFixed(2)}</span>
+                        <span>Discount (proportional):</span>
+                        <span style={{ fontWeight: 500, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>${returnOrderDiscountDeduction.toFixed(2)}</span>
+                        <span>Return Tax:</span>
+                        <span style={{ fontWeight: 500 }}>${returnTax.toFixed(2)}</span>
+                        <span>{posReturnSettings.return_transaction_fee_take_loss ? 'Transaction fee:' : 'Transaction fee (non-refundable):'}</span>
+                        <span style={{ fontWeight: 500, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>
+                          ${posReturnSettings.return_transaction_fee_take_loss ? returnProcessingFee.toFixed(2) : effectiveFee.toFixed(2)}
+                        </span>
+                        <span>{posReturnSettings.return_tip_refund ? 'Tip:' : 'Tip (non-refundable):'}</span>
+                        <span style={{ fontWeight: 500, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>
+                          ${posReturnSettings.return_tip_refund ? returnTipDeduction.toFixed(2) : effectiveTip.toFixed(2)}
+                        </span>
+                        <div style={{
+                          gridColumn: '1 / -1',
+                          borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                          marginTop: '8px',
+                          paddingTop: '8px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <span style={{ fontWeight: 600, fontSize: '16px' }}>Refund Amount:</span>
+                          <span style={{ fontWeight: 700, fontSize: '18px', color: `rgb(${themeColorRgb})` }}>${returnTotal.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+
+              {/* Right column: product list */}
+              <div style={{ flex: 1, minWidth: 0, paddingTop: 0 }}>
+                <div style={{ overflowX: 'auto', marginTop: 0, paddingTop: '6px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 0 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `2px solid ${isDarkMode ? 'var(--border-light, #333)' : '#dee2e6'}` }}>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', textTransform: 'uppercase' }}>Product</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', textTransform: 'uppercase' }}>Qty</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', textTransform: 'uppercase' }}>Condition</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', textTransform: 'uppercase' }}>Reason</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', textTransform: 'uppercase' }}>Note</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', textTransform: 'uppercase' }}>Price</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', textTransform: 'uppercase' }}>Select</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       {orderItems.map((item) => {
                         const isSelected = !!selectedItems[item.order_item_id]
-                        const selectedData = selectedItems[item.order_item_id] || { quantity: 1, condition: 'new', maxQuantity: item.quantity }
+                        const selectedData = selectedItems[item.order_item_id] || { quantity: 1, condition: 'new', maxQuantity: item.quantity, reason: '', note: '' }
                         
+                        const reasonOptions = [
+                          { value: '', label: 'Select' },
+                          { value: 'defective', label: 'Defective' },
+                          { value: 'wrong_item', label: 'Wrong item' },
+                          { value: 'changed_mind', label: 'Changed mind' },
+                          { value: 'damaged', label: 'Damaged' },
+                          { value: 'other', label: 'Other' }
+                        ]
                         const conditionOptions = [
                           { value: 'new', label: 'New' },
                           { value: 'opened', label: 'Opened' },
@@ -1996,13 +2437,21 @@ function RecentOrders() {
                         const currentCondition = isSelected ? selectedData.condition : 'new'
                         const conditionLabel = conditionOptions.find(opt => opt.value === currentCondition)?.label || 'New'
                         const isConditionDropdownOpen = openConditionDropdowns[item.order_item_id] || false
+                        const currentReason = selectedData.reason || ''
+                        const reasonLabel = reasonOptions.find(opt => opt.value === currentReason)?.label || 'Select'
+                        const isReasonDropdownOpen = openReasonDropdowns[item.order_item_id] || false
+                        const isNoteExpanded = expandedNoteItemId === item.order_item_id
                         
                         if (!conditionDropdownRefs.current[item.order_item_id]) {
                           conditionDropdownRefs.current[item.order_item_id] = { current: null }
                         }
+                        if (!reasonDropdownRefs.current[item.order_item_id]) {
+                          reasonDropdownRefs.current[item.order_item_id] = { current: null }
+                        }
                         
                         return (
-                          <tr key={item.order_item_id}>
+                          <Fragment key={item.order_item_id}>
+                          <tr>
                             <td style={{ padding: '8px 12px', borderBottom: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#f0f0f0'}`, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', fontSize: '14px' }}>
                               {item.product_name || item.sku}
                             </td>
@@ -2021,13 +2470,13 @@ function RecentOrders() {
                                     setTimeout(() => updateItemQuantity(item.order_item_id, qty, item.quantity), 0)
                                   }
                                 }}
-                                disabled={!isSelected}
+                                disabled={!isSelected || item.quantity === 1}
                                 style={{
                                   ...inputBaseStyle(isDarkMode, themeColorRgb),
                                   width: '60px',
                                   padding: '4px 8px',
                                   fontSize: '14px',
-                                  opacity: isSelected ? 1 : 0.5
+                                  opacity: isSelected && item.quantity > 1 ? 1 : 0.5
                                 }}
                                 {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                               />
@@ -2040,7 +2489,19 @@ function RecentOrders() {
                                     if (!isSelected) {
                                       toggleItem(item.order_item_id, item.quantity)
                                     }
+                                    const opening = !openConditionDropdowns[item.order_item_id]
                                     setOpenConditionDropdowns(prev => ({ ...prev, [item.order_item_id]: !prev[item.order_item_id] }))
+                                    if (opening) {
+                                      requestAnimationFrame(() => {
+                                        const el = conditionDropdownRefs.current[item.order_item_id]?.current
+                                        if (el) {
+                                          const r = el.getBoundingClientRect()
+                                          setConditionDropdownRect({ itemId: item.order_item_id, top: r.top, left: r.left, width: r.width, height: r.height })
+                                        }
+                                      })
+                                    } else {
+                                      setConditionDropdownRect(null)
+                                    }
                                   }}
                                   disabled={!isSelected}
                                   style={{
@@ -2080,53 +2541,69 @@ function RecentOrders() {
                                     }} 
                                   />
                                 </button>
-                                {isConditionDropdownOpen && isSelected && (
-                                  <div style={{
-                                    position: 'absolute',
-                                    top: '100%',
-                                    left: 0,
-                                    right: 0,
-                                    marginTop: '4px',
-                                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                                    border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
-                                    borderRadius: '8px',
-                                    boxShadow: isDarkMode ? '0 4px 12px rgba(0, 0, 0, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.15)',
-                                    zIndex: 1000,
-                                    overflow: 'hidden'
-                                  }}>
-                                    {conditionOptions.map((option) => (
-                                      <button
-                                        key={option.value}
-                                        type="button"
-                                        onClick={() => {
-                                          updateItemCondition(item.order_item_id, option.value)
-                                          setOpenConditionDropdowns(prev => ({ ...prev, [item.order_item_id]: false }))
-                                        }}
-                                        style={{
-                                          width: '100%',
-                                          padding: '8px 12px',
-                                          border: 'none',
-                                          background: currentCondition === option.value ? `rgba(${themeColorRgb}, 0.1)` : 'none',
-                                          textAlign: 'left',
-                                          fontSize: '14px',
-                                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                                          cursor: 'pointer',
-                                          transition: 'background-color 0.2s ease',
-                                          fontWeight: currentCondition === option.value ? 600 : 400
-                                        }}
-                                        onMouseEnter={(e) => {
-                                          e.target.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #1a1a1a)' : '#f5f5f5'
-                                        }}
-                                        onMouseLeave={(e) => {
-                                          e.target.style.backgroundColor = currentCondition === option.value ? `rgba(${themeColorRgb}, 0.1)` : 'transparent'
-                                        }}
-                                      >
-                                        {option.label}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
                               </div>
+                            </td>
+                            <td style={{ padding: '8px 12px', borderBottom: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#f0f0f0'}` }}>
+                              <div ref={el => { reasonDropdownRefs.current[item.order_item_id].current = el }} style={{ position: 'relative', width: 'fit-content', minWidth: '72px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!isSelected) toggleItem(item.order_item_id, item.quantity)
+                                    const opening = !openReasonDropdowns[item.order_item_id]
+                                    setOpenReasonDropdowns(prev => ({ ...prev, [item.order_item_id]: !prev[item.order_item_id] }))
+                                    if (opening) {
+                                      requestAnimationFrame(() => {
+                                        const el = reasonDropdownRefs.current[item.order_item_id]?.current
+                                        if (el) {
+                                          const r = el.getBoundingClientRect()
+                                          setReasonDropdownRect({ itemId: item.order_item_id, top: r.top, left: r.left, width: r.width, height: r.height })
+                                        }
+                                      })
+                                    } else {
+                                      setReasonDropdownRect(null)
+                                    }
+                                  }}
+                                  disabled={!isSelected}
+                                  style={{
+                                    ...inputBaseStyle(isDarkMode, themeColorRgb, isReasonDropdownOpen),
+                                    width: 'fit-content',
+                                    minWidth: '72px',
+                                    padding: '4px 8px',
+                                    fontSize: '13px',
+                                    cursor: isSelected ? 'pointer' : 'not-allowed',
+                                    opacity: isSelected ? 1 : 0.5,
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    textAlign: 'left'
+                                  }}
+                                >
+                                  <span style={{ fontSize: '13px' }}>{reasonLabel}</span>
+                                  <ChevronDown size={14} style={{ color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', transform: isReasonDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }} />
+                                </button>
+                              </div>
+                            </td>
+                            <td style={{ padding: '8px 12px', borderBottom: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#f0f0f0'}` }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!isSelected) toggleItem(item.order_item_id, item.quantity)
+                                  setExpandedNoteItemId(prev => prev === item.order_item_id ? null : item.order_item_id)
+                                }}
+                                disabled={!isSelected}
+                                style={{
+                                  padding: '6px',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  background: isNoteExpanded ? `rgba(${themeColorRgb}, 0.2)` : (isDarkMode ? 'var(--bg-tertiary, #2d2d2d)' : '#f0f0f0'),
+                                  color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
+                                  cursor: isSelected ? 'pointer' : 'not-allowed',
+                                  opacity: isSelected ? 1 : 0.5
+                                }}
+                                title="Add note"
+                              >
+                                <Pencil size={14} />
+                              </button>
                             </td>
                             <td style={{ padding: '8px 12px', textAlign: 'right', borderBottom: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#f0f0f0'}`, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', fontSize: '14px' }}>
                               ${parseFloat(item.unit_price || 0).toFixed(2)}
@@ -2140,97 +2617,254 @@ function RecentOrders() {
                               />
                             </td>
                           </tr>
+                          {isNoteExpanded && (
+                            <tr>
+                              <td colSpan={7} style={{ padding: '0', borderBottom: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#f0f0f0'}` }}>
+                                <div style={{ padding: '8px 12px', backgroundColor: isDarkMode ? 'var(--bg-secondary, #252525)' : '#f8f9fa' }}>
+                                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>Note for this item</label>
+                                  <textarea
+                                    value={selectedData.note || ''}
+                                    onChange={(e) => updateItemNote(item.order_item_id, e.target.value)}
+                                    placeholder="Write a note..."
+                                    rows={2}
+                                    style={{
+                                      ...inputBaseStyle(isDarkMode, themeColorRgb),
+                                      width: '100%',
+                                      minHeight: '56px',
+                                      resize: 'vertical',
+                                      fontSize: '14px'
+                                    }}
+                                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                                  />
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </Fragment>
                         )
                       })}
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+            )}
 
-                <div style={{ marginTop: '20px' }}>
-                  <FormField>
-                    <FormLabel isDarkMode={isDarkMode}>Reason:</FormLabel>
-                    <input
-                      type="text"
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      placeholder="Reason for return"
-                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                    />
-                  </FormField>
-
-                  {/* Return Amount Summary */}
-                  {(() => {
-                    let returnSubtotal = 0
-                    let returnTax = 0
-                    let returnProcessingFee = 0
-                    
-                    Object.entries(selectedItems).forEach(([itemId, data]) => {
-                      const item = orderItems.find(i => i.order_item_id === parseInt(itemId))
-                      if (item) {
-                        const itemSubtotal = parseFloat(item.unit_price || 0) * data.quantity
-                        const itemDiscount = parseFloat(item.discount || 0) * (data.quantity / item.quantity)
-                        const itemSubtotalAfterDiscount = itemSubtotal - itemDiscount
-                        const itemTaxRate = parseFloat(item.tax_rate || order.tax_rate || 0.08)
-                        const itemTax = itemSubtotalAfterDiscount * itemTaxRate
-                        
-                        returnSubtotal += itemSubtotalAfterDiscount
-                        returnTax += itemTax
-                      }
-                    })
-                    
-                    if (order.transaction_fee && order.subtotal) {
-                      const feeRate = parseFloat(order.transaction_fee) / parseFloat(order.subtotal)
-                      returnProcessingFee = returnSubtotal * feeRate
-                    }
-                    
-                    const returnTotal = returnSubtotal + returnTax - returnProcessingFee
-                    
-                    return (
-                      <div style={{ 
-                        marginTop: '24px',
-                        marginBottom: '24px', 
-                        padding: '16px', 
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa',
-                        borderRadius: '8px'
-                      }}>
-                        <div style={{ 
-                          display: 'grid', 
-                          gridTemplateColumns: '1fr auto', 
-                          gap: '8px',
-                          fontSize: '14px',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                        }}>
-                          <span>Return Subtotal:</span>
-                          <span style={{ fontWeight: 500 }}>${returnSubtotal.toFixed(2)}</span>
-                          <span>Return Tax:</span>
-                          <span style={{ fontWeight: 500 }}>${returnTax.toFixed(2)}</span>
-                          {returnProcessingFee > 0 && (
-                            <>
-                              <span>Processing Fee (non-refundable):</span>
-                              <span style={{ fontWeight: 500, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>-${returnProcessingFee.toFixed(2)}</span>
-                            </>
-                          )}
-                          <div style={{ 
-                            gridColumn: '1 / -1', 
-                            borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
-                            marginTop: '8px',
-                            paddingTop: '8px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center'
-                          }}>
-                            <span style={{ fontWeight: 600, fontSize: '16px' }}>Refund Amount:</span>
-                            <span style={{ fontWeight: 700, fontSize: '18px', color: `rgb(${themeColorRgb})` }}>${returnTotal.toFixed(2)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })()}
-
-                  <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                    <button
-                      onClick={() => {
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px', paddingTop: '16px', borderTop: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee' }}>
+              {returnProcessedResult ? (
+                <>
+                  {posReturnSettings.require_signature_for_return ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          setOrder(null)
+                          setOrderItems([])
+                          setSelectedItems({})
+                          setReason('')
+                          setNotes('')
+                          setReturnType(null)
+                          setExchangeTiming(null)
+                          setReturnProcessedResult(null)
+                          setReturnReceiptChoice(null)
+                        }}
+                        style={{
+                          padding: '4px 16px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap',
+                          backgroundColor: 'var(--bg-tertiary)', border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`, borderRadius: '8px',
+                          fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)', cursor: 'pointer'
+                        }}
+                      >
+                        Done
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await fetch('/api/customer-display/settings')
+                            const data = await res.json()
+                            if (data.success && data.data) {
+                              setReturnCheckoutUi(data.data.checkout_ui ?? null)
+                            }
+                          } catch (e) {
+                            console.error('Failed to load checkout UI for return receipt', e)
+                          }
+                          setShowReturnReceiptOptionsModal(true)
+                        }}
+                        style={{
+                          padding: '4px 16px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap',
+                          backgroundColor: `rgba(${themeColorRgb}, 0.7)`, border: `1px solid rgba(${themeColorRgb}, 0.5)`, borderRadius: '8px',
+                          fontSize: '14px', fontWeight: 600, color: '#fff', cursor: 'pointer'
+                        }}
+                      >
+                        Show receipt options
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => {
+                          if (returnProcessedResult.return_receipt_url) window.open(returnProcessedResult.return_receipt_url, '_blank')
+                          setOrder(null)
+                          setOrderItems([])
+                          setSelectedItems({})
+                          setReason('')
+                          setNotes('')
+                          setReturnType(null)
+                          setExchangeTiming(null)
+                          setReturnProcessedResult(null)
+                          setReturnReceiptChoice(null)
+                        }}
+                        style={{
+                          padding: '4px 16px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap',
+                          backgroundColor: 'var(--bg-tertiary)', border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`, borderRadius: '8px',
+                          fontSize: '14px', fontWeight: 500, color: 'var(--text-primary)', cursor: 'pointer'
+                        }}
+                      >
+                        Print
+                      </button>
+                      <button
+                        onClick={() => {
+                          setOrder(null)
+                          setOrderItems([])
+                          setSelectedItems({})
+                          setReason('')
+                          setNotes('')
+                          setReturnType(null)
+                          setExchangeTiming(null)
+                          setReturnProcessedResult(null)
+                          setReturnReceiptChoice(null)
+                        }}
+                        style={{
+                          padding: '4px 16px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap',
+                          backgroundColor: 'var(--bg-tertiary)', border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`, borderRadius: '8px',
+                          fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)', cursor: 'pointer'
+                        }}
+                      >
+                        No receipt
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (returnProcessedResult.return_receipt_url) window.open(returnProcessedResult.return_receipt_url, '_blank')
+                          setOrder(null)
+                          setOrderItems([])
+                          setSelectedItems({})
+                          setReason('')
+                          setNotes('')
+                          setReturnType(null)
+                          setExchangeTiming(null)
+                          setReturnProcessedResult(null)
+                          setReturnReceiptChoice(null)
+                        }}
+                        style={{
+                          padding: '4px 16px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap',
+                          backgroundColor: `rgba(${themeColorRgb}, 0.7)`, border: `1px solid rgba(${themeColorRgb}, 0.5)`, borderRadius: '8px',
+                          fontSize: '14px', fontWeight: 600, color: '#fff', cursor: 'pointer'
+                        }}
+                      >
+                        Email
+                      </button>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      setOrder(null)
+                      setOrderItems([])
+                      setSelectedItems({})
+                      setReason('')
+                      setNotes('')
+                      setReturnType(null)
+                      setExchangeTiming(null)
+                      setReturnProcessedResult(null)
+                      setReturnSignatureStep(false)
+                    }}
+                    disabled={returnLoading}
+                    style={{
+                      padding: '4px 16px',
+                      height: '28px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      whiteSpace: 'nowrap',
+                      backgroundColor: 'var(--bg-tertiary)',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      color: 'var(--text-secondary)',
+                      cursor: returnLoading ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.3s ease',
+                      boxShadow: 'none'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => createReturn(null)}
+                    disabled={returnLoading || Object.keys(selectedItems).length === 0 || !returnType || (returnType === 'exchange' && !exchangeTiming)}
+                    style={{
+                      padding: '4px 16px',
+                      height: '28px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      whiteSpace: 'nowrap',
+                      backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                      border: `1px solid rgba(${themeColorRgb}, 0.5)`,
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#fff',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease',
+                      boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3)`
+                    }}
+                  >
+                    {returnLoading ? 'Processing...' : 'Process Return'}
+                  </button>
+                </>
+              )}
+            </div>
+            {/* Checkout UI (same as POS): sign + print/email/none when "Require signature for return" is on */}
+            {showReturnReceiptOptionsModal && returnProcessedResult && (
+              <div style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 10003,
+                display: 'flex',
+                flexDirection: 'column',
+                background: 'transparent'
+              }}>
+                <CustomerDisplayPopup
+                  cart={[]}
+                  subtotal={0}
+                  tax={0}
+                  discount={0}
+                  transactionFee={0}
+                  total={0}
+                  tip={0}
+                  paymentMethod={null}
+                  amountPaid={null}
+                  showSummary={true}
+                  paymentCompleted={true}
+                  returnId={returnProcessedResult.return_id}
+                  initialCheckoutUi={returnCheckoutUi}
+                  onReturnReceiptSelect={async (receiptAction, signatureData) => {
+                    setReturnReceiptOptionsLoading(true)
+                    try {
+                      const res = await fetch('/api/return_receipt_options', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          return_id: returnProcessedResult.return_id,
+                          signature: signatureData || null,
+                          receipt_action: receiptAction
+                        })
+                      })
+                      const data = await res.json()
+                      if (data.success) {
+                        if (data.return_receipt_url) window.open(data.return_receipt_url, '_blank')
+                        setShowReturnReceiptOptionsModal(false)
                         setOrder(null)
                         setOrderItems([])
                         setSelectedItems({})
@@ -2238,56 +2872,149 @@ function RecentOrders() {
                         setNotes('')
                         setReturnType(null)
                         setExchangeTiming(null)
-                      }}
-                      disabled={returnLoading}
-                      style={{
-                        padding: '4px 16px',
-                        height: '28px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        whiteSpace: 'nowrap',
-                        backgroundColor: 'var(--bg-tertiary)',
-                        border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
-                        borderRadius: '8px',
-                        fontSize: '14px',
-                        fontWeight: 500,
-                        color: 'var(--text-secondary)',
-                        cursor: returnLoading ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.3s ease',
-                        boxShadow: 'none'
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={createReturn}
-                      disabled={returnLoading || Object.keys(selectedItems).length === 0 || !returnType}
-                      style={{
-                        padding: '4px 16px',
-                        height: '28px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        whiteSpace: 'nowrap',
-                        backgroundColor: returnLoading || Object.keys(selectedItems).length === 0 || !returnType || (returnType === 'exchange' && !exchangeTiming) ? '#ccc' : `rgba(${themeColorRgb}, 0.7)`,
-                        border: `1px solid rgba(${themeColorRgb}, 0.5)`,
-                        borderRadius: '8px',
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: '#fff',
-                        cursor: returnLoading || Object.keys(selectedItems).length === 0 || !returnType || (returnType === 'exchange' && !exchangeTiming) ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.3s ease',
-                        boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3)`
-                      }}
-                    >
-                      {returnLoading ? 'Processing...' : 'Process Return'}
-                    </button>
-                  </div>
-                </div>
+                        setReturnProcessedResult(null)
+                        setExpandedRow(null)
+                        setToast({ message: receiptAction === 'none' ? 'Done.' : 'Return receipt options saved.', type: 'success' })
+                      } else {
+                        setToast({ message: data.message || 'Failed to save', type: 'error' })
+                      }
+                    } catch (e) {
+                      setToast({ message: 'Error saving receipt options', type: 'error' })
+                    } finally {
+                      setReturnReceiptOptionsLoading(false)
+                    }
+                  }}
+                  onClose={() => {
+                    setShowReturnReceiptOptionsModal(false)
+                  }}
+                />
               </div>
             )}
           </div>
+        {conditionDropdownRect && openConditionDropdowns[conditionDropdownRect.itemId] && (() => {
+          const itemId = conditionDropdownRect.itemId
+          const currentCondition = selectedItems[itemId]?.condition || 'new'
+          const conditionOptions = [
+            { value: 'new', label: 'New' },
+            { value: 'opened', label: 'Opened' },
+            { value: 'damaged', label: 'Damaged' },
+            { value: 'defective', label: 'Defective' }
+          ]
+          return createPortal(
+            <div
+              ref={conditionDropdownPortalRef}
+              style={{
+                position: 'fixed',
+                top: conditionDropdownRect.top + conditionDropdownRect.height + 4,
+                left: conditionDropdownRect.left,
+                minWidth: conditionDropdownRect.width,
+                backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
+                borderRadius: '8px',
+                boxShadow: isDarkMode ? '0 4px 12px rgba(0, 0, 0, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.15)',
+                zIndex: 10002,
+                overflow: 'hidden'
+              }}
+            >
+              {conditionOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    updateItemCondition(itemId, option.value)
+                    setOpenConditionDropdowns(prev => ({ ...prev, [itemId]: false }))
+                    setConditionDropdownRect(null)
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: 'none',
+                    background: currentCondition === option.value ? `rgba(${themeColorRgb}, 0.1)` : 'none',
+                    textAlign: 'left',
+                    fontSize: '14px',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.2s ease',
+                    fontWeight: currentCondition === option.value ? 600 : 400
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #1a1a1a)' : '#f5f5f5'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = currentCondition === option.value ? `rgba(${themeColorRgb}, 0.1)` : 'transparent'
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>,
+            document.body
+          )
+        })()}
+        {reasonDropdownRect && openReasonDropdowns[reasonDropdownRect.itemId] && (() => {
+          const itemId = reasonDropdownRect.itemId
+          const currentReason = selectedItems[itemId]?.reason || ''
+          const reasonOptions = [
+            { value: '', label: 'Select' },
+            { value: 'defective', label: 'Defective' },
+            { value: 'wrong_item', label: 'Wrong item' },
+            { value: 'changed_mind', label: 'Changed mind' },
+            { value: 'damaged', label: 'Damaged' },
+            { value: 'other', label: 'Other' }
+          ]
+          return createPortal(
+            <div
+              ref={reasonDropdownPortalRef}
+              style={{
+                position: 'fixed',
+                top: reasonDropdownRect.top + reasonDropdownRect.height + 4,
+                left: reasonDropdownRect.left,
+                width: 'max-content',
+                minWidth: '100px',
+                maxWidth: '180px',
+                backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
+                borderRadius: '8px',
+                boxShadow: isDarkMode ? '0 4px 12px rgba(0, 0, 0, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.15)',
+                zIndex: 10002,
+                overflow: 'hidden'
+              }}
+            >
+              {reasonOptions.map((option) => (
+                <button
+                  key={option.value || 'none'}
+                  type="button"
+                  onClick={() => {
+                    updateItemReason(itemId, option.value)
+                    setOpenReasonDropdowns(prev => ({ ...prev, [itemId]: false }))
+                    setReasonDropdownRect(null)
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: 'none',
+                    background: currentReason === option.value ? `rgba(${themeColorRgb}, 0.1)` : 'none',
+                    textAlign: 'left',
+                    fontSize: '14px',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.2s ease',
+                    fontWeight: currentReason === option.value ? 600 : 400
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #1a1a1a)' : '#f5f5f5'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = currentReason === option.value ? `rgba(${themeColorRgb}, 0.1)` : 'transparent'
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>,
+            document.body
+          )
+        })()}
         </div>
       )}
 

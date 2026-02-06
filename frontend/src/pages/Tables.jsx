@@ -1,6 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import Table from '../components/Table'
+import {
+  FormField,
+  FormLabel,
+  FormTitle,
+  inputBaseStyle,
+  getInputFocusHandlers,
+  compactFormActionsStyle,
+  compactCancelButtonStyle,
+  compactPrimaryButtonStyle
+} from '../components/FormStyles'
 import { 
   Database,
   Package,
@@ -8,11 +18,12 @@ import {
   Truck,
   Users,
   Calculator,
-  Image,
   Shield,
   Folder,
   PanelLeft,
-  Bell
+  Bell,
+  Pencil,
+  X
 } from 'lucide-react'
 
 // Define table categories (all tables assigned; no "Other" tab)
@@ -88,8 +99,12 @@ const TABLE_CATEGORIES = {
     'retained_earnings',
     'accounting_customers',
     'accounting_vendors',
-    'accounts',
-    'items',
+    'invoices',
+    'invoice_lines',
+    'bills',
+    'bill_lines',
+    'payments',
+    'bill_payments',
     'tax_rates',
     'classes',
     'locations'
@@ -101,7 +116,6 @@ const TABLE_CATEGORIES = {
     'sms_settings',
     'sms_templates'
   ],
-  'Image Matching': ['image_identifications'],
   'Security & Permissions': [
     'roles',
     'permissions',
@@ -132,7 +146,14 @@ function Tables() {
   const [loadingTables, setLoadingTables] = useState(true)
   const [error, setError] = useState(null)
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set())
-  
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editorSelectedRowId, setEditorSelectedRowId] = useState(null)
+  const [editorDraftRow, setEditorDraftRow] = useState(null)
+  const [editorEditedRowIds, setEditorEditedRowIds] = useState(() => new Set())
+  const [editorSaving, setEditorSaving] = useState(false)
+  const [editorModalPosition, setEditorModalPosition] = useState({ x: 80, y: 80 })
+  const [editorDragging, setEditorDragging] = useState(false)
+  const editorDragRef = useRef({ startX: 0, startY: 0, startLeft: 0, startTop: 0 })
   const [sidebarMinimized, setSidebarMinimized] = useState(false)
   const [hoveringTables, setHoveringTables] = useState(false)
   const [showTooltip, setShowTooltip] = useState(false)
@@ -382,6 +403,91 @@ function Tables() {
     }
   }
 
+  const handleOpenEditor = () => {
+    setEditorEditedRowIds(new Set())
+    setEditorSelectedRowId(null)
+    setEditorDraftRow(null)
+    setEditorOpen(true)
+  }
+
+  const handleCloseEditor = () => {
+    setEditorOpen(false)
+    setEditorSelectedRowId(null)
+    setEditorDraftRow(null)
+    setEditorEditedRowIds(new Set())
+    loadData()
+  }
+
+  const handleEditorRowClick = (row, idx) => {
+    const rowId = getRowId(row, idx)
+    setEditorSelectedRowId(rowId)
+    setEditorDraftRow({ ...row })
+  }
+
+  const handleEditorDraftChange = (col, value) => {
+    if (!editorDraftRow) return
+    setEditorDraftRow(prev => ({ ...prev, [col]: value }))
+  }
+
+  const handleEditorDragStart = (e) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    setEditorDragging(true)
+    editorDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startLeft: editorModalPosition.x,
+      startTop: editorModalPosition.y
+    }
+  }
+
+  useEffect(() => {
+    if (!editorDragging) return
+    const onMove = (e) => {
+      setEditorModalPosition({
+        x: editorDragRef.current.startLeft + (e.clientX - editorDragRef.current.startX),
+        y: editorDragRef.current.startTop + (e.clientY - editorDragRef.current.startY)
+      })
+    }
+    const onUp = () => setEditorDragging(false)
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+  }, [editorDragging])
+
+  const handleEditorSaveRow = async () => {
+    if (!activeTab || !data || !editorDraftRow) return
+    const pk = data.primary_key || []
+    if (!pk.length) {
+      window.alert('This table has no primary key; row update is not supported.')
+      return
+    }
+    setEditorSaving(true)
+    try {
+      const response = await fetch(`/api/tables/${activeTab}/rows`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ row: editorDraftRow })
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'Failed to update row')
+      }
+      setEditorEditedRowIds(prev => new Set(prev).add(editorSelectedRowId))
+      const newData = (data.data || []).map((r, idx) => getRowId(r, idx) === editorSelectedRowId ? { ...editorDraftRow } : r)
+      setData(prev => prev ? { ...prev, data: newData } : null)
+    } catch (err) {
+      console.error(err)
+      window.alert(err.message || 'Error saving row')
+    } finally {
+      setEditorSaving(false)
+    }
+  }
+
+
   if (loadingTables) {
     return (
       <div style={{ 
@@ -422,7 +528,6 @@ function Tables() {
     'Employees & Scheduling': Users,
     'Accounting': Calculator,
     'Notifications': Bell,
-    'Image Matching': Image,
     'Security & Permissions': Shield
   }
 
@@ -725,44 +830,187 @@ function Tables() {
         {error && <div style={{ padding: '40px', textAlign: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999' }}>{error}</div>}
         {!loading && !error && data && (
           data.data && data.data.length > 0 ? (
-            <div>
+            <>
+              <div>
               <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
-                marginBottom: '12px'
-              }}>
-                <div style={{ color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontSize: '13px' }}>
-                  {selectedRowIds.size > 0 ? `${selectedRowIds.size} selected` : 'Select rows to delete'}
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  marginBottom: '12px'
+                }}>
+                  <div style={{ color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontSize: '13px' }}>
+                    {selectedRowIds.size > 0 ? `${selectedRowIds.size} selected` : 'Select rows to delete'}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button
+                      onClick={() => editorOpen ? handleCloseEditor() : handleOpenEditor()}
+                      style={{
+                        padding: '8px 12px',
+                        backgroundColor: editorOpen ? (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#e0e0e0') : (isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)'),
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                        border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <Pencil size={14} />
+                      {editorOpen ? 'Close Editor' : 'Open Editor'}
+                    </button>
+                    <button
+                      onClick={handleDeleteSelected}
+                      disabled={selectedRowIds.size === 0}
+                      style={{
+                        padding: '8px 12px',
+                        backgroundColor: selectedRowIds.size === 0 ? (isDarkMode ? 'rgba(255,255,255,0.12)' : '#eee') : '#e53935',
+                        color: selectedRowIds.size === 0 ? (isDarkMode ? 'rgba(255,255,255,0.5)' : '#999') : '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: selectedRowIds.size === 0 ? 'not-allowed' : 'pointer',
+                        fontSize: '13px',
+                        fontWeight: 600
+                      }}
+                    >
+                      Delete selected
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={handleDeleteSelected}
-                  disabled={selectedRowIds.size === 0}
-                  style={{
-                    padding: '8px 12px',
-                    backgroundColor: selectedRowIds.size === 0 ? (isDarkMode ? 'rgba(255,255,255,0.12)' : '#eee') : '#e53935',
-                    color: selectedRowIds.size === 0 ? (isDarkMode ? 'rgba(255,255,255,0.5)' : '#999') : '#fff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: selectedRowIds.size === 0 ? 'not-allowed' : 'pointer',
-                    fontSize: '13px',
-                    fontWeight: 600
-                  }}
-                >
-                  Delete selected
-                </button>
+
+                <Table
+                  columns={data.columns}
+                  data={data.data}
+                  enableRowSelection
+                  getRowId={getRowId}
+                  selectedRowIds={selectedRowIds}
+                  onSelectedRowIdsChange={setSelectedRowIds}
+                  onRowClick={editorOpen ? handleEditorRowClick : undefined}
+                  highlightedRowId={editorOpen ? editorSelectedRowId : null}
+                  themeColorRgb={themeColorRgb}
+                />
               </div>
 
-              <Table
-                columns={data.columns}
-                data={data.data}
-                enableRowSelection
-                getRowId={getRowId}
-                selectedRowIds={selectedRowIds}
-                onSelectedRowIdsChange={setSelectedRowIds}
-              />
-            </div>
+              {/* Floating draggable Row Editor modal */}
+              {editorOpen && (
+                <div
+                  style={{
+                    position: 'fixed',
+                    left: editorModalPosition.x,
+                    top: editorModalPosition.y,
+                    width: '520px',
+                    minHeight: '480px',
+                    maxHeight: 'min(92vh, 900px)',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                    border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
+                    borderRadius: '8px',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                    zIndex: 9999,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden'
+                  }}
+                >
+                  <div
+                    onMouseDown={handleEditorDragStart}
+                    style={{
+                      padding: '6px 12px',
+                      borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee',
+                      cursor: editorDragging ? 'grabbing' : 'grab',
+                      userSelect: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexShrink: 0,
+                      backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', fontSize: '13px' }}>
+                      {editorDraftRow && data?.primary_key?.length
+                        ? `Row Editor — ${data.primary_key.map(pk => editorDraftRow[pk] != null ? String(editorDraftRow[pk]) : '').join(', ')}`
+                        : 'Row Editor'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCloseEditor}
+                      style={{
+                        padding: '2px',
+                        border: 'none',
+                        background: 'none',
+                        cursor: 'pointer',
+                        color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666'
+                      }}
+                      aria-label="Close"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div style={{ overflowY: 'auto', overflowX: 'hidden', padding: '16px', flex: '1 1 0', minHeight: 0 }}>
+                    {editorDraftRow ? (
+                      <>
+                        <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '16px' }}>Edit row</FormTitle>
+                        {(data.columns || []).map(col => {
+                          const pk = data.primary_key || []
+                          const isPk = pk.includes(col)
+                          const val = editorDraftRow[col]
+                          return (
+                            <FormField key={col}>
+                              <FormLabel isDarkMode={isDarkMode}>
+                                {col.replace(/_/g, ' ')} {isPk ? '(PK)' : ''}
+                              </FormLabel>
+                              <input
+                                type="text"
+                                readOnly={isPk}
+                                value={val != null ? String(val) : ''}
+                                onChange={e => handleEditorDraftChange(col, e.target.value)}
+                                style={{
+                                  ...inputBaseStyle(isDarkMode, themeColorRgb),
+                                  ...(isPk ? { backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f0f0f0', cursor: 'default' } : {})
+                                }}
+                                {...(isPk ? {} : getInputFocusHandlers(themeColorRgb, isDarkMode))}
+                              />
+                            </FormField>
+                          )
+                        })}
+                      </>
+                    ) : (
+                      <div style={{ color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontSize: '14px' }}>
+                        Click a row in the table to select and edit it.
+                      </div>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      padding: '6px 12px',
+                      borderTop: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee',
+                      flexShrink: 0,
+                      backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'
+                    }}
+                  >
+                    <div style={{ ...compactFormActionsStyle, marginTop: 0 }}>
+                      <button
+                        type="button"
+                        onClick={handleCloseEditor}
+                        style={compactCancelButtonStyle(isDarkMode, false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleEditorSaveRow}
+                        disabled={editorSaving || !editorDraftRow}
+                        style={compactPrimaryButtonStyle(themeColorRgb, editorSaving || !editorDraftRow)}
+                      >
+                        {editorSaving ? 'Saving…' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <div style={{ padding: '40px', textAlign: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999' }}>No data in this table</div>
           )

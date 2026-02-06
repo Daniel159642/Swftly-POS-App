@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { useToast } from '../contexts/ToastContext'
 import { useTheme } from '../contexts/ThemeContext'
@@ -20,13 +20,15 @@ export default function Customers() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState(null)
-  const [modal, setModal] = useState(null) // 'view' | 'edit' | 'points'
-  const [rewardsDetail, setRewardsDetail] = useState(null)
+  const [modal, setModal] = useState(null) // 'edit' | 'points'
   const [saving, setSaving] = useState(false)
   const [editForm, setEditForm] = useState({ customer_name: '', email: '', phone: '', address: '' })
   const [pointsForm, setPointsForm] = useState({ points: '', reason: '' })
   const [actionsOpenFor, setActionsOpenFor] = useState(null)
   const [dropdownAnchor, setDropdownAnchor] = useState(null)
+  const [expandedCustomerId, setExpandedCustomerId] = useState(null)
+  const [expandedRewards, setExpandedRewards] = useState({})
+  const [loadingRewardsFor, setLoadingRewardsFor] = useState(null)
   const actionsMenuRef = useRef(null)
   const dropdownRef = useRef(null)
   const tableContainerRef = useRef(null)
@@ -101,17 +103,6 @@ export default function Customers() {
     )
   }, [customers, search])
 
-  const openView = async (customer) => {
-    setSelected(customer)
-    setModal('view')
-    setRewardsDetail(null)
-    try {
-      const res = await fetch(`/api/customers/${customer.customer_id}/rewards`)
-      const json = await res.json()
-      if (json.success && json.data) setRewardsDetail(json.data)
-    } catch (_) {}
-  }
-
   const openEdit = (customer) => {
     setSelected(customer)
     setEditForm({
@@ -129,10 +120,42 @@ export default function Customers() {
     setModal('points')
   }
 
+  const loadRewardsForCustomer = useCallback(async (customerId) => {
+    if (expandedRewards[customerId]) return
+    setLoadingRewardsFor(customerId)
+    try {
+      const res = await fetch(`/api/customers/${customerId}/rewards`)
+      const json = await res.json()
+      if (json.success && json.data) {
+        setExpandedRewards((prev) => ({ ...prev, [customerId]: json.data }))
+      }
+    } catch (_) {}
+    finally {
+      setLoadingRewardsFor(null)
+    }
+  }, [expandedRewards])
+
+  const handleRowClick = (c, e) => {
+    if (e.target.closest('button') || e.target.closest('[data-actions]')) return
+    const id = c.customer_id
+    const next = expandedCustomerId === id ? null : id
+    setExpandedCustomerId(next)
+    if (next) loadRewardsForCustomer(next)
+  }
+
+  const formatDateJoined = (d) => {
+    if (!d) return '—'
+    try {
+      const date = new Date(d)
+      return isNaN(date.getTime()) ? '—' : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    } catch {
+      return '—'
+    }
+  }
+
   const closeModal = () => {
     setModal(null)
     setSelected(null)
-    setRewardsDetail(null)
   }
 
   const handleSaveEdit = async () => {
@@ -335,51 +358,102 @@ export default function Customers() {
             </thead>
             <tbody>
               {filtered.map((c, idx) => (
-                <tr
-                  key={c.customer_id}
-                  style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#fafafa' }}
-                >
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.customer_name || '—'}</td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.email || '—'}</td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.phone || '—'}</td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333', textAlign: 'right', fontWeight: 600 }}>
-                    {c.loyalty_points != null ? Number(c.loyalty_points) : 0}
-                  </td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', textAlign: 'right' }}>
-                    <div ref={actionsOpenFor === c.customer_id ? actionsMenuRef : null} style={{ display: 'inline-block' }}>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (actionsOpenFor === c.customer_id) {
-                            setActionsOpenFor(null)
-                            setDropdownAnchor(null)
-                          } else {
-                            const rect = e.currentTarget.getBoundingClientRect()
-                            setDropdownAnchor({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
-                            setActionsOpenFor(c.customer_id)
-                          }
-                        }}
-                        aria-label="Actions"
-                        style={{
-                          padding: '6px',
-                          background: 'none',
-                          border: 'none',
-                          color: '#6b7280',
-                          cursor: 'pointer',
-                          borderRadius: '6px',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f3f4f6'; e.currentTarget.style.color = '#374151' }}
-                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#6b7280' }}
-                      >
-                        <MoreVertical size={18} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                <Fragment key={c.customer_id}>
+                  <tr
+                    onClick={(e) => handleRowClick(c, e)}
+                    style={{
+                      backgroundColor: expandedCustomerId === c.customer_id ? `rgba(${themeColorRgb}, 0.1)` : (idx % 2 === 0 ? '#fff' : '#fafafa'),
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.customer_name || '—'}</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.email || '—'}</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.phone || '—'}</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333', textAlign: 'right', fontWeight: 600 }}>
+                      {c.loyalty_points != null ? Number(c.loyalty_points) : 0}
+                    </td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', textAlign: 'right' }} data-actions>
+                      <div ref={actionsOpenFor === c.customer_id ? actionsMenuRef : null} style={{ display: 'inline-block' }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (actionsOpenFor === c.customer_id) {
+                              setActionsOpenFor(null)
+                              setDropdownAnchor(null)
+                            } else {
+                              const rect = e.currentTarget.getBoundingClientRect()
+                              setDropdownAnchor({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+                              setActionsOpenFor(c.customer_id)
+                            }
+                          }}
+                          aria-label="Actions"
+                          style={{
+                            padding: '6px',
+                            background: 'none',
+                            border: 'none',
+                            color: '#6b7280',
+                            cursor: 'pointer',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f3f4f6'; e.currentTarget.style.color = '#374151' }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = '#6b7280' }}
+                        >
+                          <MoreVertical size={18} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {expandedCustomerId === c.customer_id && (
+                    <tr style={{ backgroundColor: '#f8fafc' }}>
+                      <td colSpan={5} style={{ padding: '16px 12px', borderBottom: '1px solid #eee', verticalAlign: 'top' }}>
+                        {loadingRewardsFor === c.customer_id ? (
+                          <div style={{ fontSize: '13px', color: '#6b7280' }}>Loading details…</div>
+                        ) : (
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px', fontSize: '14px' }}>
+                            <div>
+                              <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Address</div>
+                              <div style={{ color: '#333' }}>{c.address && c.address.trim() ? c.address : '—'}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Date joined</div>
+                              <div style={{ color: '#333' }}>{formatDateJoined(c.created_date || c.created_at)}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Points</div>
+                              <div style={{ color: '#333' }}>{c.loyalty_points != null ? Number(c.loyalty_points) : 0}</div>
+                            </div>
+                            {expandedRewards[c.customer_id] && (
+                              <>
+                                <div>
+                                  <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Total spent</div>
+                                  <div style={{ color: '#333' }}>${Number(expandedRewards[c.customer_id].total_spent || 0).toFixed(2)}</div>
+                                </div>
+                                <div>
+                                  <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Orders</div>
+                                  <div style={{ color: '#333' }}>{expandedRewards[c.customer_id].order_count ?? 0}</div>
+                                </div>
+                                {expandedRewards[c.customer_id].popular_items && expandedRewards[c.customer_id].popular_items.length > 0 && (
+                                  <div style={{ gridColumn: '1 / -1' }}>
+                                    <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Popular items</div>
+                                    <ul style={{ margin: 0, paddingLeft: '20px', color: '#333' }}>
+                                      {expandedRewards[c.customer_id].popular_items.slice(0, 5).map((item, i) => (
+                                        <li key={i}>{item.product_name || item.product_id} (×{item.qty})</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -411,26 +485,6 @@ export default function Customers() {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              onClick={() => { close(); openView(customer) }}
-              style={{
-                display: 'block',
-                width: '100%',
-                padding: '10px 14px',
-                textAlign: 'left',
-                border: 'none',
-                background: 'none',
-                color: '#333',
-                fontSize: '13px',
-                fontWeight: 500,
-                cursor: 'pointer'
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f3f4f6' }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
-            >
-              View
-            </button>
             <button
               type="button"
               onClick={() => { close(); openEdit(customer) }}
@@ -475,86 +529,6 @@ export default function Customers() {
           document.body
         )
       })()}
-
-      {/* View modal */}
-      {modal === 'view' && selected && (
-        <div style={modalOverlay} onClick={closeModal}>
-          <div style={modalBox} onClick={(e) => e.stopPropagation()}>
-            <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: '#333' }}>
-                {selected.customer_name || 'Customer'}
-              </h3>
-            </div>
-            <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
-              <FormField>
-                <FormLabel isDarkMode={dark}>Email</FormLabel>
-                <div style={{ fontSize: '14px', color: '#333' }}>{selected.email || '—'}</div>
-              </FormField>
-              <FormField>
-                <FormLabel isDarkMode={dark}>Phone</FormLabel>
-                <div style={{ fontSize: '14px', color: '#333' }}>{selected.phone || '—'}</div>
-              </FormField>
-              <FormField>
-                <FormLabel isDarkMode={dark}>Loyalty points</FormLabel>
-                <div style={{ fontSize: '14px', fontWeight: 700, color: '#333' }}>{selected.loyalty_points != null ? Number(selected.loyalty_points) : 0}</div>
-              </FormField>
-              {rewardsDetail && (
-                <>
-                  <FormField>
-                    <FormLabel isDarkMode={dark}>Orders</FormLabel>
-                    <div style={{ fontSize: '14px', color: '#333' }}>{rewardsDetail.order_count ?? 0}</div>
-                  </FormField>
-                  <FormField>
-                    <FormLabel isDarkMode={dark}>Total spent</FormLabel>
-                    <div style={{ fontSize: '14px', color: '#333' }}>${Number(rewardsDetail.total_spent || 0).toFixed(2)}</div>
-                  </FormField>
-                  {rewardsDetail.popular_items && rewardsDetail.popular_items.length > 0 && (
-                    <FormField>
-                      <FormLabel isDarkMode={dark}>Popular items</FormLabel>
-                      <ul style={{ margin: '4px 0 0', paddingLeft: '20px', fontSize: '14px', color: '#333' }}>
-                        {rewardsDetail.popular_items.slice(0, 5).map((item, i) => (
-                          <li key={i}>{item.product_name || item.product_id} (×{item.qty})</li>
-                        ))}
-                      </ul>
-                    </FormField>
-                  )}
-                </>
-              )}
-              {selected.address && (
-                <FormField>
-                  <FormLabel isDarkMode={dark}>Address</FormLabel>
-                  <div style={{ fontSize: '14px', color: '#333' }}>{selected.address}</div>
-                </FormField>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '24px' }}>
-              <button
-                type="button"
-                onClick={closeModal}
-                style={{
-                  padding: '4px 16px',
-                  height: '28px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  whiteSpace: 'nowrap',
-                  backgroundColor: 'var(--bg-tertiary)',
-                  border: `1px solid ${dark ? 'var(--border-light, #333)' : '#ddd'}`,
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  color: 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  transition: 'all 0.3s ease',
-                  boxShadow: 'none'
-                }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Edit modal (create or update) */}
       {modal === 'edit' && (

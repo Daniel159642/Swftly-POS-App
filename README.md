@@ -132,6 +132,7 @@ Two database triggers automatically update inventory quantities:
    - Create database: `CREATE DATABASE pos_db;`
    - Run schema: `psql -U postgres -d pos_db -f schema_postgres.sql`
    - Configure connection in `.env` file (see `.env.example`)
+   - **Using Supabase?** See **[docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md)** for hosted setup (DB used only by backend; clients never see the URL).
 
 2. Create admin account:
    ```bash
@@ -186,8 +187,9 @@ The `database.py` module provides utility functions for managing inventory, vend
 
 ### Sales/Transaction Management
 
-- `record_sale()` - Record a sale/transaction (automatically decreases inventory)
-- `get_sales()` - Get sales records with optional filters
+- Sales are recorded via **orders** and **order_items** (use `create_order()`). There is no separate sales table; `get_sales()` reads from completed, paid orders.
+- `get_sales()` - Get sales records (from order_items + orders) with optional filters
+- `record_sale()` - **Deprecated.** Use `create_order(employee_id, items=[...], payment_method='cash')` instead.
 
 ### Pending Shipment Management
 
@@ -291,15 +293,18 @@ This feature allows you to see exactly which vendor's inventory is still in stoc
 
 ```python
 from database import (
-    add_vendor, add_product, create_shipment, add_shipment_item,
-    record_sale, get_inventory_by_vendor
+    add_employee, add_vendor, add_product, create_shipment, add_shipment_item,
+    create_order, get_inventory_by_vendor
 )
 
-# 1. Create vendors
+# 1. Create employee (required for create_order)
+emp_id = add_employee(employee_code="EMP1", first_name="Test", last_name="User", position="cashier", date_started="2024-01-01", password="x")
+
+# 2. Create vendors
 vendor_a_id = add_vendor(vendor_name="Vendor A", email="a@vendor.com")
 vendor_b_id = add_vendor(vendor_name="Vendor B", email="b@vendor.com")
 
-# 2. Create product
+# 3. Create product
 product_id = add_product(
     product_name="Widget",
     sku="WID-001",
@@ -307,20 +312,20 @@ product_id = add_product(
     product_cost=10.00
 )
 
-# 3. Receive 50 units from Vendor A
+# 4. Receive 50 units from Vendor A
 shipment_a = create_shipment(vendor_id=vendor_a_id, purchase_order_number="PO-A-001")
 add_shipment_item(shipment_id=shipment_a, product_id=product_id, 
                   quantity_received=50, unit_cost=10.00)
 
-# 4. Receive 100 units from Vendor B
+# 5. Receive 100 units from Vendor B
 shipment_b = create_shipment(vendor_id=vendor_b_id, purchase_order_number="PO-B-001")
 add_shipment_item(shipment_id=shipment_b, product_id=product_id, 
                   quantity_received=100, unit_cost=9.50)
 
-# 5. Sell 80 units (FIFO: all 50 from Vendor A + 30 from Vendor B)
-record_sale(product_id=product_id, quantity_sold=80, sale_price=25.00)
+# 6. Sell 80 units via create_order (FIFO: all 50 from Vendor A + 30 from Vendor B)
+create_order(employee_id=emp_id, items=[{"product_id": product_id, "quantity": 80, "unit_price": 25.00, "discount": 0}], payment_method="cash")
 
-# 6. Check remaining inventory by vendor
+# 7. Check remaining inventory by vendor
 breakdown = get_inventory_by_vendor(product_id)
 print(f"Total remaining: {breakdown['current_quantity']} units")
 for vendor_total in breakdown['vendor_totals']:

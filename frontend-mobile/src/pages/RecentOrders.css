@@ -9,57 +9,34 @@
   padding: calc(12px + var(--safe-top)) 16px calc(100px + var(--safe-bottom));
 }
 
-.recent-orders-header {
+/* Header container – same style as POS cart container */
+.recent-orders-header-container {
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  padding: 12px;
   margin-bottom: 12px;
-}
-
-.recent-orders-title {
-  margin: 0;
-  flex: 1;
-  min-width: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.recent-orders-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.recent-orders-header-btn {
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--surface);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.6);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border-radius: var(--radius-sm);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 4px 20px rgba(107, 163, 240, 0.08), 0 2px 8px rgba(107, 163, 240, 0.05);
 }
 
-.recent-orders-header-btn:active {
-  background: var(--accent-blue);
-  color: #fff;
+.recent-orders-search-row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .recent-orders-search-row {
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
-  padding: 8px 10px;
-  background: var(--bg-card);
+  padding: 6px 10px;
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
@@ -84,55 +61,85 @@
   color: var(--text-muted);
 }
 
-.recent-orders-search-close {
+.recent-orders-scan-btn {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: none;
-  border: none;
-  font-size: 1.25rem;
-  line-height: 1;
-  color: var(--text-muted);
+  padding: 0;
+  border: 0;
+  font-family: var(--font);
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent-blue);
+  box-shadow: rgba(99, 99, 99, 0.2) 0 2px 8px 0, inset 0px -6px 0px rgba(0, 0, 0, 0.1), inset 0px -2px 0px rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: all 150ms ease-in-out;
 }
 
-.recent-orders-search-close:active {
-  color: var(--text);
+.recent-orders-scan-btn:hover {
+  filter: brightness(0.98);
 }
 
+.recent-orders-scan-btn:active {
+  filter: brightness(0.97);
+  box-shadow: rgba(99, 99, 99, 0.2) 0 2px 6px 0, inset 0px -1px 0px rgba(0, 0, 0, 0.15);
+}
+
+/* Filter chips sit outside the header container (only on Recent Orders) */
 .recent-orders-filters {
   flex-shrink: 0;
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-top: 12px;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
-.recent-orders-filter-btn {
-  flex: 1;
-  padding: 10px 12px;
+.recent-orders-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.recent-orders-filter-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
+  border-radius: 999px;
   font-family: var(--font);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.recent-orders-filter-btn--active {
+.recent-orders-filter-chip--active {
   background: var(--accent-blue);
   border-color: var(--accent-blue);
   color: #fff;
 }
 
-.recent-orders-filter-btn:active {
+.recent-orders-filter-chip:active {
   opacity: 0.9;
 }
 
@@ -150,6 +157,12 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.recent-orders-list-wrap::-webkit-scrollbar {
+  display: none;
 }
 
 .recent-orders-muted {
@@ -180,33 +193,30 @@
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .recent-orders-number {
   font-size: 1rem;
   font-weight: 600;
   color: var(--text);
+  flex-shrink: 0;
 }
 
 .recent-orders-date {
   font-size: 0.8125rem;
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
-.recent-orders-row-meta {
+.recent-orders-row-status {
+  flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-}
-
-.recent-orders-status,
-.recent-orders-payment {
-  font-size: 0.75rem;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
-  text-transform: capitalize;
 }
 
 .recent-orders-row-total {
@@ -225,7 +235,10 @@
   bottom: 0;
   left: 0;
   right: 0;
-  background: var(--bg);
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(255, 255, 255, 0.6);
 }
 
 .recent-orders-page .nav-item--active {

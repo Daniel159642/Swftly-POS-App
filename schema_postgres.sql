@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Inventory Table
+-- Inventory Table (vendor_id only; no vendor text column)
 CREATE TABLE IF NOT EXISTS inventory (
     product_id SERIAL PRIMARY KEY,
     establishment_id INTEGER NOT NULL REFERENCES establishments(establishment_id) ON DELETE CASCADE,
@@ -46,7 +46,6 @@ CREATE TABLE IF NOT EXISTS inventory (
     barcode TEXT,
     product_price NUMERIC(10,2) NOT NULL CHECK(product_price >= 0),
     product_cost NUMERIC(10,2) NOT NULL CHECK(product_cost >= 0),
-    vendor TEXT,
     vendor_id INTEGER REFERENCES vendors(vendor_id),
     photo TEXT,
     current_quantity INTEGER NOT NULL DEFAULT 0 CHECK(current_quantity >= 0),
@@ -86,16 +85,21 @@ CREATE TABLE IF NOT EXISTS shipment_items (
     received_timestamp TIMESTAMP DEFAULT NOW()
 );
 
--- Sales/Transactions Table
-CREATE TABLE IF NOT EXISTS sales (
-    sale_id SERIAL PRIMARY KEY,
-    establishment_id INTEGER NOT NULL REFERENCES establishments(establishment_id) ON DELETE CASCADE,
-    product_id INTEGER NOT NULL REFERENCES inventory(product_id),
-    quantity_sold INTEGER NOT NULL CHECK(quantity_sold > 0),
-    sale_price NUMERIC(10,2) NOT NULL CHECK(sale_price >= 0),
-    sale_date TIMESTAMP DEFAULT NOW(),
-    notes TEXT
-);
+-- Sales: view over order_items + orders (completed, paid only). No separate sales table.
+-- Run migrations/replace_sales_table_with_view.sql if you have an existing sales table.
+CREATE OR REPLACE VIEW sales AS
+SELECT
+    oi.establishment_id,
+    oi.product_id,
+    oi.quantity AS quantity_sold,
+    oi.unit_price AS sale_price,
+    o.order_date AS sale_date,
+    NULL::TEXT AS notes,
+    (ROW_NUMBER() OVER (ORDER BY o.order_date, oi.order_item_id))::BIGINT AS sale_id
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+WHERE o.order_status = 'completed'
+  AND o.payment_status = 'completed';
 
 -- Pending_Shipments Table
 CREATE TABLE IF NOT EXISTS pending_shipments (
@@ -266,17 +270,19 @@ CREATE INDEX IF NOT EXISTS idx_approved_shipments_pending ON approved_shipments(
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS categories (
     category_id SERIAL PRIMARY KEY,
+    establishment_id INTEGER NOT NULL DEFAULT 1 REFERENCES establishments(establishment_id) ON DELETE CASCADE,
     category_name TEXT NOT NULL,
     description TEXT,
     parent_category_id INTEGER REFERENCES categories(category_id),
     is_auto_generated INTEGER DEFAULT 0 CHECK(is_auto_generated IN (0, 1)),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
--- Partial uniques: roots unique by name; non-roots unique by (name, parent)
+-- Partial uniques: per establishment, roots unique by name; non-roots unique by (name, parent)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_root_name
-    ON categories (category_name) WHERE parent_category_id IS NULL;
+    ON categories (establishment_id, category_name) WHERE parent_category_id IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_name_parent
-    ON categories (category_name, parent_category_id) WHERE parent_category_id IS NOT NULL;
+    ON categories (establishment_id, category_name, parent_category_id) WHERE parent_category_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_categories_establishment ON categories(establishment_id);
 
 CREATE TABLE IF NOT EXISTS product_metadata (
     metadata_id SERIAL PRIMARY KEY,
@@ -448,7 +454,7 @@ CREATE TABLE IF NOT EXISTS time_clock (
     status TEXT DEFAULT 'clocked_in' CHECK(status IN ('clocked_in', 'on_break', 'clocked_out'))
 );
 
--- Audit Log Table
+-- Audit Log Table (single audit trail; activity_log merged here)
 CREATE TABLE IF NOT EXISTS audit_log (
     audit_id SERIAL PRIMARY KEY,
     establishment_id INTEGER NOT NULL REFERENCES establishments(establishment_id) ON DELETE CASCADE,
@@ -460,7 +466,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
     old_values TEXT,
     new_values TEXT,
     ip_address TEXT,
-    notes TEXT
+    notes TEXT,
+    resource_type TEXT,
+    details TEXT
 );
 
 -- Master Calendar Table
@@ -640,26 +648,15 @@ CREATE TABLE IF NOT EXISTS employee_permission_overrides (
     UNIQUE(employee_id, permission_id)
 );
 
--- Activity Log Table
-CREATE TABLE IF NOT EXISTS activity_log (
-    log_id SERIAL PRIMARY KEY,
-    establishment_id INTEGER NOT NULL REFERENCES establishments(establishment_id) ON DELETE CASCADE,
-    employee_id INTEGER REFERENCES employees(employee_id),
-    action TEXT NOT NULL,
-    resource_type TEXT,
-    resource_id INTEGER,
-    details TEXT,
-    ip_address TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+-- (activity_log removed: use audit_log only; run migrations/consolidate_audit_activity.sql on existing DBs)
 
 -- ============================================================================
 -- CASH REGISTER CONTROL TABLES
 -- ============================================================================
 
--- Cash Register Sessions Table
+-- Cash Register Sessions Table (register_session_id aligns with app code; avoids clash with employee_sessions.session_id)
 CREATE TABLE IF NOT EXISTS cash_register_sessions (
-    session_id SERIAL PRIMARY KEY,
+    register_session_id SERIAL PRIMARY KEY,
     establishment_id INTEGER NOT NULL REFERENCES establishments(establishment_id) ON DELETE CASCADE,
     register_id INTEGER DEFAULT 1,
     employee_id INTEGER NOT NULL REFERENCES employees(employee_id),
@@ -684,7 +681,7 @@ CREATE TABLE IF NOT EXISTS cash_register_sessions (
 CREATE TABLE IF NOT EXISTS cash_transactions (
     transaction_id SERIAL PRIMARY KEY,
     establishment_id INTEGER NOT NULL REFERENCES establishments(establishment_id) ON DELETE CASCADE,
-    session_id INTEGER NOT NULL REFERENCES cash_register_sessions(session_id),
+    session_id INTEGER REFERENCES cash_register_sessions(register_session_id),
     transaction_type TEXT NOT NULL CHECK(transaction_type IN ('cash_in', 'cash_out', 'deposit', 'withdrawal', 'adjustment')),
     amount NUMERIC(10,2) NOT NULL CHECK(amount > 0),
     reason TEXT,

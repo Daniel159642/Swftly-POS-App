@@ -22,10 +22,12 @@ DROP VIEW IF EXISTS sales CASCADE;
 DROP TABLE IF EXISTS sales_old CASCADE;
 
 -- ============================================================================
--- 2. DROP PENDING_SHIPMENTS TABLES (unified into shipments)
+-- 2. DROP PENDING_SHIPMENTS TABLES - DEFERRED
 -- ============================================================================
-DROP TABLE IF EXISTS pending_shipment_items CASCADE;
-DROP TABLE IF EXISTS pending_shipments CASCADE;
+-- Do NOT drop pending_shipments / pending_shipment_items; the app still uses them.
+-- Unify into shipments only after refactoring all code. See optimize_database_redundancies.sql.
+-- DROP TABLE IF EXISTS pending_shipment_items CASCADE;
+-- DROP TABLE IF EXISTS pending_shipments CASCADE;
 
 -- ============================================================================
 -- 3. DROP ACTIVITY_LOG TABLE (consolidated into audit_log)

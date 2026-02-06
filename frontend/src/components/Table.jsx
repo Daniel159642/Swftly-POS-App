@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Image } from 'lucide-react'
 
-function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, selectedRowIds, onSelectedRowIdsChange, actionsAsEllipsis = false, ellipsisMenuItems }) {
+function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, selectedRowIds, onSelectedRowIdsChange, actionsAsEllipsis = false, ellipsisMenuItems, themeColorRgb = '132, 0, 255', onRowClick, highlightedRowId }) {
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return document.documentElement.classList.contains('dark-theme')
   })
-  
+  const [pendingConfirm, setPendingConfirm] = useState(null) // { item, row } when showing confirm sub-view
+
   useEffect(() => {
     const checkDarkMode = () => {
       setIsDarkMode(document.documentElement.classList.contains('dark-theme'))
@@ -36,6 +37,7 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
       if (!inTrigger && !inMenu) {
         setOpenDropdownRowKey(null)
         setDropdownAnchor(null)
+        setPendingConfirm(null)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -321,12 +323,22 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
           </tr>
         </thead>
       <tbody>
-        {data.map((row, idx) => (
-          <tr 
-            key={resolvedGetRowId(row, idx)} 
-            style={{ 
-              backgroundColor: idx % 2 === 0 ? (isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff') : (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#fafafa'),
-              cursor: onEdit ? 'pointer' : 'default'
+        {data.map((row, idx) => {
+          const rowId = resolvedGetRowId(row, idx)
+          const isHighlighted = highlightedRowId != null && rowId === highlightedRowId
+          return (
+          <tr
+            key={rowId}
+            style={{
+              backgroundColor: isHighlighted
+                ? `rgba(${themeColorRgb}, 0.22)`
+                : (idx % 2 === 0 ? (isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff') : (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#fafafa')),
+              cursor: (onEdit || onRowClick) ? 'pointer' : 'default'
+            }}
+            onClick={(e) => {
+              if (onRowClick && !e.target.closest('input[type="checkbox"]')) {
+                onRowClick(row, idx)
+              }
             }}
             onDoubleClick={() => {
               if (onEdit) {
@@ -511,7 +523,8 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
               </td>
             )}
           </tr>
-        ))}
+          )
+        })}
       </tbody>
     </table>
 
@@ -520,11 +533,40 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
         const rowIndex = data.findIndex((row, idx) => resolvedGetRowId(row, idx) === openDropdownRowKey)
         const row = rowIndex >= 0 ? data[rowIndex] : null
         if (!row) return null
-        const menuItems = ellipsisMenuItems ?? (onEdit ? [{ label: 'Edit', onClick: (r) => onEdit(r) }] : [])
+        const menuItems = (typeof ellipsisMenuItems === 'function' ? ellipsisMenuItems(row) : ellipsisMenuItems) ?? (onEdit ? [{ label: 'Edit', onClick: (r) => onEdit(r) }] : [])
         const close = () => {
           setOpenDropdownRowKey(null)
           setDropdownAnchor(null)
+          setPendingConfirm(null)
         }
+        const pc = pendingConfirm
+        const showingConfirm = !!pc
+
+        const handleItemClick = (item, r) => {
+          if (item.confirm) {
+            setPendingConfirm({ item, row: r })
+          } else {
+            const res = item.onClick(r)
+            if (res && typeof res.then === 'function') {
+              res.then(close).catch(() => {})
+            } else {
+              close()
+            }
+          }
+        }
+
+        const handleConfirmClick = async () => {
+          if (!pc) return
+          try {
+            const p = pc.item.onClick(pc.row)
+            if (p && typeof p.then === 'function') {
+              await p
+            }
+          } finally {
+            close()
+          }
+        }
+
         return createPortal(
           <div
             ref={ellipsisDropdownRef}
@@ -533,7 +575,7 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
               position: 'fixed',
               top: dropdownAnchor.top,
               right: dropdownAnchor.right,
-              minWidth: '120px',
+              minWidth: showingConfirm ? '200px' : '120px',
               backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
               border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #dee2e6',
               borderRadius: '6px',
@@ -543,38 +585,78 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {menuItems.map((item, i) => (
-              <button
-                key={i}
-                role="menuitem"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  item.onClick(row)
-                  close()
-                }}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  padding: '10px 14px',
-                  textAlign: 'left',
-                  border: 'none',
-                  background: 'none',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                  fontSize: '14px',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.15s'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f0f0f0'
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = 'transparent'
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
+            {showingConfirm ? (
+              <>
+                <div style={{ padding: '10px 14px', fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#555', borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee' }}>
+                  {typeof pc.item.confirmMessage === 'function' ? pc.item.confirmMessage(pc.row) : pc.item.confirmMessage}
+                </div>
+                <div style={{ display: 'flex', gap: '8px', padding: '10px 14px', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={() => setPendingConfirm(null)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '13px',
+                      border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
+                      background: isDarkMode ? 'var(--bg-tertiary)' : '#f5f5f5',
+                      color: isDarkMode ? 'var(--text-primary)' : '#333',
+                      borderRadius: '6px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmClick}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '13px',
+                      border: 'none',
+                      background: pc.item.confirmDanger ? '#c62828' : `rgba(${themeColorRgb}, 0.7)`,
+                      color: '#fff',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                  >
+                    {pc.item.confirmButtonLabel || 'Confirm'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              menuItems.map((item, i) => (
+                <button
+                  key={i}
+                  role="menuitem"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleItemClick(item, row)
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    padding: '10px 14px',
+                    textAlign: 'left',
+                    border: 'none',
+                    background: 'none',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.15s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f0f0f0'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'transparent'
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))
+            )}
           </div>,
           document.body
         )

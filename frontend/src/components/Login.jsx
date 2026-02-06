@@ -291,7 +291,7 @@ function Login({ onLogin }) {
           textAlign: 'center'
         }}
       >
-        Sign in to Swift
+        Sign in to Delancey
       </h1>
       <p
         style={{

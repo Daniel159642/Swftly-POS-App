@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { useTheme } from '../contexts/ThemeContext'
@@ -16,6 +16,7 @@ import {
   CheckCircle,
   XCircle,
   Printer,
+  Download,
   Bold,
   Italic,
   AlignLeft,
@@ -23,11 +24,15 @@ import {
   AlignRight,
   Plus,
   Trash2,
-  X
+  X,
+  Undo2,
+  Redo2
 } from 'lucide-react'
 import { FormTitle, FormLabel, FormField, inputBaseStyle, getInputFocusHandlers } from '../components/FormStyles'
 import Table from '../components/Table'
+import '../components/CustomerDisplay.css'
 import '../components/CustomerDisplayButtons.css'
+import { getDefaultCheckoutUi, mergeCheckoutUiFromApi } from '../utils/checkoutUi'
 
 function CustomDropdown({ value, onChange, options, placeholder, required, isDarkMode, themeColorRgb, style = {} }) {
   const [isOpen, setIsOpen] = useState(false)
@@ -278,7 +283,14 @@ const DEFAULT_RECEIPT_TEMPLATE = {
   date_line_italic: false,
   date_line_align: 'center',
   date_line_font_size: 10,
+  date_display_mode: 'both', // 'both' | 'date_only' | 'time_only'
   show_barcode: true,
+  show_order_number_below_barcode: true,
+  barcode_number_font: 'monospace',
+  barcode_number_font_size: 10,
+  barcode_number_bold: false,
+  barcode_number_italic: false,
+  barcode_number_align: 'center',
   // Signature
   show_signature_title: true,
   signature_title_font: 'monospace',
@@ -286,7 +298,34 @@ const DEFAULT_RECEIPT_TEMPLATE = {
   signature_title_italic: false,
   signature_title_align: 'left',
   signature_title_font_size: 10,
-  // Payment preview: card | cash
+  // Customer & Order section (pickup/delivery) - per-line styling
+  customer_order_font: 'monospace',
+  customer_order_font_size: 12,
+  customer_order_bold: false,
+  customer_order_italic: false,
+  customer_order_align: 'left',
+  preview_customer_order: true,
+  order_type_font: 'monospace',
+  order_type_font_size: 12,
+  order_type_bold: false,
+  order_type_italic: false,
+  order_type_align: 'left',
+  customer_name_font: 'monospace',
+  customer_name_font_size: 12,
+  customer_name_bold: false,
+  customer_name_italic: false,
+  customer_name_align: 'left',
+  customer_phone_font: 'monospace',
+  customer_phone_font_size: 12,
+  customer_phone_bold: false,
+  customer_phone_italic: false,
+  customer_phone_align: 'left',
+  customer_address_font: 'monospace',
+  customer_address_font_size: 12,
+  customer_address_bold: false,
+  customer_address_italic: false,
+  customer_address_align: 'left',
+  // Payment preview: card | cash | not_paid_pickup | not_paid_delivery
   preview_payment_type: 'card',
   show_cash_amount_given: true,
   show_cash_change: true,
@@ -300,6 +339,100 @@ const DEFAULT_RECEIPT_TEMPLATE = {
   cash_change_italic: false,
   cash_change_align: 'center',
   cash_change_font_size: 11
+}
+
+// Preset styles - exercise all template parameters (date, barcode, footer, styling, etc.)
+const RECEIPT_PRESETS = {
+  modern: {
+    ...DEFAULT_RECEIPT_TEMPLATE,
+    font_family: 'monospace',
+    font_size: 11,
+    receipt_width: 80,
+    line_spacing: 1.3,
+    divider_style: 'dashed',
+    bold_item_names: true,
+    header_alignment: 'center',
+    footer_message: 'Thank you for your business!',
+    footer_message_font: 'monospace',
+    footer_message_font_size: 12,
+    footer_message_bold: false,
+    footer_message_align: 'center',
+    return_policy: 'Returns within 30 days with receipt',
+    return_policy_font: 'monospace',
+    return_policy_font_size: 10,
+    return_policy_align: 'center',
+    store_website: 'https://example.com',
+    store_website_font: 'monospace',
+    store_website_font_size: 10,
+    store_website_align: 'center',
+    store_email: 'hello@example.com',
+    store_email_font: 'monospace',
+    store_email_font_size: 10,
+    store_email_align: 'center',
+    show_signature: true,
+    date_display_mode: 'both',
+    show_barcode: true,
+    show_order_number_below_barcode: true,
+    barcode_number_font: 'monospace',
+    barcode_number_font_size: 10,
+    barcode_number_align: 'center',
+    show_item_descriptions: false,
+    show_item_skus: true,
+    tax_line_display: 'breakdown',
+    preview_payment_type: 'card',
+    preview_customer_order: true
+  },
+  classic: {
+    ...DEFAULT_RECEIPT_TEMPLATE,
+    font_family: 'Courier New',
+    font_size: 12,
+    receipt_width: 80,
+    line_spacing: 1.2,
+    divider_style: 'solid',
+    bold_item_names: false,
+    header_alignment: 'left',
+    footer_message: 'Thank you for your business.',
+    footer_message_font: 'Courier New',
+    footer_message_font_size: 11,
+    footer_message_align: 'left',
+    return_policy: '',
+    store_website: '',
+    store_email: '',
+    show_signature: true,
+    date_display_mode: 'date_only',
+    show_barcode: true,
+    show_order_number_below_barcode: false,
+    show_item_descriptions: false,
+    show_item_skus: true,
+    tax_line_display: 'single_line',
+    preview_payment_type: 'cash',
+    preview_customer_order: true
+  },
+  minimal: {
+    ...DEFAULT_RECEIPT_TEMPLATE,
+    font_family: 'monospace',
+    font_size: 10,
+    receipt_width: 58,
+    line_spacing: 1.1,
+    divider_style: 'none',
+    bold_item_names: false,
+    header_alignment: 'center',
+    footer_message: 'Thanks!',
+    footer_message_font: 'monospace',
+    footer_message_font_size: 9,
+    footer_message_align: 'center',
+    return_policy: '',
+    store_website: '',
+    store_email: '',
+    show_signature: false,
+    date_display_mode: 'time_only',
+    show_barcode: false,
+    show_item_descriptions: false,
+    show_item_skus: false,
+    tax_line_display: 'single_line',
+    preview_payment_type: 'card',
+    preview_customer_order: false
+  }
 }
 
 const SAMPLE_LINE_ITEMS = [
@@ -324,30 +457,28 @@ const CODE128_PATTERNS = {
   'START': '11010000100', 'STOP': '1100011101011'
 }
 
-function generateBarcodeSVG(text, width = 180, height = 40) {
+function generateBarcodeSVG(text, width = 180, height = 40, showNumberInSvg = true) {
   const orderNum = String(text).toUpperCase()
   let pattern = CODE128_PATTERNS['START']
-  
   for (const char of orderNum) {
     pattern += CODE128_PATTERNS[char] || CODE128_PATTERNS['0']
   }
   pattern += CODE128_PATTERNS['STOP']
-  
   const barWidth = width / pattern.length
   let bars = []
   let x = 0
-  
   for (let i = 0; i < pattern.length; i++) {
     if (pattern[i] === '1') {
       bars.push(`<rect x="${x.toFixed(2)}" y="0" width="${Math.max(barWidth, 1).toFixed(2)}" height="${height}" fill="#000"/>`)
     }
     x += barWidth
   }
-  
-  return `<svg width="${width}" height="${height + 14}" viewBox="0 0 ${width} ${height + 14}" xmlns="http://www.w3.org/2000/svg">
+  const svgHeight = showNumberInSvg ? height + 14 : height
+  const textEl = showNumberInSvg ? `<text x="${width / 2}" y="${height + 11}" text-anchor="middle" font-family="monospace" font-size="10" fill="#000">${orderNum}</text>` : ''
+  return `<svg width="${width}" height="${svgHeight}" viewBox="0 0 ${width} ${svgHeight}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="${width}" height="${height}" fill="#fff"/>
     ${bars.join('')}
-    <text x="${width / 2}" y="${height + 11}" text-anchor="middle" font-family="monospace" font-size="10" fill="#000">${orderNum}</text>
+    ${textEl}
   </svg>`
 }
 
@@ -364,6 +495,7 @@ function TextFormattingToolbar({
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 })
   const buttonRef = useRef(null)
   const fontOptions = [
+    { value: 'system-ui', label: 'System' },
     { value: 'monospace', label: 'Monospace' },
     { value: 'Courier New', label: 'Courier New' },
     { value: 'Consolas', label: 'Consolas' },
@@ -371,7 +503,7 @@ function TextFormattingToolbar({
     { value: 'Helvetica', label: 'Helvetica' },
     { value: 'Times New Roman', label: 'Times New Roman' }
   ]
-  const selectedFont = fontOptions.find(f => f.value === (font || 'monospace')) || fontOptions[0]
+  const selectedFont = fontOptions.find(f => f.value === (font || 'system-ui')) || fontOptions[0]
 
   useEffect(() => {
     if (fontDropdownOpen && buttonRef.current) {
@@ -717,7 +849,7 @@ function ReceiptPreview({ settings, id = 'receipt-preview-print', onSectionClick
         lineHeight: ls,
         background: '#fff',
         color: '#000',
-        padding: '12px',
+        padding: '12px 6px',
         boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
         borderRadius: '4px',
         border: '1px solid #e0e0e0'
@@ -748,6 +880,45 @@ function ReceiptPreview({ settings, id = 'receipt-preview-print', onSectionClick
         </div>
       </div>
       <div style={{ borderTop: divider, margin: '6px 0' }} />
+      {/* Customer & Order section (for pickup/delivery) - per-line styling */}
+      {(settings.preview_customer_order !== false) && (
+        <div 
+          onClick={() => onSectionClick && onSectionClick('customer_order')}
+          style={sectionStyle('customer_order')}
+        >
+          <div style={{ marginBottom: '6px' }}>
+            <div style={{
+              fontFamily: settings.order_type_font || settings.customer_order_font || 'monospace',
+              fontSize: `${settings.order_type_font_size ?? settings.customer_order_font_size ?? fs}px`,
+              fontWeight: (settings.order_type_bold ?? settings.customer_order_bold) ? 700 : 400,
+              fontStyle: (settings.order_type_italic ?? settings.customer_order_italic) ? 'italic' : 'normal',
+              textAlign: textAlign(settings.order_type_align ?? settings.customer_order_align ?? 'left')
+            }}>Order Type: Pickup</div>
+            <div style={{
+              fontFamily: settings.customer_name_font || settings.customer_order_font || 'monospace',
+              fontSize: `${settings.customer_name_font_size ?? settings.customer_order_font_size ?? fs}px`,
+              fontWeight: (settings.customer_name_bold ?? settings.customer_order_bold) ? 700 : 400,
+              fontStyle: (settings.customer_name_italic ?? settings.customer_order_italic) ? 'italic' : 'normal',
+              textAlign: textAlign(settings.customer_name_align ?? settings.customer_order_align ?? 'left')
+            }}>Customer: Jane Doe</div>
+            <div style={{
+              fontFamily: settings.customer_phone_font || settings.customer_order_font || 'monospace',
+              fontSize: `${settings.customer_phone_font_size ?? settings.customer_order_font_size ?? fs}px`,
+              fontWeight: (settings.customer_phone_bold ?? settings.customer_order_bold) ? 700 : 400,
+              fontStyle: (settings.customer_phone_italic ?? settings.customer_order_italic) ? 'italic' : 'normal',
+              textAlign: textAlign(settings.customer_phone_align ?? settings.customer_order_align ?? 'left')
+            }}>Phone: (555) 123-4567</div>
+            <div style={{
+              fontFamily: settings.customer_address_font || settings.customer_order_font || 'monospace',
+              fontSize: `${settings.customer_address_font_size ?? settings.customer_order_font_size ?? fs}px`,
+              fontWeight: (settings.customer_address_bold ?? settings.customer_order_bold) ? 700 : 400,
+              fontStyle: (settings.customer_address_italic ?? settings.customer_order_italic) ? 'italic' : 'normal',
+              textAlign: textAlign(settings.customer_address_align ?? settings.customer_order_align ?? 'left')
+            }}>Address: 123 Main St, City</div>
+          </div>
+          <div style={{ borderTop: divider, margin: '6px 0' }} />
+        </div>
+      )}
       {/* Body: 1. Line items (products & prices) */}
       <div 
         onClick={() => onSectionClick && onSectionClick('body_items')}
@@ -836,7 +1007,7 @@ function ReceiptPreview({ settings, id = 'receipt-preview-print', onSectionClick
               fontWeight: settings.payment_method_bold ? 700 : 400,
               fontStyle: settings.payment_method_italic ? 'italic' : 'normal',
               fontFamily: settings.payment_method_font || 'monospace'
-            }}>{settings.preview_payment_type === 'cash' ? 'Paid with Cash' : 'Paid by Card'}</div>
+            }}>{settings.preview_payment_type === 'not_paid_pickup' ? 'Not paid - Pay at pickup' : settings.preview_payment_type === 'not_paid_delivery' ? 'Not paid - Pay at delivery' : settings.preview_payment_type === 'cash' ? 'Paid with Cash' : settings.preview_payment_type === 'store_credit' ? 'Paid with Store Credit' : settings.preview_payment_type === 'check' ? 'Paid by Check' : settings.preview_payment_type === 'mobile' ? 'Paid by Mobile' : 'Paid by Card'}</div>
             {settings.preview_payment_type === 'cash' && settings.show_cash_amount_given && (
               <div style={{ 
                 textAlign: textAlign(settings.cash_amount_given_align || 'center'), 
@@ -866,19 +1037,42 @@ function ReceiptPreview({ settings, id = 'receipt-preview-print', onSectionClick
         onClick={() => onSectionClick && onSectionClick('body_barcode')}
         style={sectionStyle('body_barcode')}
       >
-        <div style={{ 
-          fontSize: `${settings.date_line_font_size || fs - 2}px`, 
-          textAlign: textAlign(settings.date_line_align || 'center'),
-          fontWeight: settings.date_line_bold ? 700 : 400,
-          fontStyle: settings.date_line_italic ? 'italic' : 'normal',
-          fontFamily: settings.date_line_font || 'monospace'
-        }}>{new Date().toLocaleString()}</div>
+        {(() => {
+          const mode = settings.date_display_mode || 'both'
+          const d = new Date()
+          let dateTimeText = ''
+          if (mode === 'date_only') dateTimeText = d.toLocaleDateString()
+          else if (mode === 'time_only') dateTimeText = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          else dateTimeText = d.toLocaleString()
+          if (dateTimeText) {
+            return (
+              <div style={{ 
+                fontSize: `${settings.date_line_font_size || fs - 2}px`, 
+                textAlign: textAlign(settings.date_line_align || 'center'),
+                fontWeight: settings.date_line_bold ? 700 : 400,
+                fontStyle: settings.date_line_italic ? 'italic' : 'normal',
+                fontFamily: settings.date_line_font || 'monospace'
+              }}>{dateTimeText}</div>
+            )
+          }
+          return null
+        })()}
         {settings.show_barcode !== false && (
           <div style={{ textAlign: 'center', marginTop: '8px' }}>
             <div 
               style={{ display: 'inline-block' }}
-              dangerouslySetInnerHTML={{ __html: generateBarcodeSVG('ORD-10042', 160, 35) }}
+              dangerouslySetInnerHTML={{ __html: generateBarcodeSVG('ORD-10042', 160, 35, false) }}
             />
+            {settings.show_order_number_below_barcode !== false && (
+              <div style={{ 
+                marginTop: '4px',
+                fontSize: `${settings.barcode_number_font_size || fs - 2}px`,
+                fontWeight: settings.barcode_number_bold ? 700 : 400,
+                fontStyle: settings.barcode_number_italic ? 'italic' : 'normal',
+                fontFamily: settings.barcode_number_font || 'monospace',
+                textAlign: textAlign(settings.barcode_number_align || 'center')
+              }}>ORD-10042</div>
+            )}
           </div>
         )}
       </div>
@@ -887,10 +1081,47 @@ function ReceiptPreview({ settings, id = 'receipt-preview-print', onSectionClick
         onClick={() => onSectionClick && onSectionClick('footer')}
         style={sectionStyle('footer')}
       >
-        <div style={{ textAlign: textAlign(settings.footer_alignment), fontSize: `${fs - 1}px`, whiteSpace: 'pre-wrap' }}>
-          {settings.footer_message && <div style={{ marginBottom: '4px' }}>{settings.footer_message}</div>}
-          {settings.return_policy && <div style={{ marginBottom: '4px' }}>{settings.return_policy}</div>}
-          {(settings.store_website || settings.store_email) && <div>{[settings.store_website, settings.store_email].filter(Boolean).join(' · ')}</div>}
+        <div style={{ whiteSpace: 'pre-wrap' }}>
+          {settings.footer_message && (
+            <div style={{ 
+              marginBottom: '4px',
+              fontSize: `${settings.footer_message_font_size || fs - 1}px`,
+              fontWeight: settings.footer_message_bold ? 700 : 400,
+              fontStyle: settings.footer_message_italic ? 'italic' : 'normal',
+              fontFamily: settings.footer_message_font || 'monospace',
+              textAlign: textAlign(settings.footer_message_align || 'center')
+            }}>{settings.footer_message}</div>
+          )}
+          {settings.return_policy && (
+            <div style={{ 
+              marginBottom: '4px',
+              fontSize: `${settings.return_policy_font_size || fs - 1}px`,
+              fontWeight: settings.return_policy_bold ? 700 : 400,
+              fontStyle: settings.return_policy_italic ? 'italic' : 'normal',
+              fontFamily: settings.return_policy_font || 'monospace',
+              textAlign: textAlign(settings.return_policy_align || 'center')
+            }}>{settings.return_policy}</div>
+          )}
+          {settings.store_website && (
+            <div style={{ 
+              marginBottom: '4px',
+              fontSize: `${settings.store_website_font_size || fs - 1}px`,
+              fontWeight: settings.store_website_bold ? 700 : 400,
+              fontStyle: settings.store_website_italic ? 'italic' : 'normal',
+              fontFamily: settings.store_website_font || 'monospace',
+              textAlign: textAlign(settings.store_website_align || 'center')
+            }}>{settings.store_website}</div>
+          )}
+          {settings.store_email && (
+            <div style={{ 
+              marginBottom: '4px',
+              fontSize: `${settings.store_email_font_size || fs - 1}px`,
+              fontWeight: settings.store_email_bold ? 700 : 400,
+              fontStyle: settings.store_email_italic ? 'italic' : 'normal',
+              fontFamily: settings.store_email_font || 'monospace',
+              textAlign: textAlign(settings.store_email_align || 'center')
+            }}>{settings.store_email}</div>
+          )}
         </div>
         {settings.show_signature && (
           <div style={{ marginTop: '12px', paddingTop: '8px' }}>
@@ -927,13 +1158,13 @@ function ReceiptPreview({ settings, id = 'receipt-preview-print', onSectionClick
   )
 }
 
-const SETTINGS_TAB_IDS = ['location', 'pos', 'cash', 'sms', 'rewards']
+const SETTINGS_TAB_IDS = ['location', 'pos', 'cash', 'notifications', 'rewards']
 
 function Settings() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { themeMode, themeColor } = useTheme()
   const [receiptSettings, setReceiptSettings] = useState(() => ({ ...DEFAULT_RECEIPT_TEMPLATE }))
-  const [activeTab, setActiveTab] = useState('location') // 'location', 'pos', 'cash', 'sms', or 'rewards'
+  const [activeTab, setActiveTab] = useState('location') // 'location', 'pos', 'cash', 'notifications', or 'rewards'
 
   // Open tab from URL ?tab=cash (e.g. from POS "Open Register" toast)
   useEffect(() => {
@@ -944,16 +1175,82 @@ function Settings() {
   }, [searchParams])
   const [posSettings, setPosSettings] = useState({
     num_registers: 1,
-    register_type: 'one_screen'
+    register_type: 'one_screen',
+    return_transaction_fee_take_loss: false,
+    return_tip_refund: false,
+    require_signature_for_return: false,
+    transaction_fee_mode: 'additional',
+    transaction_fee_charge_cash: false
   })
   const [deliveryPayOnDeliveryCashOnly, setDeliveryPayOnDeliveryCashOnly] = useState(false)
-  const [receiptOptionsOffered, setReceiptOptionsOffered] = useState({
-    print: true,
-    email: true,
-    no_receipt: true
-  })
+  const [allowDelivery, setAllowDelivery] = useState(true)
+  const [allowPickup, setAllowPickup] = useState(true)
+  const [allowPayAtPickup, setAllowPayAtPickup] = useState(false)
+  const [deliveryFeeEnabled, setDeliveryFeeEnabled] = useState(false)
+  const [allowScheduledPickup, setAllowScheduledPickup] = useState(false)
+  const [allowScheduledDelivery, setAllowScheduledDelivery] = useState(false)
   const [activeReceiptSection, setActiveReceiptSection] = useState(null) // 'header', 'body_items', 'body_totals', 'body_barcode', 'footer', 'styling', null
   const [receiptEditModalOpen, setReceiptEditModalOpen] = useState(false)
+  const [receiptUndoStack, setReceiptUndoStack] = useState([])
+  const [receiptRedoStack, setReceiptRedoStack] = useState([])
+  const setReceiptSettingsWithUndo = (updater) => {
+    setReceiptSettings(prev => {
+      setReceiptUndoStack(u => [...u, JSON.parse(JSON.stringify(prev))])
+      setReceiptRedoStack([])
+      return typeof updater === 'function' ? updater(prev) : updater
+    })
+  }
+  const handleReceiptUndo = () => {
+    if (receiptUndoStack.length === 0) return
+    const toRestore = receiptUndoStack[receiptUndoStack.length - 1]
+    setReceiptSettings(prev => {
+      setReceiptRedoStack(r => [...r, JSON.parse(JSON.stringify(prev))])
+      return JSON.parse(JSON.stringify(toRestore))
+    })
+    setReceiptUndoStack(u => u.slice(0, -1))
+  }
+  const handleReceiptRedo = () => {
+    if (receiptRedoStack.length === 0) return
+    const toRestore = receiptRedoStack[receiptRedoStack.length - 1]
+    setReceiptSettings(prev => {
+      setReceiptUndoStack(u => [...u, JSON.parse(JSON.stringify(prev))])
+      return JSON.parse(JSON.stringify(toRestore))
+    })
+    setReceiptRedoStack(r => r.slice(0, -1))
+  }
+  const [receiptTemplateDropdownOpen, setReceiptTemplateDropdownOpen] = useState(false)
+  const [receiptShowNewTemplateInput, setReceiptShowNewTemplateInput] = useState(false)
+  const [receiptNewTemplateName, setReceiptNewTemplateName] = useState('')
+  const receiptTemplateDropdownRef = useRef(null)
+  const receiptNewTemplateInputRef = useRef(null)
+  useEffect(() => {
+    if (receiptEditModalOpen) {
+      setReceiptUndoStack([])
+      setReceiptRedoStack([])
+      loadReceiptTemplates()
+    }
+  }, [receiptEditModalOpen])
+  useEffect(() => {
+    if (receiptShowNewTemplateInput && receiptNewTemplateInputRef.current) {
+      receiptNewTemplateInputRef.current.focus()
+    }
+  }, [receiptShowNewTemplateInput])
+  useEffect(() => {
+    if (!receiptTemplateDropdownOpen) {
+      setReceiptShowNewTemplateInput(false)
+      setReceiptNewTemplateName('')
+    }
+  }, [receiptTemplateDropdownOpen])
+  useEffect(() => {
+    if (!receiptTemplateDropdownOpen) return
+    const handleClickOutside = (e) => {
+      if (receiptTemplateDropdownRef.current && !receiptTemplateDropdownRef.current.contains(e.target)) {
+        setReceiptTemplateDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [receiptTemplateDropdownOpen])
   const [savedTemplates, setSavedTemplates] = useState([])
   const [storeLocationSettings, setStoreLocationSettings] = useState({
     store_name: 'Store',
@@ -982,11 +1279,17 @@ function Settings() {
     }
   })
   const [editingStoreHours, setEditingStoreHours] = useState(false)
+  const storeLocationLoadedRef = useRef(false)
+  const storeLocationSaveTimeoutRef = useRef(null)
+  const previousActiveTabRef = useRef('location')
   const [displaySettings, setDisplaySettings] = useState({
     tip_enabled: false,
     tip_after_payment: false,
-    tip_suggestions: [15, 18, 20, 25],
-    require_signature: 'not_required'
+    tip_suggestions: [15, 18, 20],
+    require_signature: 'not_required',
+    tip_custom_in_checkout: false,
+    tip_allocation: 'logged_in_employee',
+    tip_refund_from: 'store'
   })
   const CHECKOUT_BUTTON_STYLES = [
     { value: 'default', label: 'Default (solid)' },
@@ -999,40 +1302,14 @@ function Settings() {
     { value: 'gradient', label: 'Gradient (glossy)' },
     { value: 'gold', label: 'Gold (amber)' }
   ]
-  const checkoutUiScreenDefaults = () => ({
-    backgroundColor: '#e8f0fe',
-    buttonColor: '#4a90e2',
-    textColor: '#1a1a1a',
-    button_style: 'default',
-    title_font: 'system-ui',
-    title_font_size: 36,
-    title_bold: false,
-    title_italic: false,
-    title_align: 'center',
-    body_font: 'system-ui',
-    body_font_size: 24,
-    body_bold: false,
-    body_italic: false,
-    body_align: 'left',
-    button_font: 'system-ui',
-    button_font_size: 36,
-    button_bold: true,
-    button_italic: false,
-    signature_background: '#ffffff',
-    signature_border_width: 2,
-    signature_border_color: 'rgba(0,0,0,0.2)',
-    signature_ink_color: '#000000'
-  })
-  const DEFAULT_CHECKOUT_UI = {
-    review_order: checkoutUiScreenDefaults(),
-    cash_confirmation: { ...checkoutUiScreenDefaults(), title_font_size: 40 },
-    receipt: checkoutUiScreenDefaults()
-  }
-  const [checkoutUiSettings, setCheckoutUiSettings] = useState(() => ({
-    review_order: { ...DEFAULT_CHECKOUT_UI.review_order },
-    cash_confirmation: { ...DEFAULT_CHECKOUT_UI.cash_confirmation },
-    receipt: { ...DEFAULT_CHECKOUT_UI.receipt }
-  }))
+  // Checkout display dimensions (matches customer display: 800px wide, 600px tall typical tablet)
+  const CHECKOUT_PREVIEW_WIDTH = 800
+  const CHECKOUT_PREVIEW_HEIGHT = 600
+  const CHECKOUT_PREVIEW_CONTAINER_WIDTH = 420
+  const [checkoutPreviewScale, setCheckoutPreviewScale] = useState(() => CHECKOUT_PREVIEW_CONTAINER_WIDTH / CHECKOUT_PREVIEW_WIDTH)
+  const checkoutPreviewContainerRef = useRef(null)
+
+  const [checkoutUiSettings, setCheckoutUiSettings] = useState(() => getDefaultCheckoutUi())
   const getCheckoutTextStyle = (s, type) => {
     const t = type === 'title' ? 'title' : type === 'button' ? 'button' : 'body'
     const font = s[`${t}_font`] ?? s.fontFamily ?? 'system-ui'
@@ -1108,6 +1385,28 @@ function Settings() {
       setCheckoutUiRedoStack([])
     }
   }, [checkoutUiEditModalOpen])
+  useLayoutEffect(() => {
+    if (!checkoutUiEditModalOpen && checkoutPreviewContainerRef.current) {
+      const el = checkoutPreviewContainerRef.current
+      const updateScale = () => {
+        if (el && el.offsetWidth > 0) {
+          setCheckoutPreviewScale(el.offsetWidth / CHECKOUT_PREVIEW_WIDTH)
+        }
+      }
+      updateScale()
+      const ro = new ResizeObserver(updateScale)
+      ro.observe(el)
+      const io = new IntersectionObserver(
+        () => updateScale(),
+        { threshold: 0, rootMargin: '0px' }
+      )
+      io.observe(el)
+      return () => {
+        ro.disconnect()
+        io.disconnect()
+      }
+    }
+  }, [checkoutUiEditModalOpen, checkoutUiTab])
   const [rewardsSettings, setRewardsSettings] = useState({
     enabled: false,
     require_email: false,
@@ -1131,26 +1430,6 @@ function Settings() {
   })
   const [showCreateCampaignModal, setShowCreateCampaignModal] = useState(false)
   const [newCampaign, setNewCampaign] = useState({ name: '', type: 'promo_discount', discount_value: '', product_id: null, buy_qty: 1, get_qty: 1 })
-  const [smsSettings, setSmsSettings] = useState({
-    sms_provider: 'email',
-    smtp_server: 'smtp.gmail.com',
-    smtp_port: 587,
-    smtp_user: '',
-    smtp_password: '',
-    smtp_use_tls: 1,
-    aws_access_key_id: '',
-    aws_secret_access_key: '',
-    aws_region: 'us-east-1',
-    business_name: '',
-    auto_send_rewards_earned: 1,
-    auto_send_rewards_redeemed: 1
-  })
-  const [smsMessages, setSmsMessages] = useState([])
-  const [smsTemplates, setSmsTemplates] = useState([])
-  const [smsStores, setSmsStores] = useState([])
-  const [selectedSmsStore, setSelectedSmsStore] = useState(1)
-  const [showSendSmsModal, setShowSendSmsModal] = useState(false)
-  const [sendSmsForm, setSendSmsForm] = useState({ phone_number: '', message_text: '', carrier_preference: '' })
   const [registers, setRegisters] = useState(() => {
     // Load from localStorage or default to one register
     const saved = localStorage.getItem('cash_registers')
@@ -1279,12 +1558,44 @@ function Settings() {
     try {
       const token = localStorage.getItem('sessionToken')
       const res = await fetch('/api/accounting/settings', { headers: token ? { 'X-Session-Token': token } : {} })
+      if (!res.ok) {
+        if (res.status === 403) return
+        return
+      }
       const json = await res.json()
-      if (json.success && json.data && 'delivery_pay_on_delivery_cash_only' in json.data) {
-        setDeliveryPayOnDeliveryCashOnly(!!json.data.delivery_pay_on_delivery_cash_only)
+      if (json.success && json.data) {
+        const d = json.data
+        if ('delivery_pay_on_delivery_cash_only' in d) setDeliveryPayOnDeliveryCashOnly(!!d.delivery_pay_on_delivery_cash_only)
+        if ('allow_delivery' in d) setAllowDelivery(!!d.allow_delivery)
+        if ('allow_pickup' in d) setAllowPickup(!!d.allow_pickup)
+        if ('allow_pay_at_pickup' in d) setAllowPayAtPickup(!!d.allow_pay_at_pickup)
+        if ('delivery_fee_enabled' in d) setDeliveryFeeEnabled(!!d.delivery_fee_enabled)
+        if ('allow_scheduled_pickup' in d) setAllowScheduledPickup(!!d.allow_scheduled_pickup)
+        if ('allow_scheduled_delivery' in d) setAllowScheduledDelivery(!!d.allow_scheduled_delivery)
       }
     } catch (e) {
       console.warn('Could not load establishment settings:', e)
+    }
+  }
+  const saveOrderDeliverySetting = async (key, value) => {
+    try {
+      const token = localStorage.getItem('sessionToken')
+      const res = await fetch('/api/accounting/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Session-Token': token } : {}) },
+        body: JSON.stringify({ [key]: value })
+      })
+      const json = await res.json()
+      if (json.success) {
+        setMessage({ type: 'success', text: 'Setting saved.' })
+        return true
+      } else {
+        setMessage({ type: 'error', text: json.message || 'Failed to save' })
+        return false
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to save setting' })
+      return false
     }
   }
   const saveDeliveryPayOnDeliveryCashOnly = async (value) => {
@@ -1318,8 +1629,6 @@ function Settings() {
           loadRewardsSettings(),
           loadPosSettings(),
           loadEstablishmentSettings(),
-          loadSmsSettings(),
-          loadSmsStores(),
           loadCashSettings(),
           loadDailyCounts()
         ])
@@ -1331,16 +1640,11 @@ function Settings() {
   }, [])
 
   useEffect(() => {
-    if (activeTab === 'sms') {
-      loadSmsSettings()
-      loadSmsMessages()
-      loadSmsTemplates()
-    }
     if (activeTab === 'cash') {
       loadRegisterSessions()
       loadRegisterEvents()
     }
-  }, [activeTab, selectedSmsStore, cashSettings.register_id])
+  }, [activeTab, cashSettings.register_id])
   
   // Ensure selected register_id exists in registers list
   useEffect(() => {
@@ -1355,9 +1659,17 @@ function Settings() {
       const data = await response.json()
       if (data.success && data.settings) {
         const s = data.settings
+        const templateStyles = s.template_styles && typeof s.template_styles === 'object' ? s.template_styles : {}
+        const preset = s.template_preset ?? templateStyles.template_preset ?? 'custom'
+        // If template_styles is empty but preset is modern/classic/minimal, apply preset styling so preview matches dropdown
+        const hasSavedStyles = Object.keys(templateStyles).length > 5
+        const baseStyles = (preset && RECEIPT_PRESETS[preset] && !hasSavedStyles)
+          ? { ...RECEIPT_PRESETS[preset] }
+          : { ...DEFAULT_RECEIPT_TEMPLATE, ...templateStyles }
         setReceiptSettings({
-          ...DEFAULT_RECEIPT_TEMPLATE,
+          ...baseStyles,
           receipt_type: s.receipt_type || 'traditional',
+          template_preset: preset,
           store_name: s.store_name ?? 'Store',
           store_address: s.store_address ?? '',
           store_city: s.store_city ?? '',
@@ -1390,6 +1702,23 @@ function Settings() {
     }
   }
 
+  const clearReceiptTemplates = async () => {
+    if (!window.confirm('Clear all saved receipt templates? This cannot be undone.')) return
+    try {
+      const response = await fetch('/api/receipt-templates/clear', { method: 'POST' })
+      const data = await response.json()
+      if (data.success) {
+        await loadReceiptTemplates()
+        setReceiptSettings(prev => ({ ...prev, template_preset: prev.template_preset?.startsWith('template_') ? 'modern' : prev.template_preset }))
+        setMessage({ type: 'success', text: `Cleared ${data.deleted || 0} template(s).` })
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to clear templates' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: e.message || 'Failed to clear templates' })
+    }
+  }
+
   const createReceiptTemplate = async () => {
     const name = window.prompt('Name your template')
     if (!name || !name.trim()) return
@@ -1405,7 +1734,6 @@ function Settings() {
         setReceiptSettings(prev => ({ ...prev, template_preset: `template_${data.template.id}` }))
         setMessage({ type: 'success', text: `Template "${data.template.name}" saved.` })
         setTimeout(() => setMessage(null), 2500)
-        setReceiptEditModalOpen(false)
       } else {
         setMessage({ type: 'error', text: data.message || 'Failed to save template' })
       }
@@ -1421,66 +1749,66 @@ function Settings() {
     setTimeout(() => setMessage(null), 2500)
   }
 
-  const printTestReceipt = () => {
-    const el = document.getElementById('receipt-preview-print')
-    if (!el) return
-    const win = window.open('', '_blank')
-    win.document.write(`
-      <!DOCTYPE html><html><head><title>Test Receipt</title>
-      <style>
-        body { font-family: 'Courier New', monospace; font-size: 12px; padding: 16px; max-width: 80mm; margin: 0 auto; }
-        .line { border-bottom: 1px dashed #000; margin: 6px 0; }
-      </style></head><body>${el.innerHTML}</body></html>
-    `)
-    win.document.close()
-    win.print()
-    win.close()
+  const saveReceiptSettingsOnly = async (settings) => {
+    try {
+      const res = await fetch('/api/receipt-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...settings,
+          receipt_type: settings.receipt_type || 'traditional',
+          return_policy: settings.return_policy || '',
+          show_tax_breakdown: settings.show_tax_breakdown ? 1 : 0,
+          show_payment_method: settings.show_payment_method ? 1 : 0,
+          show_signature: settings.show_signature ? 1 : 0
+        })
+      })
+      const data = await res.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: 'Receipt template saved.' })
+        setTimeout(() => setMessage(null), 2000)
+      }
+    } catch (e) {
+      console.error('Error saving receipt settings:', e)
+    }
   }
 
-  const applyTemplatePreset = (preset) => {
-    const presets = {
-      modern: {
-        ...DEFAULT_RECEIPT_TEMPLATE,
-        font_family: 'monospace',
-        font_size: 11,
-        receipt_width: 80,
-        divider_style: 'dashed',
-        bold_item_names: true,
-        header_alignment: 'center',
-        footer_alignment: 'center',
-        show_item_descriptions: false,
-        show_item_skus: true,
-        tax_line_display: 'breakdown'
-      },
-      classic: {
-        ...DEFAULT_RECEIPT_TEMPLATE,
-        font_family: 'Courier New',
-        font_size: 12,
-        receipt_width: 80,
-        divider_style: 'solid',
-        bold_item_names: false,
-        header_alignment: 'left',
-        footer_alignment: 'left',
-        show_item_descriptions: false,
-        show_item_skus: true,
-        tax_line_display: 'single_line'
-      },
-      minimal: {
-        ...DEFAULT_RECEIPT_TEMPLATE,
-        font_family: 'monospace',
-        font_size: 10,
-        receipt_width: 58,
-        divider_style: 'none',
-        bold_item_names: false,
-        header_alignment: 'center',
-        footer_alignment: 'center',
-        show_item_descriptions: false,
-        show_item_skus: false,
-        tax_line_display: 'single_line'
+  const printTestReceipt = async () => {
+    try {
+      const response = await fetch('/api/receipt/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: receiptSettings })
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        setMessage?.({ type: 'error', text: err.message || 'Failed to generate receipt' })
+        return
       }
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'receipt_test.pdf'
+      a.style.display = 'none'
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+      }, 100)
+      setMessage?.({ type: 'success', text: 'Receipt downloaded.' })
+      setTimeout(() => setMessage?.(null), 2000)
+    } catch (e) {
+      setMessage?.({ type: 'error', text: e.message || 'Failed to generate receipt' })
     }
-    const next = presets[preset] || DEFAULT_RECEIPT_TEMPLATE
-    setReceiptSettings(prev => ({ ...next, template_preset: preset, store_name: prev.store_name, store_address: prev.store_address, store_phone: prev.store_phone, footer_message: prev.footer_message, return_policy: prev.return_policy, store_email: prev.store_email, store_website: prev.store_website }))
+  }
+
+  const applyTemplatePreset = async (preset) => {
+    const base = RECEIPT_PRESETS[preset] || DEFAULT_RECEIPT_TEMPLATE
+    const next = { ...base, template_preset: preset, store_name: receiptSettings.store_name, store_address: receiptSettings.store_address, store_phone: receiptSettings.store_phone, footer_message: receiptSettings.footer_message, return_policy: receiptSettings.return_policy, store_email: receiptSettings.store_email, store_website: receiptSettings.store_website }
+    setReceiptSettings(next)
+    await saveReceiptSettingsOnly(next)
   }
 
   const loadStoreLocationSettings = async () => {
@@ -1522,6 +1850,19 @@ function Settings() {
           require_location: data.settings.require_location === 1 || data.settings.require_location === true,
           store_hours: data.settings.store_hours ? { ...defaultStoreHours, ...data.settings.store_hours } : defaultStoreHours
         })
+        storeLocationLoadedRef.current = true
+        // Keep receipt state in sync with store info so Receipt Template shows it
+        setReceiptSettings(prev => ({
+          ...prev,
+          store_name: data.settings.store_name ?? prev.store_name,
+          store_address: data.settings.address ?? prev.store_address,
+          store_city: data.settings.city ?? prev.store_city,
+          store_state: data.settings.state ?? prev.store_state,
+          store_zip: data.settings.zip ?? prev.store_zip,
+          store_phone: data.settings.store_phone ?? prev.store_phone,
+          store_email: data.settings.store_email ?? prev.store_email,
+          store_website: data.settings.store_website ?? prev.store_website
+        }))
       }
     } catch (error) {
       console.error('Error loading store location settings:', error)
@@ -1537,16 +1878,13 @@ function Settings() {
           ...prev,
           tip_enabled: data.data.tip_enabled === 1 || data.data.tip_enabled === true,
           tip_after_payment: data.data.tip_after_payment === 1 || data.data.tip_after_payment === true,
-          tip_suggestions: data.data.tip_suggestions || [15, 18, 20, 25]
+          tip_suggestions: (data.data.tip_suggestions || [15, 18, 20]).slice(0, 3),
+          require_signature: data.data.signature_required === 1 ? 'required' : 'not_required',
+          tip_custom_in_checkout: data.data.tip_custom_in_checkout === 1 || data.data.tip_custom_in_checkout === true,
+          tip_allocation: data.data.tip_allocation === 'split_all' ? 'split_all' : 'logged_in_employee',
+          tip_refund_from: data.data.tip_refund_from === 'employee' ? 'employee' : 'store'
         }))
-        if (data.data.checkout_ui && typeof data.data.checkout_ui === 'object') {
-          const ui = data.data.checkout_ui
-          setCheckoutUiSettings(prev => ({
-            review_order: { ...checkoutUiScreenDefaults(), ...(prev.review_order || {}), ...(ui.review_order || {}) },
-            cash_confirmation: { ...checkoutUiScreenDefaults(), ...(prev.cash_confirmation || {}), ...(ui.cash_confirmation || {}) },
-            receipt: { ...checkoutUiScreenDefaults(), ...(prev.receipt || {}), ...(ui.receipt || {}) }
-          }))
-        }
+        setCheckoutUiSettings(mergeCheckoutUiFromApi(data.data.checkout_ui))
       }
     } catch (error) {
       console.error('Error loading display settings:', error)
@@ -1585,201 +1923,19 @@ function Settings() {
       const response = await fetch('/api/pos-settings')
       const data = await response.json()
       if (data.success && data.settings) {
+        const mode = data.settings.transaction_fee_mode || 'additional'
         setPosSettings({
           num_registers: data.settings.num_registers || 1,
-          register_type: data.settings.register_type || 'one_screen'
+          register_type: data.settings.register_type || 'one_screen',
+          return_transaction_fee_take_loss: !!data.settings.return_transaction_fee_take_loss,
+          return_tip_refund: !!data.settings.return_tip_refund,
+          require_signature_for_return: !!data.settings.require_signature_for_return,
+          transaction_fee_mode: ['additional', 'included', 'none'].includes(mode) ? mode : 'additional',
+          transaction_fee_charge_cash: !!data.settings.transaction_fee_charge_cash
         })
       }
     } catch (error) {
       console.error('Error loading POS settings:', error)
-    }
-  }
-
-  const loadSmsSettings = async () => {
-    try {
-      const response = await fetch(`/api/sms/settings/${selectedSmsStore}`)
-      if (!response.ok) {
-        console.warn('SMS settings not available:', response.status)
-        // Set default values if API fails
-        setSmsSettings({
-          sms_provider: 'email',
-          smtp_server: 'smtp.gmail.com',
-          smtp_port: 587,
-          smtp_user: '',
-          smtp_password: '',
-          smtp_use_tls: 1,
-          aws_access_key_id: '',
-          aws_secret_access_key: '',
-          aws_region: 'us-east-1',
-          business_name: '',
-          auto_send_rewards_earned: 1,
-          auto_send_rewards_redeemed: 1
-        })
-        return
-      }
-      const data = await response.json()
-      setSmsSettings({
-        sms_provider: data.sms_provider || 'email',
-        smtp_server: data.smtp_server || 'smtp.gmail.com',
-        smtp_port: data.smtp_port || 587,
-        smtp_user: data.smtp_user || '',
-        smtp_password: data.smtp_password === '***' ? '' : (data.smtp_password || ''),
-        smtp_use_tls: data.smtp_use_tls !== undefined ? data.smtp_use_tls : 1,
-        aws_access_key_id: data.aws_access_key_id || '',
-        aws_secret_access_key: data.aws_secret_access_key === '***' ? '' : (data.aws_secret_access_key || ''),
-        aws_region: data.aws_region || 'us-east-1',
-        business_name: data.business_name || '',
-        auto_send_rewards_earned: data.auto_send_rewards_earned !== undefined ? data.auto_send_rewards_earned : 1,
-        auto_send_rewards_redeemed: data.auto_send_rewards_redeemed !== undefined ? data.auto_send_rewards_redeemed : 1
-      })
-    } catch (error) {
-      console.error('Error loading SMS settings:', error)
-      // Set default values on error
-      setSmsSettings({
-        sms_provider: 'email',
-        smtp_server: 'smtp.gmail.com',
-        smtp_port: 587,
-        smtp_user: '',
-        smtp_password: '',
-        smtp_use_tls: 1,
-        aws_access_key_id: '',
-        aws_secret_access_key: '',
-        aws_region: 'us-east-1',
-        business_name: '',
-        auto_send_rewards_earned: 1,
-        auto_send_rewards_redeemed: 1
-      })
-    }
-  }
-
-  const loadSmsStores = async () => {
-    try {
-      const response = await fetch('/api/sms/stores')
-      if (!response.ok) {
-        console.warn('SMS stores not available:', response.status)
-        // Set default store if API fails
-        setSmsStores([{ store_id: 1, store_name: 'Default Store' }])
-        setSelectedSmsStore(1)
-        return
-      }
-      const data = await response.json()
-      if (Array.isArray(data) && data.length > 0) {
-        setSmsStores(data)
-        setSelectedSmsStore(data[0].store_id)
-      } else {
-        // Set default store if no stores returned
-        setSmsStores([{ store_id: 1, store_name: 'Default Store' }])
-        setSelectedSmsStore(1)
-      }
-    } catch (error) {
-      console.error('Error loading SMS stores:', error)
-      // Set default store on error
-      setSmsStores([{ store_id: 1, store_name: 'Default Store' }])
-      setSelectedSmsStore(1)
-    }
-  }
-
-  const loadSmsMessages = async () => {
-    try {
-      const response = await fetch(`/api/sms/messages?store_id=${selectedSmsStore}&limit=50`)
-      const data = await response.json()
-      if (Array.isArray(data)) {
-        setSmsMessages(data)
-      }
-    } catch (error) {
-      console.error('Error loading SMS messages:', error)
-    }
-  }
-
-  const loadSmsTemplates = async () => {
-    try {
-      const response = await fetch(`/api/sms/templates?store_id=${selectedSmsStore}`)
-      const data = await response.json()
-      if (Array.isArray(data)) {
-        setSmsTemplates(data)
-      }
-    } catch (error) {
-      console.error('Error loading SMS templates:', error)
-    }
-  }
-
-  const saveSmsSettings = async () => {
-    setSaving(true)
-    setMessage(null)
-    try {
-      const sessionToken = localStorage.getItem('sessionToken')
-      const response = await fetch(`/api/sms/settings/${selectedSmsStore}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Session-Token': sessionToken
-        },
-        body: JSON.stringify({
-          ...smsSettings,
-          session_token: sessionToken
-        })
-      })
-
-      const data = await response.json()
-      if (data.success) {
-        setMessage({ type: 'success', text: 'SMS settings saved successfully!' })
-        setTimeout(() => setMessage(null), 3000)
-        loadSmsSettings()
-      } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to save SMS settings' })
-      }
-    } catch (error) {
-      console.error('Error saving SMS settings:', error)
-      setMessage({ type: 'error', text: 'Failed to save SMS settings' })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleSendSms = async (e) => {
-    e.preventDefault()
-    setSaving(true)
-    setMessage(null)
-    try {
-      // Normalize phone: digits only; US 1+10 -> 10 digits
-      let digits = (sendSmsForm.phone_number || '').replace(/\D/g, '')
-      if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1)
-      if (digits.length !== 10) {
-        setMessage({ type: 'error', text: 'Use a 10-digit US number (e.g. 5551234567). Got ' + (digits.length || 0) + ' digits.' })
-        setSaving(false)
-        return
-      }
-      const sessionToken = localStorage.getItem('sessionToken')
-      const response = await fetch('/api/sms/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Session-Token': sessionToken
-        },
-        body: JSON.stringify({
-          phone_number: digits,
-          message_text: sendSmsForm.message_text || '',
-          store_id: selectedSmsStore,
-          session_token: sessionToken,
-          carrier_preference: sendSmsForm.carrier_preference || undefined
-        })
-      })
-
-      const data = await response.json()
-      if (data.success) {
-        const carrierNote = data.carrier_tried ? ` (tried ${data.carrier_tried} first).` : ''
-        const hint = data.gateway_used ? ` If you didn't receive it, your carrier may differ${carrierNote}` : ''
-        setMessage({ type: 'success', text: `SMS sent to ${data.phone_cleaned || digits}${hint}` })
-        setShowSendSmsModal(false)
-        setSendSmsForm({ phone_number: '', message_text: '', carrier_preference: '' })
-        loadSmsMessages()
-      } else {
-        setMessage({ type: 'error', text: data.message || data.error || 'Failed to send SMS' })
-      }
-    } catch (error) {
-      setMessage({ type: 'error', text: 'Error sending SMS: ' + error.message })
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -2292,7 +2448,12 @@ function Settings() {
         },
         body: JSON.stringify({
           num_registers: parseInt(posSettings.num_registers) || 1,
-          register_type: posSettings.register_type || 'one_screen'
+          register_type: posSettings.register_type || 'one_screen',
+          return_transaction_fee_take_loss: !!posSettings.return_transaction_fee_take_loss,
+          return_tip_refund: !!posSettings.return_tip_refund,
+          require_signature_for_return: !!posSettings.require_signature_for_return,
+          transaction_fee_mode: posSettings.transaction_fee_mode || 'additional',
+          transaction_fee_charge_cash: !!posSettings.transaction_fee_charge_cash
         })
       })
 
@@ -2310,7 +2471,11 @@ function Settings() {
           tip_enabled: displaySettings.tip_enabled ? 1 : 0,
           tip_after_payment: displaySettings.tip_after_payment ? 1 : 0,
           tip_suggestions: displaySettings.tip_suggestions,
-          checkout_ui: checkoutUiSettings
+          signature_required: displaySettings.require_signature === 'required' ? 1 : 0,
+          checkout_ui: checkoutUiSettings,
+          tip_custom_in_checkout: displaySettings.tip_custom_in_checkout,
+          tip_allocation: displaySettings.tip_allocation,
+          tip_refund_from: displaySettings.tip_refund_from
         })
       })
 
@@ -2362,7 +2527,11 @@ function Settings() {
         body: JSON.stringify({
           tip_enabled: displaySettings.tip_enabled ? 1 : 0,
           tip_after_payment: displaySettings.tip_after_payment ? 1 : 0,
-          tip_suggestions: displaySettings.tip_suggestions
+          tip_suggestions: displaySettings.tip_suggestions,
+          signature_required: displaySettings.require_signature === 'required' ? 1 : 0,
+          tip_custom_in_checkout: displaySettings.tip_custom_in_checkout,
+          tip_allocation: displaySettings.tip_allocation,
+          tip_refund_from: displaySettings.tip_refund_from
         })
       })
 
@@ -2381,9 +2550,11 @@ function Settings() {
     }
   }
 
-  const saveStoreLocationSettings = async () => {
-    setSaving(true)
-    setMessage(null)
+  const saveStoreLocationSettings = async (isAutoSave = false) => {
+    if (!isAutoSave) {
+      setSaving(true)
+      setMessage(null)
+    }
     try {
       const token = localStorage.getItem('sessionToken')
       const response = await fetch('/api/store-location-settings', {
@@ -2401,18 +2572,71 @@ function Settings() {
 
       const data = await response.json()
       if (data.success) {
-        setMessage({ type: 'success', text: 'Store location settings saved successfully!' })
-        setTimeout(() => setMessage(null), 3000)
+        setReceiptSettings(prev => ({
+          ...prev,
+          store_name: storeLocationSettings.store_name ?? prev.store_name,
+          store_address: storeLocationSettings.address ?? prev.store_address,
+          store_city: storeLocationSettings.city ?? prev.store_city,
+          store_state: storeLocationSettings.state ?? prev.store_state,
+          store_zip: storeLocationSettings.zip ?? prev.store_zip,
+          store_phone: storeLocationSettings.store_phone ?? prev.store_phone,
+          store_email: storeLocationSettings.store_email ?? prev.store_email,
+          store_website: storeLocationSettings.store_website ?? prev.store_website
+        }))
+        if (!isAutoSave) {
+          setMessage({ type: 'success', text: 'Store location settings saved successfully!' })
+          setTimeout(() => setMessage(null), 3000)
+        }
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to save store location settings' })
+        if (!isAutoSave) setMessage({ type: 'error', text: data.message || 'Failed to save store location settings' })
       }
     } catch (error) {
       console.error('Error saving store location settings:', error)
-      setMessage({ type: 'error', text: 'Failed to save store location settings' })
+      if (!isAutoSave) setMessage({ type: 'error', text: 'Failed to save store location settings' })
     } finally {
-      setSaving(false)
+      if (!isAutoSave) setSaving(false)
     }
   }
+
+  // Sync store info into receipt state so receipt form and preview show store data
+  const syncStoreInfoToReceipt = () => {
+    setReceiptSettings(prev => ({
+      ...prev,
+      store_name: storeLocationSettings.store_name ?? prev.store_name,
+      store_address: storeLocationSettings.address ?? prev.store_address,
+      store_city: storeLocationSettings.city ?? prev.store_city,
+      store_state: storeLocationSettings.state ?? prev.store_state,
+      store_zip: storeLocationSettings.zip ?? prev.store_zip,
+      store_phone: storeLocationSettings.store_phone ?? prev.store_phone,
+      store_email: storeLocationSettings.store_email ?? prev.store_email,
+      store_website: storeLocationSettings.store_website ?? prev.store_website
+    }))
+  }
+
+  useEffect(() => {
+    if (!storeLocationLoadedRef.current) return
+    if (storeLocationSaveTimeoutRef.current) clearTimeout(storeLocationSaveTimeoutRef.current)
+    storeLocationSaveTimeoutRef.current = setTimeout(() => {
+      storeLocationSaveTimeoutRef.current = null
+      saveStoreLocationSettings(true)
+    }, 1000)
+    return () => {
+      if (storeLocationSaveTimeoutRef.current) clearTimeout(storeLocationSaveTimeoutRef.current)
+    }
+  }, [storeLocationSettings])
+
+  // When leaving Store Information tab: save immediately so backend and receipt_settings update
+  // When entering POS tab: sync store info into receipt state so form and receipt show it
+  useEffect(() => {
+    const prevTab = previousActiveTabRef.current
+    if (prevTab === 'location' && activeTab !== 'location') {
+      saveStoreLocationSettings(true)
+    }
+    if (activeTab === 'pos') {
+      syncStoreInfoToReceipt()
+    }
+    previousActiveTabRef.current = activeTab
+  }, [activeTab])
 
   const getCurrentLocation = () => {
     return new Promise((resolve, reject) => {
@@ -2484,7 +2708,7 @@ function Settings() {
     { id: 'location', label: 'Store Information', icon: MapPin },
     { id: 'pos', label: 'POS Settings', icon: ShoppingCart },
     { id: 'cash', label: 'Cash Register', icon: DollarSign },
-    { id: 'sms', label: 'SMS & Notifications', icon: MessageSquare },
+    { id: 'notifications', label: 'Notifications', icon: MessageSquare },
     { id: 'rewards', label: 'Customer Rewards', icon: Gift }
   ]
 
@@ -2720,16 +2944,13 @@ function Settings() {
         {/* Content */}
         <div>
           {/* Save Button - Hidden for location, cash, and pos tabs (pos has its own at bottom) */}
-          {activeTab !== 'location' && activeTab !== 'cash' && activeTab !== 'pos' && activeTab !== 'rewards' && (
+          {activeTab !== 'location' && activeTab !== 'cash' && activeTab !== 'pos' && activeTab !== 'rewards' && activeTab !== 'notifications' && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button
                 type="button"
                 className="button-26 button-26--header"
                 role="button"
-                onClick={
-                  activeTab === 'sms' ? saveSmsSettings :
-                  null
-                }
+                onClick={null}
                 disabled={saving}
                 style={{
                   opacity: saving ? 0.6 : 1,
@@ -2738,10 +2959,7 @@ function Settings() {
               >
                 <div className="button-26__content">
                   <span className="button-26__text text">
-                    {saving 
-                      ? (activeTab === 'sms' ? 'Saving...' : 'Saving...')
-                      : (activeTab === 'sms' ? 'Save SMS Settings' : 'Save')
-                    }
+                    {saving ? 'Saving...' : 'Save'}
                   </span>
                 </div>
               </button>
@@ -2762,13 +2980,13 @@ function Settings() {
                 <input
                   type="text"
                   placeholder="Enter store name"
-                  value={storeLocationSettings.store_name}
+                  value={storeLocationSettings.store_name ?? ''}
                   onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_name: e.target.value })}
                   style={inputBaseStyle(isDarkMode, themeColorRgb)}
                   {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                 />
                 <CustomDropdown
-                  value={storeLocationSettings.store_type}
+                  value={storeLocationSettings.store_type ?? ''}
                   onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_type: e.target.value })}
                   options={[
                     { value: 'retail', label: 'Retail Store' },
@@ -2787,7 +3005,7 @@ function Settings() {
                   <input
                     type="text"
                     placeholder="Logo URL or file path"
-                    value={storeLocationSettings.store_logo}
+                    value={storeLocationSettings.store_logo ?? ''}
                     onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_logo: e.target.value })}
                     style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), flex: 1 }}
                     {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -2854,7 +3072,7 @@ function Settings() {
                 <input
                   type="text"
                   placeholder="Street Address"
-                  value={storeLocationSettings.address}
+                  value={storeLocationSettings.address ?? ''}
                   onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, address: e.target.value })}
                   style={inputBaseStyle(isDarkMode, themeColorRgb)}
                   {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -2863,7 +3081,7 @@ function Settings() {
                   <input
                     type="text"
                     placeholder="City"
-                    value={storeLocationSettings.city}
+                    value={storeLocationSettings.city ?? ''}
                     onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, city: e.target.value })}
                     style={inputBaseStyle(isDarkMode, themeColorRgb)}
                     {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -2871,7 +3089,7 @@ function Settings() {
                   <input
                     type="text"
                     placeholder="State"
-                    value={storeLocationSettings.state}
+                    value={storeLocationSettings.state ?? ''}
                     onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, state: e.target.value })}
                     style={inputBaseStyle(isDarkMode, themeColorRgb)}
                     {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -2879,7 +3097,7 @@ function Settings() {
                   <input
                     type="text"
                     placeholder="ZIP Code"
-                    value={storeLocationSettings.zip}
+                    value={storeLocationSettings.zip ?? ''}
                     onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, zip: e.target.value })}
                     style={inputBaseStyle(isDarkMode, themeColorRgb)}
                     {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -2888,7 +3106,7 @@ function Settings() {
                 <input
                   type="text"
                   placeholder="Country"
-                  value={storeLocationSettings.country}
+                  value={storeLocationSettings.country ?? ''}
                   onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, country: e.target.value })}
                   style={inputBaseStyle(isDarkMode, themeColorRgb)}
                   {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -2905,7 +3123,7 @@ function Settings() {
                 <input
                   type="tel"
                   placeholder="Phone Number"
-                  value={storeLocationSettings.store_phone}
+                  value={storeLocationSettings.store_phone ?? ''}
                   onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_phone: e.target.value })}
                   style={inputBaseStyle(isDarkMode, themeColorRgb)}
                   {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -2913,7 +3131,7 @@ function Settings() {
                 <input
                   type="email"
                   placeholder="Email Address"
-                  value={storeLocationSettings.store_email}
+                  value={storeLocationSettings.store_email ?? ''}
                   onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_email: e.target.value })}
                   style={inputBaseStyle(isDarkMode, themeColorRgb)}
                   {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -2921,7 +3139,7 @@ function Settings() {
                 <input
                   type="url"
                   placeholder="Website URL"
-                  value={storeLocationSettings.store_website}
+                  value={storeLocationSettings.store_website ?? ''}
                   onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_website: e.target.value })}
                   style={inputBaseStyle(isDarkMode, themeColorRgb)}
                   {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -2940,24 +3158,49 @@ function Settings() {
                 <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: 0, fontSize: '15px', fontWeight: 600 }}>
                   Store Hours
                 </FormTitle>
-                <button
-                  onClick={() => setEditingStoreHours(!editingStoreHours)}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: editingStoreHours 
-                      ? `rgba(${themeColorRgb}, 0.2)`
-                      : `rgba(${themeColorRgb}, 0.7)`,
-                    color: '#fff',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    fontSize: '13px',
-                    transition: 'all 0.3s ease'
-                  }}
-                >
-                  {editingStoreHours ? 'Cancel' : 'Edit'}
-                </button>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  {editingStoreHours && (
+                    <button
+                      onClick={async () => {
+                        await saveStoreLocationSettings(false)
+                        setEditingStoreHours(false)
+                      }}
+                      disabled={saving}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                        color: '#fff',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        borderRadius: '8px',
+                        cursor: saving ? 'not-allowed' : 'pointer',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        transition: 'all 0.3s ease',
+                        opacity: saving ? 0.7 : 1
+                      }}
+                    >
+                      {saving ? 'Saving...' : 'Save'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setEditingStoreHours(!editingStoreHours)}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: editingStoreHours 
+                        ? `rgba(${themeColorRgb}, 0.2)`
+                        : `rgba(${themeColorRgb}, 0.7)`,
+                      color: '#fff',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      fontSize: '13px',
+                      transition: 'all 0.3s ease'
+                    }}
+                  >
+                    {editingStoreHours ? 'Cancel' : 'Edit'}
+                  </button>
+                </div>
               </div>
               {(() => {
                 // Generate current week days
@@ -3375,7 +3618,7 @@ function Settings() {
                     type="number"
                     step="0.01"
                     min="0"
-                    value={rewardsSettings.minimum_spend}
+                    value={rewardsSettings.minimum_spend ?? ''}
                     onChange={(e) => setRewardsSettings({
                       ...rewardsSettings,
                       minimum_spend: parseFloat(e.target.value) || 0.0
@@ -3406,7 +3649,7 @@ function Settings() {
                       type="number"
                       step="0.1"
                       min="0"
-                      value={rewardsSettings.points_per_dollar}
+                      value={rewardsSettings.points_per_dollar ?? ''}
                       onChange={(e) => setRewardsSettings({ ...rewardsSettings, points_per_dollar: parseFloat(e.target.value) || 1.0 })}
                       style={inputBaseStyle(isDarkMode, themeColorRgb)}
                       {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -3437,7 +3680,7 @@ function Settings() {
                       step="0.1"
                       min="0"
                       max="100"
-                      value={rewardsSettings.percentage_discount}
+                      value={rewardsSettings.percentage_discount ?? ''}
                       onChange={(e) => setRewardsSettings({ ...rewardsSettings, percentage_discount: parseFloat(e.target.value) || 0.0 })}
                       style={inputBaseStyle(isDarkMode, themeColorRgb)}
                       {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -3467,7 +3710,7 @@ function Settings() {
                       type="number"
                       step="0.01"
                       min="0"
-                      value={rewardsSettings.fixed_discount}
+                      value={rewardsSettings.fixed_discount ?? ''}
                       onChange={(e) => setRewardsSettings({ ...rewardsSettings, fixed_discount: parseFloat(e.target.value) || 0.0 })}
                       style={inputBaseStyle(isDarkMode, themeColorRgb)}
                       {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -3638,7 +3881,7 @@ function Settings() {
                       <FormField style={{ marginBottom: '14px' }}>
                         <FormLabel isDarkMode={isDarkMode}>Promotion type</FormLabel>
                         <select
-                          value={newCampaign.type}
+                          value={newCampaign.type ?? ''}
                           onChange={(e) => setNewCampaign(prev => ({ ...prev, type: e.target.value }))}
                           style={inputBaseStyle(isDarkMode, themeColorRgb)}
                         >
@@ -3653,7 +3896,7 @@ function Settings() {
                           <input
                             type="text"
                             placeholder="e.g. 10 or 10% or 5.00"
-                            value={newCampaign.discount_value}
+                            value={newCampaign.discount_value ?? ''}
                             onChange={(e) => setNewCampaign(prev => ({ ...prev, discount_value: e.target.value }))}
                             style={inputBaseStyle(isDarkMode, themeColorRgb)}
                             {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -3675,7 +3918,7 @@ function Settings() {
                           <input
                             type="text"
                             placeholder="e.g. 15% or 2.00"
-                            value={newCampaign.discount_value}
+                            value={newCampaign.discount_value ?? ''}
                             onChange={(e) => setNewCampaign(prev => ({ ...prev, discount_value: e.target.value }))}
                             style={inputBaseStyle(isDarkMode, themeColorRgb)}
                             {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -3689,7 +3932,7 @@ function Settings() {
                             <input
                               type="number"
                               min={1}
-                              value={newCampaign.buy_qty}
+                              value={newCampaign.buy_qty ?? ''}
                               onChange={(e) => setNewCampaign(prev => ({ ...prev, buy_qty: parseInt(e.target.value, 10) || 1 }))}
                               style={inputBaseStyle(isDarkMode, themeColorRgb)}
                               {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -3700,7 +3943,7 @@ function Settings() {
                             <input
                               type="number"
                               min={1}
-                              value={newCampaign.get_qty}
+                              value={newCampaign.get_qty ?? ''}
                               onChange={(e) => setNewCampaign(prev => ({ ...prev, get_qty: parseInt(e.target.value, 10) || 1 }))}
                               style={inputBaseStyle(isDarkMode, themeColorRgb)}
                               {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
@@ -3790,244 +4033,395 @@ function Settings() {
                 themeColorRgb={themeColorRgb}
                 style={{ maxWidth: '320px' }}
               />
-              <p style={{
-                marginTop: '8px',
-                fontSize: '14px',
-                color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
-                lineHeight: 1.4
-              }}>
-                {posSettings.register_type === 'one_screen'
-                  ? 'Single display screen for both cashier and customer view.'
-                  : posSettings.register_type === 'two_screen'
-                    ? 'Separate displays for cashier and customer.'
-                    : 'Choose a register type above.'}
-              </p>
             </FormField>
 
-            {/* Customer Display Settings */}
-            <div style={{
-              marginTop: '16px'
-            }}>
-              <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 600 }}>
-                Customer Display Settings
-              </FormTitle>
-              
-              <FormField>
-                <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>
-                  Enable tip prompts before payment
-                </FormLabel>
-                <CustomDropdown
-                  value={displaySettings.tip_enabled ? 'enabled' : 'disabled'}
-                  onChange={(e) => setDisplaySettings({ ...displaySettings, tip_enabled: e.target.value === 'enabled' })}
-                  options={[
-                    { value: 'enabled', label: 'Enabled' },
-                    { value: 'disabled', label: 'Disabled' }
-                  ]}
-                  placeholder="Select"
-                  isDarkMode={isDarkMode}
-                  themeColorRgb={themeColorRgb}
-                  style={{ maxWidth: '200px' }}
-                />
-              </FormField>
-
-              <FormField>
-                <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>
-                  Require signature
-                </FormLabel>
-                <CustomDropdown
-                  value={displaySettings.require_signature}
-                  onChange={(e) => setDisplaySettings({ ...displaySettings, require_signature: e.target.value })}
-                  options={[
-                    { value: 'not_required', label: 'Not required' },
-                    { value: 'required', label: 'Required' }
-                  ]}
-                  placeholder="Select"
-                  isDarkMode={isDarkMode}
-                  themeColorRgb={themeColorRgb}
-                  style={{ maxWidth: '200px' }}
-                />
-                <p style={{
-                  marginTop: '6px',
-                  fontSize: '13px',
-                  color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
-                  lineHeight: 1.4
-                }}>
-                  {displaySettings.require_signature === 'required'
-                    ? 'Print, no receipt, and email cannot be used without signing first.'
-                    : 'Print, no receipt, and email can be used without signing.'}
-                </p>
-              </FormField>
-            </div>
-
-            {/* Orders / Delivery: pay on delivery cash only */}
-            <div style={{
-              marginTop: '16px',
-              paddingTop: '16px',
-              borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`
-            }}>
-              <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 600 }}>
-                Orders &amp; Delivery
-              </FormTitle>
-              <FormField>
-                <label style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                }}>
+            <FormTitle isDarkMode={isDarkMode} style={{ marginTop: '12px', marginBottom: '8px', fontSize: '15px', fontWeight: 600 }}>
+              Transaction fee settings
+            </FormTitle>
+            <div style={{ marginTop: '2px', marginBottom: '12px', borderLeft: `3px solid ${isDarkMode ? 'var(--border-light, #444)' : '#ddd'}`, paddingLeft: '12px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#555', marginBottom: '8px' }}>Returns</div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
+                <div className="checkbox-wrapper-2">
                   <input
                     type="checkbox"
-                    checked={deliveryPayOnDeliveryCashOnly}
-                    onChange={(e) => saveDeliveryPayOnDeliveryCashOnly(e.target.checked)}
-                    style={{ width: '18px', height: '18px', accentColor: themeColor }}
+                    className="sc-gJwTLC ikxBAC"
+                    checked={posSettings.return_transaction_fee_take_loss || false}
+                    onChange={(e) => setPosSettings({ ...posSettings, return_transaction_fee_take_loss: e.target.checked })}
                   />
-                  <span>Delivery: allow only cash when customer pays on delivery</span>
-                </label>
-                <p style={{
-                  marginTop: '6px',
-                  marginLeft: '28px',
-                  fontSize: '13px',
-                  color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
-                  lineHeight: 1.4
-                }}>
-                  When enabled, delivery orders that are &quot;pay on delivery&quot; can only be marked as paid with cash.
-                </p>
-              </FormField>
-            </div>
-
-            {/* Receipt Template – preset, preview, Edit, Print test */}
-            <div style={{
-              marginTop: '16px',
-              paddingTop: '16px',
-              borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`
-            }}>
-              <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px', fontSize: '15px', fontWeight: 600 }}>
-                Receipt Template
-              </FormTitle>
-              {!receiptEditModalOpen && (
-                <div style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                  <ReceiptPreview
-                    settings={receiptSettings}
-                    id="receipt-preview-print"
-                    isDarkMode={isDarkMode}
-                    themeColorRgb={themeColorRgb}
-                  />
-                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
-                    <CustomDropdown
-                      value={receiptSettings.template_preset || 'custom'}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        if (v.startsWith('template_')) {
-                          const id = parseInt(v.replace('template_', ''), 10)
-                          const t = savedTemplates.find(x => x.id === id)
-                          if (t && t.settings) {
-                            setReceiptSettings({ ...DEFAULT_RECEIPT_TEMPLATE, ...t.settings, template_preset: v })
-                          } else {
-                            setReceiptSettings(prev => ({ ...prev, template_preset: v }))
-                          }
-                        } else if (v !== 'custom') {
-                          applyTemplatePreset(v)
-                        } else {
-                          setReceiptSettings(prev => ({ ...prev, template_preset: v }))
-                        }
-                      }}
-                      options={[
-                        { value: 'custom', label: 'Custom' },
-                        { value: 'modern', label: 'Modern' },
-                        { value: 'classic', label: 'Classic' },
-                        { value: 'minimal', label: 'Minimal' },
-                        ...savedTemplates.map(t => ({ value: `template_${t.id}`, label: t.name }))
-                      ]}
-                      placeholder="Preset"
-                      isDarkMode={isDarkMode}
-                      themeColorRgb={themeColorRgb}
-                      style={{ maxWidth: '140px', padding: '6px 10px' }}
-                    />
-                    <button
-                      type="button"
-                      className="button-26 button-26--header"
-                      role="button"
-                      onClick={() => setReceiptEditModalOpen(true)}
-                    >
-                      <div className="button-26__content">
-                        <span className="button-26__text text">Edit</span>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      className="button-26 button-26--header"
-                      role="button"
-                      onClick={printTestReceipt}
-                    >
-                      <div className="button-26__content">
-                        <Printer size={14} style={{ marginRight: '6px', color: '#888' }} />
-                        <span className="button-26__text text">Print test</span>
-                      </div>
-                    </button>
-                  </div>
                 </div>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Take loss on transaction fee (do not deduct from return refund)</span>
+              </label>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#555', marginBottom: '6px', marginTop: '14px' }}>At checkout</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="transaction_fee_mode"
+                    checked={posSettings.transaction_fee_mode === 'additional'}
+                    onChange={() => setPosSettings({ ...posSettings, transaction_fee_mode: 'additional' })}
+                  />
+                  <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Additional fee at checkout</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="transaction_fee_mode"
+                    checked={posSettings.transaction_fee_mode === 'included'}
+                    onChange={() => setPosSettings({ ...posSettings, transaction_fee_mode: 'included' })}
+                  />
+                  <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Included in product price (no separate fee)</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="transaction_fee_mode"
+                    checked={posSettings.transaction_fee_mode === 'none'}
+                    onChange={() => setPosSettings({ ...posSettings, transaction_fee_mode: 'none' })}
+                  />
+                  <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>No fee (store absorbs)</span>
+                </label>
+              </div>
+              {posSettings.transaction_fee_mode === 'additional' && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginTop: '6px' }}>
+                  <div className="checkbox-wrapper-2">
+                    <input
+                      type="checkbox"
+                      className="sc-gJwTLC ikxBAC"
+                      checked={posSettings.transaction_fee_charge_cash || false}
+                      onChange={(e) => setPosSettings({ ...posSettings, transaction_fee_charge_cash: e.target.checked })}
+                    />
+                  </div>
+                  <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Charge transaction fee for cash payments</span>
+                </label>
               )}
             </div>
 
-            {/* Checkout UI – Edit opens modal with controls left, preview right (exact checkout styles) */}
-            <div style={{
-              marginTop: '16px',
-              paddingTop: '16px',
-              borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`
-            }}>
+            <FormTitle isDarkMode={isDarkMode} style={{ marginTop: '12px', marginBottom: '8px', fontSize: '15px', fontWeight: 600 }}>
+              Display
+            </FormTitle>
+            <div style={{ marginTop: '2px' }}>
+              <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 600 }}>
+                Tips settings
+              </FormTitle>
+              <div style={{ borderLeft: `3px solid ${isDarkMode ? 'var(--border-light, #444)' : '#ddd'}`, paddingLeft: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
+                  <div className="checkbox-wrapper-2">
+                    <input
+                      type="checkbox"
+                      className="sc-gJwTLC ikxBAC"
+                      checked={posSettings.return_tip_refund || false}
+                      onChange={(e) => setPosSettings({ ...posSettings, return_tip_refund: e.target.checked })}
+                    />
+                  </div>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Refund tip on returns (do not deduct proportional tip from refund)</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
+                  <div className="checkbox-wrapper-2">
+                    <input
+                      type="checkbox"
+                      className="sc-gJwTLC ikxBAC"
+                      checked={posSettings.require_signature_for_return || false}
+                      onChange={(e) => setPosSettings({ ...posSettings, require_signature_for_return: e.target.checked })}
+                    />
+                  </div>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Require signature for return (customer signs and chooses print/email/no receipt before processing)</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
+                  <div className="checkbox-wrapper-2">
+                    <input
+                      type="checkbox"
+                      className="sc-gJwTLC ikxBAC"
+                      checked={displaySettings.tip_enabled}
+                      onChange={(e) => setDisplaySettings({ ...displaySettings, tip_enabled: e.target.checked })}
+                    />
+                  </div>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Tip prompts before payment</span>
+                </label>
+
+                <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#555', marginBottom: '8px' }}>Tip suggestion amounts (%) — 3 options only (4th is No tip)</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+                  {((displaySettings.tip_suggestions || [15, 18, 20]).slice(0, 3)).map((p, i) => (
+                    <input
+                      key={i}
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={p}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10)
+                        if (isNaN(v) || v < 0 || v > 100) return
+                        const base = (displaySettings.tip_suggestions || [15, 18, 20]).slice(0, 3)
+                        const next = [...base]
+                        next[i] = v
+                        setDisplaySettings({ ...displaySettings, tip_suggestions: next })
+                      }}
+                      style={{
+                        width: '56px',
+                        padding: '6px 8px',
+                        fontSize: '14px',
+                        borderRadius: '6px',
+                        border: isDarkMode ? '1px solid var(--border-light, #444)' : '1px solid #ccc',
+                        background: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#fff',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                      }}
+                    />
+                  ))}
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '10px' }}>
+                  <div className="checkbox-wrapper-2">
+                    <input
+                      type="checkbox"
+                      className="sc-gJwTLC ikxBAC"
+                      checked={displaySettings.tip_custom_in_checkout || false}
+                      onChange={(e) => setDisplaySettings({ ...displaySettings, tip_custom_in_checkout: e.target.checked })}
+                    />
+                  </div>
+                  <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Show custom tip option in checkout</span>
+                </label>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#555', marginBottom: '4px' }}>Tip allocation</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="tip_allocation"
+                      checked={displaySettings.tip_allocation === 'logged_in_employee'}
+                      onChange={() => setDisplaySettings({ ...displaySettings, tip_allocation: 'logged_in_employee' })}
+                    />
+                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allocate to logged-in employee</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="tip_allocation"
+                      checked={displaySettings.tip_allocation === 'split_all'}
+                      onChange={() => setDisplaySettings({ ...displaySettings, tip_allocation: 'split_all' })}
+                    />
+                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Split amongst all employees</span>
+                  </label>
+                </div>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#555', marginBottom: '4px' }}>When refunding tip</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="tip_refund_from"
+                      checked={displaySettings.tip_refund_from === 'employee'}
+                      onChange={() => setDisplaySettings({ ...displaySettings, tip_refund_from: 'employee' })}
+                    />
+                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Deduct from employee(s)</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="tip_refund_from"
+                      checked={displaySettings.tip_refund_from === 'store'}
+                      onChange={() => setDisplaySettings({ ...displaySettings, tip_refund_from: 'store' })}
+                    />
+                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Store absorbs cost</span>
+                  </label>
+                </div>
+              </div>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginTop: '12px' }}>
+                <div className="checkbox-wrapper-2">
+                  <input
+                    type="checkbox"
+                    className="sc-gJwTLC ikxBAC"
+                    checked={displaySettings.require_signature === 'required'}
+                    onChange={(e) => setDisplaySettings({ ...displaySettings, require_signature: e.target.checked ? 'required' : 'not_required' })}
+                  />
+                </div>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Require signature</span>
+              </label>
+            </div>
+
+            {/* Orders & Delivery: master switches + sub options */}
+            <div style={{ marginTop: '16px' }}>
+              <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px', fontSize: '15px', fontWeight: 600 }}>
+                Orders &amp; Delivery
+              </FormTitle>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                  <div className="checkbox-wrapper-2">
+                    <input
+                      type="checkbox"
+                      className="sc-gJwTLC ikxBAC"
+                      checked={allowDelivery}
+                      onChange={async (e) => {
+                        const v = e.target.checked
+                        const ok = await saveOrderDeliverySetting('allow_delivery', v)
+                        if (ok) setAllowDelivery(v)
+                      }}
+                    />
+                  </div>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Delivery</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                  <div className="checkbox-wrapper-2">
+                    <input
+                      type="checkbox"
+                      className="sc-gJwTLC ikxBAC"
+                      checked={allowPickup}
+                      onChange={async (e) => {
+                        const v = e.target.checked
+                        const ok = await saveOrderDeliverySetting('allow_pickup', v)
+                        if (ok) setAllowPickup(v)
+                      }}
+                    />
+                  </div>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Pickup</span>
+                </label>
+              </div>
+              <div style={{ marginTop: '16px', borderLeft: `3px solid ${isDarkMode ? 'var(--border-light, #444)' : '#ddd'}`, paddingLeft: '12px' }}>
+                <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '10px' }}>Options</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                    <div className="checkbox-wrapper-2">
+                      <input
+                        type="checkbox"
+                        className="sc-gJwTLC ikxBAC"
+                        checked={allowPayAtPickup}
+                        onChange={async (e) => {
+                          const v = e.target.checked
+                          const ok = await saveOrderDeliverySetting('allow_pay_at_pickup', v)
+                          if (ok) setAllowPayAtPickup(v)
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow pay at pickup</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                    <div className="checkbox-wrapper-2">
+                      <input
+                        type="checkbox"
+                        className="sc-gJwTLC ikxBAC"
+                        checked={deliveryPayOnDeliveryCashOnly}
+                        onChange={(e) => saveDeliveryPayOnDeliveryCashOnly(e.target.checked)}
+                      />
+                    </div>
+                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow pay at delivery (cash)</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                    <div className="checkbox-wrapper-2">
+                      <input
+                        type="checkbox"
+                        className="sc-gJwTLC ikxBAC"
+                        checked={deliveryFeeEnabled}
+                        onChange={async (e) => {
+                          const v = e.target.checked
+                          const ok = await saveOrderDeliverySetting('delivery_fee_enabled', v)
+                          if (ok) setDeliveryFeeEnabled(v)
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Delivery fee</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                    <div className="checkbox-wrapper-2">
+                      <input
+                        type="checkbox"
+                        className="sc-gJwTLC ikxBAC"
+                        checked={allowScheduledPickup}
+                        onChange={async (e) => {
+                          const v = e.target.checked
+                          const ok = await saveOrderDeliverySetting('allow_scheduled_pickup', v)
+                          if (ok) setAllowScheduledPickup(v)
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow scheduled pickup</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                    <div className="checkbox-wrapper-2">
+                      <input
+                        type="checkbox"
+                        className="sc-gJwTLC ikxBAC"
+                        checked={allowScheduledDelivery}
+                        onChange={async (e) => {
+                          const v = e.target.checked
+                          const ok = await saveOrderDeliverySetting('allow_scheduled_delivery', v)
+                          if (ok) setAllowScheduledDelivery(v)
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow scheduled delivery</span>
+                  </label>
+                </div>
+              </div>
+              <div style={{
+                marginTop: '12px',
+                paddingTop: '12px',
+                borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`,
+                display: 'flex',
+                justifyContent: 'flex-end'
+              }}>
+                <button
+                  type="button"
+                  className="button-26 button-26--header"
+                  role="button"
+                  onClick={savePosSettings}
+                  disabled={saving}
+                  style={{
+                    opacity: saving ? 0.6 : 1,
+                    cursor: saving ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  <div className="button-26__content">
+                    <span className="button-26__text text">
+                      {saving ? 'Saving…' : 'Save settings'}
+                    </span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Checkout UI – receipt and checkout previews side by side; click to open edit modal */}
+            <div style={{ marginTop: '16px' }}>
               <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px', fontSize: '15px', fontWeight: 600 }}>
                 Checkout UI
               </FormTitle>
-              {!checkoutUiEditModalOpen && (
-                <div style={{ marginBottom: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', width: '100%', maxWidth: '500px' }}>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {[
-                        { id: 'review_order', label: 'Review Your Order' },
-                        { id: 'cash_confirmation', label: 'Cash to Cashier' },
-                        { id: 'receipt', label: 'Sign Below' }
-                      ].map(({ id, label }) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => setCheckoutUiTab(id)}
-                          style={{
-                            padding: '8px 14px',
-                            fontSize: '13px',
-                            border: `1px solid ${checkoutUiTab === id ? `rgba(${themeColorRgb}, 0.7)` : (isDarkMode ? 'var(--border-color, #404040)' : '#ddd')}`,
-                            borderRadius: '8px',
-                            background: checkoutUiTab === id ? `rgba(${themeColorRgb}, 0.15)` : (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'),
-                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                            cursor: 'pointer',
-                            fontWeight: checkoutUiTab === id ? 600 : 400
-                          }}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      className="button-26 button-26--header"
-                      role="button"
-                      onClick={() => setCheckoutUiEditModalOpen(true)}
-                    >
-                      <div className="button-26__content">
-                        <span className="button-26__text text">Edit</span>
-                      </div>
-                    </button>
+              <div style={{ display: 'flex', flexDirection: 'row', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                {!receiptEditModalOpen && (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setReceiptEditModalOpen(true)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReceiptEditModalOpen(true); } }}
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', outline: 'none' }}
+                  >
+                    <ReceiptPreview
+                      settings={receiptSettings}
+                      id="receipt-preview-print"
+                      isDarkMode={isDarkMode}
+                      themeColorRgb={themeColorRgb}
+                    />
                   </div>
-                  <div style={{
-                    width: '100%',
-                    maxWidth: '500px',
-                    minHeight: '280px',
-                    borderRadius: '12px',
-                    overflow: 'hidden',
-                    border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)'
-                  }}>
+                )}
+                {!checkoutUiEditModalOpen && (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setCheckoutUiEditModalOpen(true)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCheckoutUiEditModalOpen(true); } }}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', outline: 'none' }}
+                >
+                  <div
+                    style={{
+                      width: CHECKOUT_PREVIEW_CONTAINER_WIDTH,
+                      maxWidth: '100%',
+                      aspectRatio: `${CHECKOUT_PREVIEW_WIDTH} / ${CHECKOUT_PREVIEW_HEIGHT}`,
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                      position: 'relative'
+                    }}
+                    ref={checkoutPreviewContainerRef}
+                  >
+                    {/* 800×600 content scaled to fill; absolute so it doesn't drive container size – fills correctly on first paint */}
+                    <div style={{ position: 'absolute', top: 0, left: 0, width: CHECKOUT_PREVIEW_WIDTH, height: CHECKOUT_PREVIEW_HEIGHT, transform: `scale(${checkoutPreviewScale})`, transformOrigin: 'top left', overflow: 'hidden', borderRadius: '8px' }}>
+                        <div style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: 'transparent' }}>
                     {checkoutUiTab === 'review_order' && (() => {
                       const s = checkoutUiSettings.review_order || {}
                       const bg = s.backgroundColor || '#e8f0fe'
@@ -4037,21 +4431,53 @@ function Settings() {
                       const bodyStyle = getCheckoutTextStyle(s, 'body')
                       const btnTextStyle = getCheckoutTextStyle(s, 'button')
                       const styleId = s.button_style || 'default'
+                      const btnRgb = hexToRgb(btn)
                       return (
-                        <div style={{ padding: '20px', minHeight: '280px', backgroundColor: bg, color: tc, display: 'flex', flexDirection: 'column' }}>
-                          <div style={{ textAlign: titleStyle.textAlign, marginBottom: '20px', ...titleStyle }}>Review Your Order</div>
-                          <div style={{ background: 'rgba(0,0,0,0.06)', borderRadius: '15px', padding: '20px', marginBottom: '20px', width: '100%' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid rgba(0,0,0,0.1)', ...bodyStyle }}><span>Sample Item</span><span>$9.99</span></div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', ...bodyStyle }}><span>Another Item × 2</span><span>$24.00</span></div>
-                          </div>
-                          <div style={{ background: 'rgba(0,0,0,0.06)', borderRadius: '15px', padding: '20px', marginBottom: '20px', width: '100%' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '28px', ...bodyStyle }}><span>Subtotal</span><span>$33.99</span></div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '28px', ...bodyStyle }}><span>Tax</span><span>$2.72</span></div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid currentColor', marginTop: '8px', paddingTop: '8px', fontSize: '42px', fontWeight: 'bold', ...bodyStyle }}><span>Total</span><span>$36.71</span></div>
-                          </div>
-                          <div style={{ display: 'flex', gap: '20px', width: '100%', marginTop: '20px' }}>
-                            {renderCheckoutPreviewButton('Cash', styleId, btn, btnTextStyle)}
-                            {renderCheckoutPreviewButton('Card', styleId, btn, btnTextStyle)}
+                        <div className="customer-display-popup-container" style={{
+                          ['--customer-display-theme-color-rgb']: btnRgb,
+                          padding: '20px',
+                          width: '100%',
+                          height: '100%',
+                          minHeight: CHECKOUT_PREVIEW_HEIGHT,
+                          boxSizing: 'border-box',
+                          backgroundColor: bg,
+                          color: tc,
+                          fontFamily: titleStyle.fontFamily || 'system-ui',
+                          fontWeight: titleStyle.fontWeight || '600',
+                          maxWidth: '100%',
+                          maxHeight: '100%',
+                          borderRadius: 0,
+                          boxShadow: 'none',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          flex: 1
+                        }}>
+                          <div className="transaction-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+                            <div style={{ height: '32px', marginBottom: '4px' }} />
+                            <div className="screen-header" style={{ marginTop: 0, marginBottom: '20px' }}>
+                              <h2 style={titleStyle}>Review Your Order</h2>
+                            </div>
+                            <div className="items-list" style={bodyStyle}>
+                              <div className="item-row">
+                                <span className="item-name">Sample Item</span>
+                                <span className="item-price">$9.99</span>
+                              </div>
+                              <div className="item-row">
+                                <span className="item-name">Another Item</span>
+                                <span className="item-quantity">× 2</span>
+                                <span className="item-price">$24.00</span>
+                              </div>
+                            </div>
+                            <div className="totals-section" style={bodyStyle}>
+                              <div className="total-row"><span>Subtotal:</span><span>$33.99</span></div>
+                              <div className="total-row"><span>Tax:</span><span>$2.72</span></div>
+                              <div className="total-row final"><span>Total:</span><span>$36.71</span></div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '20px', width: '100%', marginTop: '20px' }}>
+                              {renderCheckoutPreviewButton('Cash', styleId, btn, btnTextStyle)}
+                              {renderCheckoutPreviewButton('Card', styleId, btn, btnTextStyle)}
+                            </div>
                           </div>
                         </div>
                       )
@@ -4059,22 +4485,183 @@ function Settings() {
                     {checkoutUiTab === 'cash_confirmation' && (() => {
                       const s = checkoutUiSettings.cash_confirmation || {}
                       const bg = s.backgroundColor || '#e8f0fe'
+                      const btn = s.buttonColor || '#4a90e2'
                       const tc = s.textColor || '#1a1a1a'
                       const titleStyle = getCheckoutTextStyle(s, 'title')
                       const bodyStyle = getCheckoutTextStyle(s, 'body')
+                      const btnRgb = hexToRgb(btn)
                       return (
-                        <div style={{ padding: '20px', minHeight: '280px', backgroundColor: bg, color: tc, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-                          <div style={{ textAlign: titleStyle.textAlign, marginBottom: '24px', ...titleStyle }}>Please give the cash amount to the cashier</div>
-                          <div style={{ background: 'rgba(0,0,0,0.06)', borderRadius: '15px', padding: '20px', width: '100%', maxWidth: '320px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '28px', ...bodyStyle }}><span>Subtotal</span><span>$33.99</span></div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '28px', ...bodyStyle }}><span>Tax</span><span>$2.72</span></div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid currentColor', marginTop: '8px', paddingTop: '8px', fontSize: '42px', fontWeight: 'bold', ...bodyStyle }}><span>Total</span><span>$36.71</span></div>
+                        <div className="customer-display-popup-container" style={{
+                          ['--customer-display-theme-color-rgb']: btnRgb,
+                          padding: '20px',
+                          width: '100%',
+                          height: '100%',
+                          minHeight: CHECKOUT_PREVIEW_HEIGHT,
+                          boxSizing: 'border-box',
+                          backgroundColor: bg,
+                          color: tc,
+                          fontFamily: titleStyle.fontFamily || 'system-ui',
+                          fontWeight: titleStyle.fontWeight || '600',
+                          maxWidth: '100%',
+                          maxHeight: '100%',
+                          borderRadius: 0,
+                          boxShadow: 'none',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          flex: 1
+                        }}>
+                          <div className="payment-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: '10px', marginTop: '-10px' }}>
+                              <span style={{ padding: '6px 12px', fontSize: '12px', opacity: 0 }}>Cancel</span>
+                              <span style={{ padding: '6px 12px', fontSize: '12px', opacity: 0 }}>Continue</span>
+                            </div>
+                            <div className="screen-header" style={{ width: '100%', marginBottom: '20px' }}>
+                              <h2 style={{ margin: 0, ...titleStyle }}>Please give the cash amount to the cashier</h2>
+                            </div>
+                            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                              <div className="totals-section" style={{ background: `rgba(${btnRgb}, 0.15)`, borderRadius: '15px', padding: '20px', width: '100%', ...bodyStyle }}>
+                                <div className="total-row"><span>Subtotal:</span><span>$33.99</span></div>
+                                <div className="total-row"><span>Tax:</span><span>$2.72</span></div>
+                                <div className="total-row final"><span>Total:</span><span>$36.71</span></div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                    {checkoutUiTab === 'tip_selection' && (() => {
+                      const s = checkoutUiSettings.tip_selection || {}
+                      const bg = s.backgroundColor || '#e8f0fe'
+                      const btn = s.buttonColor || '#4a90e2'
+                      const tc = s.textColor || '#1a1a1a'
+                      const titleStyle = getCheckoutTextStyle(s, 'title')
+                      const btnTextStyle = getCheckoutTextStyle(s, 'button')
+                      const btnRgb = hexToRgb(btn)
+                      const tipBtnBase = {
+                        aspectRatio: '1',
+                        minHeight: 0,
+                        padding: '16px',
+                        backgroundColor: btn,
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        textAlign: 'center',
+                        cursor: 'default',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        ...btnTextStyle
+                      }
+                      return (
+                        <div className="customer-display-popup-container" style={{
+                          ['--customer-display-theme-color-rgb']: btnRgb,
+                          padding: '20px',
+                          width: '100%',
+                          height: '100%',
+                          minHeight: CHECKOUT_PREVIEW_HEIGHT,
+                          boxSizing: 'border-box',
+                          backgroundColor: bg,
+                          color: tc,
+                          fontFamily: titleStyle.fontFamily || 'system-ui',
+                          fontWeight: titleStyle.fontWeight || '600',
+                          maxWidth: '100%',
+                          maxHeight: '100%',
+                          borderRadius: 0,
+                          boxShadow: 'none',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          flex: 1
+                        }}>
+                          <div className="payment-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: '8px' }}>
+                              <span />
+                            </div>
+                            <div className="screen-header" style={titleStyle}>
+                              <h2>Add a tip?</h2>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', width: '100%', maxWidth: '400px', margin: '0 auto', flex: 1, alignContent: 'start' }}>
+                              {[15, 18, 20].map((pct) => (
+                                <div key={pct} style={{ ...tipBtnBase }}>
+                                  <div style={{ fontSize: 'clamp(28px, 6vw, 36px)', fontWeight: 600, marginBottom: '4px' }}>{pct}%</div>
+                                  <div style={{ fontSize: 'clamp(16px, 3.5vw, 20px)', opacity: 0.95 }}>${(36.71 * pct / 100).toFixed(2)}</div>
+                                </div>
+                              ))}
+                              <div style={{ ...tipBtnBase }}>
+                                No tip
+                              </div>
+                              <div style={{
+                                gridColumn: '1 / -1',
+                                padding: '20px 16px',
+                                backgroundColor: `rgba(${btnRgb}, 0.35)`,
+                                color: tc,
+                                border: `2px solid ${btn}`,
+                                borderRadius: '8px',
+                                textAlign: 'center',
+                                cursor: 'default',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: 'clamp(18px, 4vw, 22px)',
+                                fontWeight: 600,
+                                ...btnTextStyle
+                              }}>
+                                Custom
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                    {checkoutUiTab === 'card' && (() => {
+                      const s = checkoutUiSettings.card || {}
+                      const bg = s.backgroundColor || '#e8f0fe'
+                      const tc = s.textColor || '#1a1a1a'
+                      const bodyStyle = getCheckoutTextStyle(s, 'body')
+                      const instructionText = s.instruction_text ?? 'Please insert or tap your card'
+                      return (
+                        <div className="customer-display-popup-container" style={{
+                          padding: '20px',
+                          width: '100%',
+                          height: '100%',
+                          minHeight: CHECKOUT_PREVIEW_HEIGHT,
+                          boxSizing: 'border-box',
+                          backgroundColor: bg,
+                          color: tc,
+                          fontFamily: bodyStyle.fontFamily || 'system-ui',
+                          maxWidth: '100%',
+                          maxHeight: '100%',
+                          borderRadius: 0,
+                          boxShadow: 'none',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          flex: 1
+                        }}>
+                          <div className="card-processing-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', justifyContent: 'flex-start', alignItems: 'stretch' }}>
+                            <div style={{ height: '32px', marginBottom: '10px', marginTop: '-10px' }} />
+                            <div className="card-animation" style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px', marginTop: '24px' }}>
+                              <img src="/contactless-svgrepo-com.svg" alt="" style={{ width: '200px', height: '200px', color: 'inherit' }} />
+                            </div>
+                            <div className="card-instruction" style={{ fontSize: '1.25rem', textAlign: 'center', ...bodyStyle }}>
+                              {instructionText}
+                            </div>
                           </div>
                         </div>
                       )
                     })()}
                     {checkoutUiTab === 'receipt' && (() => {
                       const s = checkoutUiSettings.receipt || {}
+                      const opts = s.receipt_options_offered || {}
+                      const showPrint = opts.print !== false
+                      const showEmail = opts.email !== false
+                      const showNoReceipt = opts.no_receipt !== false
+                      const hasAnyOption = showPrint || showEmail || showNoReceipt
                       const bg = s.backgroundColor || '#e8f0fe'
                       const btn = s.buttonColor || '#4a90e2'
                       const tc = s.textColor || '#1a1a1a'
@@ -4086,21 +4673,74 @@ function Settings() {
                       const sigBorderW = s.signature_border_width ?? 2
                       const sigBorderColor = s.signature_border_color || 'rgba(0,0,0,0.2)'
                       const sigInk = s.signature_ink_color || '#000000'
+                      const btnRgb = hexToRgb(btn)
                       return (
-                        <div style={{ padding: '20px', minHeight: '280px', backgroundColor: bg, color: tc, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <div style={{ textAlign: titleStyle.textAlign, marginBottom: '20px', ...titleStyle }}>Sign Below</div>
-                          <div style={{ width: '100%', height: '250px', border: `${sigBorderW}px solid ${sigBorderColor}`, borderRadius: '8px', marginBottom: '20px', background: sigBg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: sigInk, ...bodyStyle }}>Signature area</div>
-                          <div style={{ display: 'flex', gap: '20px', width: '100%', marginBottom: '20px' }}>
-                            {renderCheckoutPreviewButton('Print', styleId, btn, btnTextStyle)}
-                            {renderCheckoutPreviewButton('No Receipt', styleId, btn, btnTextStyle)}
+                        <div className="customer-display-popup-container" style={{
+                          ['--customer-display-theme-color-rgb']: btnRgb,
+                          padding: '20px',
+                          width: '100%',
+                          height: '100%',
+                          minHeight: CHECKOUT_PREVIEW_HEIGHT,
+                          boxSizing: 'border-box',
+                          backgroundColor: bg,
+                          color: tc,
+                          fontFamily: titleStyle.fontFamily || 'system-ui',
+                          fontWeight: titleStyle.fontWeight || '600',
+                          maxWidth: '100%',
+                          maxHeight: '100%',
+                          borderRadius: 0,
+                          boxShadow: 'none',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          flex: 1
+                        }}>
+                          <div className="receipt-screen-popup" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
+                            <div className="screen-header" style={{ width: '100%', marginBottom: '30px' }}>
+                              <h2 style={titleStyle}>Sign Below</h2>
+                            </div>
+                            <div style={{
+                              width: '100%',
+                              height: '250px',
+                              border: `${sigBorderW}px solid ${sigBorderColor}`,
+                              borderRadius: '8px',
+                              backgroundColor: sigBg,
+                              marginBottom: '30px',
+                              position: 'relative',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: sigInk,
+                              ...bodyStyle
+                            }}>
+                              Signature area
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', marginTop: '20px' }}>
+                              {!hasAnyOption ? (
+                                <>
+                                  <div style={{ textAlign: 'center', fontSize: '18px', color: tc, opacity: 0.9 }}>Thank you for your purchase</div>
+                                  {renderCheckoutPreviewButton('Done', styleId, btn, btnTextStyle, true)}
+                                </>
+                              ) : (
+                                <>
+                                  <div style={{ display: 'flex', gap: '20px', width: '100%' }}>
+                                    {showPrint && renderCheckoutPreviewButton('Print', styleId, btn, btnTextStyle)}
+                                    {showNoReceipt && renderCheckoutPreviewButton('No Receipt', styleId, btn, btnTextStyle)}
+                                  </div>
+                                  {showEmail && renderCheckoutPreviewButton('Email', styleId, btn, btnTextStyle, true)}
+                                </>
+                              )}
+                            </div>
                           </div>
-                          {renderCheckoutPreviewButton('Email', styleId, btn, btnTextStyle, true)}
                         </div>
                       )
                     })()}
+                        </div>
+                      </div>
                   </div>
                 </div>
               )}
+              </div>
             </div>
 
             {/* Checkout UI Edit modal – left: controls, right: exact checkout preview */}
@@ -4115,96 +4755,120 @@ function Settings() {
                 <div
                   style={{
                     background: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
-                    borderRadius: '12px', maxWidth: '95vw', width: '1200px', maxHeight: '90vh',
+                    borderRadius: '12px', maxWidth: '95vw', width: 360 + (CHECKOUT_PREVIEW_WIDTH * 0.75) + 32, height: '72vh', maxHeight: '90vh',
                     display: 'flex', flexDirection: 'column', overflow: 'hidden',
                     boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
                     border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd'
                   }}
                   onClick={e => e.stopPropagation()}
                 >
-                  <div style={{ padding: '12px 16px', borderBottom: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'}`, display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                      {[
-                        { id: 'review_order', label: 'Review Your Order' },
-                        { id: 'cash_confirmation', label: 'Cash to Cashier' },
-                        { id: 'receipt', label: 'Sign Below' }
-                      ].map(({ id, label }) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => setCheckoutUiTab(id)}
-                          style={{
-                            padding: '8px 14px', fontSize: '13px',
-                            border: `1px solid ${checkoutUiTab === id ? `rgba(${themeColorRgb}, 0.7)` : (isDarkMode ? 'var(--border-color, #404040)' : '#ddd')}`,
-                            borderRadius: '6px',
-                            background: checkoutUiTab === id ? `rgba(${themeColorRgb}, 0.15)` : (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'),
-                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                            cursor: 'pointer',
-                            fontWeight: checkoutUiTab === id ? 600 : 400
-                          }}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                      <button
-                        type="button"
-                        onClick={handleCheckoutUiUndo}
-                        disabled={checkoutUiUndoStack.length === 0}
-                        title="Undo"
-                        style={{
-                          padding: '6px 12px', fontSize: '12px',
-                          border: `1px solid ${checkoutUiUndoStack.length === 0 ? (isDarkMode ? 'var(--border-color, #404040)' : '#ddd') : (isDarkMode ? 'var(--border-color, #404040)' : '#ccc')}`,
-                          borderRadius: '6px',
-                          background: checkoutUiUndoStack.length === 0 ? (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5') : (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'),
-                          color: checkoutUiUndoStack.length === 0 ? (isDarkMode ? 'var(--text-tertiary, #666)' : '#999') : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'),
-                          cursor: checkoutUiUndoStack.length === 0 ? 'default' : 'pointer',
-                          opacity: checkoutUiUndoStack.length === 0 ? 0.7 : 1
-                        }}
-                      >
-                        Undo
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCheckoutUiRedo}
-                        disabled={checkoutUiRedoStack.length === 0}
-                        title="Redo"
-                        style={{
-                          padding: '6px 12px', fontSize: '12px',
-                          border: `1px solid ${checkoutUiRedoStack.length === 0 ? (isDarkMode ? 'var(--border-color, #404040)' : '#ddd') : (isDarkMode ? 'var(--border-color, #404040)' : '#ccc')}`,
-                          borderRadius: '6px',
-                          background: checkoutUiRedoStack.length === 0 ? (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5') : (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'),
-                          color: checkoutUiRedoStack.length === 0 ? (isDarkMode ? 'var(--text-tertiary, #666)' : '#999') : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'),
-                          cursor: checkoutUiRedoStack.length === 0 ? 'default' : 'pointer',
-                          opacity: checkoutUiRedoStack.length === 0 ? 0.7 : 1
-                        }}
-                      >
-                        Redo
-                      </button>
-                    </div>
-                  </div>
                   <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
-                    <div style={{ flex: '0 0 320px', overflowY: 'auto', padding: '16px', borderRight: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'}` }}>
+                    {/* Left column: header (tabs) + scrollable controls + footer (Cancel, Save, Undo, Redo) */}
+                    <div style={{ flex: '0 0 360px', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'}` }}>
+                      <div style={{ padding: '12px 16px 8px', flexShrink: 0 }}>
+                        <div style={{ position: 'relative' }}>
+                          <div
+                            className="checkout-ui-tabs-scroll"
+                            style={{
+                              display: 'flex',
+                              gap: '8px',
+                              flexWrap: 'nowrap',
+                              overflowX: 'auto',
+                              paddingBottom: 0,
+                              scrollbarWidth: 'none',
+                              msOverflowStyle: 'none'
+                            }}
+                          >
+                            {[
+                              { id: 'review_order', label: 'Review Your Order' },
+                              { id: 'cash_confirmation', label: 'Cash to Cashier' },
+                              { id: 'tip_selection', label: 'Tip Selection' },
+                              { id: 'card', label: 'Tap or Insert Card' },
+                              { id: 'receipt', label: 'Sign Below' }
+                            ].map(({ id, label }) => {
+                              const isActive = checkoutUiTab === id
+                              return (
+                                <button
+                                  key={id}
+                                  type="button"
+                                  onClick={() => setCheckoutUiTab(id)}
+                                  style={{
+                                    padding: '4px 16px',
+                                    height: '28px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    whiteSpace: 'nowrap',
+                                    backgroundColor: isActive
+                                      ? `rgba(${themeColorRgb}, 0.7)`
+                                      : (isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'),
+                                    border: isActive
+                                      ? `1px solid rgba(${themeColorRgb}, 0.5)`
+                                      : `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                                    borderRadius: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: isActive ? 600 : 500,
+                                    color: isActive ? '#fff' : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'),
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s ease',
+                                    boxShadow: isActive ? `0 4px 15px rgba(${themeColorRgb}, 0.3)` : 'none'
+                                  }}
+                                >
+                                  {label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <div style={{
+                            position: 'absolute',
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: '20px',
+                            background: `linear-gradient(to right, ${isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff'} 0%, ${isDarkMode ? 'rgba(26, 26, 26, 0.3)' : 'rgba(255, 255, 255, 0.3)'} 50%, transparent 100%)`,
+                            pointerEvents: 'none',
+                            zIndex: 1
+                          }} />
+                          <div style={{
+                            position: 'absolute',
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: '20px',
+                            background: `linear-gradient(to left, ${isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff'} 0%, ${isDarkMode ? 'rgba(26, 26, 26, 0.3)' : 'rgba(255, 255, 255, 0.3)'} 50%, transparent 100%)`,
+                            pointerEvents: 'none',
+                            zIndex: 1
+                          }} />
+                        </div>
+                      </div>
+                      <div className="checkout-ui-controls-scroll" style={{ flex: 1, overflowY: 'auto', padding: '16px', minHeight: 0 }}>
                       <FormField>
                         <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Background color</FormLabel>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <input type="color" value={checkoutUiSettings[checkoutUiTab]?.backgroundColor || '#e8f0fe'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), backgroundColor: e.target.value } }))} style={{ width: '40px', height: '36px', padding: 0, border: 'none', borderRadius: '6px', cursor: 'pointer' }} />
-                          <input type="text" value={checkoutUiSettings[checkoutUiTab]?.backgroundColor || '#e8f0fe'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), backgroundColor: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), flex: 1, fontSize: '13px' }} />
+                          <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                            <div style={{ position: 'absolute', inset: 0, background: checkoutUiSettings[checkoutUiTab]?.backgroundColor || '#e8f0fe' }} />
+                            <input type="color" value={checkoutUiSettings[checkoutUiTab]?.backgroundColor || '#e8f0fe'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), backgroundColor: e.target.value } }))} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', padding: 0, border: 'none', opacity: 0, cursor: 'pointer' }} />
+                          </div>
+                          <input type="text" value={checkoutUiSettings[checkoutUiTab]?.backgroundColor || '#e8f0fe'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), backgroundColor: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', minWidth: '80px', fontSize: '13px' }} />
                         </div>
                       </FormField>
                       <FormField>
                         <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Button color</FormLabel>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <input type="color" value={checkoutUiSettings[checkoutUiTab]?.buttonColor || '#4a90e2'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), buttonColor: e.target.value } }))} style={{ width: '40px', height: '36px', padding: 0, border: 'none', borderRadius: '6px', cursor: 'pointer' }} />
-                          <input type="text" value={checkoutUiSettings[checkoutUiTab]?.buttonColor || '#4a90e2'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), buttonColor: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), flex: 1, fontSize: '13px' }} />
+                          <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                            <div style={{ position: 'absolute', inset: 0, background: checkoutUiSettings[checkoutUiTab]?.buttonColor || '#4a90e2' }} />
+                            <input type="color" value={checkoutUiSettings[checkoutUiTab]?.buttonColor || '#4a90e2'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), buttonColor: e.target.value } }))} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', padding: 0, border: 'none', opacity: 0, cursor: 'pointer' }} />
+                          </div>
+                          <input type="text" value={checkoutUiSettings[checkoutUiTab]?.buttonColor || '#4a90e2'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), buttonColor: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', minWidth: '80px', fontSize: '13px' }} />
                         </div>
                       </FormField>
                       <FormField>
                         <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Text color (body)</FormLabel>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <input type="color" value={checkoutUiSettings[checkoutUiTab]?.textColor || '#1a1a1a'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), textColor: e.target.value } }))} style={{ width: '40px', height: '36px', padding: 0, border: 'none', borderRadius: '6px', cursor: 'pointer' }} />
-                          <input type="text" value={checkoutUiSettings[checkoutUiTab]?.textColor || '#1a1a1a'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), textColor: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), flex: 1, fontSize: '13px' }} />
+                          <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                            <div style={{ position: 'absolute', inset: 0, background: checkoutUiSettings[checkoutUiTab]?.textColor || '#1a1a1a' }} />
+                            <input type="color" value={checkoutUiSettings[checkoutUiTab]?.textColor || '#1a1a1a'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), textColor: e.target.value } }))} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', padding: 0, border: 'none', opacity: 0, cursor: 'pointer' }} />
+                          </div>
+                          <input type="text" value={checkoutUiSettings[checkoutUiTab]?.textColor || '#1a1a1a'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, [checkoutUiTab]: { ...(prev[checkoutUiTab] || {}), textColor: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', minWidth: '80px', fontSize: '13px' }} />
                         </div>
                       </FormField>
                       <FormField>
@@ -4241,7 +4905,20 @@ function Settings() {
                           themeColorRgb={themeColorRgb}
                         />
                       </FormField>
-                      {(checkoutUiTab === 'review_order' || checkoutUiTab === 'receipt') && (
+                      {checkoutUiTab === 'card' && (
+                        <FormField>
+                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Instruction message</FormLabel>
+                          <input
+                            type="text"
+                            value={checkoutUiSettings.card?.instruction_text ?? 'Please insert or tap your card'}
+                            onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, card: { ...(prev.card || {}), instruction_text: e.target.value || 'Please insert or tap your card' } }))}
+                            placeholder="Please insert or tap your card"
+                            style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '100%', fontSize: '13px' }}
+                          />
+                          <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '6px', lineHeight: 1.4 }}>Shown below the contactless icon on the card screen.</p>
+                        </FormField>
+                      )}
+                      {(checkoutUiTab === 'review_order' || checkoutUiTab === 'tip_selection' || checkoutUiTab === 'receipt') && (
                         <>
                           <FormField>
                             <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Button style</FormLabel>
@@ -4279,8 +4956,11 @@ function Settings() {
                           <FormField>
                             <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Signature area background</FormLabel>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <input type="color" value={checkoutUiSettings.receipt?.signature_background || '#ffffff'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_background: e.target.value } }))} style={{ width: '40px', height: '36px', padding: 0, border: 'none', borderRadius: '6px', cursor: 'pointer' }} />
-                              <input type="text" value={checkoutUiSettings.receipt?.signature_background || '#ffffff'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_background: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), flex: 1, fontSize: '13px' }} />
+                              <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                                <div style={{ position: 'absolute', inset: 0, background: checkoutUiSettings.receipt?.signature_background || '#ffffff' }} />
+                                <input type="color" value={checkoutUiSettings.receipt?.signature_background || '#ffffff'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_background: e.target.value } }))} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', padding: 0, border: 'none', opacity: 0, cursor: 'pointer' }} />
+                              </div>
+                              <input type="text" value={checkoutUiSettings.receipt?.signature_background || '#ffffff'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_background: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', minWidth: '80px', fontSize: '13px' }} />
                             </div>
                           </FormField>
                           <FormField>
@@ -4291,23 +4971,177 @@ function Settings() {
                                 <input type="number" min={0} max={8} value={checkoutUiSettings.receipt?.signature_border_width ?? 2} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_border_width: Math.min(8, Math.max(0, Number(e.target.value) || 0)) } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '56px', fontSize: '13px' }} />
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
-                                <input type="color" value={typeof checkoutUiSettings.receipt?.signature_border_color === 'string' && checkoutUiSettings.receipt.signature_border_color.startsWith('#') ? checkoutUiSettings.receipt.signature_border_color : '#000000'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_border_color: e.target.value } }))} style={{ width: '40px', height: '36px', padding: 0, border: 'none', borderRadius: '6px', cursor: 'pointer' }} />
-                                <input type="text" value={checkoutUiSettings.receipt?.signature_border_color || 'rgba(0,0,0,0.2)'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_border_color: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), flex: 1, fontSize: '13px' }} />
+                                <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                                  <div style={{ position: 'absolute', inset: 0, background: (typeof checkoutUiSettings.receipt?.signature_border_color === 'string' && checkoutUiSettings.receipt.signature_border_color.startsWith('#')) ? checkoutUiSettings.receipt.signature_border_color : '#000000' }} />
+                                  <input type="color" value={typeof checkoutUiSettings.receipt?.signature_border_color === 'string' && checkoutUiSettings.receipt.signature_border_color.startsWith('#') ? checkoutUiSettings.receipt.signature_border_color : '#000000'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_border_color: e.target.value } }))} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', padding: 0, border: 'none', opacity: 0, cursor: 'pointer' }} />
+                                </div>
+                                <input type="text" value={checkoutUiSettings.receipt?.signature_border_color || 'rgba(0,0,0,0.2)'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_border_color: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', minWidth: '80px', fontSize: '13px' }} />
                               </div>
                             </div>
                           </FormField>
                           <FormField>
                             <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Signature ink color</FormLabel>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <input type="color" value={checkoutUiSettings.receipt?.signature_ink_color || '#000000'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_ink_color: e.target.value } }))} style={{ width: '40px', height: '36px', padding: 0, border: 'none', borderRadius: '6px', cursor: 'pointer' }} />
-                              <input type="text" value={checkoutUiSettings.receipt?.signature_ink_color || '#000000'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_ink_color: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), flex: 1, fontSize: '13px' }} />
+                              <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                                <div style={{ position: 'absolute', inset: 0, background: checkoutUiSettings.receipt?.signature_ink_color || '#000000' }} />
+                                <input type="color" value={checkoutUiSettings.receipt?.signature_ink_color || '#000000'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_ink_color: e.target.value } }))} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', padding: 0, border: 'none', opacity: 0, cursor: 'pointer' }} />
+                              </div>
+                              <input type="text" value={checkoutUiSettings.receipt?.signature_ink_color || '#000000'} onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), signature_ink_color: e.target.value } }))} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', minWidth: '80px', fontSize: '13px' }} />
+                            </div>
+                          </FormField>
+                          <FormField>
+                            <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '8px', display: 'block' }}>Receipt options shown at checkout</FormLabel>
+                            <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '10px', lineHeight: 1.4 }}>
+                              Choose which buttons customers see on the Sign Below screen after payment.
+                            </p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                                <div className="checkbox-wrapper-2">
+                                  <input
+                                    type="checkbox"
+                                    className="sc-gJwTLC ikxBAC"
+                                    checked={(checkoutUiSettings.receipt?.receipt_options_offered?.print !== false)}
+                                    onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({
+                                      ...prev,
+                                      receipt: {
+                                        ...(prev.receipt || {}),
+                                        receipt_options_offered: {
+                                          ...(prev.receipt?.receipt_options_offered || { print: true, email: true, no_receipt: true }),
+                                          print: e.target.checked
+                                        }
+                                      }
+                                    }))}
+                                  />
+                                </div>
+                                <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Offer Print</span>
+                              </label>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                                <div className="checkbox-wrapper-2">
+                                  <input
+                                    type="checkbox"
+                                    className="sc-gJwTLC ikxBAC"
+                                    checked={(checkoutUiSettings.receipt?.receipt_options_offered?.email !== false)}
+                                    onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({
+                                      ...prev,
+                                      receipt: {
+                                        ...(prev.receipt || {}),
+                                        receipt_options_offered: {
+                                          ...(prev.receipt?.receipt_options_offered || { print: true, email: true, no_receipt: true }),
+                                          email: e.target.checked
+                                        }
+                                      }
+                                    }))}
+                                  />
+                                </div>
+                                <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Offer Email</span>
+                              </label>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                                <div className="checkbox-wrapper-2">
+                                  <input
+                                    type="checkbox"
+                                    className="sc-gJwTLC ikxBAC"
+                                    checked={(checkoutUiSettings.receipt?.receipt_options_offered?.no_receipt !== false)}
+                                    onChange={(e) => setCheckoutUiSettingsWithUndo(prev => ({
+                                      ...prev,
+                                      receipt: {
+                                        ...(prev.receipt || {}),
+                                        receipt_options_offered: {
+                                          ...(prev.receipt?.receipt_options_offered || { print: true, email: true, no_receipt: true }),
+                                          no_receipt: e.target.checked
+                                        }
+                                      }
+                                    }))}
+                                  />
+                                </div>
+                                <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Offer No Receipt</span>
+                              </label>
                             </div>
                           </FormField>
                         </>
                       )}
+                      </div>
+                      <div style={{ padding: '12px 16px', borderTop: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={handleCheckoutUiUndo}
+                          disabled={checkoutUiUndoStack.length === 0}
+                          title="Undo"
+                          style={{
+                            padding: 0, border: 'none', background: 'none',
+                            color: checkoutUiUndoStack.length === 0 ? (isDarkMode ? 'var(--text-tertiary, #666)' : '#999') : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'),
+                            cursor: checkoutUiUndoStack.length === 0 ? 'default' : 'pointer',
+                            opacity: checkoutUiUndoStack.length === 0 ? 0.5 : 1
+                          }}
+                        >
+                          <Undo2 size={18} strokeWidth={2.5} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCheckoutUiRedo}
+                          disabled={checkoutUiRedoStack.length === 0}
+                          title="Redo"
+                          style={{
+                            padding: 0, border: 'none', background: 'none',
+                            color: checkoutUiRedoStack.length === 0 ? (isDarkMode ? 'var(--text-tertiary, #666)' : '#999') : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'),
+                            cursor: checkoutUiRedoStack.length === 0 ? 'default' : 'pointer',
+                            opacity: checkoutUiRedoStack.length === 0 ? 0.5 : 1
+                          }}
+                        >
+                          <Redo2 size={18} strokeWidth={2.5} />
+                        </button>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: 'auto' }}>
+                          <button
+                            type="button"
+                            className="button-26 button-26--header"
+                            role="button"
+                            onClick={() => setCheckoutUiEditModalOpen(false)}
+                          >
+                            <div className="button-26__content"><span className="button-26__text text">Cancel</span></div>
+                          </button>
+                          <button
+                            type="button"
+                            className="button-26 button-26--header"
+                            role="button"
+                            onClick={async () => {
+                              setSaving(true)
+                              setMessage(null)
+                              try {
+                                const sessionToken = localStorage.getItem('sessionToken')
+                                const res = await fetch('/api/customer-display/settings', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+                                  body: JSON.stringify({ checkout_ui: checkoutUiSettings })
+                                })
+                                const data = await res.json()
+                                if (data.success) {
+                                  const saved = data.data?.checkout_ui
+                                  if (saved != null && typeof saved === 'object') {
+                                    setCheckoutUiSettings(mergeCheckoutUiFromApi(saved))
+                                  }
+                                  setCheckoutUiEditModalOpen(false)
+                                  setMessage({ type: 'success', text: 'Saved' })
+                                  setTimeout(() => setMessage(null), 3000)
+                                  loadDisplaySettings().catch(() => {})
+                                } else {
+                                  setMessage({ type: 'error', text: data.message || 'Failed to save' })
+                                }
+                              } catch (err) {
+                                console.error(err)
+                                setMessage({ type: 'error', text: 'Failed to save' })
+                              } finally {
+                                setSaving(false)
+                              }
+                            }}
+                            disabled={saving}
+                          >
+                            <div className="button-26__content"><span className="button-26__text text">{saving ? 'Saving…' : 'Save'}</span></div>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ flex: 1, overflow: 'auto', padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5' }}>
-                      <div style={{ width: '100%', maxWidth: '800px', minHeight: '500px', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.15)' }}>
+                    <div style={{ flex: 1, overflow: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff', maxWidth: CHECKOUT_PREVIEW_WIDTH * 0.75 + 32 }}>
+                      <div style={{ width: CHECKOUT_PREVIEW_WIDTH * 0.75, height: CHECKOUT_PREVIEW_HEIGHT * 0.75, flexShrink: 0, borderRadius: '12px', overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.15)' }}>
+                        <div style={{ width: CHECKOUT_PREVIEW_WIDTH, height: CHECKOUT_PREVIEW_HEIGHT, transform: 'scale(0.75)', transformOrigin: 'top left' }}>
                         {checkoutUiTab === 'review_order' && (() => {
                           const s = checkoutUiSettings.review_order || {}
                           const bg = s.backgroundColor || '#e8f0fe'
@@ -4317,21 +5151,176 @@ function Settings() {
                           const bodyStyle = getCheckoutTextStyle(s, 'body')
                           const btnTextStyle = getCheckoutTextStyle(s, 'button')
                           const styleId = s.button_style || 'default'
+                          const btnRgb = hexToRgb(btn)
                           return (
-                            <div style={{ padding: '20px', minHeight: '500px', backgroundColor: bg, color: tc, display: 'flex', flexDirection: 'column' }}>
-                              <div style={{ textAlign: titleStyle.textAlign, marginBottom: '30px', ...titleStyle }}>Review Your Order</div>
-                              <div style={{ background: 'rgba(0,0,0,0.06)', borderRadius: '15px', padding: '20px', marginBottom: '20px', width: '100%' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid rgba(0,0,0,0.1)', ...bodyStyle }}><span>Sample Item</span><span>$9.99</span></div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', ...bodyStyle }}><span>Another Item × 2</span><span>$24.00</span></div>
+                            <div className="customer-display-popup-container" style={{
+                              ['--customer-display-theme-color-rgb']: btnRgb,
+                              padding: '20px',
+                              width: '100%',
+                              height: '100%',
+                              boxSizing: 'border-box',
+                              backgroundColor: bg,
+                              color: tc,
+                              fontFamily: titleStyle.fontFamily || 'system-ui',
+                              fontWeight: titleStyle.fontWeight || '600',
+                              maxWidth: '100%',
+                              maxHeight: '100%',
+                              borderRadius: 0,
+                              boxShadow: 'none',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              flex: 1
+                            }}>
+                              <div className="transaction-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+                                <div style={{ height: '32px', marginBottom: '4px' }} />
+                                <div className="screen-header" style={{ marginTop: 0, marginBottom: '20px' }}>
+                                  <h2 style={titleStyle}>Review Your Order</h2>
+                                </div>
+                                <div className="items-list" style={bodyStyle}>
+                                  <div className="item-row">
+                                    <span className="item-name">Sample Item</span>
+                                    <span className="item-price">$9.99</span>
+                                  </div>
+                                  <div className="item-row">
+                                    <span className="item-name">Another Item</span>
+                                    <span className="item-quantity">× 2</span>
+                                    <span className="item-price">$24.00</span>
+                                  </div>
+                                </div>
+                                <div className="totals-section" style={bodyStyle}>
+                                  <div className="total-row"><span>Subtotal:</span><span>$33.99</span></div>
+                                  <div className="total-row"><span>Tax:</span><span>$2.72</span></div>
+                                  <div className="total-row final"><span>Total:</span><span>$36.71</span></div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '20px', width: '100%', marginTop: '20px' }}>
+                                  {renderCheckoutPreviewButton('Cash', styleId, btn, btnTextStyle)}
+                                  {renderCheckoutPreviewButton('Card', styleId, btn, btnTextStyle)}
+                                </div>
                               </div>
-                              <div style={{ background: 'rgba(0,0,0,0.06)', borderRadius: '15px', padding: '20px', marginBottom: '20px', width: '100%' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '28px', ...bodyStyle }}><span>Subtotal</span><span>$33.99</span></div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '28px', ...bodyStyle }}><span>Tax</span><span>$2.72</span></div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid currentColor', marginTop: '8px', paddingTop: '8px', fontSize: '42px', fontWeight: 'bold', ...bodyStyle }}><span>Total</span><span>$36.71</span></div>
+                            </div>
+                          )
+                        })()}
+                        {checkoutUiTab === 'tip_selection' && (() => {
+                          const s = checkoutUiSettings.tip_selection || {}
+                          const bg = s.backgroundColor || '#e8f0fe'
+                          const btn = s.buttonColor || '#4a90e2'
+                          const tc = s.textColor || '#1a1a1a'
+                          const titleStyle = getCheckoutTextStyle(s, 'title')
+                          const btnTextStyle = getCheckoutTextStyle(s, 'button')
+                          const btnRgb = hexToRgb(btn)
+                          const tipBtnBase = {
+                            aspectRatio: '1',
+                            minHeight: 0,
+                            padding: '16px',
+                            backgroundColor: btn,
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            textAlign: 'center',
+                            cursor: 'default',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            ...btnTextStyle
+                          }
+                          return (
+                            <div className="customer-display-popup-container" style={{
+                              ['--customer-display-theme-color-rgb']: btnRgb,
+                              padding: '20px',
+                              width: '100%',
+                              height: '100%',
+                              minHeight: CHECKOUT_PREVIEW_HEIGHT,
+                              boxSizing: 'border-box',
+                              backgroundColor: bg,
+                              color: tc,
+                              fontFamily: titleStyle.fontFamily || 'system-ui',
+                              fontWeight: titleStyle.fontWeight || '600',
+                              maxWidth: '100%',
+                              maxHeight: '100%',
+                              borderRadius: 0,
+                              boxShadow: 'none',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              flex: 1
+                            }}>
+                              <div className="payment-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: '8px' }}>
+                                  <span />
+                                </div>
+                                <div className="screen-header" style={titleStyle}>
+                                  <h2>Add a tip?</h2>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', width: '100%', maxWidth: '400px', margin: '0 auto', flex: 1, alignContent: 'start' }}>
+                                  {[15, 18, 20].map((pct) => (
+                                    <div key={pct} style={{ ...tipBtnBase }}>
+                                      <div style={{ fontSize: 'clamp(28px, 6vw, 36px)', fontWeight: 600, marginBottom: '4px' }}>{pct}%</div>
+                                      <div style={{ fontSize: 'clamp(16px, 3.5vw, 20px)', opacity: 0.95 }}>${(36.71 * pct / 100).toFixed(2)}</div>
+                                    </div>
+                                  ))}
+                                  <div style={{ ...tipBtnBase }}>
+                                    No tip
+                                  </div>
+                                  <div style={{
+                                    gridColumn: '1 / -1',
+                                    padding: '20px 16px',
+                                    backgroundColor: `rgba(${btnRgb}, 0.35)`,
+                                    color: tc,
+                                    border: `2px solid ${btn}`,
+                                    borderRadius: '8px',
+                                    textAlign: 'center',
+                                    cursor: 'default',
+                                    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: 'clamp(18px, 4vw, 22px)',
+                                    fontWeight: 600,
+                                    ...btnTextStyle
+                                  }}>
+                                    Custom
+                                  </div>
+                                </div>
                               </div>
-                              <div style={{ display: 'flex', gap: '20px', width: '100%', marginTop: '20px' }}>
-                                {renderCheckoutPreviewButton('Cash', styleId, btn, btnTextStyle)}
-                                {renderCheckoutPreviewButton('Card', styleId, btn, btnTextStyle)}
+                            </div>
+                          )
+                        })()}
+                        {checkoutUiTab === 'card' && (() => {
+                          const s = checkoutUiSettings.card || {}
+                          const bg = s.backgroundColor || '#e8f0fe'
+                          const tc = s.textColor || '#1a1a1a'
+                          const bodyStyle = getCheckoutTextStyle(s, 'body')
+                          const instructionText = s.instruction_text ?? 'Please insert or tap your card'
+                          return (
+                            <div className="customer-display-popup-container" style={{
+                              padding: '20px',
+                              width: '100%',
+                              height: '100%',
+                              boxSizing: 'border-box',
+                              backgroundColor: bg,
+                              color: tc,
+                              fontFamily: bodyStyle.fontFamily || 'system-ui',
+                              maxWidth: '100%',
+                              maxHeight: '100%',
+                              borderRadius: 0,
+                              boxShadow: 'none',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              flex: 1
+                            }}>
+                              <div className="card-processing-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', justifyContent: 'flex-start', alignItems: 'stretch' }}>
+                                <div style={{ height: '32px', marginBottom: '10px', marginTop: '-10px' }} />
+                                <div className="card-animation" style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px', marginTop: '48px' }}>
+                                  <img src="/contactless-svgrepo-com.svg" alt="" style={{ width: '320px', height: '320px', color: 'inherit' }} />
+                                </div>
+                                <div className="card-instruction" style={{ fontSize: '1.25rem', textAlign: 'center', ...bodyStyle }}>
+                                  {instructionText}
+                                </div>
                               </div>
                             </div>
                           )
@@ -4339,22 +5328,57 @@ function Settings() {
                         {checkoutUiTab === 'cash_confirmation' && (() => {
                           const s = checkoutUiSettings.cash_confirmation || {}
                           const bg = s.backgroundColor || '#e8f0fe'
+                          const btn = s.buttonColor || '#4a90e2'
                           const tc = s.textColor || '#1a1a1a'
                           const titleStyle = getCheckoutTextStyle(s, 'title')
                           const bodyStyle = getCheckoutTextStyle(s, 'body')
+                          const btnRgb = hexToRgb(btn)
                           return (
-                            <div style={{ padding: '20px', minHeight: '500px', backgroundColor: bg, color: tc, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-                              <div style={{ textAlign: titleStyle.textAlign, marginBottom: '24px', ...titleStyle }}>Please give the cash amount to the cashier</div>
-                              <div style={{ background: 'rgba(0,0,0,0.06)', borderRadius: '15px', padding: '20px', width: '100%', maxWidth: '320px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '28px', ...bodyStyle }}><span>Subtotal</span><span>$33.99</span></div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '28px', ...bodyStyle }}><span>Tax</span><span>$2.72</span></div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid currentColor', marginTop: '8px', paddingTop: '8px', fontSize: '42px', fontWeight: 'bold', ...bodyStyle }}><span>Total</span><span>$36.71</span></div>
+                            <div className="customer-display-popup-container" style={{
+                              ['--customer-display-theme-color-rgb']: btnRgb,
+                              padding: '20px',
+                              width: '100%',
+                              height: '100%',
+                              boxSizing: 'border-box',
+                              backgroundColor: bg,
+                              color: tc,
+                              fontFamily: titleStyle.fontFamily || 'system-ui',
+                              fontWeight: titleStyle.fontWeight || '600',
+                              maxWidth: '100%',
+                              maxHeight: '100%',
+                              borderRadius: 0,
+                              boxShadow: 'none',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              flex: 1
+                            }}>
+                              <div className="payment-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: '10px', marginTop: '-10px' }}>
+                                  <span style={{ padding: '6px 12px', fontSize: '12px', opacity: 0 }}>Cancel</span>
+                                  <span style={{ padding: '6px 12px', fontSize: '12px', opacity: 0 }}>Continue</span>
+                                </div>
+                                <div className="screen-header" style={{ width: '100%', marginBottom: '20px' }}>
+                                  <h2 style={{ margin: 0, ...titleStyle }}>Please give the cash amount to the cashier</h2>
+                                </div>
+                                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                                  <div className="totals-section" style={{ background: `rgba(${btnRgb}, 0.15)`, borderRadius: '15px', padding: '20px', width: '100%', ...bodyStyle }}>
+                                    <div className="total-row"><span>Subtotal:</span><span>$33.99</span></div>
+                                    <div className="total-row"><span>Tax:</span><span>$2.72</span></div>
+                                    <div className="total-row final"><span>Total:</span><span>$36.71</span></div>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           )
                         })()}
                         {checkoutUiTab === 'receipt' && (() => {
                           const s = checkoutUiSettings.receipt || {}
+                          const opts = s.receipt_options_offered || {}
+                          const showPrint = opts.print !== false
+                          const showEmail = opts.email !== false
+                          const showNoReceipt = opts.no_receipt !== false
+                          const hasAnyOption = showPrint || showEmail || showNoReceipt
                           const bg = s.backgroundColor || '#e8f0fe'
                           const btn = s.buttonColor || '#4a90e2'
                           const tc = s.textColor || '#1a1a1a'
@@ -4366,72 +5390,76 @@ function Settings() {
                           const sigBorderW = s.signature_border_width ?? 2
                           const sigBorderColor = s.signature_border_color || 'rgba(0,0,0,0.2)'
                           const sigInk = s.signature_ink_color || '#000000'
+                          const btnRgb = hexToRgb(btn)
                           return (
-                            <div style={{ padding: '20px', minHeight: '500px', backgroundColor: bg, color: tc, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                              <div style={{ textAlign: titleStyle.textAlign, marginBottom: '20px', ...titleStyle }}>Sign Below</div>
-                              <div style={{ width: '100%', height: '250px', border: `${sigBorderW}px solid ${sigBorderColor}`, borderRadius: '8px', marginBottom: '20px', background: sigBg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: sigInk, ...bodyStyle }}>Signature area</div>
-                              <div style={{ display: 'flex', gap: '20px', width: '100%', marginBottom: '20px' }}>
-                                {renderCheckoutPreviewButton('Print', styleId, btn, btnTextStyle)}
-                                {renderCheckoutPreviewButton('No Receipt', styleId, btn, btnTextStyle)}
+                            <div className="customer-display-popup-container" style={{
+                              ['--customer-display-theme-color-rgb']: btnRgb,
+                              padding: '20px',
+                              width: '100%',
+                              height: '100%',
+                              boxSizing: 'border-box',
+                              backgroundColor: bg,
+                              color: tc,
+                              fontFamily: titleStyle.fontFamily || 'system-ui',
+                              fontWeight: titleStyle.fontWeight || '600',
+                              maxWidth: '100%',
+                              maxHeight: '100%',
+                              borderRadius: 0,
+                              boxShadow: 'none',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              flex: 1
+                            }}>
+                              <div className="receipt-screen-popup" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
+                                <div className="screen-header" style={{ width: '100%', marginBottom: '30px' }}>
+                                  <h2 style={titleStyle}>Sign Below</h2>
+                                </div>
+                                <div style={{
+                                  width: '100%',
+                                  height: '250px',
+                                  border: `${sigBorderW}px solid ${sigBorderColor}`,
+                                  borderRadius: '8px',
+                                  backgroundColor: sigBg,
+                                  marginBottom: '30px',
+                                  position: 'relative',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: sigInk,
+                                  ...bodyStyle
+                                }}>
+                                  Signature area
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', marginTop: '20px' }}>
+                                  {!hasAnyOption ? (
+                                    <>
+                                      <div style={{ textAlign: 'center', fontSize: '18px', color: tc, opacity: 0.9 }}>Thank you for your purchase</div>
+                                      {renderCheckoutPreviewButton('Done', styleId, btn, btnTextStyle, true)}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div style={{ display: 'flex', gap: '20px', width: '100%' }}>
+                                        {showPrint && renderCheckoutPreviewButton('Print', styleId, btn, btnTextStyle)}
+                                        {showNoReceipt && renderCheckoutPreviewButton('No Receipt', styleId, btn, btnTextStyle)}
+                                      </div>
+                                      {showEmail && renderCheckoutPreviewButton('Email', styleId, btn, btnTextStyle, true)}
+                                    </>
+                                  )}
+                                </div>
                               </div>
-                              {renderCheckoutPreviewButton('Email', styleId, btn, btnTextStyle, true)}
                             </div>
                           )
                         })()}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div style={{ padding: '12px 16px', borderTop: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'}`, display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                    <button
-                      type="button"
-                      onClick={() => setCheckoutUiEditModalOpen(false)}
-                      style={{
-                        padding: '8px 16px', fontSize: '14px', border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
-                        borderRadius: '8px', background: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', cursor: 'pointer'
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="button-26 button-26--header"
-                      role="button"
-                      onClick={async () => {
-                        setSaving(true)
-                        setMessage(null)
-                        try {
-                          const sessionToken = localStorage.getItem('sessionToken')
-                          const res = await fetch('/api/customer-display/settings', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
-                            body: JSON.stringify({ checkout_ui: checkoutUiSettings })
-                          })
-                          const data = await res.json()
-                          if (data.success) {
-                            setCheckoutUiEditModalOpen(false)
-                            setMessage({ type: 'success', text: 'Saved' })
-                            setTimeout(() => setMessage(null), 3000)
-                          } else {
-                            setMessage({ type: 'error', text: data.message || 'Failed to save' })
-                          }
-                        } catch (err) {
-                          console.error(err)
-                          setMessage({ type: 'error', text: 'Failed to save' })
-                        } finally {
-                          setSaving(false)
-                        }
-                      }}
-                      disabled={saving}
-                    >
-                      <div className="button-26__content"><span className="button-26__text text">{saving ? 'Saving…' : 'Save'}</span></div>
-                    </button>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Edit modal – left: settings, right: preview; bottom: Save, Print test */}
+            {/* Receipt Edit modal – same style as Checkout UI: left controls, right preview */}
             {receiptEditModalOpen && (
               <div
                 style={{
@@ -4443,7 +5471,7 @@ function Settings() {
                 <div
                   style={{
                     background: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
-                    borderRadius: '12px', maxWidth: '95vw', width: '1200px', maxHeight: '90vh',
+                    borderRadius: '12px', maxWidth: '95vw', width: '720px', height: '72vh', maxHeight: '90vh',
                     display: 'flex', flexDirection: 'column', overflow: 'hidden',
                     boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
                     border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd'
@@ -4451,29 +5479,41 @@ function Settings() {
                   onClick={e => e.stopPropagation()}
                 >
                   <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
-                    <div style={{ flex: '1 1 50%', overflowY: 'auto', padding: '16px', borderRight: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'}` }}>
-                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
-                        {['header', 'body_items', 'body_totals', 'body_barcode', 'footer', 'styling'].map(s => {
-                          const labels = { header: 'Header', body_items: 'Line items', body_totals: 'Totals', body_barcode: 'Date & barcode', footer: 'Footer', styling: 'Styling' }
-                          return (
-                            <button
-                              key={s}
-                              type="button"
-                              onClick={() => setActiveReceiptSection(activeReceiptSection === s ? null : s)}
-                              style={{
-                                padding: '6px 10px', fontSize: '12px',
-                                border: `1px solid ${activeReceiptSection === s ? `rgba(${themeColorRgb}, 0.7)` : (isDarkMode ? 'var(--border-color, #404040)' : '#ddd')}`,
-                                borderRadius: '6px',
-                                background: activeReceiptSection === s ? `rgba(${themeColorRgb}, 0.15)` : (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'),
-                                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              {labels[s]}
-                            </button>
-                          )
-                        })}
+                    <div style={{ flex: '0 0 360px', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'}` }}>
+                      <div style={{ padding: '12px 16px 8px', flexShrink: 0 }}>
+                        <div style={{ position: 'relative' }}>
+                          <div
+                            className="checkout-ui-tabs-scroll"
+                            style={{ display: 'flex', gap: '8px', flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 0, scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                          >
+                            {['header', 'customer_order', 'body_items', 'body_totals', 'body_barcode', 'footer', 'styling'].map(s => {
+                              const labels = { header: 'Header', customer_order: 'Customer & Order', body_items: 'Line items', body_totals: 'Totals', body_barcode: 'Date & barcode', footer: 'Footer', styling: 'Styling' }
+                              const isActive = activeReceiptSection === s
+                              return (
+                                <button
+                                  key={s}
+                                  type="button"
+                                  onClick={() => setActiveReceiptSection(isActive ? null : s)}
+                                  style={{
+                                    padding: '4px 16px', height: '28px', display: 'flex', alignItems: 'center', whiteSpace: 'nowrap',
+                                    backgroundColor: isActive ? `rgba(${themeColorRgb}, 0.7)` : (isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'),
+                                    border: isActive ? `1px solid rgba(${themeColorRgb}, 0.5)` : `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                                    borderRadius: '8px', fontSize: '14px', fontWeight: isActive ? 600 : 500,
+                                    color: isActive ? '#fff' : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'),
+                                    cursor: 'pointer', transition: 'all 0.3s ease',
+                                    boxShadow: isActive ? `0 4px 15px rgba(${themeColorRgb}, 0.3)` : 'none'
+                                  }}
+                                >
+                                  {labels[s]}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '20px', background: `linear-gradient(to right, ${isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff'} 0%, ${isDarkMode ? 'rgba(26, 26, 26, 0.3)' : 'rgba(255, 255, 255, 0.3)'} 50%, transparent 100%)`, pointerEvents: 'none', zIndex: 1 }} />
+                          <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '20px', background: `linear-gradient(to left, ${isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff'} 0%, ${isDarkMode ? 'rgba(26, 26, 26, 0.3)' : 'rgba(255, 255, 255, 0.3)'} 50%, transparent 100%)`, pointerEvents: 'none', zIndex: 1 }} />
+                        </div>
                       </div>
+                      <div className="checkout-ui-controls-scroll" style={{ flex: 1, overflowY: 'auto', padding: '16px', minHeight: 0 }}>
                       {activeReceiptSection && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
@@ -4482,67 +5522,149 @@ function Settings() {
                       <>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Store name</FormLabel>
-                          <input type="text" placeholder="Store" value={receiptSettings.store_name} onChange={(e) => setReceiptSettings({ ...receiptSettings, store_name: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                          <input type="text" placeholder="Store" value={receiptSettings.store_name ?? ''} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_name: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
                           
                           {/* Toolbar - Google Docs style */}
                           <TextFormattingToolbar
                             font={receiptSettings.store_name_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, store_name_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_name_font: e.target.value })}
                             fontSize={receiptSettings.store_name_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, store_name_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 14)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_name_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 14)) })}
                             bold={receiptSettings.store_name_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, store_name_bold: !receiptSettings.store_name_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, store_name_bold: !receiptSettings.store_name_bold })}
                             italic={receiptSettings.store_name_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, store_name_italic: !receiptSettings.store_name_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, store_name_italic: !receiptSettings.store_name_italic })}
                             align={receiptSettings.store_name_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, store_name_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, store_name_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
                         </FormField>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Store address (multiple lines)</FormLabel>
-                          <textarea placeholder="Street, City, State ZIP" value={receiptSettings.store_address} onChange={(e) => setReceiptSettings({ ...receiptSettings, store_address: e.target.value })} rows={2} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), resize: 'vertical', fontFamily: 'inherit', minHeight: '56px' }} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                          <textarea placeholder="Street, City, State ZIP" value={receiptSettings.store_address ?? ''} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_address: e.target.value })} rows={2} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), resize: 'vertical', fontFamily: 'inherit', minHeight: '56px' }} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
                           <TextFormattingToolbar
                             font={receiptSettings.store_address_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, store_address_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_address_font: e.target.value })}
                             fontSize={receiptSettings.store_address_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, store_address_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_address_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
                             bold={receiptSettings.store_address_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, store_address_bold: !receiptSettings.store_address_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, store_address_bold: !receiptSettings.store_address_bold })}
                             italic={receiptSettings.store_address_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, store_address_italic: !receiptSettings.store_address_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, store_address_italic: !receiptSettings.store_address_italic })}
                             align={receiptSettings.store_address_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, store_address_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, store_address_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
                         </FormField>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Phone</FormLabel>
-                          <input type="text" placeholder="Phone" value={receiptSettings.store_phone} onChange={(e) => setReceiptSettings({ ...receiptSettings, store_phone: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                          <input type="text" placeholder="Phone" value={receiptSettings.store_phone ?? ''} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_phone: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
                           <TextFormattingToolbar
                             font={receiptSettings.store_phone_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, store_phone_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_phone_font: e.target.value })}
                             fontSize={receiptSettings.store_phone_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, store_phone_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_phone_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
                             bold={receiptSettings.store_phone_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, store_phone_bold: !receiptSettings.store_phone_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, store_phone_bold: !receiptSettings.store_phone_bold })}
                             italic={receiptSettings.store_phone_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, store_phone_italic: !receiptSettings.store_phone_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, store_phone_italic: !receiptSettings.store_phone_italic })}
                             align={receiptSettings.store_phone_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, store_phone_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, store_phone_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
                         </FormField>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Logo upload</FormLabel>
-                          <input type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onloadend = () => setReceiptSettings({ ...receiptSettings, store_logo: r.result }); r.readAsDataURL(f); } }} style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666' }} />
+                          <input type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onloadend = () => setReceiptSettingsWithUndo({ ...receiptSettings, store_logo: r.result }); r.readAsDataURL(f); } }} style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666' }} />
                         </FormField>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Header alignment</FormLabel>
-                          <CustomDropdown value={receiptSettings.header_alignment || 'center'} onChange={(e) => setReceiptSettings({ ...receiptSettings, header_alignment: e.target.value })} options={[{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }]} placeholder="Alignment" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '160px' }} />
+                          <CustomDropdown value={receiptSettings.header_alignment || 'center'} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, header_alignment: e.target.value })} options={[{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }]} placeholder="Alignment" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '160px' }} />
+                        </FormField>
+                      </>
+                    )}
+
+                    {/* Customer & Order section */}
+                    {activeReceiptSection === 'customer_order' && (
+                      <>
+                        <FormField>
+                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Show in preview</FormLabel>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={receiptSettings.preview_customer_order !== false} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, preview_customer_order: e.target.checked })} />
+                            <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Show Customer & Order section (Order Type, Customer, Phone, Address)</span>
+                          </label>
+                          <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '6px', lineHeight: 1.4 }}>This section appears on receipts for pickup and delivery orders.</p>
+                        </FormField>
+                        <FormField>
+                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Order type line (e.g. Order Type: Pickup)</FormLabel>
+                          <TextFormattingToolbar
+                            font={receiptSettings.order_type_font ?? receiptSettings.customer_order_font}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, order_type_font: e.target.value })}
+                            fontSize={receiptSettings.order_type_font_size ?? receiptSettings.customer_order_font_size}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, order_type_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            bold={receiptSettings.order_type_bold ?? receiptSettings.customer_order_bold}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, order_type_bold: !(receiptSettings.order_type_bold ?? receiptSettings.customer_order_bold) })}
+                            italic={receiptSettings.order_type_italic ?? receiptSettings.customer_order_italic}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, order_type_italic: !(receiptSettings.order_type_italic ?? receiptSettings.customer_order_italic) })}
+                            align={receiptSettings.order_type_align ?? receiptSettings.customer_order_align}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, order_type_align: align })}
+                            isDarkMode={isDarkMode}
+                            themeColorRgb={themeColorRgb}
+                          />
+                        </FormField>
+                        <FormField>
+                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Customer name line</FormLabel>
+                          <TextFormattingToolbar
+                            font={receiptSettings.customer_name_font ?? receiptSettings.customer_order_font}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, customer_name_font: e.target.value })}
+                            fontSize={receiptSettings.customer_name_font_size ?? receiptSettings.customer_order_font_size}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, customer_name_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            bold={receiptSettings.customer_name_bold ?? receiptSettings.customer_order_bold}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, customer_name_bold: !(receiptSettings.customer_name_bold ?? receiptSettings.customer_order_bold) })}
+                            italic={receiptSettings.customer_name_italic ?? receiptSettings.customer_order_italic}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, customer_name_italic: !(receiptSettings.customer_name_italic ?? receiptSettings.customer_order_italic) })}
+                            align={receiptSettings.customer_name_align ?? receiptSettings.customer_order_align}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, customer_name_align: align })}
+                            isDarkMode={isDarkMode}
+                            themeColorRgb={themeColorRgb}
+                          />
+                        </FormField>
+                        <FormField>
+                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Phone line</FormLabel>
+                          <TextFormattingToolbar
+                            font={receiptSettings.customer_phone_font ?? receiptSettings.customer_order_font}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, customer_phone_font: e.target.value })}
+                            fontSize={receiptSettings.customer_phone_font_size ?? receiptSettings.customer_order_font_size}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, customer_phone_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            bold={receiptSettings.customer_phone_bold ?? receiptSettings.customer_order_bold}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, customer_phone_bold: !(receiptSettings.customer_phone_bold ?? receiptSettings.customer_order_bold) })}
+                            italic={receiptSettings.customer_phone_italic ?? receiptSettings.customer_order_italic}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, customer_phone_italic: !(receiptSettings.customer_phone_italic ?? receiptSettings.customer_order_italic) })}
+                            align={receiptSettings.customer_phone_align ?? receiptSettings.customer_order_align}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, customer_phone_align: align })}
+                            isDarkMode={isDarkMode}
+                            themeColorRgb={themeColorRgb}
+                          />
+                        </FormField>
+                        <FormField>
+                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Address line</FormLabel>
+                          <TextFormattingToolbar
+                            font={receiptSettings.customer_address_font ?? receiptSettings.customer_order_font}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, customer_address_font: e.target.value })}
+                            fontSize={receiptSettings.customer_address_font_size ?? receiptSettings.customer_order_font_size}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, customer_address_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            bold={receiptSettings.customer_address_bold ?? receiptSettings.customer_order_bold}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, customer_address_bold: !(receiptSettings.customer_address_bold ?? receiptSettings.customer_order_bold) })}
+                            italic={receiptSettings.customer_address_italic ?? receiptSettings.customer_order_italic}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, customer_address_italic: !(receiptSettings.customer_address_italic ?? receiptSettings.customer_order_italic) })}
+                            align={receiptSettings.customer_address_align ?? receiptSettings.customer_order_align}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, customer_address_align: align })}
+                            isDarkMode={isDarkMode}
+                            themeColorRgb={themeColorRgb}
+                          />
                         </FormField>
                       </>
                     )}
@@ -4554,55 +5676,55 @@ function Settings() {
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Item name</FormLabel>
                           <TextFormattingToolbar
                             font={receiptSettings.item_name_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, item_name_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, item_name_font: e.target.value })}
                             fontSize={receiptSettings.item_name_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, item_name_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, item_name_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
                             bold={receiptSettings.item_name_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, item_name_bold: !receiptSettings.item_name_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, item_name_bold: !receiptSettings.item_name_bold })}
                             italic={receiptSettings.item_name_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, item_name_italic: !receiptSettings.item_name_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, item_name_italic: !receiptSettings.item_name_italic })}
                             align={receiptSettings.item_name_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, item_name_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, item_name_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
                         </FormField>
                         <FormField>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                            <input type="checkbox" checked={!!receiptSettings.show_item_descriptions} onChange={(e) => setReceiptSettings({ ...receiptSettings, show_item_descriptions: e.target.checked })} />
+                            <input type="checkbox" checked={!!receiptSettings.show_item_descriptions} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, show_item_descriptions: e.target.checked })} />
                             <FormLabel isDarkMode={isDarkMode} style={{ margin: 0 }}>Item description</FormLabel>
                           </div>
                           <TextFormattingToolbar
                             font={receiptSettings.item_desc_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, item_desc_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, item_desc_font: e.target.value })}
                             fontSize={receiptSettings.item_desc_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, item_desc_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 10)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, item_desc_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 10)) })}
                             bold={receiptSettings.item_desc_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, item_desc_bold: !receiptSettings.item_desc_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, item_desc_bold: !receiptSettings.item_desc_bold })}
                             italic={receiptSettings.item_desc_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, item_desc_italic: !receiptSettings.item_desc_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, item_desc_italic: !receiptSettings.item_desc_italic })}
                             align={receiptSettings.item_desc_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, item_desc_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, item_desc_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
                         </FormField>
                         <FormField>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                            <input type="checkbox" checked={!!receiptSettings.show_item_skus} onChange={(e) => setReceiptSettings({ ...receiptSettings, show_item_skus: e.target.checked })} />
+                            <input type="checkbox" checked={!!receiptSettings.show_item_skus} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, show_item_skus: e.target.checked })} />
                             <FormLabel isDarkMode={isDarkMode} style={{ margin: 0 }}>Item SKU</FormLabel>
                           </div>
                           <TextFormattingToolbar
                             font={receiptSettings.item_sku_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, item_sku_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, item_sku_font: e.target.value })}
                             fontSize={receiptSettings.item_sku_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, item_sku_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 10)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, item_sku_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 10)) })}
                             bold={receiptSettings.item_sku_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, item_sku_bold: !receiptSettings.item_sku_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, item_sku_bold: !receiptSettings.item_sku_bold })}
                             italic={receiptSettings.item_sku_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, item_sku_italic: !receiptSettings.item_sku_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, item_sku_italic: !receiptSettings.item_sku_italic })}
                             align={receiptSettings.item_sku_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, item_sku_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, item_sku_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
@@ -4611,15 +5733,15 @@ function Settings() {
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Item price</FormLabel>
                           <TextFormattingToolbar
                             font={receiptSettings.item_price_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, item_price_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, item_price_font: e.target.value })}
                             fontSize={receiptSettings.item_price_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, item_price_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, item_price_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
                             bold={receiptSettings.item_price_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, item_price_bold: !receiptSettings.item_price_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, item_price_bold: !receiptSettings.item_price_bold })}
                             italic={receiptSettings.item_price_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, item_price_italic: !receiptSettings.item_price_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, item_price_italic: !receiptSettings.item_price_italic })}
                             align={receiptSettings.item_price_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, item_price_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, item_price_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
@@ -4631,11 +5753,11 @@ function Settings() {
                     {activeReceiptSection === 'body_totals' && (
                       <>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                          <input type="checkbox" checked={!!receiptSettings.show_tax_breakdown} onChange={(e) => setReceiptSettings({ ...receiptSettings, show_tax_breakdown: e.target.checked })} />
+                          <input type="checkbox" checked={!!receiptSettings.show_tax_breakdown} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, show_tax_breakdown: e.target.checked })} />
                           <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Show tax breakdown</span>
                         </label>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                          <input type="checkbox" checked={!!receiptSettings.show_payment_method} onChange={(e) => setReceiptSettings({ ...receiptSettings, show_payment_method: e.target.checked })} />
+                          <input type="checkbox" checked={!!receiptSettings.show_payment_method} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, show_payment_method: e.target.checked })} />
                           <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Show payment method</span>
                         </label>
                         <div style={{ borderTop: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`, margin: '8px 0' }} />
@@ -4643,15 +5765,15 @@ function Settings() {
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Subtotal</FormLabel>
                           <TextFormattingToolbar
                             font={receiptSettings.subtotal_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, subtotal_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, subtotal_font: e.target.value })}
                             fontSize={receiptSettings.subtotal_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, subtotal_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, subtotal_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
                             bold={receiptSettings.subtotal_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, subtotal_bold: !receiptSettings.subtotal_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, subtotal_bold: !receiptSettings.subtotal_bold })}
                             italic={receiptSettings.subtotal_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, subtotal_italic: !receiptSettings.subtotal_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, subtotal_italic: !receiptSettings.subtotal_italic })}
                             align={receiptSettings.subtotal_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, subtotal_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, subtotal_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
@@ -4659,19 +5781,19 @@ function Settings() {
                         <FormField>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                             <FormLabel isDarkMode={isDarkMode} style={{ margin: 0 }}>Tax</FormLabel>
-                            <CustomDropdown value={receiptSettings.tax_line_display || 'breakdown'} onChange={(e) => setReceiptSettings({ ...receiptSettings, tax_line_display: e.target.value })} options={[{ value: 'single_line', label: 'Single' }, { value: 'breakdown', label: 'Breakdown' }, { value: 'none', label: 'Hide' }]} placeholder="Display" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '100px' }} />
+                            <CustomDropdown value={receiptSettings.tax_line_display || 'breakdown'} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, tax_line_display: e.target.value })} options={[{ value: 'single_line', label: 'Single' }, { value: 'breakdown', label: 'Breakdown' }, { value: 'none', label: 'Hide' }]} placeholder="Display" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '100px' }} />
                           </div>
                           <TextFormattingToolbar
                             font={receiptSettings.tax_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, tax_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, tax_font: e.target.value })}
                             fontSize={receiptSettings.tax_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, tax_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, tax_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
                             bold={receiptSettings.tax_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, tax_bold: !receiptSettings.tax_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, tax_bold: !receiptSettings.tax_bold })}
                             italic={receiptSettings.tax_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, tax_italic: !receiptSettings.tax_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, tax_italic: !receiptSettings.tax_italic })}
                             align={receiptSettings.tax_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, tax_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, tax_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
@@ -4680,15 +5802,15 @@ function Settings() {
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Total</FormLabel>
                           <TextFormattingToolbar
                             font={receiptSettings.total_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, total_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, total_font: e.target.value })}
                             fontSize={receiptSettings.total_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, total_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 14)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, total_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 14)) })}
                             bold={receiptSettings.total_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, total_bold: !receiptSettings.total_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, total_bold: !receiptSettings.total_bold })}
                             italic={receiptSettings.total_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, total_italic: !receiptSettings.total_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, total_italic: !receiptSettings.total_italic })}
                             align={receiptSettings.total_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, total_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, total_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
@@ -4697,19 +5819,19 @@ function Settings() {
                         <FormField>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                             <FormLabel isDarkMode={isDarkMode} style={{ margin: 0 }}>Payment method</FormLabel>
-                            <CustomDropdown value={receiptSettings.preview_payment_type || 'card'} onChange={(e) => setReceiptSettings({ ...receiptSettings, preview_payment_type: e.target.value })} options={[{ value: 'card', label: 'Card' }, { value: 'cash', label: 'Cash' }]} placeholder="Preview" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '90px', marginLeft: 'auto' }} />
+                            <CustomDropdown value={receiptSettings.preview_payment_type || 'card'} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, preview_payment_type: e.target.value })} options={[{ value: 'card', label: 'Card' }, { value: 'cash', label: 'Cash' }, { value: 'store_credit', label: 'Store Credit' }, { value: 'check', label: 'Check' }, { value: 'mobile', label: 'Mobile' }, { value: 'not_paid_pickup', label: 'Not paid - Pickup' }, { value: 'not_paid_delivery', label: 'Not paid - Delivery' }]} placeholder="Preview" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '180px', marginLeft: 'auto' }} />
                           </div>
                           <TextFormattingToolbar
                             font={receiptSettings.payment_method_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, payment_method_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, payment_method_font: e.target.value })}
                             fontSize={receiptSettings.payment_method_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, payment_method_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 11)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, payment_method_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 11)) })}
                             bold={receiptSettings.payment_method_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, payment_method_bold: !receiptSettings.payment_method_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, payment_method_bold: !receiptSettings.payment_method_bold })}
                             italic={receiptSettings.payment_method_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, payment_method_italic: !receiptSettings.payment_method_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, payment_method_italic: !receiptSettings.payment_method_italic })}
                             align={receiptSettings.payment_method_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, payment_method_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, payment_method_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
@@ -4717,11 +5839,11 @@ function Settings() {
                             <>
                               <div style={{ display: 'flex', gap: '12px', marginTop: '10px', marginBottom: '4px' }}>
                                 <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '13px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
-                                  <input type="checkbox" checked={!!receiptSettings.show_cash_amount_given} onChange={(e) => setReceiptSettings({ ...receiptSettings, show_cash_amount_given: e.target.checked })} />
+                                  <input type="checkbox" checked={!!receiptSettings.show_cash_amount_given} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, show_cash_amount_given: e.target.checked })} />
                                   Amount given
                                 </label>
                                 <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontSize: '13px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
-                                  <input type="checkbox" checked={!!receiptSettings.show_cash_change} onChange={(e) => setReceiptSettings({ ...receiptSettings, show_cash_change: e.target.checked })} />
+                                  <input type="checkbox" checked={!!receiptSettings.show_cash_change} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, show_cash_change: e.target.checked })} />
                                   Change
                                 </label>
                               </div>
@@ -4729,15 +5851,15 @@ function Settings() {
                                 <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block', fontSize: '12px' }}>Amount given line</FormLabel>
                                 <TextFormattingToolbar
                                   font={receiptSettings.cash_amount_given_font}
-                                  onFontChange={(e) => setReceiptSettings({ ...receiptSettings, cash_amount_given_font: e.target.value })}
+                                  onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, cash_amount_given_font: e.target.value })}
                                   fontSize={receiptSettings.cash_amount_given_font_size}
-                                  onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, cash_amount_given_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 11)) })}
+                                  onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, cash_amount_given_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 11)) })}
                                   bold={receiptSettings.cash_amount_given_bold}
-                                  onBoldToggle={() => setReceiptSettings({ ...receiptSettings, cash_amount_given_bold: !receiptSettings.cash_amount_given_bold })}
+                                  onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, cash_amount_given_bold: !receiptSettings.cash_amount_given_bold })}
                                   italic={receiptSettings.cash_amount_given_italic}
-                                  onItalicToggle={() => setReceiptSettings({ ...receiptSettings, cash_amount_given_italic: !receiptSettings.cash_amount_given_italic })}
+                                  onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, cash_amount_given_italic: !receiptSettings.cash_amount_given_italic })}
                                   align={receiptSettings.cash_amount_given_align}
-                                  onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, cash_amount_given_align: align })}
+                                  onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, cash_amount_given_align: align })}
                                   isDarkMode={isDarkMode}
                                   themeColorRgb={themeColorRgb}
                                 />
@@ -4746,15 +5868,15 @@ function Settings() {
                                 <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block', fontSize: '12px' }}>Change line</FormLabel>
                                 <TextFormattingToolbar
                                   font={receiptSettings.cash_change_font}
-                                  onFontChange={(e) => setReceiptSettings({ ...receiptSettings, cash_change_font: e.target.value })}
+                                  onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, cash_change_font: e.target.value })}
                                   fontSize={receiptSettings.cash_change_font_size}
-                                  onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, cash_change_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 11)) })}
+                                  onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, cash_change_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 11)) })}
                                   bold={receiptSettings.cash_change_bold}
-                                  onBoldToggle={() => setReceiptSettings({ ...receiptSettings, cash_change_bold: !receiptSettings.cash_change_bold })}
+                                  onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, cash_change_bold: !receiptSettings.cash_change_bold })}
                                   italic={receiptSettings.cash_change_italic}
-                                  onItalicToggle={() => setReceiptSettings({ ...receiptSettings, cash_change_italic: !receiptSettings.cash_change_italic })}
+                                  onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, cash_change_italic: !receiptSettings.cash_change_italic })}
                                   align={receiptSettings.cash_change_align}
-                                  onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, cash_change_align: align })}
+                                  onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, cash_change_align: align })}
                                   isDarkMode={isDarkMode}
                                   themeColorRgb={themeColorRgb}
                                 />
@@ -4769,25 +5891,64 @@ function Settings() {
                     {activeReceiptSection === 'body_barcode' && (
                       <>
                         <FormField>
-                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Date & Barcode</FormLabel>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', cursor: 'pointer', fontSize: '13px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
-                            <input type="checkbox" checked={receiptSettings.show_barcode !== false} onChange={(e) => setReceiptSettings({ ...receiptSettings, show_barcode: e.target.checked })} />
-                            Barcode (includes order #)
-                          </label>
+                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Date & Time</FormLabel>
+                          <div style={{ marginBottom: '8px' }}>
+                            <span style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '4px', display: 'block' }}>Show</span>
+                            <CustomDropdown
+                              value={receiptSettings.date_display_mode ?? 'both'}
+                              onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, date_display_mode: e.target.value })}
+                              options={[
+                                { value: 'both', label: 'Date and time' },
+                                { value: 'date_only', label: 'Date only' },
+                                { value: 'time_only', label: 'Time only' }
+                              ]}
+                              placeholder="Select"
+                              isDarkMode={isDarkMode}
+                              themeColorRgb={themeColorRgb}
+                              style={{ fontSize: '13px', padding: '6px 10px' }}
+                            />
+                          </div>
                           <TextFormattingToolbar
                             font={receiptSettings.date_line_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, date_line_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, date_line_font: e.target.value })}
                             fontSize={receiptSettings.date_line_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, date_line_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 10)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, date_line_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 10)) })}
                             bold={receiptSettings.date_line_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, date_line_bold: !receiptSettings.date_line_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, date_line_bold: !receiptSettings.date_line_bold })}
                             italic={receiptSettings.date_line_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, date_line_italic: !receiptSettings.date_line_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, date_line_italic: !receiptSettings.date_line_italic })}
                             align={receiptSettings.date_line_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, date_line_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, date_line_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
+                        </FormField>
+                        <FormField>
+                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Barcode</FormLabel>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '8px', cursor: 'pointer', fontSize: '13px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                            <input type="checkbox" checked={receiptSettings.show_barcode !== false} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, show_barcode: e.target.checked })} />
+                            Show barcode
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '8px', cursor: 'pointer', fontSize: '13px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                            <input type="checkbox" checked={receiptSettings.show_order_number_below_barcode !== false} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, show_order_number_below_barcode: e.target.checked })} />
+                            Order number below barcode
+                          </label>
+                          {receiptSettings.show_order_number_below_barcode !== false && (
+                            <TextFormattingToolbar
+                              font={receiptSettings.barcode_number_font}
+                              onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, barcode_number_font: e.target.value })}
+                              fontSize={receiptSettings.barcode_number_font_size}
+                              onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, barcode_number_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 10)) })}
+                              bold={receiptSettings.barcode_number_bold}
+                              onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, barcode_number_bold: !receiptSettings.barcode_number_bold })}
+                              italic={receiptSettings.barcode_number_italic}
+                              onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, barcode_number_italic: !receiptSettings.barcode_number_italic })}
+                              align={receiptSettings.barcode_number_align}
+                              onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, barcode_number_align: align })}
+                              isDarkMode={isDarkMode}
+                              themeColorRgb={themeColorRgb}
+                            />
+                          )}
                         </FormField>
                       </>
                     )}
@@ -4797,108 +5958,110 @@ function Settings() {
                       <>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Custom message</FormLabel>
-                          <textarea placeholder="Thank you for your business!" value={receiptSettings.footer_message} onChange={(e) => setReceiptSettings({ ...receiptSettings, footer_message: e.target.value })} rows={2} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), resize: 'vertical', fontFamily: 'inherit', minHeight: '56px' }} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                          <textarea placeholder="Thank you for your business!" value={receiptSettings.footer_message ?? ''} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, footer_message: e.target.value })} rows={2} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), resize: 'vertical', fontFamily: 'inherit', minHeight: '56px' }} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
                           <TextFormattingToolbar
                             font={receiptSettings.footer_message_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, footer_message_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, footer_message_font: e.target.value })}
                             fontSize={receiptSettings.footer_message_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, footer_message_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, footer_message_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
                             bold={receiptSettings.footer_message_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, footer_message_bold: !receiptSettings.footer_message_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, footer_message_bold: !receiptSettings.footer_message_bold })}
                             italic={receiptSettings.footer_message_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, footer_message_italic: !receiptSettings.footer_message_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, footer_message_italic: !receiptSettings.footer_message_italic })}
                             align={receiptSettings.footer_message_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, footer_message_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, footer_message_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
                         </FormField>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Return policy</FormLabel>
-                          <textarea placeholder="e.g. Returns within 30 days with receipt" value={receiptSettings.return_policy} onChange={(e) => setReceiptSettings({ ...receiptSettings, return_policy: e.target.value })} rows={2} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), resize: 'vertical', fontFamily: 'inherit', minHeight: '56px' }} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                          <textarea placeholder="e.g. Returns within 30 days with receipt" value={receiptSettings.return_policy ?? ''} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, return_policy: e.target.value })} rows={2} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), resize: 'vertical', fontFamily: 'inherit', minHeight: '56px' }} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
                           <TextFormattingToolbar
                             font={receiptSettings.return_policy_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, return_policy_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, return_policy_font: e.target.value })}
                             fontSize={receiptSettings.return_policy_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, return_policy_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, return_policy_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
                             bold={receiptSettings.return_policy_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, return_policy_bold: !receiptSettings.return_policy_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, return_policy_bold: !receiptSettings.return_policy_bold })}
                             italic={receiptSettings.return_policy_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, return_policy_italic: !receiptSettings.return_policy_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, return_policy_italic: !receiptSettings.return_policy_italic })}
                             align={receiptSettings.return_policy_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, return_policy_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, return_policy_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
                         </FormField>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Website</FormLabel>
-                          <input type="text" placeholder="https://..." value={receiptSettings.store_website} onChange={(e) => setReceiptSettings({ ...receiptSettings, store_website: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                          <input type="text" placeholder="https://..." value={receiptSettings.store_website ?? ''} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_website: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
                           <TextFormattingToolbar
                             font={receiptSettings.store_website_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, store_website_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_website_font: e.target.value })}
                             fontSize={receiptSettings.store_website_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, store_website_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_website_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
                             bold={receiptSettings.store_website_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, store_website_bold: !receiptSettings.store_website_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, store_website_bold: !receiptSettings.store_website_bold })}
                             italic={receiptSettings.store_website_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, store_website_italic: !receiptSettings.store_website_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, store_website_italic: !receiptSettings.store_website_italic })}
                             align={receiptSettings.store_website_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, store_website_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, store_website_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
                         </FormField>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Email</FormLabel>
-                          <input type="email" placeholder="store@example.com" value={receiptSettings.store_email} onChange={(e) => setReceiptSettings({ ...receiptSettings, store_email: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                          <input type="email" placeholder="store@example.com" value={receiptSettings.store_email ?? ''} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_email: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
                           <TextFormattingToolbar
                             font={receiptSettings.store_email_font}
-                            onFontChange={(e) => setReceiptSettings({ ...receiptSettings, store_email_font: e.target.value })}
+                            onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_email_font: e.target.value })}
                             fontSize={receiptSettings.store_email_font_size}
-                            onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, store_email_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
+                            onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, store_email_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 12)) })}
                             bold={receiptSettings.store_email_bold}
-                            onBoldToggle={() => setReceiptSettings({ ...receiptSettings, store_email_bold: !receiptSettings.store_email_bold })}
+                            onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, store_email_bold: !receiptSettings.store_email_bold })}
                             italic={receiptSettings.store_email_italic}
-                            onItalicToggle={() => setReceiptSettings({ ...receiptSettings, store_email_italic: !receiptSettings.store_email_italic })}
+                            onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, store_email_italic: !receiptSettings.store_email_italic })}
                             align={receiptSettings.store_email_align}
-                            onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, store_email_align: align })}
+                            onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, store_email_align: align })}
                             isDarkMode={isDarkMode}
                             themeColorRgb={themeColorRgb}
                           />
                         </FormField>
-                        <div style={{ borderTop: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`, margin: '12px 0' }} />
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                          <input type="checkbox" checked={!!receiptSettings.show_signature} onChange={(e) => setReceiptSettings({ ...receiptSettings, show_signature: e.target.checked })} />
-                          <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Show signature line</span>
-                        </label>
-                        {receiptSettings.show_signature && (
-                          <>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginLeft: '24px' }}>
-                              <input type="checkbox" checked={receiptSettings.show_signature_title !== false} onChange={(e) => setReceiptSettings({ ...receiptSettings, show_signature_title: e.target.checked })} />
-                              <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Show signature title</span>
-                            </label>
-                            {receiptSettings.show_signature_title !== false && (
-                              <FormField style={{ marginLeft: '24px' }}>
-                                <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block', fontSize: '12px' }}>Signature title</FormLabel>
-                                <TextFormattingToolbar
-                                  font={receiptSettings.signature_title_font}
-                                  onFontChange={(e) => setReceiptSettings({ ...receiptSettings, signature_title_font: e.target.value })}
-                                  fontSize={receiptSettings.signature_title_font_size}
-                                  onFontSizeChange={(e) => setReceiptSettings({ ...receiptSettings, signature_title_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 10)) })}
-                                  bold={receiptSettings.signature_title_bold}
-                                  onBoldToggle={() => setReceiptSettings({ ...receiptSettings, signature_title_bold: !receiptSettings.signature_title_bold })}
-                                  italic={receiptSettings.signature_title_italic}
-                                  onItalicToggle={() => setReceiptSettings({ ...receiptSettings, signature_title_italic: !receiptSettings.signature_title_italic })}
-                                  align={receiptSettings.signature_title_align}
-                                  onAlignChange={(align) => setReceiptSettings({ ...receiptSettings, signature_title_align: align })}
-                                  isDarkMode={isDarkMode}
-                                  themeColorRgb={themeColorRgb}
-                                />
-                              </FormField>
-                            )}
-                          </>
-                        )}
+                        <FormField>
+                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Signature</FormLabel>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                            <input type="checkbox" checked={!!receiptSettings.show_signature} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, show_signature: e.target.checked })} />
+                            Show signature line
+                          </label>
+                          {receiptSettings.show_signature && (
+                            <>
+                              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '8px', fontSize: '13px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                                <input type="checkbox" checked={receiptSettings.show_signature_title !== false} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, show_signature_title: e.target.checked })} />
+                                Show signature title
+                              </label>
+                              {receiptSettings.show_signature_title !== false && (
+                                <FormField style={{ marginTop: '8px' }}>
+                                  <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block', fontSize: '12px' }}>Signature title font</FormLabel>
+                                  <TextFormattingToolbar
+                                    font={receiptSettings.signature_title_font}
+                                    onFontChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, signature_title_font: e.target.value })}
+                                    fontSize={receiptSettings.signature_title_font_size}
+                                    onFontSizeChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, signature_title_font_size: Math.min(24, Math.max(8, Number(e.target.value) || 10)) })}
+                                    bold={receiptSettings.signature_title_bold}
+                                    onBoldToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, signature_title_bold: !receiptSettings.signature_title_bold })}
+                                    italic={receiptSettings.signature_title_italic}
+                                    onItalicToggle={() => setReceiptSettingsWithUndo({ ...receiptSettings, signature_title_italic: !receiptSettings.signature_title_italic })}
+                                    align={receiptSettings.signature_title_align}
+                                    onAlignChange={(align) => setReceiptSettingsWithUndo({ ...receiptSettings, signature_title_align: align })}
+                                    isDarkMode={isDarkMode}
+                                    themeColorRgb={themeColorRgb}
+                                  />
+                                </FormField>
+                              )}
+                            </>
+                          )}
+                        </FormField>
                       </>
                     )}
 
@@ -4907,50 +6070,276 @@ function Settings() {
                       <>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Receipt width</FormLabel>
-                          <CustomDropdown value={receiptSettings.receipt_width === 58 ? 58 : 80} onChange={(e) => setReceiptSettings({ ...receiptSettings, receipt_width: Number(e.target.value) })} options={[{ value: 58, label: '58mm' }, { value: 80, label: '80mm' }]} placeholder="Width" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '120px' }} />
+                          <CustomDropdown value={receiptSettings.receipt_width === 58 ? 58 : 80} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, receipt_width: Number(e.target.value) })} options={[{ value: 58, label: '58mm' }, { value: 80, label: '80mm' }]} placeholder="Width" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '120px' }} />
                         </FormField>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Line spacing</FormLabel>
-                          <input type="number" min={1} max={2} step={0.1} value={receiptSettings.line_spacing ?? 1.2} onChange={(e) => setReceiptSettings({ ...receiptSettings, line_spacing: Math.min(2, Math.max(1, Number(e.target.value) || 1.2)) })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                          <input type="number" min={1} max={2} step={0.1} value={receiptSettings.line_spacing ?? 1.2} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, line_spacing: Math.min(2, Math.max(1, Number(e.target.value) || 1.2)) })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
                         </FormField>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                          <input type="checkbox" checked={!!receiptSettings.bold_item_names} onChange={(e) => setReceiptSettings({ ...receiptSettings, bold_item_names: e.target.checked })} />
-                          <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Bold item names</span>
-                        </label>
+                        <FormField>
+                          <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Item names</FormLabel>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                            <input type="checkbox" checked={!!receiptSettings.bold_item_names} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, bold_item_names: e.target.checked })} />
+                            Bold item names
+                          </label>
+                        </FormField>
                         <FormField>
                           <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Divider style</FormLabel>
-                          <CustomDropdown value={receiptSettings.divider_style || 'dashed'} onChange={(e) => setReceiptSettings({ ...receiptSettings, divider_style: e.target.value })} options={[{ value: 'solid', label: 'Solid' }, { value: 'dashed', label: 'Dashed' }, { value: 'none', label: 'None' }]} placeholder="Divider" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '140px' }} />
+                          <CustomDropdown value={receiptSettings.divider_style || 'dashed'} onChange={(e) => setReceiptSettingsWithUndo({ ...receiptSettings, divider_style: e.target.value })} options={[{ value: 'solid', label: 'Solid' }, { value: 'dashed', label: 'Dashed' }, { value: 'none', label: 'None' }]} placeholder="Divider" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '140px' }} />
                         </FormField>
                       </>
                     )}
 
                   </div>
                       )}
-                    </div>
-                    <div style={{ flex: '1 1 50%', overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                      <ReceiptPreview
-                        settings={receiptSettings}
-                        id="receipt-preview-print"
-                        onSectionClick={(section) => setActiveReceiptSection(activeReceiptSection === section ? null : section)}
-                        activeSection={activeReceiptSection}
-                        isDarkMode={isDarkMode}
-                        themeColorRgb={themeColorRgb}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '10px', padding: '16px', borderTop: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'}`, flexShrink: 0, justifyContent: 'flex-end' }}>
-                    <button type="button" className="button-26 button-26--header" role="button" onClick={createReceiptTemplate}>
-                      <div className="button-26__content"><span className="button-26__text text">Save as new template</span></div>
-                    </button>
-                    <button type="button" className="button-26 button-26--header" role="button" onClick={() => setReceiptEditModalOpen(false)}>
-                      <div className="button-26__content"><span className="button-26__text text">Cancel</span></div>
-                    </button>
-                    <button type="button" className="button-26 button-26--header" role="button" onClick={printTestReceipt}>
-                      <div className="button-26__content">
-                        <Printer size={14} style={{ marginRight: '6px', color: '#888' }} />
-                        <span className="button-26__text text">Print test</span>
                       </div>
-                    </button>
+                      <div style={{ padding: '12px 16px', borderTop: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flexShrink: 0 }}>
+                        <button type="button" onClick={handleReceiptUndo} disabled={receiptUndoStack.length === 0} title="Undo" style={{ padding: 0, border: 'none', background: 'none', color: receiptUndoStack.length === 0 ? (isDarkMode ? 'var(--text-tertiary, #666)' : '#999') : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'), cursor: receiptUndoStack.length === 0 ? 'default' : 'pointer', opacity: receiptUndoStack.length === 0 ? 0.5 : 1 }}>
+                          <Undo2 size={18} strokeWidth={2.5} />
+                        </button>
+                        <button type="button" onClick={handleReceiptRedo} disabled={receiptRedoStack.length === 0} title="Redo" style={{ padding: 0, border: 'none', background: 'none', color: receiptRedoStack.length === 0 ? (isDarkMode ? 'var(--text-tertiary, #666)' : '#999') : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'), cursor: receiptRedoStack.length === 0 ? 'default' : 'pointer', opacity: receiptRedoStack.length === 0 ? 0.5 : 1 }}>
+                          <Redo2 size={18} strokeWidth={2.5} />
+                        </button>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: 'auto' }}>
+                          <button type="button" className="button-26 button-26--header" role="button" onClick={() => setReceiptEditModalOpen(false)}>
+                            <div className="button-26__content"><span className="button-26__text text">Cancel</span></div>
+                          </button>
+                          <button type="button" className="button-26 button-26--header" role="button" disabled={saving} onClick={async () => { setSaving(true); setMessage(null); try { await saveReceiptSettingsOnly(receiptSettings); setReceiptEditModalOpen(false); setMessage({ type: 'success', text: 'Saved' }); setTimeout(() => setMessage(null), 3000); loadDisplaySettings().catch(() => {}); } catch (e) { setMessage({ type: 'error', text: 'Failed to save' }); } finally { setSaving(false); } }}>
+                            <div className="button-26__content"><span className="button-26__text text">{saving ? 'Saving…' : 'Save'}</span></div>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', background: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff' }}>
+                      <div ref={receiptTemplateDropdownRef} style={{ position: 'absolute', top: 0, right: 0, zIndex: 10, padding: '8px 12px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setReceiptTemplateDropdownOpen(o => !o)}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '13px',
+                            border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
+                            borderRadius: '8px',
+                            background: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
+                          }}
+                        >
+                          <span>
+                            {receiptSettings.template_preset?.startsWith('template_')
+                              ? (savedTemplates.find(t => t.id === parseInt(receiptSettings.template_preset.replace('template_', ''), 10))?.name ?? 'Template')
+                              : (receiptSettings.template_preset === 'modern' ? 'Modern' : receiptSettings.template_preset === 'classic' ? 'Classic' : receiptSettings.template_preset === 'minimal' ? 'Minimal' : 'Custom')}
+                          </span>
+                          <ChevronDown size={14} style={{ opacity: 0.8 }} />
+                        </button>
+                        {receiptTemplateDropdownOpen && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '100%',
+                              right: 0,
+                              marginTop: '4px',
+                              minWidth: '200px',
+                              background: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+                              border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
+                              borderRadius: '8px',
+                              boxShadow: isDarkMode ? '0 4px 12px rgba(0,0,0,0.3)' : '0 4px 12px rgba(0,0,0,0.15)',
+                              zIndex: 99999,
+                              overflow: 'hidden'
+                            }}
+                          >
+                            {['modern', 'classic', 'minimal', 'custom'].map(preset => {
+                              const label = preset === 'modern' ? 'Modern' : preset === 'classic' ? 'Classic' : preset === 'minimal' ? 'Minimal' : 'Custom'
+                              const isActive = !receiptSettings.template_preset?.startsWith('template_') && receiptSettings.template_preset === preset
+                              return (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  onClick={() => {
+                                    if (preset === 'custom') {
+                                      setReceiptSettingsWithUndo(prev => ({ ...prev, template_preset: 'custom' }))
+                                    } else {
+                                      const base = RECEIPT_PRESETS[preset] || DEFAULT_RECEIPT_TEMPLATE
+                                      const next = { ...base, template_preset: preset, store_name: receiptSettings.store_name, store_address: receiptSettings.store_address, store_phone: receiptSettings.store_phone, footer_message: receiptSettings.footer_message, return_policy: receiptSettings.return_policy, store_email: receiptSettings.store_email, store_website: receiptSettings.store_website }
+                                      setReceiptSettingsWithUndo(() => next)
+                                    }
+                                    setReceiptTemplateDropdownOpen(false)
+                                  }}
+                                  style={{
+                                    width: '100%',
+                                    padding: '10px 14px',
+                                    border: 'none',
+                                    background: isActive ? `rgba(${themeColorRgb}, 0.15)` : 'none',
+                                    fontSize: '13px',
+                                    textAlign: 'left',
+                                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                                    cursor: 'pointer',
+                                    fontWeight: isActive ? 600 : 400
+                                  }}
+                                >
+                                  {label}
+                                </button>
+                              )
+                            })}
+                            {savedTemplates.length > 0 && (
+                              <>
+                                <div style={{ borderTop: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#eee'}` }} />
+                                {savedTemplates.map(t => {
+                                  const isActive = receiptSettings.template_preset === `template_${t.id}`
+                                  return (
+                                    <button
+                                      key={t.id}
+                                      type="button"
+                                      onClick={() => {
+                                        if (t.settings) {
+                                          setReceiptSettingsWithUndo(() => ({ ...DEFAULT_RECEIPT_TEMPLATE, ...t.settings, template_preset: `template_${t.id}` }))
+                                        } else {
+                                          setReceiptSettingsWithUndo(prev => ({ ...prev, template_preset: `template_${t.id}` }))
+                                        }
+                                        setReceiptTemplateDropdownOpen(false)
+                                      }}
+                                      style={{
+                                        width: '100%',
+                                        padding: '10px 14px',
+                                        border: 'none',
+                                        background: isActive ? `rgba(${themeColorRgb}, 0.15)` : 'none',
+                                        fontSize: '13px',
+                                        textAlign: 'left',
+                                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                                        cursor: 'pointer',
+                                        fontWeight: isActive ? 600 : 400
+                                      }}
+                                    >
+                                      {t.name}
+                                    </button>
+                                  )
+                                })}
+                              </>
+                            )}
+                            <div style={{ borderTop: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#eee'}` }} />
+                            {receiptShowNewTemplateInput ? (
+                              <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <input
+                                  ref={receiptNewTemplateInputRef}
+                                  type="text"
+                                  value={receiptNewTemplateName}
+                                  onChange={(e) => setReceiptNewTemplateName(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault()
+                                      if (receiptNewTemplateName.trim()) {
+                                        const name = receiptNewTemplateName.trim()
+                                        setReceiptNewTemplateName('')
+                                        setReceiptShowNewTemplateInput(false)
+                                        fetch('/api/receipt-templates', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ name, settings: receiptSettings })
+                                        }).then(res => res.json()).then(data => {
+                                          if (data.success && data.template) {
+                                            loadReceiptTemplates()
+                                            setReceiptSettings(prev => ({ ...prev, template_preset: `template_${data.template.id}` }))
+                                            setMessage({ type: 'success', text: `Template "${data.template.name}" saved.` })
+                                            setTimeout(() => setMessage(null), 2500)
+                                          } else {
+                                            setMessage({ type: 'error', text: data.message || 'Failed to save template' })
+                                          }
+                                        }).catch(() => setMessage({ type: 'error', text: 'Failed to save template' }))
+                                      }
+                                    } else if (e.key === 'Escape') {
+                                      setReceiptShowNewTemplateInput(false)
+                                      setReceiptNewTemplateName('')
+                                    }
+                                  }}
+                                  placeholder="Template name"
+                                  style={{
+                                    padding: '8px 12px',
+                                    fontSize: '13px',
+                                    border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
+                                    borderRadius: '6px',
+                                    background: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                                    outline: 'none'
+                                  }}
+                                />
+                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => { setReceiptShowNewTemplateInput(false); setReceiptNewTemplateName('') }}
+                                    style={{ padding: '6px 10px', fontSize: '12px', border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`, borderRadius: '6px', background: 'none', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', cursor: 'pointer' }}
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const name = receiptNewTemplateName.trim()
+                                      if (!name) return
+                                      setReceiptNewTemplateName('')
+                                      setReceiptShowNewTemplateInput(false)
+                                      try {
+                                        const response = await fetch('/api/receipt-templates', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ name, settings: receiptSettings })
+                                        })
+                                        const data = await response.json()
+                                        if (data.success && data.template) {
+                                          await loadReceiptTemplates()
+                                          setReceiptSettings(prev => ({ ...prev, template_preset: `template_${data.template.id}` }))
+                                          setMessage({ type: 'success', text: `Template "${data.template.name}" saved.` })
+                                          setTimeout(() => setMessage(null), 2500)
+                                        } else {
+                                          setMessage({ type: 'error', text: data.message || 'Failed to save template' })
+                                        }
+                                      } catch (e) {
+                                        setMessage({ type: 'error', text: 'Failed to save template' })
+                                      }
+                                    }}
+                                    disabled={!receiptNewTemplateName.trim()}
+                                    style={{ padding: '6px 12px', fontSize: '12px', border: 'none', borderRadius: '6px', background: `rgba(${themeColorRgb}, 0.8)`, color: '#fff', cursor: receiptNewTemplateName.trim() ? 'pointer' : 'default', opacity: receiptNewTemplateName.trim() ? 1 : 0.6 }}
+                                  >
+                                    Save
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setReceiptShowNewTemplateInput(true)}
+                                style={{
+                                  width: '100%',
+                                  padding: '10px 14px',
+                                  border: 'none',
+                                  background: 'none',
+                                  fontSize: '13px',
+                                  textAlign: 'left',
+                                  color: `rgba(${themeColorRgb}, 1)`,
+                                  cursor: 'pointer',
+                                  fontWeight: 500
+                                }}
+                              >
+                                Save as new template…
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="checkout-ui-controls-scroll" style={{ flex: 1, overflow: 'auto', padding: '16px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start' }}>
+                        <ReceiptPreview
+                          settings={receiptSettings}
+                          id="receipt-preview-print"
+                          onSectionClick={(section) => setActiveReceiptSection(activeReceiptSection === section ? null : section)}
+                          activeSection={activeReceiptSection}
+                          isDarkMode={isDarkMode}
+                          themeColorRgb={themeColorRgb}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4959,407 +6348,17 @@ function Settings() {
         </div>
       )}
 
-      {/* SMS Settings Tab */}
-      {activeTab === 'sms' && (
+      {/* Notifications Tab */}
+      {activeTab === 'notifications' && (
         <div>
           <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
-            SMS & Notifications
+            Notifications
           </FormTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {/* Store selector */}
-            <FormField>
-              <FormLabel isDarkMode={isDarkMode}>
-                Store
-              </FormLabel>
-              <select
-                value={selectedSmsStore}
-                onChange={(e) => setSelectedSmsStore(Number(e.target.value))}
-                style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '300px' }}
-                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-              >
-                {smsStores.map((s) => (
-                  <option key={s.store_id} value={s.store_id}>{s.store_name}</option>
-                ))}
-              </select>
-            </FormField>
-
-            {/* SMS Provider Selection */}
-            <FormField>
-              <FormLabel isDarkMode={isDarkMode}>
-                SMS Provider
-              </FormLabel>
-              <select
-                value={smsSettings.sms_provider || 'email'}
-                onChange={(e) => setSmsSettings({...smsSettings, sms_provider: e.target.value})}
-                style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '300px' }}
-                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-              >
-                <option value="email">Email-to-SMS (FREE)</option>
-                <option value="aws_sns">AWS SNS (~$0.006/SMS)</option>
-              </select>
-              <p style={{
-                marginTop: '8px',
-                fontSize: '13px',
-                color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
-              }}>
-                {smsSettings.sms_provider === 'email' 
-                  ? 'Free but most US carriers have discontinued it; delivery often fails.'
-                  : 'Low cost, high reliability. Recommended for production.'}
-              </p>
-              {smsSettings.sms_provider === 'email' && (
-                <div style={{
-                  marginTop: '8px',
-                  padding: '10px 12px',
-                  fontSize: '13px',
-                  backgroundColor: isDarkMode ? 'rgba(255,180,0,0.15)' : 'rgba(255,180,0,0.2)',
-                  color: isDarkMode ? '#f0c040' : '#8a6d00',
-                  borderRadius: '6px',
-                  border: `1px solid ${isDarkMode ? 'rgba(255,180,0,0.4)' : 'rgba(200,150,0,0.5)'}`
-                }}>
-                  <strong>Note:</strong> ATT, Verizon, and T-Mobile have discontinued free email-to-SMS gateways (2024–2025). Delivery may fail. For reliable SMS, switch to <strong>AWS SNS</strong> above (~$0.006/SMS).
-                </div>
-              )}
-            </FormField>
-
-            {/* Email Settings */}
-            {smsSettings.sms_provider === 'email' && (
-              <>
-                <FormField>
-                  <FormLabel isDarkMode={isDarkMode}>
-                    SMTP Server
-                  </FormLabel>
-                  <input
-                    type="text"
-                    value={smsSettings.smtp_server || 'smtp.gmail.com'}
-                    onChange={(e) => setSmsSettings({...smsSettings, smtp_server: e.target.value})}
-                    style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '400px' }}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                </FormField>
-
-                <FormField>
-                  <FormLabel isDarkMode={isDarkMode}>
-                    SMTP Port
-                  </FormLabel>
-                  <input
-                    type="number"
-                    value={smsSettings.smtp_port || 587}
-                    onChange={(e) => setSmsSettings({...smsSettings, smtp_port: parseInt(e.target.value)})}
-                    style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '200px' }}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                </FormField>
-
-                <FormField>
-                  <FormLabel isDarkMode={isDarkMode}>
-                    Email Address (Gmail)
-                  </FormLabel>
-                  <input
-                    type="email"
-                    value={smsSettings.smtp_user || ''}
-                    onChange={(e) => setSmsSettings({...smsSettings, smtp_user: e.target.value})}
-                    placeholder="yourstore@gmail.com"
-                    style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '400px' }}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                  <p style={{
-                    marginTop: '4px',
-                    fontSize: '13px',
-                    color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
-                  }}>
-                    For Gmail: Enable 2FA and create an App Password
-                  </p>
-                </FormField>
-
-                <FormField>
-                  <FormLabel isDarkMode={isDarkMode}>
-                    App Password
-                  </FormLabel>
-                  <input
-                    type="password"
-                    value={smsSettings.smtp_password || ''}
-                    onChange={(e) => setSmsSettings({...smsSettings, smtp_password: e.target.value})}
-                    placeholder="Enter app password"
-                    style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '400px' }}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                </FormField>
-              </>
-            )}
-
-            {/* AWS Settings */}
-            {smsSettings.sms_provider === 'aws_sns' && (
-              <>
-                <FormField>
-                  <FormLabel isDarkMode={isDarkMode}>
-                    AWS Access Key ID
-                  </FormLabel>
-                  <input
-                    type="text"
-                    value={smsSettings.aws_access_key_id || ''}
-                    onChange={(e) => setSmsSettings({...smsSettings, aws_access_key_id: e.target.value})}
-                    placeholder="AKIA..."
-                    style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '400px' }}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                </FormField>
-
-                <FormField>
-                  <FormLabel isDarkMode={isDarkMode}>
-                    AWS Secret Access Key
-                  </FormLabel>
-                  <input
-                    type="password"
-                    value={smsSettings.aws_secret_access_key || ''}
-                    onChange={(e) => setSmsSettings({...smsSettings, aws_secret_access_key: e.target.value})}
-                    placeholder="Enter secret key"
-                    style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '400px' }}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                </FormField>
-
-                <FormField>
-                  <FormLabel isDarkMode={isDarkMode}>
-                    AWS Region
-                  </FormLabel>
-                  <input
-                    type="text"
-                    value={smsSettings.aws_region || 'us-east-1'}
-                    onChange={(e) => setSmsSettings({...smsSettings, aws_region: e.target.value})}
-                    placeholder="us-east-1"
-                    style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '200px' }}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                </FormField>
-              </>
-            )}
-
-            {/* Business Name */}
-            <FormField>
-              <FormLabel isDarkMode={isDarkMode}>
-                Business Name
-              </FormLabel>
-              <input
-                type="text"
-                value={smsSettings.business_name || ''}
-                onChange={(e) => setSmsSettings({...smsSettings, business_name: e.target.value})}
-                placeholder="Your Store Name"
-                style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '400px' }}
-                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-              />
-            </FormField>
-
-            {/* Auto-send Options */}
-            <div>
-              <label style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                cursor: 'pointer'
-              }}>
-                <input
-                  type="checkbox"
-                  checked={smsSettings.auto_send_rewards_earned || false}
-                  onChange={(e) => setSmsSettings({...smsSettings, auto_send_rewards_earned: e.target.checked ? 1 : 0})}
-                />
-                <span style={{
-                  fontSize: '14px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                }}>
-                  Auto-send SMS when customers earn rewards
-                </span>
-              </label>
-            </div>
-
-            <div>
-              <label style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                cursor: 'pointer'
-              }}>
-                <input
-                  type="checkbox"
-                  checked={smsSettings.auto_send_rewards_redeemed || false}
-                  onChange={(e) => setSmsSettings({...smsSettings, auto_send_rewards_redeemed: e.target.checked ? 1 : 0})}
-                />
-                <span style={{
-                  fontSize: '14px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                }}>
-                  Auto-send SMS when customers redeem rewards
-                </span>
-              </label>
-            </div>
-
-            {/* Actions */}
-            <p style={{
-              marginTop: '16px',
-              fontSize: '13px',
-              color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
-            }}>
-              To test: save your Gmail + App Password above, then click <strong>Send Test SMS</strong> and enter a 10-digit US mobile number.
-            </p>
-            <div style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: '12px',
-              marginTop: '12px'
-            }}>
-              <button
-                type="button"
-                className="button-26 button-26--header"
-                role="button"
-                onClick={() => setShowSendSmsModal(true)}
-              >
-                <div className="button-26__content">
-                  <span className="button-26__text text">Send Test SMS</span>
-                </div>
-              </button>
-              <button
-                type="button"
-                className="button-26 button-26--header"
-                role="button"
-                onClick={saveSmsSettings}
-                disabled={saving}
-                style={{
-                  opacity: saving ? 0.6 : 1,
-                  cursor: saving ? 'not-allowed' : 'pointer'
-                }}
-              >
-                <div className="button-26__content">
-                  <span className="button-26__text text">
-                    {saving ? 'Saving...' : 'Save SMS Settings'}
-                  </span>
-                </div>
-              </button>
-            </div>
+            {/* Blank tab - content can be added later */}
           </div>
         </div>
       )}
-
-      {/* Send SMS Modal */}
-      {showSendSmsModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-            padding: '30px',
-            borderRadius: '8px',
-            width: '90%',
-            maxWidth: '500px'
-          }}>
-            <h2 style={{
-              marginTop: 0,
-              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-            }}>
-              Send Test SMS
-            </h2>
-            <form onSubmit={handleSendSms}>
-              <FormField>
-                <FormLabel isDarkMode={isDarkMode}>
-                  Phone Number (10 digits, US)
-                </FormLabel>
-                <input
-                  type="tel"
-                  value={sendSmsForm.phone_number}
-                  onChange={(e) => setSendSmsForm({...sendSmsForm, phone_number: e.target.value})}
-                  placeholder="5551234567"
-                  required
-                  style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                  {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                />
-                <p style={{ fontSize: '12px', color: isDarkMode ? '#999' : '#666', marginTop: '4px' }}>
-                  Digits only, e.g. 5551234567. With country code use 15551234567.
-                </p>
-              </FormField>
-              <FormField>
-                <FormLabel isDarkMode={isDarkMode}>
-                  Carrier (pick for best delivery)
-                </FormLabel>
-                <select
-                  value={sendSmsForm.carrier_preference || ''}
-                  onChange={(e) => setSendSmsForm({...sendSmsForm, carrier_preference: e.target.value})}
-                  style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), maxWidth: '100%' }}
-                  {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                >
-                  <option value="">Try ATT first, then others</option>
-                  <option value="att">ATT</option>
-                  <option value="verizon">Verizon</option>
-                  <option value="tmobile">T-Mobile</option>
-                  <option value="sprint">Sprint</option>
-                </select>
-                <p style={{ fontSize: '12px', color: isDarkMode ? '#999' : '#666', marginTop: '4px' }}>
-                  If you don&apos;t receive the SMS, pick your carrier and try again.
-                </p>
-              </FormField>
-              <FormField>
-                <FormLabel isDarkMode={isDarkMode}>
-                  Message
-                </FormLabel>
-                <textarea
-                  value={sendSmsForm.message_text}
-                  onChange={(e) => setSendSmsForm({...sendSmsForm, message_text: e.target.value})}
-                  rows={5}
-                  required
-                  style={{
-                    ...inputBaseStyle(isDarkMode, themeColorRgb),
-                    resize: 'vertical',
-                    fontFamily: 'inherit',
-                    minHeight: '100px'
-                  }}
-                  {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                />
-                <p style={{
-                  fontSize: '13px',
-                  color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
-                  marginTop: '8px'
-                }}>
-                  {sendSmsForm.message_text.length}/160 characters
-                </p>
-              </FormField>
-              <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
-                <button
-                  type="submit"
-                  className="button-26 button-26--header"
-                  role="button"
-                  disabled={saving}
-                  style={{
-                    opacity: saving ? 0.6 : 1,
-                    cursor: saving ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  <div className="button-26__content">
-                    <span className="button-26__text text">
-                      {saving ? 'Sending...' : 'Send'}
-                    </span>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  className="button-26 button-26--header"
-                  role="button"
-                  onClick={() => setShowSendSmsModal(false)}
-                >
-                  <div className="button-26__content">
-                    <span className="button-26__text text">Cancel</span>
-                  </div>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-          )}
 
       {activeTab === 'cash' && (
         <div>

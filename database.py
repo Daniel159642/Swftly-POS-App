@@ -123,6 +123,7 @@ def ensure_metadata_tables(conn=None):
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS categories (
                     category_id SERIAL PRIMARY KEY,
+                    establishment_id INTEGER NOT NULL DEFAULT 1 REFERENCES establishments(establishment_id) ON DELETE CASCADE,
                     category_name TEXT NOT NULL,
                     description TEXT,
                     parent_category_id INTEGER REFERENCES categories(category_id),
@@ -132,12 +133,13 @@ def ensure_metadata_tables(conn=None):
             """)
             cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_root_name
-                ON categories (category_name) WHERE parent_category_id IS NULL
+                ON categories (establishment_id, category_name) WHERE parent_category_id IS NULL
             """)
             cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_name_parent
-                ON categories (category_name, parent_category_id) WHERE parent_category_id IS NOT NULL
+                ON categories (establishment_id, category_name, parent_category_id) WHERE parent_category_id IS NOT NULL
             """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_categories_establishment ON categories(establishment_id)")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS product_metadata (
                     metadata_id SERIAL PRIMARY KEY,
@@ -488,8 +490,8 @@ def _build_category_path(category_id: int, by_id: Dict[int, Dict]) -> str:
     return " > ".join(reversed(parts)) if parts else ""
 
 
-def list_categories(include_path: bool = True) -> List[Dict[str, Any]]:
-    """List all categories. Optionally include category_path (e.g. 'Electronics > Phones')."""
+def list_categories(include_path: bool = True, archived_only: bool = False) -> List[Dict[str, Any]]:
+    """List categories. Optionally include category_path. Set archived_only=True to list only archived."""
     from psycopg2.extras import RealDictCursor
     conn = None
     try:
@@ -499,7 +501,25 @@ def list_categories(include_path: bool = True) -> List[Dict[str, Any]]:
             conn.rollback()
         except Exception:
             pass
-        cursor.execute("SELECT * FROM categories ORDER BY category_name")
+        try:
+            if archived_only:
+                cursor.execute("""
+                    SELECT * FROM categories
+                    WHERE archived = TRUE
+                    ORDER BY category_name
+                """)
+            else:
+                cursor.execute("""
+                    SELECT * FROM categories
+                    WHERE (archived IS NULL OR archived = FALSE)
+                    ORDER BY category_name
+                """)
+        except Exception:
+            if archived_only:
+                conn.rollback()
+                return []
+            conn.rollback()
+            cursor.execute("SELECT * FROM categories ORDER BY category_name")
         rows = cursor.fetchall()
         if not rows:
             return []
@@ -526,6 +546,22 @@ def list_categories(include_path: bool = True) -> List[Dict[str, Any]]:
                 conn.close()
             except Exception:
                 pass
+
+
+def delete_category(category_id: int) -> bool:
+    """Delete a category. Unlinks product_metadata first. Fails if category has children."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT 1 FROM categories WHERE parent_category_id = %s LIMIT 1", (category_id,))
+        if cursor.fetchone():
+            raise ValueError("Cannot delete category that has subcategories")
+        cursor.execute("UPDATE product_metadata SET category_id = NULL WHERE category_id = %s", (category_id,))
+        cursor.execute("DELETE FROM categories WHERE category_id = %s", (category_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 
 def suggest_categories_for_product(product_name: str, barcode: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -747,6 +783,7 @@ def add_product(
     item_type: 'product' (sellable at POS) or 'ingredient' (raw material, not sold at POS).
     unit: For ingredients, e.g. 'oz', 'lb', 'g', 'ml', 'each'.
     sell_at_pos: If False, item is hidden from POS (e.g. ingredients).
+    vendor: Deprecated; use vendor_id. If vendor (name) is passed and vendor_id is None, resolved from vendors.
     """
     if item_type not in ("product", "ingredient"):
         raise ValueError("item_type must be 'product' or 'ingredient'")
@@ -759,13 +796,21 @@ def add_product(
         establishment_id = get_current_establishment()
         if establishment_id is None:
             establishment_id = _get_or_create_default_establishment(conn)
+        if vendor_id is None and vendor:
+            cursor.execute(
+                "SELECT vendor_id FROM vendors WHERE vendor_name = %s AND establishment_id = %s LIMIT 1",
+                (vendor.strip(), establishment_id),
+            )
+            row = cursor.fetchone()
+            if row:
+                vendor_id = row[0] if isinstance(row, tuple) else row.get("vendor_id")
         cursor.execute("""
             INSERT INTO inventory 
-            (establishment_id, product_name, sku, product_price, product_cost, vendor, vendor_id, photo,
+            (establishment_id, product_name, sku, product_price, product_cost, vendor_id, photo,
              current_quantity, category, barcode, item_type, unit, sell_at_pos)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING product_id
-        """, (establishment_id, product_name, sku, product_price, product_cost, vendor, vendor_id, photo,
+        """, (establishment_id, product_name, sku, product_price, product_cost, vendor_id, photo,
               current_quantity, category, barcode, item_type, unit, sell_at_pos))
         row = cursor.fetchone()
         product_id = row[0] if row and not isinstance(row, dict) else (row.get("product_id") if row else None)
@@ -1005,7 +1050,7 @@ def update_product(product_id: int, employee_id: Optional[int] = None, auto_extr
     
     # Build update query dynamically
     allowed_fields = ['product_name', 'sku', 'product_price', 'product_cost',
-                     'vendor', 'vendor_id', 'photo', 'current_quantity', 'category', 'barcode',
+                     'vendor_id', 'photo', 'current_quantity', 'category', 'barcode',
                      'item_type', 'unit', 'sell_at_pos']
     
     updates = []
@@ -1022,9 +1067,8 @@ def update_product(product_id: int, employee_id: Optional[int] = None, auto_extr
         conn.close()
         return False
     
-    # Add updated_at timestamp
+    # Add updated_at timestamp (NOW() has no placeholder)
     updates.append("updated_at = NOW()")
-    values.append(datetime.now().isoformat())
     values.append(product_id)
     
     query = f"UPDATE inventory SET {', '.join(updates)} WHERE product_id = %s"
@@ -1093,23 +1137,23 @@ def delete_product(product_id: int) -> bool:
 def list_products(
     category: Optional[str] = None,
     vendor: Optional[str] = None,
+    vendor_id: Optional[int] = None,
     min_quantity: Optional[int] = None
 ) -> List[Dict[str, Any]]:
-    """List all products with optional filters"""
+    """List all products with optional filters. Use vendor_id (or vendor name for backward compat)."""
     conn = get_connection()
     cursor = conn.cursor()
-    
     query = "SELECT * FROM inventory WHERE 1=1"
     params = []
-    
     if category:
         query += " AND category = %s"
         params.append(category)
-    
-    if vendor:
-        query += " AND vendor = %s"
+    if vendor_id is not None:
+        query += " AND vendor_id = %s"
+        params.append(vendor_id)
+    elif vendor:
+        query += " AND vendor_id = (SELECT vendor_id FROM vendors WHERE vendor_name = %s LIMIT 1)"
         params.append(vendor)
-    
     if min_quantity is not None:
         query += " AND current_quantity >= %s"
         params.append(min_quantity)
@@ -1308,6 +1352,12 @@ def get_establishment_settings(establishment_id: Optional[int] = None) -> Dict[s
             },
             'pos_search_filters': s.get('pos_search_filters'),
             'delivery_pay_on_delivery_cash_only': bool(s.get('delivery_pay_on_delivery_cash_only', False)),
+            'allow_delivery': s.get('allow_delivery', True) if 'allow_delivery' in s else True,
+            'allow_pickup': s.get('allow_pickup', True) if 'allow_pickup' in s else True,
+            'allow_pay_at_pickup': bool(s.get('allow_pay_at_pickup', False)),
+            'delivery_fee_enabled': bool(s.get('delivery_fee_enabled', False)),
+            'allow_scheduled_pickup': bool(s.get('allow_scheduled_pickup', False)),
+            'allow_scheduled_delivery': bool(s.get('allow_scheduled_delivery', False)),
         }
     except Exception:
         try:
@@ -1325,6 +1375,12 @@ def _default_store_settings() -> Dict[str, Any]:
             'cash': 0.0, 'check': 0.0, 'store_credit': 0.0
         },
         'delivery_pay_on_delivery_cash_only': False,
+        'allow_delivery': True,
+        'allow_pickup': True,
+        'allow_pay_at_pickup': False,
+        'delivery_fee_enabled': False,
+        'allow_scheduled_pickup': False,
+        'allow_scheduled_delivery': False,
     }
 
 
@@ -1356,6 +1412,18 @@ def update_establishment_settings(establishment_id: Optional[int], settings: Dic
             current['pos_search_filters'] = settings['pos_search_filters']
         if 'delivery_pay_on_delivery_cash_only' in settings:
             current['delivery_pay_on_delivery_cash_only'] = bool(settings['delivery_pay_on_delivery_cash_only'])
+        if 'allow_delivery' in settings:
+            current['allow_delivery'] = bool(settings['allow_delivery'])
+        if 'allow_pickup' in settings:
+            current['allow_pickup'] = bool(settings['allow_pickup'])
+        if 'allow_pay_at_pickup' in settings:
+            current['allow_pay_at_pickup'] = bool(settings['allow_pay_at_pickup'])
+        if 'delivery_fee_enabled' in settings:
+            current['delivery_fee_enabled'] = bool(settings['delivery_fee_enabled'])
+        if 'allow_scheduled_pickup' in settings:
+            current['allow_scheduled_pickup'] = bool(settings['allow_scheduled_pickup'])
+        if 'allow_scheduled_delivery' in settings:
+            current['allow_scheduled_delivery'] = bool(settings['allow_scheduled_delivery'])
         import json
         cursor.execute(
             "UPDATE establishments SET settings = %s::jsonb WHERE establishment_id = %s",
@@ -1509,8 +1577,8 @@ def get_vendor(vendor_id: int) -> Optional[Dict[str, Any]]:
     
     return dict(row) if row else None
 
-def list_vendors() -> List[Dict[str, Any]]:
-    """List all vendors"""
+def list_vendors(archived_only: bool = False) -> List[Dict[str, Any]]:
+    """List vendors. Set archived_only=True to list only archived."""
     from psycopg2.extras import RealDictCursor
     conn = None
     try:
@@ -1523,7 +1591,25 @@ def list_vendors() -> List[Dict[str, Any]]:
         except:
             pass  # Ignore if already rolled back or no transaction
         
-        cursor.execute("SELECT * FROM vendors ORDER BY vendor_name")
+        try:
+            if archived_only:
+                cursor.execute("""
+                    SELECT * FROM vendors
+                    WHERE archived = TRUE
+                    ORDER BY vendor_name
+                """)
+            else:
+                cursor.execute("""
+                    SELECT * FROM vendors
+                    WHERE (archived IS NULL OR archived = FALSE)
+                    ORDER BY vendor_name
+                """)
+        except Exception:
+            if archived_only:
+                conn.rollback()
+                return []
+            conn.rollback()
+            cursor.execute("SELECT * FROM vendors ORDER BY vendor_name")
         rows = cursor.fetchall()
         
         # RealDictCursor returns dict-like rows, convert to list of dicts
@@ -1586,6 +1672,57 @@ def delete_vendor(vendor_id: int) -> bool:
     conn.close()
     
     return success
+
+
+def set_archived_product(product_id: int, archived: bool = True) -> bool:
+    """Set archived flag on a product (soft delete). No-op if archived column does not exist."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE inventory SET archived = %s WHERE product_id = %s", (archived, product_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        if "archived" in str(e).lower() and "does not exist" in str(e).lower():
+            conn.rollback()
+            return False
+        raise
+    finally:
+        conn.close()
+
+
+def set_archived_category(category_id: int, archived: bool = True) -> bool:
+    """Set archived flag on a category. No-op if archived column does not exist."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE categories SET archived = %s WHERE category_id = %s", (archived, category_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        if "archived" in str(e).lower() and "does not exist" in str(e).lower():
+            conn.rollback()
+            return False
+        raise
+    finally:
+        conn.close()
+
+
+def set_archived_vendor(vendor_id: int, archived: bool = True) -> bool:
+    """Set archived flag on a vendor. No-op if archived column does not exist."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE vendors SET archived = %s WHERE vendor_id = %s", (archived, vendor_id))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        if "archived" in str(e).lower() and "does not exist" in str(e).lower():
+            conn.rollback()
+            return False
+        raise
+    finally:
+        conn.close()
 
 # ============================================================================
 # Shipment Management Functions
@@ -1837,77 +1974,57 @@ def record_sale(
     sale_price: float,
     notes: Optional[str] = None
 ) -> int:
-    """Record a sale/transaction (automatically decreases inventory)"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    # Check if enough inventory exists
-    cursor.execute("SELECT current_quantity FROM inventory WHERE product_id = %s", (product_id,))
-    row = cursor.fetchone()
-    
-    if not row:
-        conn.close()
-        raise ValueError(f"Product ID {product_id} not found")
-    
-    current_qty = row['current_quantity']
-    if quantity_sold > current_qty:
-        conn.close()
-        raise ValueError(f"Insufficient inventory. Available: {current_qty}, Requested: {quantity_sold}")
-    
-    try:
-        cursor.execute("""
-            INSERT INTO sales (product_id, quantity_sold, sale_price, notes)
-            VALUES (%s, %s, %s, %s)
-        """, (product_id, quantity_sold, sale_price, notes))
-        
-        conn.commit()
-        # For PostgreSQL, need to use RETURNING or fetch differently
-        sale_id = cursor.lastrowid if hasattr(cursor, 'lastrowid') else None
-        conn.close()
-        
-        return sale_id
-    except Exception as e:
-        import psycopg2
-        if isinstance(e, psycopg2.IntegrityError):
-            conn.rollback()
-            conn.close()
-            raise ValueError(f"Error recording sale") from e
+    """Deprecated. Sales are recorded via create_order (orders + order_items). Use create_order to record a sale."""
+    import warnings
+    warnings.warn(
+        "record_sale() is deprecated. Use create_order(employee_id, items=[{...}], payment_method='cash') to record sales.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    raise NotImplementedError(
+        "record_sale() is deprecated. Sales come from orders. Use create_order(employee_id, items=[{'product_id': ..., 'quantity': ..., 'unit_price': ...}], payment_method='cash') instead."
+    )
 
 def get_sales(
     product_id: Optional[int] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Get sales records with optional filters"""
+    """Get sales records from completed, paid orders (order_items + orders). Same shape as legacy sales table."""
+    from psycopg2.extras import RealDictCursor
     conn = get_connection()
-    cursor = conn.cursor()
-    
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     query = """
-        SELECT s.*, i.product_name, i.sku
-        FROM sales s
-        JOIN inventory i ON s.product_id = i.product_id
-        WHERE 1=1
+        SELECT
+            oi.establishment_id,
+            oi.product_id,
+            oi.quantity AS quantity_sold,
+            oi.unit_price AS sale_price,
+            o.order_date AS sale_date,
+            NULL::TEXT AS notes,
+            oi.order_item_id AS sale_id,
+            i.product_name,
+            i.sku
+        FROM order_items oi
+        JOIN orders o ON o.order_id = oi.order_id
+        JOIN inventory i ON i.product_id = oi.product_id
+        WHERE o.order_status = 'completed'
+          AND o.payment_status = 'completed'
     """
     params = []
-    
     if product_id:
-        query += " AND s.product_id = %s"
+        query += " AND oi.product_id = %s"
         params.append(product_id)
-    
     if start_date:
-        query += " AND DATE(s.sale_date) >= %s"
+        query += " AND DATE(o.order_date) >= %s"
         params.append(start_date)
-    
     if end_date:
-        query += " AND DATE(s.sale_date) <= %s"
+        query += " AND DATE(o.order_date) <= %s"
         params.append(end_date)
-    
-    query += " ORDER BY s.sale_date DESC"
-    
+    query += " ORDER BY o.order_date DESC, oi.order_item_id DESC"
     cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
-    
     return [dict(row) for row in rows]
 
 # ============================================================================
@@ -1954,10 +2071,17 @@ def get_inventory_by_vendor(product_id: int) -> Dict[str, Any]:
     
     shipments = cursor.fetchall()
     
-    # Get total quantity sold
-    cursor.execute("SELECT COALESCE(SUM(quantity_sold), 0) as total_sold FROM sales WHERE product_id = %s", (product_id,))
+    # Get total quantity sold from completed, paid orders (single source of truth)
+    cursor.execute("""
+        SELECT COALESCE(SUM(oi.quantity), 0) AS total_sold
+        FROM order_items oi
+        JOIN orders o ON o.order_id = oi.order_id
+        WHERE oi.product_id = %s
+          AND o.order_status = 'completed'
+          AND o.payment_status = 'completed'
+    """, (product_id,))
     total_sold_row = cursor.fetchone()
-    total_sold = total_sold_row['total_sold'] if total_sold_row else 0
+    total_sold = (total_sold_row[0] if total_sold_row is not None else 0)
     
     # Calculate remaining inventory by vendor using FIFO
     remaining_to_allocate = product['current_quantity']
@@ -4009,16 +4133,36 @@ def search_customers(establishment_id: Optional[int], q: str, limit: int = 20) -
             establishment_id = _get_or_create_default_establishment(conn)
         term = f"%{(q or '').strip()}%"
         cursor.execute("""
-            SELECT customer_id, establishment_id, customer_name, email, phone, loyalty_points, created_date
-            FROM customers
-            WHERE establishment_id = %s
-              AND (customer_name ILIKE %s OR email ILIKE %s OR phone ILIKE %s)
-            ORDER BY customer_name NULLS LAST
-            LIMIT %s
-        """, (establishment_id, term, term, term, limit))
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'address'
+        """)
+        has_address_col = cursor.fetchone() is not None
+        if has_address_col:
+            cursor.execute("""
+                SELECT customer_id, establishment_id, customer_name, email, phone, COALESCE(address, '') AS address, loyalty_points, created_date
+                FROM customers
+                WHERE establishment_id = %s
+                  AND (customer_name ILIKE %s OR email ILIKE %s OR phone ILIKE %s)
+                ORDER BY customer_name NULLS LAST
+                LIMIT %s
+            """, (establishment_id, term, term, term, limit))
+            cols = ['customer_id', 'establishment_id', 'customer_name', 'email', 'phone', 'address', 'loyalty_points', 'created_date']
+        else:
+            cursor.execute("""
+                SELECT customer_id, establishment_id, customer_name, email, phone, loyalty_points, created_date
+                FROM customers
+                WHERE establishment_id = %s
+                  AND (customer_name ILIKE %s OR email ILIKE %s OR phone ILIKE %s)
+                ORDER BY customer_name NULLS LAST
+                LIMIT %s
+            """, (establishment_id, term, term, term, limit))
+            cols = ['customer_id', 'establishment_id', 'customer_name', 'email', 'phone', 'loyalty_points', 'created_date']
         rows = cursor.fetchall()
-        cols = ['customer_id', 'establishment_id', 'customer_name', 'email', 'phone', 'loyalty_points', 'created_date']
-        return [dict(zip(cols, row)) for row in rows] if rows else []
+        result = [dict(zip(cols, row)) for row in rows] if rows else []
+        if result and not has_address_col:
+            for r in result:
+                r['address'] = ''
+        return result
     finally:
         conn.close()
 
@@ -4137,6 +4281,32 @@ def generate_order_number() -> str:
     
     return order_number
 
+def _apply_pos_settings_fee_mode(cursor, fee_rates: Optional[Dict[str, float]]) -> Optional[Dict[str, float]]:
+    """Apply pos_settings transaction_fee_mode and transaction_fee_charge_cash to fee_rates. Returns adjusted copy or None to use as-is."""
+    if not fee_rates:
+        return fee_rates
+    try:
+        cursor.execute("""
+            SELECT transaction_fee_mode, transaction_fee_charge_cash FROM pos_settings ORDER BY id DESC LIMIT 1
+        """)
+        row = cursor.fetchone()
+        if not row:
+            return fee_rates
+        mode = (row.get('transaction_fee_mode') if isinstance(row, dict) else (row[0] if row else None)) or 'additional'
+        if isinstance(mode, str):
+            mode = mode.strip().lower()
+        charge_cash = row.get('transaction_fee_charge_cash') if isinstance(row, dict) else (row[1] if len(row) > 1 else False)
+        if mode in ('included', 'none'):
+            return {k: 0.0 for k in fee_rates.keys()} if fee_rates else {}
+        if not charge_cash:
+            out = dict(fee_rates)
+            out['cash'] = 0.0
+            return out
+        return fee_rates
+    except Exception:
+        return fee_rates
+
+
 def calculate_transaction_fee(payment_method: str, amount: float, fee_rates: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
     """
     Calculate transaction fee based on payment method
@@ -4178,7 +4348,8 @@ def create_order(
     customer_info: Optional[Dict[str, str]] = None,
     points_used: int = 0,
     payment_status: Optional[str] = None,
-    order_status_override: Optional[str] = None
+    order_status_override: Optional[str] = None,
+    discount_type: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Create a new order and process payment
@@ -4264,7 +4435,12 @@ def create_order(
             
             if existing_customer:
                 customer_id = existing_customer['customer_id'] if isinstance(existing_customer, dict) else existing_customer[0]
-                # Update customer info if provided
+                # Update customer info if provided (only include address if column exists)
+                cursor.execute("""
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'address'
+                """)
+                has_address_col = cursor.fetchone() is not None
                 update_fields = []
                 update_values = []
                 if customer_name:
@@ -4276,7 +4452,7 @@ def create_order(
                 if customer_phone:
                     update_fields.append("phone = %s")
                     update_values.append(customer_phone)
-                if customer_address:
+                if customer_address and has_address_col:
                     update_fields.append("address = %s")
                     update_values.append(customer_address)
                 if update_fields:
@@ -4311,6 +4487,42 @@ def create_order(
                 else:
                     customer_id = result[0] if result else None
         
+        # Order-level customer snapshot: what was used for this order (may differ from profile)
+        order_customer_name = None
+        order_customer_phone = None
+        order_customer_email = None
+        order_customer_address = None
+        if customer_info and (customer_info.get('name') or customer_info.get('phone') or customer_info.get('email') or customer_info.get('address')):
+            order_customer_name = (customer_info.get('name') or '').strip() or None
+            order_customer_phone = (customer_info.get('phone') or '').strip() or None
+            order_customer_email = (customer_info.get('email') or '').strip() or None
+            order_customer_address = (customer_info.get('address') or '').strip() or None
+        elif customer_id:
+            cursor.execute("""
+                SELECT customer_name, phone, email
+                FROM customers WHERE customer_id = %s
+            """, (customer_id,))
+            cust_row = cursor.fetchone()
+            if cust_row:
+                if isinstance(cust_row, dict):
+                    order_customer_name = (cust_row.get('customer_name') or '').strip() or None
+                    order_customer_phone = (cust_row.get('phone') or '').strip() or None
+                    order_customer_email = (cust_row.get('email') or '').strip() or None
+                else:
+                    order_customer_name = (cust_row[0] or '').strip() or None if len(cust_row) > 0 else None
+                    order_customer_phone = (cust_row[1] or '').strip() or None if len(cust_row) > 1 else None
+                    order_customer_email = (cust_row[2] or '').strip() or None if len(cust_row) > 2 else None
+            cursor.execute("""
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'address'
+            """)
+            if cursor.fetchone() and customer_id:
+                cursor.execute("SELECT address FROM customers WHERE customer_id = %s", (customer_id,))
+                addr_row = cursor.fetchone()
+                if addr_row:
+                    order_customer_address = (addr_row.get('address') if isinstance(addr_row, dict) else addr_row[0]) or None
+                    if order_customer_address:
+                        order_customer_address = (order_customer_address or '').strip() or None
 
         
         # Generate order number
@@ -4361,11 +4573,13 @@ def create_order(
         # Calculate final total (including transaction fee and tip)
         total = pre_fee_total + transaction_fee + tip
         
-        # Create order - check if tip and order_type columns exist
+        # Create order - check if tip, order_type, and customer snapshot columns exist
         cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = \'orders\' AND table_schema = 'public'")
         columns = [col[0] for col in cursor.fetchall()]
         has_tip = 'tip' in columns
         has_order_type = 'order_type' in columns
+        has_discount_type = 'discount_type' in columns
+        has_order_customer_snapshot = all(c in columns for c in ('customer_name', 'customer_phone', 'customer_email', 'customer_address'))
         
         # Get current datetime using local timezone (ensure accurate time)
         # datetime.now() uses system local timezone automatically
@@ -4387,34 +4601,91 @@ def create_order(
             ostatus = 'completed'
         print(f"Creating order: payment_status={pstatus!r}, order_status={ostatus!r}, order_type={order_type!r}")
 
-        if has_tip and has_order_type:
-            cursor.execute("""
-                INSERT INTO orders (
-                    establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
-                    discount, transaction_fee, tip, total, payment_method, payment_status, order_status, order_type, notes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING order_id
-            """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
-                  discount, transaction_fee, tip, total, payment_method, pstatus, ostatus, order_type, notes))
+        if has_tip and has_order_type and has_discount_type:
+            if has_order_customer_snapshot:
+                cursor.execute("""
+                    INSERT INTO orders (
+                        establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount,
+                        discount, transaction_fee, tip, total, payment_method, payment_status, order_status, order_type, notes, discount_type,
+                        customer_name, customer_phone, customer_email, customer_address
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING order_id
+                """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                      discount, transaction_fee, tip, total, payment_method, pstatus, ostatus, order_type, notes, (discount_type or None),
+                      order_customer_name, order_customer_phone, order_customer_email, order_customer_address))
+            else:
+                cursor.execute("""
+                    INSERT INTO orders (
+                        establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
+                        discount, transaction_fee, tip, total, payment_method, payment_status, order_status, order_type, notes, discount_type
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING order_id
+                """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                      discount, transaction_fee, tip, total, payment_method, pstatus, ostatus, order_type, notes, (discount_type or None)))
+        elif has_tip and has_order_type:
+            if has_order_customer_snapshot:
+                cursor.execute("""
+                    INSERT INTO orders (
+                        establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount,
+                        discount, transaction_fee, tip, total, payment_method, payment_status, order_status, order_type, notes,
+                        customer_name, customer_phone, customer_email, customer_address
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING order_id
+                """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                      discount, transaction_fee, tip, total, payment_method, pstatus, ostatus, order_type, notes,
+                      order_customer_name, order_customer_phone, order_customer_email, order_customer_address))
+            else:
+                cursor.execute("""
+                    INSERT INTO orders (
+                        establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
+                        discount, transaction_fee, tip, total, payment_method, payment_status, order_status, order_type, notes
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING order_id
+                """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                      discount, transaction_fee, tip, total, payment_method, pstatus, ostatus, order_type, notes))
         elif has_tip:
-            cursor.execute("""
-                INSERT INTO orders (
-                    establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
-                    discount, transaction_fee, tip, total, payment_method, payment_status, order_status, notes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING order_id
-            """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
-                  discount, transaction_fee, tip, total, payment_method, pstatus, ostatus, notes))
+            if has_order_customer_snapshot:
+                cursor.execute("""
+                    INSERT INTO orders (
+                        establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount,
+                        discount, transaction_fee, tip, total, payment_method, payment_status, order_status, notes,
+                        customer_name, customer_phone, customer_email, customer_address
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING order_id
+                """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                      discount, transaction_fee, tip, total, payment_method, pstatus, ostatus, notes,
+                      order_customer_name, order_customer_phone, order_customer_email, order_customer_address))
+            else:
+                cursor.execute("""
+                    INSERT INTO orders (
+                        establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
+                        discount, transaction_fee, tip, total, payment_method, payment_status, order_status, notes
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING order_id
+                """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                      discount, transaction_fee, tip, total, payment_method, pstatus, ostatus, notes))
         else:
             # Fallback for older schema (no tip or order_type)
-            cursor.execute("""
-                INSERT INTO orders (
-                    establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
-                    discount, transaction_fee, total, payment_method, payment_status, order_status, notes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING order_id
-            """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
-                  discount, transaction_fee, total, payment_method, pstatus, ostatus, notes))
+            if has_order_customer_snapshot:
+                cursor.execute("""
+                    INSERT INTO orders (
+                        establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount,
+                        discount, transaction_fee, total, payment_method, payment_status, order_status, notes,
+                        customer_name, customer_phone, customer_email, customer_address
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING order_id
+                """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                      discount, transaction_fee, total, payment_method, pstatus, ostatus, notes,
+                      order_customer_name, order_customer_phone, order_customer_email, order_customer_address))
+            else:
+                cursor.execute("""
+                    INSERT INTO orders (
+                        establishment_id, order_number, order_date, employee_id, customer_id, subtotal, tax_rate, tax_amount, 
+                        discount, transaction_fee, total, payment_method, payment_status, order_status, notes
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING order_id
+                """, (establishment_id, order_number, current_datetime, employee_id, customer_id, subtotal, tax_rate, total_tax,
+                      discount, transaction_fee, total, payment_method, pstatus, ostatus, notes))
         
         result = cursor.fetchone()
         if isinstance(result, dict):
@@ -4765,8 +5036,15 @@ def update_order_status(
             tip = float(order.get('tip') or 0)
             pre_fee_total = total - float(order.get('transaction_fee') or 0) - tip
             fee_rates = get_establishment_settings(establishment_id).get('transaction_fee_rates') or {}
+            fee_rates = _apply_pos_settings_fee_mode(cursor, fee_rates) or fee_rates
             fee_calc = calculate_transaction_fee(pay_method, pre_fee_total, fee_rates)
             transaction_fee = fee_calc['transaction_fee']
+            new_total = pre_fee_total + transaction_fee + tip
+            # Keep order row in sync for receipts and accounting
+            cursor.execute("""
+                UPDATE orders SET transaction_fee = %s, total = %s, payment_method = %s
+                WHERE order_id = %s
+            """, (transaction_fee, new_total, pay_method, order_id))
             cursor.execute("""
                 SELECT column_name FROM information_schema.columns WHERE table_name = 'payment_transactions' AND table_schema = 'public'
             """)
@@ -5023,14 +5301,22 @@ def create_pending_return(
     cursor = conn.cursor()
     
     try:
-        # Verify order exists
-        cursor.execute("SELECT order_id, order_number FROM orders WHERE order_id = %s", (order_id,))
+        # Verify order exists and get establishment
+        cursor.execute("SELECT order_id, order_number, establishment_id FROM orders WHERE order_id = %s", (order_id,))
         order = cursor.fetchone()
         if not order:
             conn.close()
             return {'success': False, 'message': 'Order not found'}
         
         order = dict(order)
+        establishment_id = order.get('establishment_id')
+        if establishment_id is None:
+            cursor.execute("SELECT establishment_id FROM establishments ORDER BY establishment_id LIMIT 1")
+            row = cursor.fetchone()
+            establishment_id = row['establishment_id'] if row else None
+        if establishment_id is None:
+            conn.close()
+            return {'success': False, 'message': 'No establishment found; cannot create return'}
         
         # Generate unique return number
         # Check how many returns already exist for this order on this date
@@ -5095,22 +5381,26 @@ def create_pending_return(
         # Create pending return
         cursor.execute("""
             INSERT INTO pending_returns (
-                return_number, order_id, employee_id, customer_id,
+                establishment_id, return_number, order_id, employee_id, customer_id,
                 total_refund_amount, reason, notes
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (return_number, order_id, employee_id, customer_id, total_refund, reason, notes))
-        
-        return_id = cursor.lastrowid
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING return_id
+        """, (establishment_id, return_number, order_id, employee_id, customer_id, total_refund, reason, notes))
+        return_row = cursor.fetchone()
+        return_id = return_row[0] if return_row else None
+        if return_id is None:
+            conn.close()
+            return {'success': False, 'message': 'Failed to create pending return'}
         
         # Create return items
         for item in return_items:
             cursor.execute("""
                 INSERT INTO pending_return_items (
-                    return_id, order_item_id, product_id, quantity,
+                    establishment_id, return_id, order_item_id, product_id, quantity,
                     unit_price, discount, refund_amount, condition, notes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                return_id, item['order_item_id'], item['product_id'],
+                establishment_id, return_id, item['order_item_id'], item['product_id'],
                 item['quantity'], item['unit_price'], item['discount'],
                 item['refund_amount'], item['condition'], item['notes']
             ))
@@ -5346,7 +5636,8 @@ def process_return_immediate(
     return_tax: float = 0,
     return_processing_fee: float = 0,
     return_total: float = 0,
-    payment_method: Optional[str] = None
+    payment_method: Optional[str] = None,
+    return_tip_amount: float = 0,
 ) -> Dict[str, Any]:
     """
     Process a return immediately (no pending state)
@@ -5357,15 +5648,38 @@ def process_return_immediate(
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
-        # Verify order exists
-        cursor.execute("SELECT order_id, order_number, establishment_id FROM orders WHERE order_id = %s", (order_id,))
+        # Verify order exists and get order-level totals (for proportional tip; processing fee only on full return)
+        cursor.execute("""
+            SELECT order_id, order_number, establishment_id, customer_id, subtotal, discount, transaction_fee
+            FROM orders WHERE order_id = %s
+        """, (order_id,))
         order = cursor.fetchone()
         if not order:
             conn.close()
             return {'success': False, 'message': 'Order not found'}
         
         order = dict(order)
-        establishment_id = order['establishment_id']
+        # Order tip (may be on orders or payment_transactions)
+        try:
+            cursor.execute("SELECT tip FROM orders WHERE order_id = %s", (order_id,))
+            tip_row = cursor.fetchone()
+            order['tip'] = float(tip_row.get('tip', 0) or 0) if tip_row else 0
+        except Exception:
+            order['tip'] = 0
+        establishment_id = order.get('establishment_id')
+        if establishment_id is None:
+            cursor.execute("SELECT establishment_id FROM establishments ORDER BY establishment_id LIMIT 1")
+            row = cursor.fetchone()
+            establishment_id = row['establishment_id'] if row else None
+        if establishment_id is None:
+            conn.close()
+            return {'success': False, 'message': 'No establishment found; cannot process return'}
+        
+        # Total quantity on the order (for full-return check: processing fee only when all items returned)
+        cursor.execute("SELECT COALESCE(SUM(quantity), 0) AS total_qty FROM order_items WHERE order_id = %s", (order_id,))
+        order_total_qty = int(cursor.fetchone().get('total_qty', 0) or 0)
+        return_total_qty = sum(int(item.get('quantity', 0)) for item in items_to_return)
+        is_full_return = order_total_qty > 0 and return_total_qty >= order_total_qty
         
         # Generate unique return number
         date_str = datetime.now().strftime('%Y%m%d')
@@ -5434,30 +5748,55 @@ def process_return_immediate(
                 'notes': item_notes
             })
         
-        # Use calculated values if provided values are 0 or use provided values
+        # Use calculated subtotal; tax is always from returned items only (never whole-order tax)
         final_subtotal = return_subtotal if return_subtotal > 0 else calculated_subtotal
-        final_tax = return_tax if return_tax > 0 else calculated_tax
+        final_tax = calculated_tax  # Always use item-level tax for returned items only
         
-        # Calculate processing fee (proportional to original order)
-        final_processing_fee = return_processing_fee
-        if final_processing_fee == 0:
-            cursor.execute("SELECT transaction_fee, subtotal FROM orders WHERE order_id = %s", (order_id,))
-            order_fees = cursor.fetchone()
-            if order_fees and order_fees.get('transaction_fee') and order_fees.get('subtotal'):
-                fee_rate = float(order_fees['transaction_fee']) / float(order_fees['subtotal'])
+        # Processing fee: only refund when ALL items on the order are returned
+        final_processing_fee = 0
+        if is_full_return:
+            order_fee = float(order.get('transaction_fee') or 0)
+            order_subtotal = float(order.get('subtotal') or 0)
+            if order_subtotal > 0 and order_fee > 0:
+                fee_rate = order_fee / order_subtotal
                 final_processing_fee = final_subtotal * fee_rate
+        # If frontend sent a fee for partial return, ignore it (we use 0)
+        if not is_full_return:
+            final_processing_fee = 0
+        elif return_processing_fee > 0 and final_processing_fee == 0:
+            final_processing_fee = return_processing_fee
         
-        # Final return total
-        final_return_total = return_total if return_total > 0 else (final_subtotal + final_tax - final_processing_fee)
+        # Proportional tip (by returned item value): order_tip * (return_subtotal / order_subtotal)
+        order_subtotal = float(order.get('subtotal') or 0)
+        order_tip = float(order.get('tip') or 0)
+        return_tip_proportional = 0.0
+        if order_subtotal > 0 and order_tip > 0:
+            return_tip_proportional = order_tip * (final_subtotal / order_subtotal)
+        # Store proportional tip for receipt; actual refund/deduction is in return_total from frontend
+        stored_return_tip = return_tip_amount if return_tip_amount else return_tip_proportional
+        
+        # Final return total (frontend sends correct total; we recompute for consistency)
+        final_return_total = return_total if return_total > 0 else (
+            final_subtotal + final_tax - final_processing_fee - (return_tip_proportional if not return_tip_amount else 0)
+        )
+        
+        # Proportional discount for receipt
+        order_discount = float(order.get('discount') or 0)
+        return_discount_val = 0.0
+        if order_subtotal > 0 and order_discount > 0:
+            return_discount_val = order_discount * (final_subtotal / order_subtotal)
         
         # Create return record (using pending_returns table but immediately approved)
         cursor.execute("""
             INSERT INTO pending_returns (
                 establishment_id, return_number, order_id, employee_id, customer_id,
-                total_refund_amount, reason, notes, status, approved_by, approved_date
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'approved', %s, CURRENT_TIMESTAMP)
+                total_refund_amount, reason, notes, status, approved_by, approved_date,
+                return_subtotal, return_discount, return_tax, return_processing_fee, return_tip
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'approved', %s, CURRENT_TIMESTAMP,
+                %s, %s, %s, %s, %s)
             RETURNING return_id
-        """, (establishment_id, return_number, order_id, employee_id, customer_id, final_return_total, reason, notes, employee_id))
+        """, (establishment_id, return_number, order_id, employee_id, customer_id, final_return_total, reason, notes, employee_id,
+              final_subtotal, return_discount_val, final_tax, final_processing_fee, stored_return_tip))
         
         return_result = cursor.fetchone()
         return_id = return_result['return_id'] if isinstance(return_result, dict) else return_result[0]
@@ -5466,11 +5805,11 @@ def process_return_immediate(
         for item_data in return_items_data:
             cursor.execute("""
                 INSERT INTO pending_return_items (
-                    return_id, order_item_id, product_id, quantity,
+                    establishment_id, return_id, order_item_id, product_id, quantity,
                     unit_price, discount, refund_amount, condition, notes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                return_id, item_data['order_item_id'], item_data['product_id'],
+                establishment_id, return_id, item_data['order_item_id'], item_data['product_id'],
                 item_data['quantity'], item_data['unit_price'], 
                 item_data['discount'],
                 item_data['refund_amount'], item_data['condition'], item_data['notes']
@@ -5499,33 +5838,71 @@ def process_return_immediate(
                     WHERE order_item_id = %s
                 """, (new_qty, new_subtotal, item_data['order_item_id']))
             else:
-                # Full return - delete item
+                # Full return - delete item (pending_return_items FK is ON DELETE SET NULL so row is kept with order_item_id NULL)
                 cursor.execute("DELETE FROM order_items WHERE order_item_id = %s", (item_data['order_item_id'],))
         
         # Create exchange credit if exchange type
         exchange_credit_id = None
         exchange_credit_number = None
         if return_type == 'exchange':
-            # Generate exchange credit number
+            # Generate exchange credit number (scan at POS by order barcode or EXC- number)
             exchange_credit_number = f"EXC-{date_str}-{return_id}"
+            credit_notes = f"Credit: {exchange_credit_number}"
             
-            # Create exchange credit record (we'll use a simple table or store in a JSON field)
-            # For now, we'll store it in a way that can be scanned at checkout
-            # This could be a new table: exchange_credits
-            # For simplicity, we'll create a record that can be looked up by the credit number
+            # Create store credit record
             cursor.execute("""
                 INSERT INTO payment_transactions (
-                    establishment_id, order_id, payment_method, amount, 
-                    net_amount, status, transaction_date, notes
-                ) VALUES (%s, %s, 'store_credit', %s, %s, 'approved', CURRENT_TIMESTAMP, %s)
+                    establishment_id, order_id, payment_method, amount,
+                    net_amount, status, transaction_date
+                ) VALUES (%s, %s, 'store_credit', %s, %s, 'approved', CURRENT_TIMESTAMP)
                 RETURNING transaction_id
-            """, (
-                establishment_id, order_id, final_return_total, final_return_total,
-                f'Exchange credit for return {return_number}. Credit: {exchange_credit_number}'
-            ))
-            
+            """, (establishment_id, order_id, final_return_total, final_return_total))
             exchange_result = cursor.fetchone()
             exchange_credit_id = exchange_result['transaction_id'] if isinstance(exchange_result, dict) else exchange_result[0]
+            # Optional: notes + amount_remaining (savepoint so missing columns don't abort transaction)
+            try:
+                cursor.execute("SAVEPOINT optional_store_credit_columns")
+                cursor.execute("""
+                    UPDATE payment_transactions SET notes = %s, amount_remaining = %s
+                    WHERE transaction_id = %s
+                """, (credit_notes, final_return_total, exchange_credit_id))
+                cursor.execute("RELEASE SAVEPOINT optional_store_credit_columns")
+            except Exception:
+                try:
+                    cursor.execute("ROLLBACK TO SAVEPOINT optional_store_credit_columns")
+                except Exception:
+                    conn.rollback()
+                    raise
+            # Link return to this transaction (savepoint in case exchange_transaction_id column missing)
+            try:
+                cursor.execute("SAVEPOINT link_exchange_transaction")
+                cursor.execute("""
+                    UPDATE pending_returns SET exchange_transaction_id = %s WHERE return_id = %s
+                """, (exchange_credit_id, return_id))
+                cursor.execute("RELEASE SAVEPOINT link_exchange_transaction")
+            except Exception:
+                try:
+                    cursor.execute("ROLLBACK TO SAVEPOINT link_exchange_transaction")
+                except Exception:
+                    conn.rollback()
+                    raise
+            # If order has a customer, add store credit to their balance
+            order_customer_id = order.get('customer_id')
+            if order_customer_id:
+                try:
+                    cursor.execute("SAVEPOINT customer_store_credit_balance")
+                    cursor.execute("""
+                        UPDATE customers
+                        SET store_credit_balance = COALESCE(store_credit_balance, 0) + %s
+                        WHERE customer_id = %s
+                    """, (final_return_total, order_customer_id))
+                    cursor.execute("RELEASE SAVEPOINT customer_store_credit_balance")
+                except Exception:
+                    try:
+                        cursor.execute("ROLLBACK TO SAVEPOINT customer_store_credit_balance")
+                    except Exception:
+                        conn.rollback()
+                        raise
         
         # Process refund if refund type
         if return_type == 'refund':
@@ -5550,6 +5927,12 @@ def process_return_immediate(
             SET notes = COALESCE(notes, '') || %s
             WHERE order_id = %s
         """, (notes_text, order_id))
+        
+        # Set order_status to 'returned' when all items were returned (full return)
+        if is_full_return:
+            cursor.execute("""
+                UPDATE orders SET order_status = 'returned' WHERE order_id = %s
+            """, (order_id,))
         
         conn.commit()
         conn.close()
@@ -7159,80 +7542,30 @@ def get_audit_trail(
     return audit_trail
 
 # ============================================================================
-# ACCOUNTING SYSTEM FUNCTIONS
+# ACCOUNTING SYSTEM FUNCTIONS (single ledger: accounting schema only)
 # ============================================================================
+# All double-entry data lives in accounting.accounts, accounting.transactions,
+# and accounting.transaction_lines. Public chart_of_accounts, journal_entries,
+# and journal_entry_lines are deprecated and no longer written to; they may be
+# dropped in a future migration.
 
 def initialize_chart_of_accounts() -> Dict[str, Any]:
-    """Initialize standard chart of accounts"""
+    """Ensure accounting schema and chart of accounts exist (single ledger in accounting schema).
+    Public chart_of_accounts is deprecated; all accounting uses accounting.accounts."""
+    try:
+        from accounting_bootstrap import ensure_accounting_schema
+        ensure_accounting_schema()
+    except Exception as e:
+        logger.warning("Accounting bootstrap in initialize_chart_of_accounts: %s", e)
     conn = get_connection()
     cursor = conn.cursor()
-    
-    accounts = [
-        # ASSETS
-        ('1000', 'Cash', 'asset', 'current_asset', 'debit'),
-        ('1010', 'Petty Cash', 'asset', 'current_asset', 'debit'),
-        ('1100', 'Accounts Receivable', 'asset', 'current_asset', 'debit'),
-        ('1200', 'Inventory', 'asset', 'current_asset', 'debit'),
-        ('1300', 'Prepaid Expenses', 'asset', 'current_asset', 'debit'),
-        ('1500', 'Equipment', 'asset', 'fixed_asset', 'debit'),
-        ('1510', 'Accumulated Depreciation - Equipment', 'contra_asset', 'fixed_asset', 'credit'),
-        ('1600', 'Furniture & Fixtures', 'asset', 'fixed_asset', 'debit'),
-        ('1610', 'Accumulated Depreciation - Furniture', 'contra_asset', 'fixed_asset', 'credit'),
-        # LIABILITIES
-        ('2000', 'Accounts Payable', 'liability', 'current_liability', 'credit'),
-        ('2100', 'Sales Tax Payable', 'liability', 'current_liability', 'credit'),
-        ('2200', 'Wages Payable', 'liability', 'current_liability', 'credit'),
-        ('2300', 'Unearned Revenue', 'liability', 'current_liability', 'credit'),
-        ('2500', 'Notes Payable - Long Term', 'liability', 'long_term_liability', 'credit'),
-        # EQUITY
-        ('3000', "Owner's Capital", 'equity', 'owner_equity', 'credit'),
-        ('3100', "Owner's Drawings", 'equity', 'owner_equity', 'debit'),
-        ('3200', 'Retained Earnings', 'equity', 'retained_earnings', 'credit'),
-        ('3300', 'Common Stock', 'equity', 'paid_in_capital', 'credit'),
-        ('3400', 'Additional Paid-In Capital', 'equity', 'paid_in_capital', 'credit'),
-        # REVENUE
-        ('4000', 'Sales Revenue', 'revenue', 'operating_revenue', 'credit'),
-        ('4100', 'Sales Returns and Allowances', 'contra_revenue', 'operating_revenue', 'debit'),
-        ('4200', 'Sales Discounts', 'contra_revenue', 'operating_revenue', 'debit'),
-        ('4500', 'Other Income', 'revenue', 'non_operating_revenue', 'credit'),
-        # EXPENSES
-        ('5000', 'Cost of Goods Sold', 'expense', 'cogs', 'debit'),
-        ('5100', 'Inventory Shrinkage', 'expense', 'cogs', 'debit'),
-        ('5200', 'Freight In', 'expense', 'cogs', 'debit'),
-        ('6000', 'Salaries and Wages Expense', 'expense', 'operating_expense', 'debit'),
-        ('6100', 'Rent Expense', 'expense', 'operating_expense', 'debit'),
-        ('6200', 'Utilities Expense', 'expense', 'operating_expense', 'debit'),
-        ('6300', 'Insurance Expense', 'expense', 'operating_expense', 'debit'),
-        ('6400', 'Office Supplies Expense', 'expense', 'operating_expense', 'debit'),
-        ('6500', 'Depreciation Expense', 'expense', 'operating_expense', 'debit'),
-        ('6600', 'Marketing and Advertising', 'expense', 'operating_expense', 'debit'),
-        ('6700', 'Bank Fees', 'expense', 'operating_expense', 'debit'),
-        ('6800', 'Damaged Goods Expense', 'expense', 'operating_expense', 'debit'),
-        ('6900', 'Shipping Discrepancy Loss', 'expense', 'operating_expense', 'debit'),
-    ]
-    
-    added = 0
-    skipped = 0
-    
-    for account_number, account_name, account_type, account_subtype, normal_balance in accounts:
-        try:
-            cursor.execute("""
-                INSERT INTO chart_of_accounts (
-                    account_number, account_name, account_type, account_subtype, normal_balance
-                ) VALUES (%s, %s, %s, %s, %s)
-            """, (account_number, account_name, account_type, account_subtype, normal_balance))
-            added += 1
-        except Exception:
-            skipped += 1
-    
-    conn.commit()
-    conn.close()
-    
-    return {
-        'added': added,
-        'skipped': skipped,
-        'total': len(accounts)
-    }
+    try:
+        cursor.execute("SELECT COUNT(*) AS cnt FROM accounting.accounts")
+        row = cursor.fetchone()
+        total = row[0] if row else 0
+        return {'added': 0, 'skipped': 0, 'total': total}
+    finally:
+        conn.close()
 
 def add_account(
     account_number: str,
@@ -7243,40 +7576,49 @@ def add_account(
     parent_account_id: Optional[int] = None,
     description: Optional[str] = None
 ) -> int:
-    """Add a new account to chart of accounts"""
+    """Add a new account to the accounting schema chart of accounts (single ledger)."""
+    import psycopg2
     conn = get_connection()
     cursor = conn.cursor()
-    
     try:
+        # Map to accounting.accounts: sub_type, balance_type; account_type capitalized for accounting
+        at = (account_type or '').strip()
+        if at and at[0].isupper():
+            acc_type = at
+        else:
+            acc_type = (at.capitalize() if at else 'Expense')
         cursor.execute("""
-            INSERT INTO chart_of_accounts (
-                account_number, account_name, account_type, account_subtype,
-                normal_balance, parent_account_id, description
+            INSERT INTO accounting.accounts (
+                account_number, account_name, account_type, sub_type,
+                balance_type, parent_account_id, description
             ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (account_number, account_name, account_type, account_subtype,
+            RETURNING id
+        """, (account_number, account_name, acc_type, account_subtype,
               normal_balance, parent_account_id, description))
-        
+        row = cursor.fetchone()
         conn.commit()
-        account_id = cursor.lastrowid
+        return row[0] if row else 0
+    except psycopg2.IntegrityError:
+        conn.rollback()
+        raise ValueError(f"Account number '{account_number}' already exists") from None
+    finally:
         conn.close()
-        return account_id
-    except Exception as e:
-        import psycopg2
-        if isinstance(e, psycopg2.IntegrityError):
-            conn.rollback()
-            conn.close()
-            raise ValueError(f"Account number '{account_number}' already exists") from e
 
 def get_account_by_number(account_number: str) -> Optional[Dict[str, Any]]:
-    """Get account by account number"""
+    """Get account by account number from accounting schema (single ledger). Returns dict with account_id for compatibility."""
+    from psycopg2.extras import RealDictCursor
     conn = get_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT * FROM chart_of_accounts WHERE account_number = %s", (account_number,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    return dict(row) if row else None
+    try:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT * FROM accounting.accounts WHERE account_number = %s", (account_number,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d['account_id'] = d.get('id')  # compatibility for callers expecting chart_of_accounts.account_id
+        return d
+    finally:
+        conn.close()
 
 def create_journal_entry(
     entry_date: str,
@@ -7289,108 +7631,74 @@ def create_journal_entry(
     notes: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Create a journal entry with multiple lines (double-entry bookkeeping)
-    
+    Create a journal entry in the accounting schema (single ledger).
     line_items: List of dicts with keys: account_number, debit_amount, credit_amount, description
     """
+    try:
+        from backend.models.transaction_model import TransactionRepository
+    except ImportError:
+        return {'success': False, 'message': 'Accounting backend not available'}
+    total_debits = sum(float(item.get('debit_amount', 0)) for item in line_items)
+    total_credits = sum(float(item.get('credit_amount', 0)) for item in line_items)
+    if abs(total_debits - total_credits) > 0.01:
+        return {
+            'success': False,
+            'message': f'Debits ({total_debits:.2f}) must equal Credits ({total_credits:.2f})'
+        }
+    lines = []
+    for item in line_items:
+        account = get_account_by_number(item.get('account_number') or '')
+        if not account:
+            return {'success': False, 'message': f"Account {item.get('account_number')} not found"}
+        lines.append({
+            'account_id': account['account_id'],
+            'debit_amount': float(item.get('debit_amount', 0)),
+            'credit_amount': float(item.get('credit_amount', 0)),
+            'description': str(item.get('description', '')),
+        })
     conn = get_connection()
     cursor = conn.cursor()
-    
     try:
-        # Generate entry number
         cursor.execute("""
-            SELECT COUNT(*) + 1 as next_num
-            FROM journal_entries
-            WHERE strftime('%Y', entry_date) = strftime('%Y', %s)
+            SELECT COUNT(*) + 1 AS next_num FROM accounting.transactions
+            WHERE EXTRACT(YEAR FROM transaction_date) = EXTRACT(YEAR FROM %s::date)
         """, (entry_date,))
-        
         next_num = cursor.fetchone()[0]
-        entry_number = f"JE-{datetime.now().year}-{next_num:05d}"
-        
-        # Validate debits = credits
-        total_debits = sum(float(item.get('debit_amount', 0)) for item in line_items)
-        total_credits = sum(float(item.get('credit_amount', 0)) for item in line_items)
-        
-        if abs(total_debits - total_credits) > 0.01:  # Allow small floating point differences
-            conn.close()
-            return {
-                'success': False,
-                'message': f'Debits ({total_debits:.2f}) must equal Credits ({total_credits:.2f})'
-            }
-        
-        # Create journal entry header
-        cursor.execute("""
-            INSERT INTO journal_entries (
-                entry_number, entry_date, entry_type, transaction_source, source_id,
-                description, employee_id, notes
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (entry_number, entry_date, entry_type, transaction_source, source_id,
-              description, employee_id, notes))
-        
-        journal_entry_id = cursor.lastrowid
-        
-        # Create journal entry lines
-        for idx, item in enumerate(line_items, start=1):
-            # Get account_id from account_number
-            account = get_account_by_number(item['account_number'])
-            if not account:
-                conn.rollback()
-                conn.close()
-                return {
-                    'success': False,
-                    'message': f"Account {item['account_number']} not found"
-                }
-            
-            cursor.execute("""
-                INSERT INTO journal_entry_lines (
-                    journal_entry_id, line_number, account_id,
-                    debit_amount, credit_amount, description
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-            """, (journal_entry_id, idx, account['account_id'],
-                  item.get('debit_amount', 0), item.get('credit_amount', 0),
-                  item.get('description', '')))
-        
-        conn.commit()
-        
-        # Log audit action
+        entry_number = f"JE-{datetime.now().year}-{int(next_num):05d}"
+    finally:
+        conn.close()
+    data = {
+        'transaction_number': entry_number,
+        'transaction_date': entry_date,
+        'transaction_type': 'journal_entry',
+        'description': description or notes or '',
+        'source_document_id': source_id,
+        'source_document_type': transaction_source or 'other',
+        'lines': lines,
+    }
+    try:
+        result = TransactionRepository.create(data, employee_id)
+        txn = result.get('transaction', {})
         log_audit_action(
             table_name='journal_entries',
-            record_id=journal_entry_id,
+            record_id=txn.get('id'),
             action_type='INSERT',
             employee_id=employee_id,
             new_values={'entry_number': entry_number, 'description': description}
         )
-        
-        conn.close()
-        
         return {
             'success': True,
-            'journal_entry_id': journal_entry_id,
-            'entry_number': entry_number
+            'journal_entry_id': txn.get('id'),
+            'entry_number': txn.get('transaction_number') or entry_number,
         }
-        
     except Exception as e:
-        conn.rollback()
-        conn.close()
         return {'success': False, 'message': str(e)}
 
 def post_journal_entry(journal_entry_id: int, employee_id: int) -> bool:
-    """Post a journal entry (mark as posted)"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        UPDATE journal_entries
-        SET posted = 1,
-            posted_date = CURRENT_TIMESTAMP
-        WHERE journal_entry_id = %s
-    """, (journal_entry_id,))
-    
-    conn.commit()
-    success = cursor.rowcount > 0
-    conn.close()
-    
-    if success:
+    """Post a journal entry in the accounting schema (mark as posted)."""
+    try:
+        from backend.models.transaction_model import TransactionRepository
+        TransactionRepository.post_transaction(journal_entry_id, employee_id)
         log_audit_action(
             table_name='journal_entries',
             record_id=journal_entry_id,
@@ -7398,154 +7706,24 @@ def post_journal_entry(journal_entry_id: int, employee_id: int) -> bool:
             employee_id=employee_id,
             new_values={'posted': True}
         )
-    
-    return success
+        return True
+    except Exception:
+        return False
 
 def journalize_sale(order_id: int, employee_id: int) -> Dict[str, Any]:
-    """Create journal entry for a sale with transaction fees"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    # Get order details - check if tip column exists
-    cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = \'orders\' AND table_schema = 'public'")
-    columns = [col[0] for col in cursor.fetchall()]
-    has_tip = 'tip' in columns
-    has_order_type = 'order_type' in columns
-    if has_tip:
-        cursor.execute("""
-            SELECT 
-                o.total,
-                o.tax_amount,
-                o.subtotal,
-                o.transaction_fee,
-                o.tip,
-                o.payment_method
-            FROM orders o
-            WHERE o.order_id = %s
-        """, (order_id,))
-    else:
-        cursor.execute("""
-            SELECT 
-                o.total,
-                o.tax_amount,
-                o.subtotal,
-                o.transaction_fee,
-                0.0 as tip,
-                o.payment_method
-            FROM orders o
-            WHERE o.order_id = %s
-        """, (order_id,))
-    
-    order = cursor.fetchone()
-    if not order:
-        conn.close()
-        return {'success': False, 'message': 'Order not found'}
-    
-    order = dict(order)
-    
-    # Get payment transaction details
-    cursor.execute("""
-        SELECT net_amount, transaction_fee
-        FROM payment_transactions
-        WHERE order_id = %s
-        LIMIT 1
-    """, (order_id,))
-    
-    payment = cursor.fetchone()
-    payment = dict(payment) if payment else {'net_amount': order['total'], 'transaction_fee': order.get('transaction_fee', 0.0)}
-    
-    # Get COGS
-    cursor.execute("""
-        SELECT SUM(oi.quantity * i.product_cost) as cogs
-        FROM order_items oi
-        JOIN inventory i ON oi.product_id = i.product_id
-        WHERE oi.order_id = %s
-    """, (order_id,))
-    
-    cogs_row = cursor.fetchone()
-    cogs = cogs_row['cogs'] if cogs_row and cogs_row['cogs'] else 0.0
-    
-    conn.close()
-    
-    # Determine cash account based on payment method
-    cash_account = '1000'  # Cash (default)
-    if order['payment_method'] in ['credit_card', 'debit_card', 'mobile_payment']:
-        cash_account = '1100'  # Accounts Receivable (will be settled when payment processor deposits)
-    
-    # Get tip amount
-    tip_amount = float(order.get('tip', 0.0))
-    
-    # Build journal entry line items
-    line_items = [
-        {
-            'account_number': cash_account,
-            'debit_amount': float(payment['net_amount']) + tip_amount,  # Net amount after fees + tip
-            'credit_amount': 0,
-            'description': f'Payment received (net after fees + tip)'
-        },
-        {
-            'account_number': '4000',  # Sales Revenue
-            'debit_amount': 0,
-            'credit_amount': float(order['subtotal']),
-            'description': f'Sales revenue'
-        },
-        {
-            'account_number': '2100',  # Sales Tax Payable
-            'debit_amount': 0,
-            'credit_amount': float(order['tax_amount']),
-            'description': f'Sales tax collected'
-        },
-        {
-            'account_number': '5000',  # COGS
-            'debit_amount': float(cogs),
-            'credit_amount': 0,
-            'description': f'Cost of goods sold'
-        },
-        {
-            'account_number': '1200',  # Inventory
-            'debit_amount': 0,
-            'credit_amount': float(cogs),
-            'description': f'Inventory reduction'
+    """Create and post a sales journal entry in the accounting schema (single ledger). Delegates to POS–accounting bridge."""
+    try:
+        from pos_accounting_bridge import journalize_sale_to_accounting
+        result = journalize_sale_to_accounting(order_id, employee_id)
+        if not result.get('success'):
+            return {'success': False, 'message': result.get('message', 'Journalize failed')}
+        return {
+            'success': True,
+            'journal_entry_id': result.get('transaction_id'),
+            'entry_number': result.get('entry_number', ''),
         }
-    ]
-    
-    # Add tip revenue if tip exists
-    if tip_amount > 0:
-        line_items.append({
-            'account_number': '4500',  # Other Income (tips)
-            'debit_amount': 0,
-            'credit_amount': tip_amount,
-            'description': f'Tip received'
-        })
-    
-    # Add transaction fee expense if applicable
-    if payment['transaction_fee'] > 0:
-        line_items.append({
-            'account_number': '6700',  # Bank Fees / Transaction Fees
-            'debit_amount': float(payment['transaction_fee']),
-            'credit_amount': 0,
-            'description': f'Payment processing fee ({order["payment_method"]})'
-        })
-        
-        # Credit the difference (gross - net) to balance the entry
-        gross_amount = float(order['total'])
-        net_amount = float(payment['net_amount'])
-        fee_amount = float(payment['transaction_fee'])
-        
-        # Adjust cash account to reflect gross amount collected (including tip)
-        # The difference (fee) is already accounted for in the fee expense
-        # We need to debit the full gross amount and credit the fee separately
-        # Update cash account to gross amount (which includes tip)
-        line_items[0]['debit_amount'] = gross_amount + tip_amount
-    
-    return create_journal_entry(
-        entry_date=datetime.now().date().isoformat(),
-        transaction_source='sale',
-        source_id=order_id,
-        description=f'Sale transaction for Order #{order_id}',
-        line_items=line_items,
-        employee_id=employee_id
-    )
+    except Exception as e:
+        return {'success': False, 'message': str(e)}
 
 def journalize_shipment_received(shipment_id: int, employee_id: int) -> Dict[str, Any]:
     """Create journal entry when shipment is received"""
@@ -7895,191 +8073,154 @@ def generate_balance_sheet(as_of_date: Optional[str] = None) -> Dict[str, Any]:
     if not as_of_date:
         as_of_date = datetime.now().date().isoformat()
     
+    from psycopg2.extras import RealDictCursor
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("""
         SELECT 
-            coa.account_type,
-            coa.account_subtype,
-            coa.account_number,
-            coa.account_name,
-            coa.normal_balance,
+            a.account_type,
+            a.sub_type AS account_subtype,
+            a.account_number,
+            a.account_name,
+            a.balance_type AS normal_balance,
             COALESCE(SUM(
-                CASE WHEN coa.normal_balance = 'debit' 
-                     THEN jel.debit_amount - jel.credit_amount
-                     ELSE jel.credit_amount - jel.debit_amount 
+                CASE WHEN a.balance_type = 'debit'
+                     THEN tl.debit_amount - tl.credit_amount
+                     ELSE tl.credit_amount - tl.debit_amount
                 END
-            ), 0) as balance
-        FROM chart_of_accounts coa
-        LEFT JOIN journal_entry_lines jel ON coa.account_id = jel.account_id
-        LEFT JOIN journal_entries je ON jel.journal_entry_id = je.journal_entry_id
-        WHERE (je.posted = 1 OR je.posted IS NULL)
-          AND (je.entry_date <= %s OR je.entry_date IS NULL)
-          AND coa.account_type IN ('asset', 'contra_asset', 'liability', 'equity')
-        GROUP BY coa.account_id
-        ORDER BY 
-            CASE 
-                WHEN coa.account_type = 'asset' THEN 1
-                WHEN coa.account_type = 'contra_asset' THEN 2
-                WHEN coa.account_type = 'liability' THEN 3
-                WHEN coa.account_type = 'equity' THEN 4
-            END,
-            coa.account_number
+            ), 0) + COALESCE(a.opening_balance, 0) AS balance
+        FROM accounting.accounts a
+        LEFT JOIN accounting.transaction_lines tl ON a.id = tl.account_id
+        LEFT JOIN accounting.transactions t ON t.id = tl.transaction_id AND t.is_posted = true AND t.is_void = false AND t.transaction_date <= %s
+        WHERE a.account_type IN ('Asset', 'Liability', 'Equity')
+          AND (a.is_active IS NULL OR a.is_active = true)
+        GROUP BY a.id, a.account_type, a.sub_type, a.account_number, a.account_name, a.balance_type, a.opening_balance
+        ORDER BY
+            CASE a.account_type WHEN 'Asset' THEN 1 WHEN 'Liability' THEN 2 WHEN 'Equity' THEN 3 ELSE 4 END,
+            a.account_number
     """, (as_of_date,))
-    
     accounts = [dict(row) for row in cursor.fetchall()]
-    
-    # Organize by type
     balance_sheet = {
         'assets': [],
         'liabilities': [],
         'equity': [],
         'date': as_of_date
     }
-    
     total_assets = 0.0
     total_liabilities = 0.0
     total_equity = 0.0
-    
     for account in accounts:
-        balance = float(account['balance']) if account['balance'] else 0.0
-        
-        if account['account_type'] in ['asset', 'contra_asset']:
+        balance = float(account['balance']) if account.get('balance') is not None else 0.0
+        if account['account_type'] == 'Asset':
             balance_sheet['assets'].append(account)
-            if account['account_type'] == 'asset':
-                total_assets += balance
-            else:  # contra_asset
-                total_assets -= balance
-        elif account['account_type'] == 'liability':
+            total_assets += balance
+        elif account['account_type'] == 'Liability':
             balance_sheet['liabilities'].append(account)
             total_liabilities += balance
-        elif account['account_type'] == 'equity':
+        elif account['account_type'] == 'Equity':
             balance_sheet['equity'].append(account)
             total_equity += balance
-    
     balance_sheet['total_assets'] = total_assets
     balance_sheet['total_liabilities'] = total_liabilities
     balance_sheet['total_equity'] = total_equity
     balance_sheet['total_liabilities_and_equity'] = total_liabilities + total_equity
-    
     conn.close()
-    
     return balance_sheet
 
 def generate_income_statement(start_date: str, end_date: str) -> Dict[str, Any]:
-    """Generate Income Statement"""
+    """Generate Income Statement from accounting schema (single ledger)."""
     conn = get_connection()
-    cursor = conn.cursor()
-    
+    from psycopg2.extras import RealDictCursor
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("""
         SELECT 
-            coa.account_type,
-            coa.account_subtype,
-            coa.account_number,
-            coa.account_name,
-            coa.normal_balance,
+            a.account_type,
+            a.sub_type AS account_subtype,
+            a.account_number,
+            a.account_name,
+            a.balance_type AS normal_balance,
             COALESCE(SUM(
-                CASE WHEN coa.normal_balance = 'debit' 
-                     THEN jel.debit_amount - jel.credit_amount
-                     ELSE jel.credit_amount - jel.debit_amount 
+                CASE WHEN a.balance_type = 'debit'
+                     THEN tl.debit_amount - tl.credit_amount
+                     ELSE tl.credit_amount - tl.debit_amount
                 END
-            ), 0) as balance
-        FROM chart_of_accounts coa
-        LEFT JOIN journal_entry_lines jel ON coa.account_id = jel.account_id
-        LEFT JOIN journal_entries je ON jel.journal_entry_id = je.journal_entry_id
-        WHERE je.posted = 1
-          AND je.entry_date BETWEEN %s AND %s
-          AND coa.account_type IN ('revenue', 'contra_revenue', 'expense')
-        GROUP BY coa.account_id
-        ORDER BY 
-            CASE 
-                WHEN coa.account_type = 'revenue' THEN 1
-                WHEN coa.account_type = 'contra_revenue' THEN 2
-                WHEN coa.account_subtype = 'cogs' THEN 3
-                WHEN coa.account_type = 'expense' THEN 4
-            END,
-            coa.account_number
+            ), 0) AS balance
+        FROM accounting.accounts a
+        LEFT JOIN accounting.transaction_lines tl ON a.id = tl.account_id
+        LEFT JOIN accounting.transactions t ON t.id = tl.transaction_id AND t.is_posted = true AND t.is_void = false
+             AND t.transaction_date BETWEEN %s AND %s
+        WHERE a.account_type IN ('Revenue', 'Contra Revenue', 'Expense', 'COGS', 'Other Income', 'Other Expense', 'Cost of Goods Sold')
+          AND (a.is_active IS NULL OR a.is_active = true)
+        GROUP BY a.id, a.account_type, a.sub_type, a.account_number, a.account_name, a.balance_type
+        ORDER BY
+            CASE a.account_type WHEN 'Revenue' THEN 1 WHEN 'Contra Revenue' THEN 2 WHEN 'Other Income' THEN 3 WHEN 'COGS' THEN 4 WHEN 'Cost of Goods Sold' THEN 5 WHEN 'Expense' THEN 6 WHEN 'Other Expense' THEN 7 ELSE 8 END,
+            a.account_number
     """, (start_date, end_date))
-    
     accounts = [dict(row) for row in cursor.fetchall()]
-    
     income_statement = {
         'revenue': [],
         'cogs': [],
         'expenses': [],
         'period': f"{start_date} to {end_date}"
     }
-    
     total_revenue = 0.0
     total_cogs = 0.0
     total_expenses = 0.0
-    
     for account in accounts:
-        balance = float(account['balance']) if account['balance'] else 0.0
-        
-        if account['account_type'] == 'revenue':
+        balance = float(account.get('balance', 0)) if account.get('balance') is not None else 0.0
+        if account['account_type'] in ('Revenue', 'Other Income'):
             income_statement['revenue'].append(account)
             total_revenue += balance
-        elif account['account_type'] == 'contra_revenue':
+        elif account['account_type'] == 'Contra Revenue':
             income_statement['revenue'].append(account)
             total_revenue -= balance
-        elif account['account_subtype'] == 'cogs':
+        elif account['account_type'] in ('COGS', 'Cost of Goods Sold') or (account.get('account_subtype') or '').lower() == 'cost of sales':
             income_statement['cogs'].append(account)
             total_cogs += balance
-        elif account['account_type'] == 'expense':
+        elif account['account_type'] in ('Expense', 'Other Expense'):
             income_statement['expenses'].append(account)
             total_expenses += balance
-    
     gross_profit = total_revenue - total_cogs
     net_income = gross_profit - total_expenses
-    
     income_statement['total_revenue'] = total_revenue
     income_statement['total_cogs'] = total_cogs
     income_statement['gross_profit'] = gross_profit
     income_statement['total_expenses'] = total_expenses
     income_statement['net_income'] = net_income
-    
     conn.close()
-    
     return income_statement
 
-def generate_trial_balance(as_of_date: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Generate Trial Balance"""
+def generate_trial_balance(as_of_date: Optional[str] = None) -> Dict[str, Any]:
+    """Generate Trial Balance from accounting schema (single ledger)."""
     conn = get_connection()
-    cursor = conn.cursor()
-    
     if not as_of_date:
         as_of_date = datetime.now().date().isoformat()
-    
+    from psycopg2.extras import RealDictCursor
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("""
         SELECT 
-            coa.account_number,
-            coa.account_name,
-            coa.account_type,
-            COALESCE(SUM(jel.debit_amount), 0) as total_debits,
-            COALESCE(SUM(jel.credit_amount), 0) as total_credits,
+            a.account_number,
+            a.account_name,
+            a.account_type,
+            COALESCE(SUM(tl.debit_amount), 0) AS total_debits,
+            COALESCE(SUM(tl.credit_amount), 0) AS total_credits,
             COALESCE(SUM(
-                CASE WHEN coa.normal_balance = 'debit' 
-                     THEN jel.debit_amount - jel.credit_amount
-                     ELSE jel.credit_amount - jel.debit_amount 
+                CASE WHEN a.balance_type = 'debit'
+                     THEN tl.debit_amount - tl.credit_amount
+                     ELSE tl.credit_amount - tl.debit_amount
                 END
-            ), 0) as balance
-        FROM chart_of_accounts coa
-        LEFT JOIN journal_entry_lines jel ON coa.account_id = jel.account_id
-        LEFT JOIN journal_entries je ON jel.journal_entry_id = je.journal_entry_id
-        WHERE je.posted = 1
-          AND (je.entry_date <= %s OR je.entry_date IS NULL)
-        GROUP BY coa.account_id
-        HAVING total_debits > 0 OR total_credits > 0
-        ORDER BY coa.account_number
+            ), 0) + COALESCE(a.opening_balance, 0) AS balance
+        FROM accounting.accounts a
+        LEFT JOIN accounting.transaction_lines tl ON a.id = tl.account_id
+        LEFT JOIN accounting.transactions t ON t.id = tl.transaction_id AND t.is_posted = true AND t.is_void = false AND t.transaction_date <= %s
+        WHERE (a.is_active IS NULL OR a.is_active = true)
+        GROUP BY a.id, a.account_number, a.account_name, a.account_type, a.balance_type, a.opening_balance
+        HAVING COALESCE(SUM(tl.debit_amount), 0) > 0 OR COALESCE(SUM(tl.credit_amount), 0) > 0 OR COALESCE(a.opening_balance, 0) != 0
+        ORDER BY a.account_number
     """, (as_of_date,))
-    
     trial_balance = [dict(row) for row in cursor.fetchall()]
-    
-    # Calculate totals
-    total_debits = sum(float(row['total_debits']) for row in trial_balance)
-    total_credits = sum(float(row['total_credits']) for row in trial_balance)
-    
+    total_debits = sum(float(row.get('total_debits', 0)) for row in trial_balance)
+    total_credits = sum(float(row.get('total_credits', 0)) for row in trial_balance)
     conn.close()
-    
     return {
         'accounts': trial_balance,
         'total_debits': total_debits,
@@ -8090,21 +8231,21 @@ def generate_trial_balance(as_of_date: Optional[str] = None) -> List[Dict[str, A
 def add_fiscal_period(
     period_name: str,
     start_date: str,
-    end_date: str
+    end_date: str,
+    establishment_id: int = 1
 ) -> int:
-    """Add a fiscal period"""
+    """Add a fiscal period. establishment_id defaults to 1 for backward compatibility."""
     conn = get_connection()
     cursor = conn.cursor()
-    
     cursor.execute("""
-        INSERT INTO fiscal_periods (period_name, start_date, end_date)
-        VALUES (%s, %s, %s)
-    """, (period_name, start_date, end_date))
-    
+        INSERT INTO fiscal_periods (establishment_id, period_name, start_date, end_date)
+        VALUES (%s, %s, %s, %s)
+        RETURNING period_id
+    """, (establishment_id, period_name, start_date, end_date))
+    row = cursor.fetchone()
+    period_id = row[0] if row else None
     conn.commit()
-    period_id = cursor.lastrowid
     conn.close()
-    
     return period_id
 
 def calculate_retained_earnings(
@@ -8116,36 +8257,35 @@ def calculate_retained_earnings(
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Get period dates
+    # Get period dates and establishment_id
     cursor.execute("""
-        SELECT start_date, end_date
+        SELECT establishment_id, start_date, end_date
         FROM fiscal_periods
         WHERE period_id = %s
     """, (period_id,))
-    
-    period = cursor.fetchone()
-    if not period:
+    period_row = cursor.fetchone()
+    if not period_row:
         conn.close()
         return {'success': False, 'message': 'Period not found'}
-    
-    period = dict(period)
-    
+    establishment_id = period_row[0]
+    period = {'start_date': period_row[1], 'end_date': period_row[2]}
+
     # Get net income for period
     income_stmt = generate_income_statement(period['start_date'], period['end_date'])
-    
     net_income = income_stmt['net_income']
     ending_balance = beginning_balance + net_income - dividends
-    
-    # Record retained earnings
+
+    # Record retained earnings (establishment_id required for multi-tenant)
     cursor.execute("""
         INSERT INTO retained_earnings (
-            fiscal_period_id, beginning_balance, net_income,
+            establishment_id, fiscal_period_id, beginning_balance, net_income,
             dividends, ending_balance
-        ) VALUES (%s, %s, %s, %s, %s)
-    """, (period_id, beginning_balance, net_income, dividends, ending_balance))
-    
+        ) VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING retained_earnings_id
+    """, (establishment_id, period_id, beginning_balance, net_income, dividends, ending_balance))
+    row = cursor.fetchone()
+    retained_earnings_id = row[0] if row else None
     conn.commit()
-    retained_earnings_id = cursor.lastrowid
     conn.close()
     
     return {
@@ -8782,10 +8922,10 @@ def complete_verification(pending_shipment_id: int, employee_id: int, notes: Opt
                 # Create new product in inventory with barcode
                 cursor.execute("""
                     INSERT INTO inventory 
-                    (establishment_id, product_name, sku, barcode, product_price, product_cost, vendor, vendor_id, current_quantity, category)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, NULL)
+                    (establishment_id, product_name, sku, barcode, product_price, product_cost, vendor_id, current_quantity, category)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 0, NULL)
                     RETURNING product_id
-                """, (establishment_id, product_name, sku, barcode, unit_cost, unit_cost, vendor_name, vendor_id))
+                """, (establishment_id, product_name, sku, barcode, unit_cost, unit_cost, vendor_id))
                 
                 result = cursor.fetchone()
                 if isinstance(result, dict):
@@ -8897,10 +9037,9 @@ def complete_verification(pending_shipment_id: int, employee_id: int, notes: Opt
                     UPDATE inventory
                     SET current_quantity = current_quantity + %s,
                         vendor_id = %s,
-                        vendor = %s,
                         last_restocked = CURRENT_TIMESTAMP
                     WHERE product_id = %s
-                """, (quantity, vendor_id, vendor_name, product_id))
+                """, (quantity, vendor_id, product_id))
                 if cursor.rowcount > 0:
                     inventory_updates += 1
                     print(f"✓ Added {quantity} units of product {product_id} to inventory")
@@ -9295,23 +9434,31 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     return distance
 
 def get_store_location_settings() -> Optional[Dict[str, Any]]:
-    """Get store location settings"""
+    """Get store location settings (includes store_hours as dict if column exists)."""
+    from psycopg2.extras import RealDictCursor
     conn = get_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT * FROM store_location_settings 
-        ORDER BY id DESC 
-        LIMIT 1
-    """)
-    
-    row = cursor.fetchone()
-    conn.close()
-    
-    if not row:
-        return None
-    
-    return dict(row)
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT * FROM store_location_settings
+            ORDER BY id DESC
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        # Ensure store_hours is a dict (JSONB may come as str in some drivers)
+        if 'store_hours' in out and out['store_hours'] is not None:
+            if isinstance(out['store_hours'], str):
+                import json
+                try:
+                    out['store_hours'] = json.loads(out['store_hours'])
+                except Exception:
+                    out['store_hours'] = None
+        return out
+    finally:
+        conn.close()
 
 def update_store_location_settings(
     store_name: Optional[str] = None,
@@ -9319,22 +9466,30 @@ def update_store_location_settings(
     longitude: Optional[float] = None,
     address: Optional[str] = None,
     allowed_radius_meters: Optional[float] = None,
-    require_location: Optional[int] = None
+    require_location: Optional[int] = None,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    zip_code: Optional[str] = None,
+    country: Optional[str] = None,
+    store_phone: Optional[str] = None,
+    store_email: Optional[str] = None,
+    store_website: Optional[str] = None,
+    store_type: Optional[str] = None,
+    store_logo: Optional[str] = None,
+    store_hours: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    """Update store location settings"""
+    """Update store location settings. New fields (city, state, zip, country, store_phone, store_email, store_website, store_type, store_logo, store_hours) are applied if the columns exist."""
+    import json
     conn = get_connection()
     cursor = conn.cursor()
-    
     try:
-        # Check if settings exist
         cursor.execute("SELECT COUNT(*) FROM store_location_settings")
         count = cursor.fetchone()[0]
-        
+
         if count == 0:
-            # Create new settings
             cursor.execute("""
                 INSERT INTO store_location_settings (
-                    store_name, latitude, longitude, address, 
+                    store_name, latitude, longitude, address,
                     allowed_radius_meters, require_location
                 ) VALUES (%s, %s, %s, %s, %s, %s)
             """, (
@@ -9346,10 +9501,8 @@ def update_store_location_settings(
                 require_location if require_location is not None else 1
             ))
         else:
-            # Update existing settings
             updates = []
             params = []
-            
             if store_name is not None:
                 updates.append("store_name = %s")
                 params.append(store_name)
@@ -9368,25 +9521,52 @@ def update_store_location_settings(
             if require_location is not None:
                 updates.append("require_location = %s")
                 params.append(require_location)
-            
+            if city is not None:
+                updates.append("city = %s")
+                params.append(city)
+            if state is not None:
+                updates.append("state = %s")
+                params.append(state)
+            if zip_code is not None:
+                updates.append("zip = %s")
+                params.append(zip_code)
+            if country is not None:
+                updates.append("country = %s")
+                params.append(country)
+            if store_phone is not None:
+                updates.append("store_phone = %s")
+                params.append(store_phone)
+            if store_email is not None:
+                updates.append("store_email = %s")
+                params.append(store_email)
+            if store_website is not None:
+                updates.append("store_website = %s")
+                params.append(store_website)
+            if store_type is not None:
+                updates.append("store_type = %s")
+                params.append(store_type)
+            if store_logo is not None:
+                updates.append("store_logo = %s")
+                params.append(store_logo)
+            if store_hours is not None:
+                updates.append("store_hours = %s::jsonb")
+                params.append(json.dumps(store_hours))
+
             if updates:
                 updates.append("updated_at = CURRENT_TIMESTAMP")
-                
-                query = f"""
-                    UPDATE store_location_settings 
-                    SET {', '.join(updates)}
+                cursor.execute("""
+                    UPDATE store_location_settings
+                    SET """ + ", ".join(updates) + """
                     WHERE id = (SELECT id FROM store_location_settings ORDER BY id DESC LIMIT 1)
-                """
-                cursor.execute(query, params)
-        
+                """, params)
         conn.commit()
-        conn.close()
         return True
     except Exception as e:
         conn.rollback()
-        conn.close()
         print(f"Error updating store location settings: {e}")
         return False
+    finally:
+        conn.close()
 
 def validate_location(latitude: float, longitude: float) -> Dict[str, Any]:
     """

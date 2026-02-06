@@ -1,6 +1,11 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import FullCalendar from '@fullcalendar/react'
+import dayGridPlugin from '@fullcalendar/daygrid'
+import timeGridPlugin from '@fullcalendar/timegrid'
+import interactionPlugin from '@fullcalendar/interaction'
 import {
+  LayoutDashboard,
   ShoppingCart,
   ClipboardList,
   Package,
@@ -20,21 +25,20 @@ import api from '../services/api'
 import ProfileButton from '../components/ProfileButton'
 import './Calendar.css'
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const EVENT_TYPES = ['holiday', 'event', 'meeting', 'shipment', 'schedule', 'maintenance']
 const EVENT_COLORS = {
-  schedule: 'var(--accent-blue)',
+  schedule: '#3b82f6',
   shipment: '#0ea5e9',
   holiday: '#ef4444',
-  event: 'var(--accent)',
+  event: '#8b5cf6',
   meeting: '#8b5cf6',
   maintenance: '#f59e0b',
-  other: 'var(--text-muted)'
+  other: '#6b7280'
 }
 
 function formatTime(timeStr) {
   if (!timeStr) return ''
-  const part = (timeStr + '').trim()
+  const part = (timeStr + '').trim().slice(0, 5)
   const [h, m] = part.split(':')
   const hour = parseInt(h, 10)
   const ampm = hour >= 12 ? 'PM' : 'AM'
@@ -43,51 +47,20 @@ function formatTime(timeStr) {
 }
 
 function toYMD(d) {
+  if (typeof d === 'string') return d.slice(0, 10)
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
 }
 
-function getMonthStartEnd(date) {
-  const y = date.getFullYear()
-  const m = date.getMonth()
-  const start = new Date(y, m, 1)
-  const end = new Date(y, m + 1, 0)
-  return { start: toYMD(start), end: toYMD(end) }
-}
-
-function getDaysInMonth(date) {
-  const y = date.getFullYear()
-  const m = date.getMonth()
-  const first = new Date(y, m, 1)
-  const last = new Date(y, m + 1, 0)
-  const startPad = first.getDay()
-  const days = []
-  for (let i = 0; i < startPad; i++) days.push(null)
-  for (let d = 1; d <= last.getDate(); d++) days.push(new Date(y, m, d))
-  return days
-}
-
-function getWeekDays(ymd) {
-  const d = new Date(ymd + 'T12:00:00')
-  const day = d.getDay()
-  const start = new Date(d)
-  start.setDate(d.getDate() - day)
-  const out = []
-  for (let i = 0; i < 7; i++) {
-    const x = new Date(start)
-    x.setDate(start.getDate() + i)
-    out.push(toYMD(x))
-  }
-  return out
-}
-
 export default function Calendar() {
   const navigate = useNavigate()
-  const [viewDate, setViewDate] = useState(() => new Date())
+  const calendarRef = useRef(null)
+  const [viewRange, setViewRange] = useState({ start: null, end: null })
   const [selectedDate, setSelectedDate] = useState(() => toYMD(new Date()))
-  const [viewMode, setViewMode] = useState('month') // 'month' | 'week' | 'day'
+  const [currentView, setCurrentView] = useState('dayGridMonth')
+  const [calendarTitle, setCalendarTitle] = useState('')
   const [events, setEvents] = useState([])
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
@@ -107,6 +80,7 @@ export default function Calendar() {
   const filterRef = useRef(null)
   const scheduleRef = useRef(null)
   const linkRef = useRef(null)
+  const lastRangeRef = useRef({ start: null, end: null })
 
   const [showEventModal, setShowEventModal] = useState(false)
   const [newEvent, setNewEvent] = useState({
@@ -137,31 +111,14 @@ export default function Calendar() {
   const [subscriptionUrls, setSubscriptionUrls] = useState(null)
   const [loadingSubscription, setLoadingSubscription] = useState(false)
 
-  const { start, end } = getMonthStartEnd(viewDate)
-  const days = getDaysInMonth(viewDate)
-  const weekDays = getWeekDays(selectedDate)
-
-  useEffect(() => {
-    loadData()
-  }, [start, end])
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (filterRef.current && !filterRef.current.contains(e.target)) setShowFilterDropdown(false)
-      if (scheduleRef.current && !scheduleRef.current.contains(e.target)) setShowScheduleDropdown(false)
-      if (linkRef.current && !linkRef.current.contains(e.target)) setShowLinkDropdown(false)
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  const loadData = async () => {
+  const loadData = async (startDate, endDate) => {
+    if (!startDate || !endDate) return
     setLoading(true)
     setError('')
     try {
       const [eventsRes, schedRes] = await Promise.all([
-        api.get(`master_calendar?start_date=${start}&end_date=${end}`),
-        api.get(`employee_schedule?start_date=${start}&end_date=${end}`)
+        api.get(`master_calendar?start_date=${startDate}&end_date=${endDate}`),
+        api.get(`employee_schedule?start_date=${startDate}&end_date=${endDate}`)
       ])
       const eventsData = eventsRes.data?.data || eventsRes.data || []
       const schedData = schedRes.data?.data || schedRes.data || []
@@ -176,6 +133,101 @@ export default function Calendar() {
     }
   }
 
+  const fullCalendarEvents = useMemo(() => {
+    const out = []
+    events.forEach((event) => {
+      if (eventFilters[event.event_type]) {
+        const startDate = event.event_date || event.start_datetime || ''
+        const startStr = (startDate + '').slice(0, 10)
+        const startTime = (event.start_time || '09:00').toString().replace(/^(\d{1,2}):(\d{2})$/, '$1:$2:00').slice(0, 8)
+        const endTime = (event.end_time || '17:00').toString().replace(/^(\d{1,2}):(\d{2})$/, '$1:$2:00').slice(0, 8)
+        const start = new Date(`${startStr}T${startTime}`)
+        const end = new Date(`${startStr}T${endTime}`)
+        out.push({
+          id: `event-${event.event_id || event.id}`,
+          title: event.title || event.event_type,
+          start: start.toISOString(),
+          end: end.toISOString(),
+          backgroundColor: EVENT_COLORS[event.event_type] || EVENT_COLORS.other,
+          borderColor: EVENT_COLORS[event.event_type] || EVENT_COLORS.other,
+          extendedProps: { ...event, type: 'event', eventType: event.event_type }
+        })
+      }
+    })
+    if (eventFilters.schedule) {
+      schedules.forEach((schedule) => {
+        const scheduleDate = (schedule.schedule_date || '').toString().slice(0, 10)
+        if (!scheduleDate) return
+        const startTime = (schedule.start_time || '09:00').toString().replace(/^(\d{1,2}):(\d{2})$/, '$1:$2:00').slice(0, 8)
+        const endTime = (schedule.end_time || '17:00').toString().replace(/^(\d{1,2}):(\d{2})$/, '$1:$2:00').slice(0, 8)
+        const start = new Date(`${scheduleDate}T${startTime}`)
+        const end = new Date(`${scheduleDate}T${endTime}`)
+        out.push({
+          id: `schedule-${schedule.schedule_id || schedule.id}`,
+          title: `${schedule.employee_name || 'Employee'}: ${formatTime(schedule.start_time)} - ${formatTime(schedule.end_time)}`,
+          start: start.toISOString(),
+          end: end.toISOString(),
+          backgroundColor: EVENT_COLORS.schedule,
+          borderColor: EVENT_COLORS.schedule,
+          extendedProps: { ...schedule, type: 'schedule', eventType: 'schedule' }
+        })
+      })
+    }
+    return out
+  }, [events, schedules, eventFilters])
+
+  const dayListEvents = useMemo(() => {
+    if (!selectedDate) return []
+    return fullCalendarEvents.filter((event) => toYMD(event.start) === selectedDate)
+  }, [fullCalendarEvents, selectedDate])
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (filterRef.current && !filterRef.current.contains(e.target)) setShowFilterDropdown(false)
+      if (scheduleRef.current && !scheduleRef.current.contains(e.target)) setShowScheduleDropdown(false)
+      if (linkRef.current && !linkRef.current.contains(e.target)) setShowLinkDropdown(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const handleDatesSet = (arg) => {
+    const startStr = toYMD(arg.start)
+    const endStr = toYMD(arg.end)
+    setCalendarTitle(arg.view.title)
+    setCurrentView(arg.view.type)
+    setViewRange({ start: startStr, end: endStr })
+    if (lastRangeRef.current.start !== startStr || lastRangeRef.current.end !== endStr) {
+      lastRangeRef.current = { start: startStr, end: endStr }
+      loadData(startStr, endStr)
+    }
+  }
+
+  const navigatePrev = () => {
+    if (calendarRef.current) calendarRef.current.getApi().prev()
+  }
+  const navigateNext = () => {
+    if (calendarRef.current) calendarRef.current.getApi().next()
+  }
+  const goToday = () => {
+    if (calendarRef.current) calendarRef.current.getApi().today()
+    setSelectedDate(toYMD(new Date()))
+  }
+  const changeView = (viewName) => {
+    if (calendarRef.current) {
+      calendarRef.current.getApi().changeView(viewName)
+      setCurrentView(viewName)
+    }
+  }
+
+  const handleEventClick = (clickInfo) => {
+    setShowEventDetail(clickInfo.event.extendedProps)
+  }
+
+  const handleDateClick = (dateClickInfo) => {
+    setSelectedDate(dateClickInfo.dateStr.slice(0, 10))
+  }
+
   const fetchEmployees = async () => {
     try {
       const res = await api.get('employees')
@@ -186,39 +238,9 @@ export default function Calendar() {
     }
   }
 
-  const prevMonth = () => setViewDate((d) => new Date(d.getFullYear(), d.getMonth() - 1))
-  const nextMonth = () => setViewDate((d) => new Date(d.getFullYear(), d.getMonth() + 1))
-  const prevWeek = () => {
-    const d = new Date(selectedDate + 'T12:00:00')
-    d.setDate(d.getDate() - 7)
-    setSelectedDate(toYMD(d))
-    if (viewMode === 'month') setViewDate(d)
-  }
-  const nextWeek = () => {
-    const d = new Date(selectedDate + 'T12:00:00')
-    d.setDate(d.getDate() + 7)
-    setSelectedDate(toYMD(d))
-    if (viewMode === 'month') setViewDate(d)
-  }
-  const goToday = () => {
-    const today = new Date()
-    setViewDate(today)
-    setSelectedDate(toYMD(today))
-  }
-
   const toggleFilter = (type) => {
     setEventFilters((prev) => ({ ...prev, [type]: !prev[type] }))
   }
-
-  const filteredEvents = events.filter((e) => eventFilters[e.event_type] !== false)
-  const filteredSchedules = eventFilters.schedule ? schedules : []
-
-  const dayEvents = filteredEvents.filter((e) => (e.event_date || e.start_datetime || '').toString().slice(0, 10) === selectedDate)
-  const daySchedules = filteredSchedules.filter((s) => (s.schedule_date || '').toString().slice(0, 10) === selectedDate)
-
-  const hasEventsOnDate = (ymd) =>
-    filteredEvents.some((e) => (e.event_date || e.start_datetime || '').toString().slice(0, 10) === ymd) ||
-    filteredSchedules.some((s) => (s.schedule_date || '').toString().slice(0, 10) === ymd)
 
   const openAddEvent = () => {
     setNewEventDate(selectedDate)
@@ -251,7 +273,7 @@ export default function Calendar() {
         end_time: newEvent.end_time || null,
         employee_ids: newEvent.forEveryone ? [] : newEvent.selectedEmployees
       })
-      await loadData()
+      if (viewRange.start && viewRange.end) await loadData(viewRange.start, viewRange.end)
       setShowEventModal(false)
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to create event')
@@ -301,7 +323,7 @@ export default function Calendar() {
         week_start_date: scheduleStart,
         settings: { week_end_date: scheduleEnd }
       })
-      await loadData()
+      if (viewRange.start && viewRange.end) await loadData(viewRange.start, viewRange.end)
       setShowScheduleCreate(false)
       setScheduleStart('')
       setScheduleEnd('')
@@ -338,8 +360,6 @@ export default function Calendar() {
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${start}/${end}&details=${details}`
   }
 
-  const monthTitle = viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-
   return (
     <div className="calendar-page">
       <div className="calendar-header">
@@ -348,13 +368,13 @@ export default function Calendar() {
       </div>
 
       <div className="calendar-toolbar">
-        <button type="button" className="calendar-nav-btn" onClick={viewMode === 'month' ? prevMonth : prevWeek} aria-label="Previous">
+        <button type="button" className="calendar-nav-btn" onClick={navigatePrev} aria-label="Previous">
           <ChevronLeft size={24} />
         </button>
         <button type="button" className="calendar-month-label" onClick={goToday}>
-          {viewMode === 'month' ? monthTitle : viewMode === 'week' ? `Week of ${weekDays[0]}` : selectedDate}
+          {calendarTitle || 'Calendar'}
         </button>
-        <button type="button" className="calendar-nav-btn" onClick={viewMode === 'month' ? nextMonth : nextWeek} aria-label="Next">
+        <button type="button" className="calendar-nav-btn" onClick={navigateNext} aria-label="Next">
           <ChevronRight size={24} />
         </button>
       </div>
@@ -415,9 +435,9 @@ export default function Calendar() {
         </div>
 
         <div className="calendar-view-toggle">
-          <button type="button" className={`calendar-view-btn ${viewMode === 'month' ? 'calendar-view-btn--active' : ''}`} onClick={() => setViewMode('month')}>Month</button>
-          <button type="button" className={`calendar-view-btn ${viewMode === 'week' ? 'calendar-view-btn--active' : ''}`} onClick={() => setViewMode('week')}>Week</button>
-          <button type="button" className={`calendar-view-btn ${viewMode === 'day' ? 'calendar-view-btn--active' : ''}`} onClick={() => setViewMode('day')}>Day</button>
+          <button type="button" className={`calendar-view-btn ${currentView === 'dayGridMonth' ? 'calendar-view-btn--active' : ''}`} onClick={() => changeView('dayGridMonth')}>Month</button>
+          <button type="button" className={`calendar-view-btn ${currentView === 'timeGridWeek' ? 'calendar-view-btn--active' : ''}`} onClick={() => changeView('timeGridWeek')}>Week</button>
+          <button type="button" className={`calendar-view-btn ${currentView === 'timeGridDay' ? 'calendar-view-btn--active' : ''}`} onClick={() => changeView('timeGridDay')}>Day</button>
         </div>
 
         <div ref={linkRef} className="calendar-dropdown-wrap">
@@ -454,56 +474,23 @@ export default function Calendar() {
         </div>
       </div>
 
-      {viewMode === 'month' && (
-        <>
-          <div className="calendar-weekdays">
-            {WEEKDAYS.map((w) => (
-              <span key={w} className="calendar-weekday">{w}</span>
-            ))}
-          </div>
-          <div className="calendar-grid">
-            {days.map((d, i) => {
-              if (!d) return <div key={`empty-${i}`} className="calendar-day calendar-day--empty" />
-              const ymd = toYMD(d)
-              const isSelected = ymd === selectedDate
-              const isToday = ymd === toYMD(new Date())
-              const hasEvents = hasEventsOnDate(ymd)
-              return (
-                <button
-                  key={ymd}
-                  type="button"
-                  className={`calendar-day ${isSelected ? 'calendar-day--selected' : ''} ${isToday ? 'calendar-day--today' : ''} ${hasEvents ? 'calendar-day--has-events' : ''}`}
-                  onClick={() => setSelectedDate(ymd)}
-                >
-                  <span className="calendar-day-num">{d.getDate()}</span>
-                </button>
-              )
-            })}
-          </div>
-        </>
-      )}
-
-      {viewMode === 'week' && (
-        <div className="calendar-week-strip">
-          {weekDays.map((ymd) => {
-            const isSelected = ymd === selectedDate
-            const isToday = ymd === toYMD(new Date())
-            const d = new Date(ymd + 'T12:00:00')
-            const hasEvents = hasEventsOnDate(ymd)
-            return (
-              <button
-                key={ymd}
-                type="button"
-                className={`calendar-week-day ${isSelected ? 'calendar-week-day--selected' : ''} ${isToday ? 'calendar-week-day--today' : ''} ${hasEvents ? 'calendar-week-day--has-events' : ''}`}
-                onClick={() => setSelectedDate(ymd)}
-              >
-                <span className="calendar-week-day-name">{WEEKDAYS[d.getDay()].slice(0, 2)}</span>
-                <span className="calendar-week-day-num">{d.getDate()}</span>
-              </button>
-            )
-          })}
-        </div>
-      )}
+      <div className="calendar-fc-wrap">
+        <FullCalendar
+          ref={calendarRef}
+          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+          initialView="dayGridMonth"
+          headerToolbar={false}
+          events={fullCalendarEvents}
+          eventClick={handleEventClick}
+          dateClick={handleDateClick}
+          datesSet={handleDatesSet}
+          height="auto"
+          editable={false}
+          selectable={false}
+          dayMaxEvents={2}
+          moreLinkClick="popover"
+        />
+      </div>
 
       <div className="calendar-day-title">
         {selectedDate === toYMD(new Date()) ? 'Today' : new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
@@ -514,41 +501,31 @@ export default function Calendar() {
       <div className="calendar-list-wrap">
         {loading ? (
           <p className="calendar-muted">Loading…</p>
-        ) : dayEvents.length === 0 && daySchedules.length === 0 ? (
+        ) : dayListEvents.length === 0 ? (
           <p className="calendar-muted">No events this day.</p>
         ) : (
           <ul className="calendar-list">
-            {daySchedules.map((s) => (
-              <li
-                key={`s-${s.schedule_id ?? s.id}`}
-                className="calendar-event"
-                style={{ borderLeftColor: EVENT_COLORS.schedule }}
-                onClick={() => setShowEventDetail({ type: 'schedule', ...s })}
-              >
-                <Clock size={16} className="calendar-event-icon" />
-                <div className="calendar-event-body">
-                  <span className="calendar-event-title">{s.employee_name || 'Shift'}</span>
-                  <span className="calendar-event-time">{formatTime(s.start_time)} – {formatTime(s.end_time)}</span>
-                </div>
-              </li>
-            ))}
-            {dayEvents.map((e) => (
-              <li
-                key={`e-${e.calendar_id ?? e.event_id ?? e.id}`}
-                className="calendar-event"
-                style={{ borderLeftColor: EVENT_COLORS[e.event_type] || EVENT_COLORS.other }}
-                onClick={() => setShowEventDetail({ type: 'event', ...e })}
-              >
-                <CalendarIcon size={16} className="calendar-event-icon" />
-                <div className="calendar-event-body">
-                  <span className="calendar-event-title">{e.title || e.event_type}</span>
-                  {(e.start_time || e.end_time) && (
-                    <span className="calendar-event-time">{formatTime(e.start_time)} – {formatTime(e.end_time)}</span>
-                  )}
-                  {e.description && <span className="calendar-event-desc">{e.description}</span>}
-                </div>
-              </li>
-            ))}
+            {dayListEvents.map((event) => {
+              const props = event.extendedProps
+              const isSchedule = props?.type === 'schedule'
+              return (
+                <li
+                  key={event.id}
+                  className="calendar-event"
+                  style={{ borderLeftColor: event.backgroundColor }}
+                  onClick={() => setShowEventDetail(props)}
+                >
+                  {isSchedule ? <Clock size={16} className="calendar-event-icon" /> : <CalendarIcon size={16} className="calendar-event-icon" />}
+                  <div className="calendar-event-body">
+                    <span className="calendar-event-title">{event.title}</span>
+                    {props?.start_time != null || props?.end_time != null ? (
+                      <span className="calendar-event-time">{formatTime(props.start_time)} – {formatTime(props.end_time)}</span>
+                    ) : null}
+                    {props?.description && <span className="calendar-event-desc">{props.description}</span>}
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         )}
       </div>
@@ -715,13 +692,13 @@ export default function Calendar() {
       )}
 
       <nav className="bottom-nav">
-        <button type="button" className="nav-item nav-item--cart" aria-label="Cart" onClick={() => navigate('/checkout')}>
-          <span className="nav-cart-circle"><ShoppingCart size={36} strokeWidth={2} /></span>
+        <button type="button" className="nav-item" aria-label="Dashboard" onClick={() => navigate('/')}><LayoutDashboard size={24} strokeWidth={2} /></button>
+        <button type="button" className="nav-item" aria-label="Orders" onClick={() => navigate('/orders')}><ClipboardList size={24} strokeWidth={2} /></button>
+        <button type="button" className="nav-item nav-item--cart" aria-label="POS" onClick={() => navigate('/checkout')}>
+          <span className="nav-cart-circle"><ShoppingCart size={24} strokeWidth={2} /></span>
         </button>
-        <button type="button" className="nav-item" aria-label="Orders" onClick={() => navigate('/orders')}><ClipboardList size={36} strokeWidth={2} /></button>
-        <button type="button" className="nav-item nav-item--active" aria-label="Calendar" onClick={() => navigate('/calendar')}><CalendarIcon size={36} strokeWidth={2} /></button>
-        <button type="button" className="nav-item" aria-label="Inventory" onClick={() => navigate('/inventory')}><Package size={36} strokeWidth={2} /></button>
-        <button type="button" className="nav-item" aria-label="Add"><Plus size={36} strokeWidth={2} /></button>
+        <button type="button" className="nav-item nav-item--active" aria-label="Calendar" onClick={() => navigate('/calendar')}><CalendarIcon size={24} strokeWidth={2} /></button>
+        <button type="button" className="nav-item" aria-label="Inventory" onClick={() => navigate('/inventory')}><Package size={24} strokeWidth={2} /></button>
       </nav>
     </div>
   )

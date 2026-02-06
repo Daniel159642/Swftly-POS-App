@@ -16,6 +16,13 @@ export function ToastProvider({ children }) {
     return () => clearTimeout(t)
   }, [toast])
 
+  const handleToastClick = () => {
+    if (toast?.action?.onClick) {
+      toast.action.onClick()
+    }
+    setToast(null)
+  }
+
   return (
     <ToastContext.Provider value={{ show, toast, setToast }}>
       {children}
@@ -35,38 +42,36 @@ export function ToastProvider({ children }) {
             backgroundColor: 'var(--bg-secondary, #2d2d2d)',
             color: 'var(--text-primary, #fff)',
             border: '1px solid var(--border-color, #404040)',
-            borderRadius: '12px',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            borderRadius: '24px',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.2)',
             zIndex: 10001,
             fontSize: '14px',
             fontWeight: 500,
-            maxWidth: '90vw'
+            maxWidth: '90vw',
+            cursor: toast.action?.onClick ? 'pointer' : 'default'
           }}
-          onClick={() => setToast(null)}
+          onClick={handleToastClick}
         >
-          {toast.type === 'error' && <XCircle size={20} style={{ flexShrink: 0, color: '#ef4444' }} />}
-          {toast.type === 'warning' && <AlertCircle size={20} style={{ flexShrink: 0, color: '#f59e0b' }} />}
-          {toast.type === 'success' && <CheckCircle size={20} style={{ flexShrink: 0, color: '#10b981' }} />}
+          {toast.type === 'error' && <XCircle size={20} style={{ flexShrink: 0, color: toast.action?.iconColor ?? '#ef4444' }} />}
+          {toast.type === 'warning' && <AlertCircle size={20} style={{ flexShrink: 0, color: toast.action?.iconColor ?? '#f59e0b' }} />}
+          {toast.type === 'success' && <CheckCircle size={20} style={{ flexShrink: 0, color: toast.action?.iconColor ?? '#10b981' }} />}
           <span style={{ flex: 1 }}>{toast.message}</span>
           {toast.action && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); toast.action?.onClick?.() }}
+            <span
               style={{
                 flexShrink: 0,
                 padding: '8px 16px',
-                backgroundColor: 'var(--color-primary, #10b981)',
+                backgroundColor: toast.action.buttonColor ?? 'var(--color-primary, #10b981)',
                 color: '#fff',
                 border: 'none',
-                borderRadius: '8px',
+                borderRadius: '12px',
                 fontSize: '14px',
                 fontWeight: 600,
-                cursor: 'pointer',
                 whiteSpace: 'nowrap'
               }}
             >
               {toast.action.label}
-            </button>
+            </span>
           )}
         </div>
       )}

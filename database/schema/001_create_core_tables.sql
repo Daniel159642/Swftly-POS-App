@@ -601,8 +601,8 @@ ALTER TABLE transaction_lines
     FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE SET NULL;
 
 -- Add foreign key constraints for tax_rate_id
-ALTER TABLE customers 
-    ADD CONSTRAINT fk_customers_tax_rate 
+ALTER TABLE accounting_customers 
+    ADD CONSTRAINT fk_accounting_customers_tax_rate 
     FOREIGN KEY (tax_rate_id) REFERENCES tax_rates(id) ON DELETE SET NULL;
 
 ALTER TABLE invoice_lines 
@@ -634,7 +634,7 @@ ALTER TABLE bill_lines
 -- Add foreign key constraints for customer_id in bill_lines
 ALTER TABLE bill_lines 
     ADD CONSTRAINT fk_bill_lines_customer 
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL;
+    FOREIGN KEY (customer_id) REFERENCES accounting_customers(id) ON DELETE SET NULL;
 
 -- ============================================================================
 -- SEQUENCES FOR AUTO-NUMBERING

@@ -8,14 +8,14 @@ import {
   Truck,
   FileText,
   LayoutGrid,
+  LayoutDashboard,
   Settings as SettingsIcon,
   BarChart3,
   LogOut,
   ChevronRight,
   ShoppingCart,
   ClipboardList,
-  Package,
-  Plus
+  Package
 } from 'lucide-react'
 import api from '../services/api'
 import './Profile.css'
@@ -240,22 +240,22 @@ export default function Profile() {
       </section>
 
       <nav className="bottom-nav">
-        <button type="button" className="nav-item nav-item--cart" aria-label="Cart" onClick={() => navigate('/checkout')}>
-          <span className="nav-cart-circle">
-            <ShoppingCart size={36} strokeWidth={2} />
-          </span>
+        <button type="button" className="nav-item" aria-label="Dashboard" onClick={() => navigate('/')}>
+          <LayoutDashboard size={24} strokeWidth={2} />
         </button>
         <button type="button" className="nav-item" aria-label="Orders" onClick={() => navigate('/orders')}>
-          <ClipboardList size={36} strokeWidth={2} />
+          <ClipboardList size={24} strokeWidth={2} />
+        </button>
+        <button type="button" className="nav-item nav-item--cart" aria-label="POS" onClick={() => navigate('/checkout')}>
+          <span className="nav-cart-circle">
+            <ShoppingCart size={24} strokeWidth={2} />
+          </span>
         </button>
         <button type="button" className="nav-item" aria-label="Calendar" onClick={() => navigate('/calendar')}>
-          <CalendarIcon size={36} strokeWidth={2} />
+          <CalendarIcon size={24} strokeWidth={2} />
         </button>
         <button type="button" className="nav-item" aria-label="Inventory" onClick={() => navigate('/inventory')}>
-          <Package size={36} strokeWidth={2} />
-        </button>
-        <button type="button" className="nav-item" aria-label="Add">
-          <Plus size={36} strokeWidth={2} />
+          <Package size={24} strokeWidth={2} />
         </button>
       </nav>
     </div>

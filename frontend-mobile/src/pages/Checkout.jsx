@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
-import { Search, Plus, Minus, Trash2, ShoppingCart, ClipboardList, Calendar as CalendarIcon, Package, Percent, ScanBarcode } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Search, LayoutDashboard, ShoppingCart, ClipboardList, Calendar as CalendarIcon, Package, ScanBarcode } from 'lucide-react'
 import api from '../services/api'
 import CameraScanner from '../components/CameraScanner'
 import ProfileButton from '../components/ProfileButton'
@@ -17,6 +17,7 @@ export default function Checkout() {
   const [categories, setCategories] = useState([])
   const [selectedCategory, setSelectedCategory] = useState(null)
   const [categoryProducts, setCategoryProducts] = useState([])
+  const [showCartView, setShowCartView] = useState(true)
   const [showScanner, setShowScanner] = useState(false)
   const [loading, setLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
@@ -24,6 +25,10 @@ export default function Checkout() {
   const [showPayment, setShowPayment] = useState(false)
   const [amountPaid, setAmountPaid] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [swipeState, setSwipeState] = useState({ key: null, translateX: 0 })
+  const touchStartX = useRef(0)
+  const touchStartKey = useRef(null)
+  const swipeTranslateRef = useRef(0)
 
   useEffect(() => {
     loadProducts()
@@ -163,6 +168,32 @@ export default function Checkout() {
     )
   }
 
+  const rowKey = (item) => `${item.product_id}-${item.variant_id ?? 'x'}`
+
+  const handleSwipeStart = (e, key) => {
+    touchStartX.current = e.touches[0].clientX
+    touchStartKey.current = key
+    setSwipeState({ key, translateX: 0 })
+  }
+
+  const handleSwipeMove = (e, key) => {
+    if (touchStartKey.current !== key) return
+    const dx = e.touches[0].clientX - touchStartX.current
+    const translateX = Math.min(0, Math.max(-80, dx))
+    swipeTranslateRef.current = translateX
+    setSwipeState((s) => (s.key === key ? { ...s, translateX } : s))
+  }
+
+  const handleSwipeEnd = (key) => {
+    if (touchStartKey.current !== key) return
+    if (swipeTranslateRef.current < -50) {
+      const item = cart.find((i) => rowKey(i) === key)
+      if (item) removeLine(item.product_id, item.variant_id)
+    }
+    touchStartKey.current = null
+    setSwipeState({ key: null, translateX: 0 })
+  }
+
   const subtotal = cart.reduce((sum, item) => sum + item.unit_price * item.quantity, 0)
   const tax = subtotal * TAX_RATE
   const total = subtotal + tax
@@ -281,12 +312,19 @@ export default function Checkout() {
           />
         )}
 
-        {!showScanner && categories.length > 0 && (
+        {!showScanner && (
           <div className="checkout-categories">
             <button
               type="button"
-              className={`checkout-category-chip ${selectedCategory === null ? 'checkout-category-chip--active' : ''}`}
-              onClick={() => setSelectedCategory(null)}
+              className={`checkout-category-chip ${showCartView ? 'checkout-category-chip--active' : ''}`}
+              onClick={() => { setShowCartView(true); setSelectedCategory(null) }}
+            >
+              Cart
+            </button>
+            <button
+              type="button"
+              className={`checkout-category-chip ${!showCartView && selectedCategory === null ? 'checkout-category-chip--active' : ''}`}
+              onClick={() => { setShowCartView(false); setSelectedCategory(null) }}
             >
               All
             </button>
@@ -294,8 +332,8 @@ export default function Checkout() {
               <button
                 type="button"
                 key={cat}
-                className={`checkout-category-chip ${selectedCategory === cat ? 'checkout-category-chip--active' : ''}`}
-                onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
+                className={`checkout-category-chip ${!showCartView && selectedCategory === cat ? 'checkout-category-chip--active' : ''}`}
+                onClick={() => { setShowCartView(false); setSelectedCategory(selectedCategory === cat ? null : cat) }}
               >
                 {cat}
               </button>
@@ -344,7 +382,41 @@ export default function Checkout() {
               </ul>
             )}
           </div>
-        ) : selectedCategory && categoryProducts.length > 0 ? (
+        ) : showCartView ? (
+          <div className={`checkout-cart-inner ${cart.length === 0 ? 'checkout-cart-inner--empty' : ''}`}>
+            {cart.length === 0 ? (
+              <p className="checkout-muted">Cart is empty</p>
+            ) : (
+              <ul className="checkout-cart-list">
+                {cart.map((item) => {
+                  const key = rowKey(item)
+                  const isSwiping = swipeState.key === key
+                  return (
+                    <li key={key} className="checkout-cart-row-wrap">
+                      <div className="checkout-cart-row-delete">Delete</div>
+                      <div
+                        className="checkout-cart-row"
+                        style={{ transform: isSwiping ? `translateX(${swipeState.translateX}px)` : 'translateX(0)' }}
+                        onTouchStart={(e) => handleSwipeStart(e, key)}
+                        onTouchMove={(e) => handleSwipeMove(e, key)}
+                        onTouchEnd={() => handleSwipeEnd(key)}
+                        onTouchCancel={() => setSwipeState({ key: null, translateX: 0 })}
+                      >
+                        <div className="checkout-cart-name">
+                          {item.product_name}
+                          {item.quantity > 1 ? ` × ${item.quantity}` : ''}
+                        </div>
+                        <div className="checkout-cart-price">
+                          ${(item.unit_price * item.quantity).toFixed(2)}
+                        </div>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        ) : selectedCategory !== null && categoryProducts.length > 0 ? (
           <div className="checkout-results-inner">
             <ul className="checkout-result-list">
               {categoryProducts.map((p) => (
@@ -380,45 +452,41 @@ export default function Checkout() {
             </ul>
           </div>
         ) : (
-          <div className="checkout-cart-inner">
-            <h2 className="checkout-cart-title">Cart</h2>
-            {cart.length === 0 ? (
-              <p className="checkout-muted">Search or scan a barcode to add products.</p>
+          <div className="checkout-results-inner">
+            {loading ? (
+              <p className="checkout-muted">Loading...</p>
+            ) : allProducts.length === 0 ? (
+              <p className="checkout-muted">No products in inventory.</p>
             ) : (
-              <ul className="checkout-cart-list">
-                {cart.map((item) => (
-                  <li key={`${item.product_id}-${item.variant_id ?? 'x'}`} className="checkout-cart-row">
-                    <div className="checkout-cart-name">{item.product_name}</div>
-                    <div className="checkout-cart-qty">
+              <ul className="checkout-result-list">
+                {allProducts.map((p) => (
+                  <li key={p.product_id}>
+                    {p.variants && p.variants.length > 0 ? (
+                      p.variants.map((v) => (
+                        <button
+                          type="button"
+                          key={v.variant_id}
+                          className="checkout-result-item"
+                          onClick={() => addToCart(p, v)}
+                        >
+                          <span>{p.product_name} — {v.variant_name || v.name}</span>
+                          <span className="checkout-result-price">
+                            ${(parseFloat(v.price ?? v.unit_price) || 0).toFixed(2)}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
                       <button
                         type="button"
-                        className="checkout-qty-btn"
-                        onClick={() => updateQty(item.product_id, item.variant_id, -1)}
-                        aria-label="Decrease"
+                        className="checkout-result-item"
+                        onClick={() => addToCart(p)}
                       >
-                        <Minus size={16} />
+                        <span>{p.product_name}</span>
+                        <span className="checkout-result-price">
+                          ${(parseFloat(p.product_price) || 0).toFixed(2)}
+                        </span>
                       </button>
-                      <span className="checkout-qty-num">{item.quantity}</span>
-                      <button
-                        type="button"
-                        className="checkout-qty-btn"
-                        onClick={() => updateQty(item.product_id, item.variant_id, 1)}
-                        aria-label="Increase"
-                      >
-                        <Plus size={16} />
-                      </button>
-                    </div>
-                    <div className="checkout-cart-price">
-                      ${(item.unit_price * item.quantity).toFixed(2)}
-                    </div>
-                    <button
-                      type="button"
-                      className="checkout-remove"
-                      onClick={() => removeLine(item.product_id, item.variant_id)}
-                      aria-label="Remove"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -428,18 +496,20 @@ export default function Checkout() {
       </div>
 
       <div className="checkout-totals-pay-wrap">
-        <div className="checkout-totals">
-          <div className="checkout-totals-row">
-            <span>Subtotal</span>
-            <span>${subtotal.toFixed(2)}</span>
-          </div>
-          <div className="checkout-totals-row">
-            <span>Tax ({(TAX_RATE * 100).toFixed(0)}%)</span>
-            <span>${tax.toFixed(2)}</span>
-          </div>
-          <div className="checkout-totals-row checkout-totals-total">
-            <span>Total</span>
-            <span>${total.toFixed(2)}</span>
+        <div className="checkout-totals-container">
+          <div className="checkout-totals">
+            <div className="checkout-totals-row">
+              <span>Subtotal</span>
+              <span>${subtotal.toFixed(2)}</span>
+            </div>
+            <div className="checkout-totals-row">
+              <span>Tax ({(TAX_RATE * 100).toFixed(0)}%)</span>
+              <span>${tax.toFixed(2)}</span>
+            </div>
+            <div className="checkout-totals-row checkout-totals-total">
+              <span>Total</span>
+              <span>${total.toFixed(2)}</span>
+            </div>
           </div>
         </div>
         {!showPayment ? (
@@ -451,14 +521,6 @@ export default function Checkout() {
               onClick={handlePayTap}
             >
               Pay ${total.toFixed(2)}
-            </button>
-            <button
-              type="button"
-              className="checkout-discount-btn"
-              aria-label="Discount"
-              disabled={cart.length === 0}
-            >
-              <Percent size={22} strokeWidth={2} />
             </button>
           </div>
         ) : (
@@ -518,22 +580,22 @@ export default function Checkout() {
       </div>
 
       <nav className="bottom-nav">
-        <button type="button" className="nav-item nav-item--cart" onClick={() => navigate('/')} aria-label="Cart">
-          <span className="nav-cart-circle">
-            <ShoppingCart size={36} strokeWidth={2} />
-          </span>
+        <button type="button" className="nav-item" aria-label="Dashboard" onClick={() => navigate('/')}>
+          <LayoutDashboard size={24} strokeWidth={2} />
         </button>
         <button type="button" className="nav-item" aria-label="Orders" onClick={() => navigate('/orders')}>
-          <ClipboardList size={36} strokeWidth={2} />
+          <ClipboardList size={24} strokeWidth={2} />
+        </button>
+        <button type="button" className="nav-item nav-item--cart nav-item--active" onClick={() => navigate('/checkout')} aria-label="POS">
+          <span className="nav-cart-circle">
+            <ShoppingCart size={24} strokeWidth={2} />
+          </span>
         </button>
         <button type="button" className="nav-item" aria-label="Calendar" onClick={() => navigate('/calendar')}>
-          <CalendarIcon size={36} strokeWidth={2} />
+          <CalendarIcon size={24} strokeWidth={2} />
         </button>
         <button type="button" className="nav-item" aria-label="Inventory" onClick={() => navigate('/inventory')}>
-          <Package size={36} strokeWidth={2} />
-        </button>
-        <button type="button" className="nav-item" aria-label="Add">
-          <Plus size={36} strokeWidth={2} />
+          <Package size={24} strokeWidth={2} />
         </button>
       </nav>
     </div>

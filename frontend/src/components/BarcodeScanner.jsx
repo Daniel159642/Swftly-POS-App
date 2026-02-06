@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { X } from 'lucide-react'
 
 function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', inline = false }) {
   const [isScanning, setIsScanning] = useState(false)
@@ -64,14 +65,18 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
       clearTimeout(resumeTimeoutRef.current)
       resumeTimeoutRef.current = null
     }
-    
-    if (scannerRef.current) {
+    // Take ref and clear immediately so a second cleanup (e.g. from another effect) doesn't call stop() again
+    const scanner = scannerRef.current
+    scannerRef.current = null
+    if (scanner) {
       try {
-        await scannerRef.current.stop()
+        await scanner.stop()
       } catch (err) {
-        console.error('Error stopping scanner:', err)
+        // Ignore "already under transition" - we only need to stop once
+        if (!String(err?.message || err).includes('transition')) {
+          console.error('Error stopping scanner:', err)
+        }
       }
-      scannerRef.current = null
     }
     setIsScanning(false)
   }
@@ -103,19 +108,19 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
 
       const html5QrCode = new Html5Qrcode('barcode-scanner-camera')
 
-      // Inline/mobile: wider qrbox so scan-area guide is clearly visible for barcodes
+      // Inline (mobile): show library qrbox. Modal: no qrbox — we draw our own centered overlay.
       const qrboxConfig = inline
         ? (viewfinderWidth, viewfinderHeight) => {
-            const width = Math.floor(viewfinderWidth * 0.96) // use almost full width
-            const height = Math.floor(width * 0.38) // wide, short box for barcodes
+            const width = Math.floor(viewfinderWidth * 0.96)
+            const height = Math.floor(width * 0.38)
             return { width, height }
           }
-        : { width: 400, height: 200 }
+        : undefined
 
       // Optimize scanner settings for Code128 linear barcodes (faster scanning)
       const config = {
         fps: 15,
-        qrbox: qrboxConfig,
+        ...(qrboxConfig != null && { qrbox: qrboxConfig }),
         aspectRatio: 1.5,
         disableFlip: false,
         ...(Html5Qrcode && Html5Qrcode.Html5QrcodeSupportedFormats ? {
@@ -172,13 +177,13 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
 
   // Drag handlers
   const handleMouseDown = (e) => {
+    if (e.target.closest('button')) return
     if (modalRef.current) {
       const rect = modalRef.current.getBoundingClientRect()
       setDragOffset({
         x: e.clientX - rect.left,
         y: e.clientY - rect.top
       })
-      // If position is null (bottom-right), calculate current position
       if (position === null) {
         setPosition({
           x: rect.left,
@@ -225,6 +230,7 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
   if (inline) {
     return (
       <div ref={modalRef} style={{ width: '100%', borderRadius: '12px', overflow: 'hidden' }}>
+        <style>{`#barcode-scanner-camera video { object-fit: cover !important; width: 100% !important; height: 100% !important; }`}</style>
         {error && (
           <div style={{
             padding: '12px',
@@ -241,8 +247,7 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
           id="barcode-scanner-camera"
           style={{
             width: '100%',
-            minHeight: '260px',
-            maxHeight: '320px',
+            height: '280px',
             overflow: 'hidden',
             backgroundColor: '#000',
             position: 'relative',
@@ -281,6 +286,7 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
   const cardContent = (
     <div
       ref={modalRef}
+      onMouseDown={handleMouseDown}
       style={{
         position: 'absolute',
         left: position ? `${position.x}px` : 'auto',
@@ -289,46 +295,17 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
         bottom: position ? 'auto' : '20px',
         backgroundColor: '#fff',
         borderRadius: '8px',
-        padding: '12px',
-        maxWidth: '600px',
-        width: '100%',
-        border: `1px solid rgba(${themeColorRgb}, 0.3)`,
+        padding: '6px',
+        width: '380px',
+        maxWidth: 'calc(100vw - 40px)',
+        border: `1px solid rgba(${themeColorRgb}, 0.25)`,
         boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
         pointerEvents: 'auto',
-        cursor: isDragging ? 'grabbing' : 'default'
+        cursor: isDragging ? 'grabbing' : 'grab',
+        userSelect: 'none',
+        boxSizing: 'border-box'
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          marginBottom: '8px',
-          cursor: 'grab',
-          userSelect: 'none'
-        }}
-        onMouseDown={handleMouseDown}
-      >
-        <button
-          onClick={onClose}
-          style={{
-            border: 'none',
-            backgroundColor: 'transparent',
-            fontSize: '20px',
-            cursor: 'pointer',
-            padding: '0',
-            width: '24px',
-            height: '24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: themeColor
-          }}
-        >
-          ×
-        </button>
-      </div>
-
       {/* Camera Scanner */}
       <div>
         {error && (
@@ -344,23 +321,96 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
           </div>
         )}
         <div
-          id="barcode-scanner-camera"
           style={{
+            position: 'relative',
             width: '100%',
-            minHeight: '280px',
-            maxHeight: '320px',
-            borderRadius: '0',
+            height: '280px',
             overflow: 'hidden',
             backgroundColor: '#000',
             border: scanStatus === 'accepted'
-              ? '4px solid #4caf50'
+              ? '2px solid #4caf50'
               : scanStatus === 'cooldown'
-              ? '4px solid #f44336'
-              : '4px solid #fff',
+              ? '2px solid #f44336'
+              : '2px solid #e0e0e0',
             transition: 'border-color 0.2s ease',
-            boxSizing: 'border-box'
+            boxSizing: 'border-box',
+            flexShrink: 0
           }}
-        />
+        >
+          <div id="barcode-scanner-camera" style={{ width: '100%', height: '100%', minHeight: 0 }} />
+          {/* Custom scan area overlay — centered; modal only (inline uses library qrbox). Corners match border status. */}
+          {!inline && (() => {
+            const cornerColor = scanStatus === 'accepted'
+              ? '#4caf50'
+              : scanStatus === 'cooldown'
+              ? '#f44336'
+              : 'rgba(255,255,255,0.9)'
+            const cornerStyle = (top, left, right, bottom) => ({
+              position: 'absolute',
+              width: '36px',
+              height: '36px',
+              ...(top !== undefined && { top: 0, borderTop: `6px solid ${cornerColor}` }),
+              ...(bottom !== undefined && { bottom: 0, borderBottom: `6px solid ${cornerColor}` }),
+              ...(left !== undefined && { left: 0, borderLeft: `6px solid ${cornerColor}` }),
+              ...(right !== undefined && { right: 0, borderRight: `6px solid ${cornerColor}` }),
+              transition: 'border-color 0.2s ease'
+            })
+            return (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: '88%',
+                  height: '42%',
+                  pointerEvents: 'none',
+                  zIndex: 1,
+                  boxShadow: '0 0 0 9999px rgba(255, 255, 255, 0.4)'
+                }}
+              >
+                <div style={cornerStyle(1, 1)} />
+                <div style={cornerStyle(1, undefined, 1)} />
+                <div style={cornerStyle(undefined, 1, undefined, 1)} />
+                <div style={cornerStyle(undefined, undefined, 1, 1)} />
+              </div>
+            )
+          })()}
+          <button
+            onClick={onClose}
+            style={{
+              position: 'absolute',
+              top: '8px',
+              right: '8px',
+              padding: '4px',
+              width: '40px',
+              height: '40px',
+              backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              color: '#fff',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+              transition: 'all 0.3s ease',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.8)`
+              e.currentTarget.style.boxShadow = `0 4px 20px rgba(${themeColorRgb}, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+              e.currentTarget.style.boxShadow = `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+            }}
+          >
+            <X size={24} strokeWidth={2.5} />
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -376,6 +426,13 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
       zIndex: 1000,
       pointerEvents: 'none'
     }}>
+      <style>{`
+        #barcode-scanner-camera video {
+          object-fit: cover !important;
+          width: 100% !important;
+          height: 100% !important;
+        }
+      `}</style>
       {cardContent}
     </div>
   )

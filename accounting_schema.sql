@@ -105,12 +105,12 @@ CREATE INDEX idx_transaction_lines_transaction_line ON transaction_lines(transac
 -- CUSTOMER & VENDOR MANAGEMENT TABLES
 -- ============================================================================
 
--- 4. Accounting_Customers Table (extends existing customers table)
--- Note: If you have an existing customers table, this creates accounting-specific fields
--- You can link via customer_id or create a view to join them
+-- 4. Accounting_Customers Table (invoicing; link to POS via customer_id)
+-- Single strategy: public.customers = POS; accounting_customers = invoicing.
+-- Link: customer_id -> public.customers(customer_id). When set, use POS as source of truth for name/email/phone.
 CREATE TABLE IF NOT EXISTS accounting_customers (
     id SERIAL PRIMARY KEY,
-    customer_id INTEGER, -- Link to existing customers.customer_id if exists
+    customer_id INTEGER, -- FK to public.customers(customer_id); run migrations/link_accounting_customers_vendors_to_pos.sql
     customer_number VARCHAR(50) UNIQUE NOT NULL,
     customer_type VARCHAR(20) NOT NULL CHECK (customer_type IN ('individual', 'business')),
     company_name VARCHAR(255),
@@ -155,10 +155,11 @@ CREATE INDEX idx_accounting_customers_name ON accounting_customers(last_name, fi
 CREATE INDEX idx_accounting_customers_is_active ON accounting_customers(is_active);
 CREATE INDEX idx_accounting_customers_customer_id ON accounting_customers(customer_id);
 
--- 5. Accounting_Vendors Table (extends existing vendors table)
+-- 5. Accounting_Vendors Table (bills; link to POS via vendor_id)
+-- Single strategy: public.vendors = POS; accounting_vendors = bills. Link: vendor_id -> public.vendors(vendor_id).
 CREATE TABLE IF NOT EXISTS accounting_vendors (
     id SERIAL PRIMARY KEY,
-    vendor_id INTEGER, -- Link to existing vendors.vendor_id if exists
+    vendor_id INTEGER, -- FK to public.vendors(vendor_id); run migrations/link_accounting_customers_vendors_to_pos.sql
     vendor_number VARCHAR(50) UNIQUE NOT NULL,
     vendor_name VARCHAR(255) NOT NULL,
     contact_name VARCHAR(100),
@@ -586,8 +587,8 @@ ALTER TABLE transaction_lines
     FOREIGN KEY (location_id) REFERENCES locations(id) ON DELETE SET NULL;
 
 -- Add foreign key constraints for tax_rate_id
-ALTER TABLE customers 
-    ADD CONSTRAINT fk_customers_tax_rate 
+ALTER TABLE accounting_customers 
+    ADD CONSTRAINT fk_accounting_customers_tax_rate 
     FOREIGN KEY (tax_rate_id) REFERENCES tax_rates(id) ON DELETE SET NULL;
 
 ALTER TABLE invoice_lines 
@@ -619,7 +620,7 @@ ALTER TABLE bill_lines
 -- Add foreign key constraints for customer_id in bill_lines
 ALTER TABLE bill_lines 
     ADD CONSTRAINT fk_bill_lines_customer 
-    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL;
+    FOREIGN KEY (customer_id) REFERENCES accounting_customers(id) ON DELETE SET NULL;
 
 -- ============================================================================
 -- SEQUENCES FOR AUTO-NUMBERING

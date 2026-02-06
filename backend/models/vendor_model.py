@@ -96,6 +96,20 @@ class VendorRepository:
             cursor.close()
 
     @staticmethod
+    def find_by_pos_vendor_id(pos_vendor_id: int) -> Optional[Dict[str, Any]]:
+        """Find accounting vendor linked to a POS vendor (public.vendors.vendor_id)."""
+        cursor = get_cursor()
+        try:
+            cursor.execute(
+                f"SELECT * FROM {VendorRepository.TABLE} WHERE vendor_id = %s",
+                (pos_vendor_id,),
+            )
+            row = cursor.fetchone()
+            return _row_to_dict(row) if row else None
+        finally:
+            cursor.close()
+
+    @staticmethod
     def find_by_vendor_number(vendor_number: str) -> Optional[Dict[str, Any]]:
         cursor = get_cursor()
         try:
@@ -154,28 +168,59 @@ class VendorRepository:
             if existing:
                 raise ValueError("Vendor number already exists")
 
+        pos_vendor_id = data.get("vendor_id")
+        if pos_vendor_id is not None:
+            existing_link = VendorRepository.find_by_pos_vendor_id(pos_vendor_id)
+            if existing_link:
+                raise ValueError(f"POS vendor id {pos_vendor_id} is already linked to an accounting vendor")
+
+        vendor_name = (data.get("vendor_name") or "").strip()
+        email = data.get("email")
+        phone = data.get("phone")
+        if pos_vendor_id is not None and (not vendor_name or not email):
+            cursor = get_cursor()
+            try:
+                cursor.execute(
+                    "SELECT vendor_name, email, phone FROM public.vendors WHERE vendor_id = %s",
+                    (pos_vendor_id,),
+                )
+                pos_row = cursor.fetchone()
+                if pos_row:
+                    pos = _row_to_dict(pos_row) if hasattr(pos_row, "keys") else {}
+                    if not vendor_name and pos.get("vendor_name"):
+                        vendor_name = (pos["vendor_name"] or "").strip()
+                    if not email and pos.get("email"):
+                        email = pos["email"]
+                    if not phone and pos.get("phone"):
+                        phone = pos["phone"]
+            finally:
+                cursor.close()
+        if not vendor_name:
+            vendor_name = vendor_number
+
         cursor = get_cursor()
         conn = cursor.connection
         try:
             cursor.execute(
                 f"""
                 INSERT INTO {VendorRepository.TABLE} (
-                    vendor_number, vendor_name, contact_name, email, phone, website,
+                    vendor_id, vendor_number, vendor_name, contact_name, email, phone, website,
                     address_line1, address_line2, city, state, postal_code, country,
                     payment_terms, payment_terms_days, account_number, tax_id,
                     is_1099_vendor, payment_method, notes, created_by, updated_by
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING *
                 """,
                 (
+                    pos_vendor_id,
                     vendor_number,
-                    (data.get("vendor_name") or "").strip(),
+                    vendor_name,
                     data.get("contact_name"),
-                    data.get("email"),
-                    data.get("phone"),
+                    email,
+                    phone,
                     data.get("website"),
                     data.get("address_line1"),
                     data.get("address_line2"),
@@ -203,7 +248,7 @@ class VendorRepository:
     @staticmethod
     def update(vendor_id: int, data: Dict[str, Any], user_id: int) -> Dict[str, Any]:
         allowed = {
-            "vendor_name", "contact_name", "email", "phone", "website",
+            "vendor_id", "vendor_name", "contact_name", "email", "phone", "website",
             "address_line1", "address_line2", "city", "state", "postal_code", "country",
             "payment_terms", "payment_terms_days", "account_number", "tax_id",
             "is_1099_vendor", "payment_method", "notes", "is_active",
@@ -213,7 +258,7 @@ class VendorRepository:
         for k, v in data.items():
             if k not in allowed:
                 continue
-            if v is None and k != "is_active":
+            if v is None and k not in ("is_active", "vendor_id"):
                 continue
             if k == "is_1099_vendor":
                 updates.append("is_1099_vendor = %s")

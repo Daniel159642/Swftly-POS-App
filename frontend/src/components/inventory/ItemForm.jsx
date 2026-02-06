@@ -1,7 +1,18 @@
 import React, { useState, useEffect } from 'react'
-import Input from '../common/Input'
-import Select from '../common/Select'
-import Button from '../common/Button'
+import { useTheme } from '../../contexts/ThemeContext'
+import CustomDropdown from '../common/CustomDropdown'
+import {
+  FormLabel,
+  FormField,
+  inputBaseStyle,
+  getInputFocusHandlers,
+  FormModalActions
+} from '../FormStyles'
+
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+}
 
 function ItemForm({
   item,
@@ -12,6 +23,8 @@ function ItemForm({
   onSubmit,
   onCancel
 }) {
+  const { themeColor } = useTheme()
+  const themeColorRgb = hexToRgb(themeColor || '#8400ff')
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
 
   const [formData, setFormData] = useState({
@@ -157,14 +170,19 @@ function ItemForm({
         padding: '16px',
         borderRadius: '8px'
       }}>
-        <Select
-          label="Item Type"
-          name="item_type"
-          value={formData.item_type}
-          onChange={handleChange}
-          options={itemTypeOptions}
-          required
-        />
+        <FormField>
+          <FormLabel isDarkMode={isDarkMode} required>Item Type</FormLabel>
+          <CustomDropdown
+            name="item_type"
+            value={formData.item_type}
+            onChange={handleChange}
+            options={itemTypeOptions}
+            placeholder="Select item type"
+            isDarkMode={isDarkMode}
+            themeColorRgb={themeColorRgb}
+            compactTrigger
+          />
+        </FormField>
       </div>
 
       {/* Basic Information */}
@@ -184,61 +202,61 @@ function ItemForm({
         </h3>
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
-          <Input
-            label="Item Name"
-            name="item_name"
-            value={formData.item_name}
-            onChange={handleChange}
-            placeholder="Product Name"
-            required
-            error={errors.item_name}
-          />
+          <FormField>
+            <FormLabel isDarkMode={isDarkMode} required>Item Name</FormLabel>
+            <input
+              name="item_name"
+              value={formData.item_name}
+              onChange={handleChange}
+              placeholder="Product Name"
+              style={inputBaseStyle(isDarkMode, themeColorRgb)}
+              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+            />
+            {errors.item_name && <p style={{ marginTop: '4px', fontSize: '12px', color: '#ef4444' }}>{errors.item_name}</p>}
+          </FormField>
 
-          <Input
-            label="Barcode/UPC"
-            name="barcode"
-            value={formData.barcode || ''}
-            onChange={handleChange}
-            placeholder="Scan or enter barcode"
-          />
+          <FormField>
+            <FormLabel isDarkMode={isDarkMode}>Barcode/UPC</FormLabel>
+            <input
+              name="barcode"
+              value={formData.barcode || ''}
+              onChange={handleChange}
+              placeholder="Scan or enter barcode"
+              style={inputBaseStyle(isDarkMode, themeColorRgb)}
+              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+            />
+          </FormField>
 
-          <Select
-            label="Unit of Measure"
-            name="unit_of_measure"
-            value={formData.unit_of_measure}
-            onChange={handleChange}
-            options={unitOptions}
-          />
+          <FormField>
+            <FormLabel isDarkMode={isDarkMode}>Unit of Measure</FormLabel>
+            <CustomDropdown
+              name="unit_of_measure"
+              value={formData.unit_of_measure}
+              onChange={handleChange}
+              options={unitOptions}
+              placeholder="Select unit"
+              isDarkMode={isDarkMode}
+              themeColorRgb={themeColorRgb}
+              compactTrigger
+            />
+          </FormField>
 
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={{
-              display: 'block',
-              fontSize: '14px',
-              fontWeight: 500,
-              color: isDarkMode ? '#ffffff' : '#374151',
-              marginBottom: '4px'
-            }}>
-              Description
-            </label>
+          <FormField style={{ gridColumn: '1 / -1' }}>
+            <FormLabel isDarkMode={isDarkMode}>Description</FormLabel>
             <textarea
               name="description"
               value={formData.description || ''}
               onChange={handleChange}
               rows={3}
+              placeholder="Item description..."
               style={{
-                width: '100%',
-                padding: '8px 12px',
-                border: `1px solid ${isDarkMode ? '#3a3a3a' : '#d1d5db'}`,
-                borderRadius: '6px',
-                backgroundColor: isDarkMode ? '#1f1f1f' : 'white',
-                color: isDarkMode ? '#ffffff' : '#1a1a1a',
-                fontSize: '14px',
-                outline: 'none',
+                ...inputBaseStyle(isDarkMode, themeColorRgb),
+                fontFamily: 'inherit',
                 resize: 'vertical'
               }}
-              placeholder="Item description..."
+              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
             />
-          </div>
+          </FormField>
         </div>
       </div>
 
@@ -260,30 +278,35 @@ function ItemForm({
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
           {isInventoryType && (
-            <Input
-              label="Purchase Cost"
-              name="purchase_cost"
-              type="number"
-              step="0.01"
-              value={formData.purchase_cost || 0}
-              onChange={handleChange}
-              placeholder="0.00"
-              style={{ textAlign: 'right' }}
-            />
+            <FormField>
+              <FormLabel isDarkMode={isDarkMode}>Purchase Cost</FormLabel>
+              <input
+                name="purchase_cost"
+                type="number"
+                step="0.01"
+                value={formData.purchase_cost || 0}
+                onChange={handleChange}
+                placeholder="0.00"
+                style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), textAlign: 'right' }}
+                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+              />
+            </FormField>
           )}
 
-          <Input
-            label="Sales Price"
-            name="sales_price"
-            type="number"
-            step="0.01"
-            value={formData.sales_price || 0}
-            onChange={handleChange}
-            placeholder="0.00"
-            style={{ textAlign: 'right' }}
-            required
-            error={errors.sales_price}
-          />
+          <FormField>
+            <FormLabel isDarkMode={isDarkMode} required>Sales Price</FormLabel>
+            <input
+              name="sales_price"
+              type="number"
+              step="0.01"
+              value={formData.sales_price || 0}
+              onChange={handleChange}
+              placeholder="0.00"
+              style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), textAlign: 'right' }}
+              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+            />
+            {errors.sales_price && <p style={{ marginTop: '4px', fontSize: '12px', color: '#ef4444' }}>{errors.sales_price}</p>}
+          </FormField>
         </div>
 
         {isInventoryType && formData.purchase_cost > 0 && formData.sales_price > 0 && (
@@ -320,48 +343,63 @@ function ItemForm({
           </h3>
           
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-            <Input
-              label="Quantity on Hand"
-              name="quantity_on_hand"
-              type="number"
-              step="0.01"
-              value={formData.quantity_on_hand || 0}
-              onChange={handleChange}
-              placeholder="0"
-              style={{ textAlign: 'right' }}
-            />
+            <FormField>
+              <FormLabel isDarkMode={isDarkMode}>Quantity on Hand</FormLabel>
+              <input
+                name="quantity_on_hand"
+                type="number"
+                step="0.01"
+                value={formData.quantity_on_hand || 0}
+                onChange={handleChange}
+                placeholder="0"
+                style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), textAlign: 'right' }}
+                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+              />
+            </FormField>
 
-            <Input
-              label="Reorder Point"
-              name="reorder_point"
-              type="number"
-              step="0.01"
-              value={formData.reorder_point || 0}
-              onChange={handleChange}
-              placeholder="0"
-              style={{ textAlign: 'right' }}
-            />
+            <FormField>
+              <FormLabel isDarkMode={isDarkMode}>Reorder Point</FormLabel>
+              <input
+                name="reorder_point"
+                type="number"
+                step="0.01"
+                value={formData.reorder_point || 0}
+                onChange={handleChange}
+                placeholder="0"
+                style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), textAlign: 'right' }}
+                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+              />
+            </FormField>
 
-            <Input
-              label="Reorder Quantity"
-              name="reorder_quantity"
-              type="number"
-              step="0.01"
-              value={formData.reorder_quantity || 0}
-              onChange={handleChange}
-              placeholder="0"
-              style={{ textAlign: 'right' }}
-            />
+            <FormField>
+              <FormLabel isDarkMode={isDarkMode}>Reorder Quantity</FormLabel>
+              <input
+                name="reorder_quantity"
+                type="number"
+                step="0.01"
+                value={formData.reorder_quantity || 0}
+                onChange={handleChange}
+                placeholder="0"
+                style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), textAlign: 'right' }}
+                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+              />
+            </FormField>
           </div>
 
           <div style={{ marginTop: '16px' }}>
-            <Select
-              label="Cost Method"
-              name="cost_method"
-              value={formData.cost_method || 'Average'}
-              onChange={handleChange}
-              options={costMethodOptions}
-            />
+            <FormField>
+              <FormLabel isDarkMode={isDarkMode}>Cost Method</FormLabel>
+              <CustomDropdown
+                name="cost_method"
+                value={formData.cost_method || 'Average'}
+                onChange={handleChange}
+                options={costMethodOptions}
+                placeholder="Select cost method"
+                isDarkMode={isDarkMode}
+                themeColorRgb={themeColorRgb}
+                compactTrigger
+              />
+            </FormField>
             <p style={{
               fontSize: '12px',
               color: isDarkMode ? '#9ca3af' : '#6b7280',
@@ -412,38 +450,48 @@ function ItemForm({
         </h3>
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
-          <Select
-            label="Revenue Account"
-            name="income_account_id"
-            value={formData.income_account_id || ''}
-            onChange={handleChange}
-            options={revenueAccounts.map(acc => ({
-              value: acc.id,
-              label: `${acc.account_number ? acc.account_number + ' - ' : ''}${acc.account_name}`
-            }))}
-            placeholder="Select revenue account"
-            required
-            error={errors.income_account_id}
-          />
+          <FormField>
+            <FormLabel isDarkMode={isDarkMode} required>Revenue Account</FormLabel>
+            <CustomDropdown
+              name="income_account_id"
+              value={formData.income_account_id || ''}
+              onChange={handleChange}
+              options={revenueAccounts.map(acc => ({
+                value: acc.id,
+                label: `${acc.account_number ? acc.account_number + ' - ' : ''}${acc.account_name}`
+              }))}
+              placeholder="Select revenue account"
+              compactTrigger
+              isDarkMode={isDarkMode}
+              themeColorRgb={themeColorRgb}
+              error={errors.income_account_id}
+            />
+            {errors.income_account_id && <p style={{ marginTop: '4px', fontSize: '12px', color: '#ef4444' }}>{errors.income_account_id}</p>}
+          </FormField>
 
-          <Select
-            label="Expense/COGS Account"
-            name="expense_account_id"
-            value={formData.expense_account_id || ''}
-            onChange={handleChange}
-            options={expenseAccounts.map(acc => ({
-              value: acc.id,
-              label: `${acc.account_number ? acc.account_number + ' - ' : ''}${acc.account_name}`
-            }))}
-            placeholder="Select expense account"
-            required
-            error={errors.expense_account_id}
-          />
+          <FormField>
+            <FormLabel isDarkMode={isDarkMode} required>Expense/COGS Account</FormLabel>
+            <CustomDropdown
+              name="expense_account_id"
+              value={formData.expense_account_id || ''}
+              onChange={handleChange}
+              options={expenseAccounts.map(acc => ({
+                value: acc.id,
+                label: `${acc.account_number ? acc.account_number + ' - ' : ''}${acc.account_name}`
+              }))}
+              placeholder="Select expense account"
+              compactTrigger
+              isDarkMode={isDarkMode}
+              themeColorRgb={themeColorRgb}
+              error={errors.expense_account_id}
+            />
+            {errors.expense_account_id && <p style={{ marginTop: '4px', fontSize: '12px', color: '#ef4444' }}>{errors.expense_account_id}</p>}
+          </FormField>
 
           {isInventoryType && (
-            <div style={{ gridColumn: '1 / -1' }}>
-              <Select
-                label="Inventory Asset Account"
+            <FormField style={{ gridColumn: '1 / -1' }}>
+              <FormLabel isDarkMode={isDarkMode} required>Inventory Asset Account</FormLabel>
+              <CustomDropdown
                 name="asset_account_id"
                 value={formData.asset_account_id || ''}
                 onChange={handleChange}
@@ -452,10 +500,13 @@ function ItemForm({
                   label: `${acc.account_number ? acc.account_number + ' - ' : ''}${acc.account_name}`
                 }))}
                 placeholder="Select inventory asset account"
-                required
+                compactTrigger
+                isDarkMode={isDarkMode}
+                themeColorRgb={themeColorRgb}
                 error={errors.asset_account_id}
               />
-            </div>
+              {errors.asset_account_id && <p style={{ marginTop: '4px', fontSize: '12px', color: '#ef4444' }}>{errors.asset_account_id}</p>}
+            </FormField>
           )}
         </div>
       </div>
@@ -501,40 +552,35 @@ function ItemForm({
         </div>
 
         {formData.is_taxable && taxRates.length > 0 && (
-          <Select
-            label="Default Tax Rate"
-            name="tax_rate_id"
-            value={formData.tax_rate_id || ''}
-            onChange={handleChange}
-            options={[
-              { value: '', label: 'No default tax rate' },
-              ...taxRates.map(rate => ({
-                value: rate.id,
-                label: `${rate.tax_name || 'Tax'} (${rate.tax_rate || 0}%)`
-              }))
-            ]}
-          />
+          <FormField>
+            <FormLabel isDarkMode={isDarkMode}>Default Tax Rate</FormLabel>
+            <CustomDropdown
+              name="tax_rate_id"
+              value={formData.tax_rate_id || ''}
+              onChange={handleChange}
+              compactTrigger
+              options={[
+                { value: '', label: 'No default tax rate' },
+                ...taxRates.map(rate => ({
+                  value: rate.id,
+                  label: `${rate.tax_name || 'Tax'} (${rate.tax_rate || 0}%)`
+                }))
+              ]}
+              placeholder="Select tax rate"
+              isDarkMode={isDarkMode}
+              themeColorRgb={themeColorRgb}
+            />
+          </FormField>
         )}
       </div>
 
       {/* Actions */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '16px' }}>
-        <Button 
-          type="button" 
-          variant="secondary" 
-          onClick={onCancel} 
-          disabled={loading}
-        >
-          Cancel
-        </Button>
-        <Button 
-          type="submit" 
-          variant="primary" 
-          disabled={loading}
-        >
-          {loading ? 'Saving...' : item ? 'Update Item' : 'Create Item'}
-        </Button>
-      </div>
+      <FormModalActions
+        onCancel={onCancel}
+        primaryLabel={loading ? 'Saving...' : (item ? 'Update Item' : 'Create Item')}
+        primaryDisabled={loading}
+        primaryType="submit"
+      />
     </form>
   )
 }

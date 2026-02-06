@@ -10,14 +10,14 @@
   --accent: #00c853;
   --accent-dim: #00a843;
   --accent-glow: rgba(0, 200, 83, 0.2);
-  --accent-blue: #5eb8f0;
-  --accent-blue-dim: #4aa3dc;
+  --accent-blue: #6ba3f0;
+  --accent-blue-dim: #5a92d9;
   --danger: #ff5252;
   --radius: 16px;
   --radius-sm: 12px;
   --safe-top: env(safe-area-inset-top, 0);
   --safe-bottom: env(safe-area-inset-bottom, 0);
-  --font: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
 }
 
 *,
@@ -65,18 +65,3 @@ h1, h2, h3, p {
   font-variant-numeric: tabular-nums;
 }
 
-/* Bottom nav: gradient fade at top */
-.bottom-nav {
-  position: relative;
-}
-
-.bottom-nav::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
-  height: 64px;
-  background: linear-gradient(to bottom, transparent, var(--bg));
-  pointer-events: none;
-}

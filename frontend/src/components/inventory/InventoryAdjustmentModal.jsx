@@ -1,13 +1,26 @@
 import React, { useState } from 'react'
-import Input from '../common/Input'
-import Select from '../common/Select'
-import Button from '../common/Button'
+import { useTheme } from '../../contexts/ThemeContext'
+import CustomDropdown from '../common/CustomDropdown'
+import {
+  FormLabel,
+  FormField,
+  inputBaseStyle,
+  getInputFocusHandlers,
+  FormModalActions
+} from '../FormStyles'
+
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+}
 
 function InventoryAdjustmentModal({
   item,
   onSubmit,
   onCancel
 }) {
+  const { themeColor } = useTheme()
+  const themeColorRgb = hexToRgb(themeColor || '#8400ff')
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
 
   const [formData, setFormData] = useState({
@@ -99,76 +112,70 @@ function InventoryAdjustmentModal({
         </p>
       </div>
 
-      <Select
-        label="Adjustment Type"
-        name="adjustment_type"
-        value={formData.adjustment_type}
-        onChange={handleChange}
-        options={adjustmentTypeOptions}
-        required
-      />
+      <FormField>
+        <FormLabel isDarkMode={isDarkMode} required>Adjustment Type</FormLabel>
+        <CustomDropdown
+          name="adjustment_type"
+          value={formData.adjustment_type}
+          onChange={handleChange}
+          options={adjustmentTypeOptions}
+          placeholder="Select adjustment type"
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
+        />
+      </FormField>
 
-      <Input
-        label="Quantity to Adjust"
-        name="quantity"
-        type="number"
-        step="0.01"
-        value={formData.quantity || ''}
-        onChange={handleChange}
-        placeholder="0"
-        required
-        error={errors.quantity}
-      />
-
-      {formData.adjustment_type === 'increase' && (
-        <Input
-          label="Unit Cost (for valuation)"
-          name="unit_cost"
+      <FormField>
+        <FormLabel isDarkMode={isDarkMode} required>Quantity to Adjust</FormLabel>
+        <input
+          name="quantity"
           type="number"
           step="0.01"
-          value={formData.unit_cost || 0}
+          value={formData.quantity || ''}
           onChange={handleChange}
-          placeholder="0.00"
+          placeholder="0"
+          style={inputBaseStyle(isDarkMode, themeColorRgb)}
+          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
         />
+        {errors.quantity && <p style={{ marginTop: '4px', fontSize: '12px', color: '#ef4444' }}>{errors.quantity}</p>}
+      </FormField>
+
+      {formData.adjustment_type === 'increase' && (
+        <FormField>
+          <FormLabel isDarkMode={isDarkMode}>Unit Cost (for valuation)</FormLabel>
+          <input
+            name="unit_cost"
+            type="number"
+            step="0.01"
+            value={formData.unit_cost || 0}
+            onChange={handleChange}
+            placeholder="0.00"
+            style={inputBaseStyle(isDarkMode, themeColorRgb)}
+            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+          />
+        </FormField>
       )}
 
-      <div>
-        <label style={{
-          display: 'block',
-          fontSize: '14px',
-          fontWeight: 500,
-          color: isDarkMode ? '#ffffff' : '#374151',
-          marginBottom: '4px'
-        }}>
-          Reason <span style={{ color: '#dc2626' }}>*</span>
-        </label>
+      <FormField>
+        <FormLabel isDarkMode={isDarkMode} required>Reason</FormLabel>
         <textarea
           name="reason"
           value={formData.reason}
           onChange={handleChange}
           rows={3}
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            border: errors.reason 
-              ? '1px solid #dc2626' 
-              : `1px solid ${isDarkMode ? '#3a3a3a' : '#d1d5db'}`,
-            borderRadius: '6px',
-            backgroundColor: isDarkMode ? '#1f1f1f' : 'white',
-            color: isDarkMode ? '#ffffff' : '#1a1a1a',
-            fontSize: '14px',
-            outline: 'none',
-            resize: 'vertical'
-          }}
           placeholder="Physical count, damage, theft, found stock, etc."
-          required
+          style={{
+            ...inputBaseStyle(isDarkMode, themeColorRgb),
+            fontFamily: 'inherit',
+            resize: 'vertical',
+            ...(errors.reason && { border: '1px solid #ef4444' })
+          }}
+          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
         />
         {errors.reason && (
-          <p style={{ marginTop: '4px', fontSize: '14px', color: '#dc2626' }}>
-            {errors.reason}
-          </p>
+          <p style={{ marginTop: '4px', fontSize: '12px', color: '#ef4444' }}>{errors.reason}</p>
         )}
-      </div>
+      </FormField>
 
       <div style={{
         backgroundColor: isDarkMode ? '#2a2a2a' : '#f9fafb',
@@ -192,23 +199,12 @@ function InventoryAdjustmentModal({
         </p>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '16px' }}>
-        <Button 
-          type="button" 
-          variant="secondary" 
-          onClick={onCancel} 
-          disabled={loading}
-        >
-          Cancel
-        </Button>
-        <Button 
-          type="submit" 
-          variant="primary" 
-          disabled={loading}
-        >
-          {loading ? 'Adjusting...' : 'Record Adjustment'}
-        </Button>
-      </div>
+      <FormModalActions
+        onCancel={onCancel}
+        primaryLabel={loading ? 'Adjusting...' : 'Record Adjustment'}
+        primaryDisabled={loading}
+        primaryType="submit"
+      />
     </form>
   )
 }

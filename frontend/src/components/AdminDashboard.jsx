@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { Plus } from 'lucide-react';
 import { usePermissions } from '../contexts/PermissionContext';
 import { useTheme } from '../contexts/ThemeContext';
 import EmployeeForm from './EmployeeForm';
 import PermissionManager from './PermissionManager';
+import Table from './Table';
 
 function AdminDashboard() {
   const { hasPermission } = usePermissions();
@@ -189,73 +191,116 @@ function AdminDashboard() {
 
   return (
     <div style={{ padding: '0', maxWidth: '100%' }}>
+      <h1 style={{ 
+        fontSize: '24px', 
+        margin: '0 0 16px 0',
+        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+      }}>
+        Admin Dashboard
+      </h1>
+
+      {/* Tabs and Add Employee inline (Inventory category tab + Create style) */}
       <div style={{ 
         display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        marginBottom: '20px',
-        flexWrap: 'wrap',
-        gap: '12px'
+        flexWrap: 'nowrap',
+        gap: '8px', 
+        marginBottom: '20px', 
+        alignItems: 'center'
       }}>
-        <h1 style={{ 
-          fontSize: '24px', 
-          margin: 0,
-          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-        }}>
-          Admin Dashboard
-        </h1>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          {activeTab === 'employees' && hasPermission('add_employee') && (
-            <button 
-              onClick={handleAddEmployee}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                color: '#fff',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: 500,
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                boxShadow: `0 2px 8px rgba(${themeColorRgb}, 0.2)`
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.9)`
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
-              }}
-            >
-              Add Employee
-            </button>
-          )}
-          {activeTab === 'schedules' && (
-            <button 
-              onClick={loadSchedules}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: `rgba(${themeColorRgb}, 0.2)`,
-                color: '#fff',
-                border: `1px solid rgba(${themeColorRgb}, 0.3)`,
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: 500,
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                boxShadow: `0 2px 8px rgba(${themeColorRgb}, 0.1)`
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.3)`
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.2)`
-              }}
-            >
-              Refresh
-            </button>
-          )}
-        </div>
+        <button
+          onClick={() => setActiveTab('employees')}
+          style={{
+            padding: '4px 16px',
+            height: '28px',
+            display: 'flex',
+            alignItems: 'center',
+            whiteSpace: 'nowrap',
+            backgroundColor: activeTab === 'employees' ? `rgba(${themeColorRgb}, 0.7)` : (isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'),
+            border: activeTab === 'employees' ? `1px solid rgba(${themeColorRgb}, 0.5)` : `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: activeTab === 'employees' ? 600 : 500,
+            color: activeTab === 'employees' ? '#fff' : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'),
+            cursor: 'pointer',
+            transition: 'all 0.3s ease',
+            boxShadow: activeTab === 'employees' ? `0 4px 15px rgba(${themeColorRgb}, 0.3)` : 'none'
+          }}
+        >
+          Employees
+        </button>
+        <button
+          onClick={() => setActiveTab('schedules')}
+          style={{
+            padding: '4px 16px',
+            height: '28px',
+            display: 'flex',
+            alignItems: 'center',
+            whiteSpace: 'nowrap',
+            backgroundColor: activeTab === 'schedules' ? `rgba(${themeColorRgb}, 0.7)` : (isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'),
+            border: activeTab === 'schedules' ? `1px solid rgba(${themeColorRgb}, 0.5)` : `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: activeTab === 'schedules' ? 600 : 500,
+            color: activeTab === 'schedules' ? '#fff' : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'),
+            cursor: 'pointer',
+            transition: 'all 0.3s ease',
+            boxShadow: activeTab === 'schedules' ? `0 4px 15px rgba(${themeColorRgb}, 0.3)` : 'none'
+          }}
+        >
+          All Schedules
+        </button>
+        {activeTab === 'schedules' && (
+          <button
+            onClick={loadSchedules}
+            style={{
+              padding: '4px 16px',
+              height: '28px',
+              display: 'flex',
+              alignItems: 'center',
+              whiteSpace: 'nowrap',
+              backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+              border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: 500,
+              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease'
+            }}
+          >
+            Refresh
+          </button>
+        )}
+        {hasPermission('add_employee') && (
+          <button
+            onClick={handleAddEmployee}
+            style={{
+              padding: '4px 16px',
+              height: '28px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              whiteSpace: 'nowrap',
+              backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+              border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: 500,
+              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+              cursor: 'pointer',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+            }}
+          >
+            <Plus size={16} />
+            Employee
+          </button>
+        )}
       </div>
 
       {error && (
@@ -294,285 +339,43 @@ function AdminDashboard() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div style={{ 
-        display: 'flex', 
-        gap: '8px', 
-        marginBottom: '20px', 
-        borderBottom: isDarkMode ? '2px solid var(--border-light, #333)' : '2px solid #eee',
-        paddingBottom: '12px'
-      }}>
-        <button
-          onClick={() => setActiveTab('employees')}
-          style={{
-            padding: '10px 16px',
-            backgroundColor: activeTab === 'employees' ? `rgba(${themeColorRgb}, 0.7)` : `rgba(${themeColorRgb}, 0.2)`,
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-            border: activeTab === 'employees' ? '1px solid rgba(255, 255, 255, 0.3)' : `1px solid rgba(${themeColorRgb}, 0.3)`,
-            borderRadius: '8px',
-            fontSize: '14px',
-            fontWeight: activeTab === 'employees' ? 600 : 500,
-            color: '#fff',
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            boxShadow: activeTab === 'employees' ? `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)` : `0 2px 8px rgba(${themeColorRgb}, 0.1)`
-          }}
-        >
-          Employees
-        </button>
-        <button
-          onClick={() => setActiveTab('schedules')}
-          style={{
-            padding: '10px 16px',
-            backgroundColor: activeTab === 'schedules' ? `rgba(${themeColorRgb}, 0.7)` : `rgba(${themeColorRgb}, 0.2)`,
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-            border: activeTab === 'schedules' ? '1px solid rgba(255, 255, 255, 0.3)' : `1px solid rgba(${themeColorRgb}, 0.3)`,
-            borderRadius: '8px',
-            fontSize: '14px',
-            fontWeight: activeTab === 'schedules' ? 600 : 500,
-            color: '#fff',
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            boxShadow: activeTab === 'schedules' ? `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)` : `0 2px 8px rgba(${themeColorRgb}, 0.1)`
-          }}
-        >
-          All Schedules
-        </button>
-      </div>
-
       {activeTab === 'employees' && (
-        <div style={{ overflowX: 'auto' }}>
-        <table style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
-          borderRadius: '8px',
-          overflow: 'hidden'
-        }}>
-          <thead>
-            <tr style={{ 
-              backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5',
-              borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #ddd'
-            }}>
-              <th style={{ 
-                padding: '12px 16px', 
-                textAlign: 'left', 
-                fontWeight: 600,
-                fontSize: '14px',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-              }}>ID</th>
-              <th style={{ 
-                padding: '12px 16px', 
-                textAlign: 'left', 
-                fontWeight: 600,
-                fontSize: '14px',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-              }}>Name</th>
-              <th style={{ 
-                padding: '12px 16px', 
-                textAlign: 'left', 
-                fontWeight: 600,
-                fontSize: '14px',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-              }}>Username</th>
-              <th style={{ 
-                padding: '12px 16px', 
-                textAlign: 'left', 
-                fontWeight: 600,
-                fontSize: '14px',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-              }}>Email</th>
-              <th style={{ 
-                padding: '12px 16px', 
-                textAlign: 'left', 
-                fontWeight: 600,
-                fontSize: '14px',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-              }}>Position</th>
-              <th style={{ 
-                padding: '12px 16px', 
-                textAlign: 'left', 
-                fontWeight: 600,
-                fontSize: '14px',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-              }}>Role</th>
-              <th style={{ 
-                padding: '12px 16px', 
-                textAlign: 'left', 
-                fontWeight: 600,
-                fontSize: '14px',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-              }}>Status</th>
-              <th style={{ 
-                padding: '12px 16px', 
-                textAlign: 'left', 
-                fontWeight: 600,
-                fontSize: '14px',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-              }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {employees.map((employee) => (
-              <tr 
-                key={employee.employee_id}
-                style={{
-                  borderBottom: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #eee',
-                  transition: 'background-color 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f9f9f9'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                }}
-              >
-                <td style={{ 
-                  padding: '12px 16px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                  fontSize: '14px'
-                }}>{employee.employee_id}</td>
-                <td style={{ 
-                  padding: '12px 16px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                  fontSize: '14px'
-                }}>{employee.first_name} {employee.last_name}</td>
-                <td style={{ 
-                  padding: '12px 16px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                  fontSize: '14px'
-                }}>{employee.username || employee.employee_code || 'N/A'}</td>
-                <td style={{ 
-                  padding: '12px 16px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                  fontSize: '14px'
-                }}>{employee.email || 'N/A'}</td>
-                <td style={{ 
-                  padding: '12px 16px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                  fontSize: '14px'
-                }}>{employee.position}</td>
-                <td style={{ 
-                  padding: '12px 16px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                  fontSize: '14px'
-                }}>{getRoleName(employee.role_id)}</td>
-                <td style={{ 
-                  padding: '12px 16px',
-                  fontSize: '14px'
-                }}>
-                  <span style={{
-                    padding: '4px 12px',
-                    borderRadius: '12px',
-                    fontSize: '12px',
-                    fontWeight: 500,
-                    backgroundColor: employee.active 
-                      ? (isDarkMode ? 'rgba(46, 125, 50, 0.2)' : '#e8f5e9')
-                      : (isDarkMode ? 'rgba(198, 40, 40, 0.2)' : '#ffebee'),
-                    color: employee.active
-                      ? (isDarkMode ? '#81c784' : '#2e7d32')
-                      : (isDarkMode ? '#ef5350' : '#c62828')
-                  }}>
-                    {employee.active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td style={{ 
-                  padding: '12px 16px'
-                }}>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {hasPermission('edit_employee') && (
-                      <button
-                        onClick={() => handleEditEmployee(employee)}
-                        style={{
-                          padding: '6px 12px',
-                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f0f0f0',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                          borderRadius: '4px',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                          fontSize: '12px',
-                          fontWeight: 500,
-                          cursor: 'pointer',
-                          transition: 'all 0.2s'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3d3d3d)' : '#e0e0e0'
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f0f0f0'
-                        }}
-                      >
-                        Edit
-                      </button>
-                    )}
-                    {hasPermission('manage_permissions') && (
-                      <button
-                        onClick={() => handleManagePermissions(employee.employee_id)}
-                        style={{
-                          padding: '6px 12px',
-                          backgroundColor: `rgba(${themeColorRgb}, 0.2)`,
-                          border: `1px solid rgba(${themeColorRgb}, 0.3)`,
-                          borderRadius: '4px',
-                          color: isDarkMode ? '#fff' : '#333',
-                          fontSize: '12px',
-                          fontWeight: 500,
-                          cursor: 'pointer',
-                          transition: 'all 0.2s'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.3)`
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.2)`
-                        }}
-                      >
-                        Permissions
-                      </button>
-                    )}
-                    {hasPermission('delete_employee') && (
-                      <button
-                        onClick={() => handleDeleteEmployee(employee.employee_id)}
-                        disabled={!employee.active}
-                        style={{
-                          padding: '6px 12px',
-                          backgroundColor: !employee.active 
-                            ? (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f0f0f0')
-                            : (isDarkMode ? 'rgba(198, 40, 40, 0.2)' : '#fee'),
-                          border: !employee.active
-                            ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd')
-                            : (isDarkMode ? '1px solid rgba(198, 40, 40, 0.4)' : '1px solid #fcc'),
-                          borderRadius: '4px',
-                          color: !employee.active
-                            ? (isDarkMode ? 'var(--text-secondary, #999)' : '#999')
-                            : (isDarkMode ? '#ef5350' : '#c33'),
-                          fontSize: '12px',
-                          fontWeight: 500,
-                          cursor: !employee.active ? 'not-allowed' : 'pointer',
-                          transition: 'all 0.2s',
-                          opacity: !employee.active ? 0.5 : 1
-                        }}
-                        onMouseEnter={(e) => {
-                          if (employee.active) {
-                            e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(198, 40, 40, 0.3)' : '#fdd'
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (employee.active) {
-                            e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(198, 40, 40, 0.2)' : '#fee'
-                          }
-                        }}
-                      >
-                        Deactivate
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+        <div style={{ overflowX: 'auto', marginTop: '20px' }}>
+          <Table
+            columns={['employee_id', 'name', 'username', 'email', 'position', 'role', 'status', 'actions']}
+            data={employees.map((emp) => ({
+              ...emp,
+              name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
+              username: emp.username || emp.employee_code || 'N/A',
+              email: emp.email || 'N/A',
+              role: getRoleName(emp.role_id),
+              status: emp.active ? 'Active' : 'Inactive'
+            }))}
+            getRowId={(row) => row.employee_id}
+            actionsAsEllipsis
+            themeColorRgb={themeColorRgb}
+            ellipsisMenuItems={(row) => {
+              const items = [];
+              if (hasPermission('edit_employee')) {
+                items.push({ label: 'Edit', onClick: () => handleEditEmployee(row) });
+              }
+              if (hasPermission('manage_permissions')) {
+                items.push({ label: 'Permissions', onClick: () => handleManagePermissions(row.employee_id) });
+              }
+              if (hasPermission('delete_employee') && row.active) {
+                items.push({
+                  label: 'Deactivate',
+                  onClick: () => handleDeleteEmployee(row.employee_id),
+                  confirm: true,
+                  confirmMessage: 'Are you sure you want to deactivate this employee?',
+                  confirmButtonLabel: 'Deactivate',
+                  confirmDanger: true
+                });
+              }
+              return items;
+            }}
+          />
+        </div>
       )}
 
       {activeTab === 'schedules' && (

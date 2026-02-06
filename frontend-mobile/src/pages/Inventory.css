@@ -251,7 +251,10 @@
   bottom: 0;
   left: 0;
   right: 0;
-  background: var(--bg);
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(255, 255, 255, 0.6);
 }
 
 .inventory-page .nav-item--active {

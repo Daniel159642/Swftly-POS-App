@@ -10,7 +10,52 @@ from collections import defaultdict
 import json
 from typing import List, Dict, Tuple, Optional, Any
 import psycopg2.extras
-from database import get_connection
+from database import get_connection, get_store_location_settings
+
+
+def _store_hours_for_scheduler() -> Dict[str, Optional[Tuple[str, str]]]:
+    """
+    Return store open/close per day for schedule generation.
+    Keys: 'monday', 'tuesday', ... 'sunday'. Value: (open_time, close_time) as 'HH:MM' or None if closed.
+    """
+    settings = get_store_location_settings()
+    if not settings or not settings.get('store_hours'):
+        return {
+            'monday': ('09:00', '17:00'), 'tuesday': ('09:00', '17:00'),
+            'wednesday': ('09:00', '17:00'), 'thursday': ('09:00', '17:00'),
+            'friday': ('09:00', '17:00'), 'saturday': ('09:00', '17:00'),
+            'sunday': ('09:00', '17:00')
+        }
+    out = {}
+    for day in ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'):
+        day_data = settings['store_hours'].get(day)
+        if not day_data or day_data.get('closed'):
+            out[day] = None
+        else:
+            open_t = day_data.get('open') or '09:00'
+            close_t = day_data.get('close') or '17:00'
+            out[day] = (open_t, close_t)
+    return out
+
+
+def _clamp_time_to_range(t: str, open_t: str, close_t: str) -> str:
+    """Clamp time string 'HH:MM' to be within [open_t, close_t]. Returns 'HH:MM'."""
+    def to_minutes(s: str) -> int:
+        parts = s.split(':')
+        h = int(parts[0]) if len(parts) > 0 else 0
+        m = int(parts[1]) if len(parts) > 1 else 0
+        return h * 60 + m
+    def from_minutes(m: int) -> str:
+        h, m = divmod(max(0, m), 60)
+        return f"{h:02d}:{m:02d}"
+    tm = to_minutes(t)
+    lo = to_minutes(open_t)
+    hi = to_minutes(close_t)
+    if tm < lo:
+        return open_t
+    if tm > hi:
+        return close_t
+    return t
 
 
 def _serialize_for_json(obj: Any) -> Any:
@@ -143,6 +188,7 @@ class AutomatedScheduleGenerator:
         
         requirements = self._get_schedule_requirements(cursor)
         time_off = self._get_time_off_requests(cursor, week_start_date, week_end_date)
+        store_hours_map = _store_hours_for_scheduler()
         
         # Generate shifts for each day
         all_shifts = []
@@ -164,10 +210,11 @@ class AutomatedScheduleGenerator:
                 employees, day_name, current_date, time_off, employee_shifts
             )
             
-            # Generate shifts for this day
+            # Generate shifts for this day (only within store hours)
             day_shifts = self._generate_day_shifts(
-                current_date, day_name, day_requirements, 
-                available_today, employee_hours, employee_shifts, settings
+                current_date, day_name, day_requirements,
+                available_today, employee_hours, employee_shifts, settings,
+                store_hours_map.get(day_name)
             )
             
             all_shifts.extend(day_shifts)
@@ -400,17 +447,27 @@ class AutomatedScheduleGenerator:
         
         return available
     
-    def _generate_day_shifts(self, date, day_name, requirements, 
-                            available_employees, employee_hours, 
-                            employee_shifts, settings):
-        """Generate shifts for a specific day"""
-        
+    def _generate_day_shifts(self, date, day_name, requirements,
+                            available_employees, employee_hours,
+                            employee_shifts, settings, store_hours_for_day=None):
+        """Generate shifts for a specific day. store_hours_for_day is (open_str, close_str) or None if closed."""
         shifts = []
-        
-        # Group requirements by time blocks
-        time_blocks = self._create_time_blocks(requirements)
-        
-        # If no requirements, create default time blocks based on availability
+        if store_hours_for_day is None:
+            return shifts
+        day_open, day_close = store_hours_for_day
+
+        def clamp_shift_start_end(st: str, en: str) -> Tuple[str, str]:
+            return _clamp_time_to_range(st, day_open, day_close), _clamp_time_to_range(en, day_open, day_close)
+
+        # Group requirements by time blocks and clamp to store hours
+        raw_blocks = self._create_time_blocks(requirements)
+        time_blocks = []
+        for b in raw_blocks:
+            st, en = clamp_shift_start_end(b['start_time'], b['end_time'])
+            if st < en:
+                time_blocks.append({**b, 'start_time': st, 'end_time': en})
+
+        # If no requirements, create default time blocks based on availability (within store hours)
         if not time_blocks and available_employees:
             # Create default shifts for available employees
             min_employees = settings.get('min_employees_per_shift', 1)
@@ -440,19 +497,21 @@ class AutomatedScheduleGenerator:
                         'end_time': end_time
                     })
             
-            # If no specific times, use default
+            # If no specific times, use store hours as default
             if not employees_by_time:
-                employees_by_time['09:00-17:00'] = [{
+                employees_by_time[f'{day_open}-{day_close}'] = [{
                     'employee': emp,
-                    'start_time': '09:00',
-                    'end_time': '17:00'
+                    'start_time': day_open,
+                    'end_time': day_close
                 } for emp in available_employees[:max_employees]]
             
-            # Create shifts for each time block
+            # Create shifts for each time block (clamped to store hours)
             for time_key, emp_list in employees_by_time.items():
-                start_time = emp_list[0]['start_time']
-                end_time = emp_list[0]['end_time']
-                
+                start_time, end_time = clamp_shift_start_end(
+                    emp_list[0]['start_time'], emp_list[0]['end_time']
+                )
+                if start_time >= end_time:
+                    continue
                 # Select employees for this shift
                 num_employees = min(max(min_employees, len(emp_list)), max_employees)
                 selected_employees = emp_list[:num_employees]

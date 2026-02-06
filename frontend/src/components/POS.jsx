@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePermissions, ProtectedComponent } from '../contexts/PermissionContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { useToast } from '../contexts/ToastContext'
 import BarcodeScanner from './BarcodeScanner'
 import CustomerDisplayPopup from './CustomerDisplayPopup'
-import { ScanBarcode, UserPlus, CheckCircle, Gift, X, AlertCircle } from 'lucide-react'
-import { formLabelStyle, inputBaseStyle, getInputFocusHandlers } from './FormStyles'
+import { ScanBarcode, UserPlus, CheckCircle, Gift, X, AlertCircle, Percent, Check, Pencil } from 'lucide-react'
+import { formLabelStyle, formModalStyle, inputBaseStyle, getInputFocusHandlers, FormModalActions } from './FormStyles'
 
 function POS({ employeeId, employeeName }) {
   const navigate = useNavigate()
@@ -66,6 +66,7 @@ function POS({ employeeId, employeeName }) {
   const [showSummary, setShowSummary] = useState(false) // Show transaction summary before payment
   const [selectedTip, setSelectedTip] = useState(0) // Tip amount selected by customer
   const [orderType, setOrderType] = useState(null) // 'pickup', 'delivery', or null
+  const [customerInfoConfirmed, setCustomerInfoConfirmed] = useState(false) // when true, hide pickup/delivery form and show summary only
   const [payAtPickupOrDelivery, setPayAtPickupOrDelivery] = useState(false) // true = pay when pickup/delivery (order placed with payment pending)
   const [orderPlacedPayLater, setOrderPlacedPayLater] = useState(null) // { orderId, orderNumber, total } after placing pay-later order
   const [orderToPayFromScan, setOrderToPayFromScan] = useState(null) // legacy: modal "Mark as paid (cash)" only
@@ -92,13 +93,30 @@ function POS({ employeeId, employeeName }) {
   const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [showCreateCustomer, setShowCreateCustomer] = useState(false)
   const [showRewardsModal, setShowRewardsModal] = useState(false)
+  const [showEditCustomerModal, setShowEditCustomerModal] = useState(false)
+  const [editCustomerForm, setEditCustomerForm] = useState({ customer_name: '', email: '', phone: '', address: '' })
   const [customerRewardsDetail, setCustomerRewardsDetail] = useState(null)
   const [pointsToUse, setPointsToUse] = useState('')
   const [rewardsDetailLoading, setRewardsDetailLoading] = useState(false)
+  const [showDiscountModal, setShowDiscountModal] = useState(false)
+  const [discountInput, setDiscountInput] = useState('')
+  const [orderDiscount, setOrderDiscount] = useState(0)
+  const [orderDiscountType, setOrderDiscountType] = useState('') // 'student' | 'employee' | 'senior' | 'military' | 'other' | ''
+  // Preset discount scenarios (label and percent)
+  const DISCOUNT_PRESETS = [
+    { id: 'student', label: 'Student', percent: 10 },
+    { id: 'employee', label: 'Employee', percent: 15 },
+    { id: 'senior', label: 'Senior', percent: 10 },
+    { id: 'military', label: 'Military', percent: 10 }
+  ]
   // POS intelligent search: space-separated tokens become filter chips (size, topping, etc.) – configurable for any product type
   const [searchFilterChips, setSearchFilterChips] = useState([])
   const [posSearchFilters, setPosSearchFilters] = useState(null)
   const [pendingQuantityForChip, setPendingQuantityForChip] = useState(null) // e.g. "½" when user typed "1/2 " before next word
+  // Transaction fee: settings from pos + accounting; method set when customer picks Cash/Card
+  const [transactionFeeSettings, setTransactionFeeSettings] = useState({ rates: {}, mode: 'additional', charge_cash: false })
+  const [paymentMethodForFee, setPaymentMethodForFee] = useState(null) // 'cash' | 'credit_card' | null
+  const searchInputRef = useRef(null) // focus after scan so scanner's Enter doesn't trigger Pay
 
   // Default filter config so intelligent search works even if API fails (sm, roni, 1/2 pep, etc.)
   const DEFAULT_POS_FILTERS = {
@@ -178,17 +196,63 @@ function POS({ employeeId, employeeName }) {
     }
   }, [])
 
-  // Fetch all products and categories on mount and when window gains focus
-  useEffect(() => {
-    fetchAllProducts()
-    loadRewardsSettings()
-    // Load configurable POS search filters (size/topping/modifier abbrevs for pizza, drinks, bouquets, etc.)
-    fetch('/api/pos-search-filters')
-      .then(res => res.json())
-      .then(data => { if (data.success && data.data) setPosSearchFilters(data.data) })
-      .catch(() => {})
+  // Single bootstrap request for POS load (products, categories, filters, rewards) – one round-trip instead of 4
+  const loadBootstrap = async () => {
+    setLoading(true)
+    try {
+      const response = await fetch('/api/pos-bootstrap')
+      const data = await response.json()
+      if (data.success) {
+        if (data.inventory?.data) {
+          setAllProducts(data.inventory.data)
+          const rawPaths = (data.inventory.data || [])
+            .map(p => p.category)
+            .filter(cat => cat && cat.trim() !== '')
+          const pathPrefixes = (path) => {
+            if (!path || typeof path !== 'string') return []
+            const parts = path.split(' > ').map(p => p.trim()).filter(Boolean)
+            const out = []
+            for (let i = 1; i <= parts.length; i++) out.push(parts.slice(0, i).join(' > '))
+            return out
+          }
+          setCategories([...new Set(rawPaths.flatMap(pathPrefixes))].sort())
+        }
+        if (data.posSearchFilters) setPosSearchFilters(data.posSearchFilters)
+        if (data.rewardsSettings) {
+          setRewardsSettings(prev => ({
+            ...prev,
+            enabled: data.rewardsSettings.enabled === 1 || data.rewardsSettings.enabled === true,
+            require_email: data.rewardsSettings.require_email === 1 || data.rewardsSettings.require_email === true,
+            require_phone: data.rewardsSettings.require_phone === 1 || data.rewardsSettings.require_phone === true,
+            require_both: data.rewardsSettings.require_both === 1 || data.rewardsSettings.require_both === true,
+            reward_type: data.rewardsSettings.reward_type || 'points',
+            points_per_dollar: parseFloat(data.rewardsSettings.points_per_dollar) || 1.0,
+            points_redemption_value: parseFloat(data.rewardsSettings.points_redemption_value) || 0.01
+          }))
+        }
+        if (data.posSettings) {
+          setTransactionFeeSettings(prev => ({
+            ...prev,
+            mode: (data.posSettings.transaction_fee_mode || 'additional').toLowerCase(),
+            charge_cash: !!data.posSettings.transaction_fee_charge_cash
+          }))
+        }
+      }
+    } catch (err) {
+      console.error('Error loading POS bootstrap:', err)
+      // Fallback to separate requests if bootstrap fails
+      fetchAllProducts()
+      loadRewardsSettings()
+      fetch('/api/pos-search-filters').then(res => res.json()).then(d => { if (d.success && d.data) setPosSearchFilters(d.data) }).catch(() => {})
+    } finally {
+      setLoading(false)
+    }
+  }
 
-    // Refresh products when window gains focus (user switches back to POS tab)
+  // Fetch bootstrap on mount and refresh products on window focus
+  useEffect(() => {
+    loadBootstrap()
+
     const handleFocus = () => {
       fetchAllProducts()
     }
@@ -211,6 +275,30 @@ function POS({ employeeId, employeeName }) {
         document.head.removeChild(style)
       }
     }
+  }, [])
+
+  // Load accounting fee rates when logged in (mode/charge_cash come from bootstrap posSettings)
+  useEffect(() => {
+    let cancelled = false
+    const token = localStorage.getItem('sessionToken')
+    const load = async () => {
+      try {
+        const defaultRates = { credit_card: 0.029, debit_card: 0.015, mobile_payment: 0.026, cash: 0, check: 0, store_credit: 0 }
+        if (!token) {
+          if (!cancelled) setTransactionFeeSettings(prev => ({ ...prev, rates: defaultRates }))
+          return
+        }
+        const accRes = await fetch('/api/accounting/settings', { headers: { 'X-Session-Token': token } })
+        const accData = accRes.ok ? await accRes.json() : {}
+        if (cancelled) return
+        const rates = accData.data?.transaction_fee_rates || defaultRates
+        setTransactionFeeSettings(prev => ({ ...prev, rates }))
+      } catch (e) {
+        if (!cancelled) setTransactionFeeSettings(prev => ({ ...prev }))
+      }
+    }
+    load()
+    return () => { cancelled = true }
   }, [])
 
   const loadRewardsSettings = async () => {
@@ -689,17 +777,62 @@ function POS({ employeeId, employeeName }) {
           return
         }
 
-        // Check if barcode is an order number (pay-later order to complete payment)
-        // Scanners often corrupt chars (e.g. "ORD#,4:"!/-, (" instead of ORD-20250201-0001); try digits-only as order_id
+        // Check if barcode is an order number (store credit receipt OR pay-later order to complete payment)
+        // Only treat as order when it contains "ORD" or is a short digit string (order_id); long digit-only = product barcode (UPC/EAN)
         const digitsOnly = (rawBarcode.replace(/\D/g, '') || '')
-        const looksLikeOrderNumber = /ORD/i.test(rawBarcode) || /^\d+$/.test(cleanedOrderBarcode) || extractedOrderNumber || (digitsOnly.length > 0 && digitsOnly.length <= 12)
-        const orderSearchVariants = []
-        if (extractedOrderNumber) orderSearchVariants.push({ type: 'order_number', value: extractedOrderNumber })
-        if (cleanedOrderBarcode && cleanedOrderBarcode.toUpperCase().startsWith('ORD')) orderSearchVariants.push({ type: 'order_number', value: cleanedOrderBarcode })
-        orderSearchVariants.push({ type: 'order_number', value: rawBarcode })
-        if (digitsOnly) orderSearchVariants.push({ type: 'order_id', value: digitsOnly })
-        if (/^\d+$/.test(cleanedOrderBarcode)) orderSearchVariants.push({ type: 'order_id', value: cleanedOrderBarcode })
+        const looksLikeOrderNumber = /ORD/i.test(rawBarcode) || extractedOrderNumber || (/^\d+$/.test(cleanedOrderBarcode) && cleanedOrderBarcode.length <= 10)
+        // Build order number variants: try exact scan first (e.g. ORD-20260205-211812), then normalized forms
+        const orderNumVariants = [cleanedOrderBarcode, rawBarcode, extractedOrderNumber].filter(Boolean)
+        const ordDigits = cleanedOrderBarcode.replace(/^ORD/i, '').replace(/-/g, '')
+        if (ordDigits.length >= 9 && /^ORD/i.test(cleanedOrderBarcode)) {
+          const withDashes = `ORD-${ordDigits.slice(0, 8)}-${ordDigits.slice(8)}`
+          if (!orderNumVariants.includes(withDashes)) orderNumVariants.push(withDashes)
+        }
         if (looksLikeOrderNumber) {
+          // Only try variants that look like valid order numbers (avoid mangled scanner data like ORD#",4:"%/-)
+          const validOrderNum = (s) => typeof s === 'string' && s.length >= 3 && /^[A-Za-z0-9\-]+$/.test(s)
+          const variantsToTry = orderNumVariants.filter(validOrderNum)
+          if (variantsToTry.length === 0 && cleanedOrderBarcode) variantsToTry.push(cleanedOrderBarcode)
+          for (const orderNum of variantsToTry) {
+            if (!orderNum || orderNum.length < 3) continue
+            try {
+              const storeCreditRes = await fetch(`/api/store_credit/by_order/${encodeURIComponent(orderNum)}`)
+              const storeCreditData = await storeCreditRes.json()
+              if (storeCreditData.success && storeCreditData.credit) {
+                const credit = storeCreditData.credit
+                const existingCredit = cart.find(item => item.is_exchange_credit && item.exchange_credit_id === credit.transaction_id)
+                if (existingCredit) {
+                  showToast('Store credit from this order is already in cart', 'error')
+                  return
+                }
+                setCart(prevCart => [...prevCart, {
+                  product_id: 'EXCHANGE_CREDIT',
+                  product_name: 'Store Credit',
+                  sku: credit.credit_number || `EXC-order-${credit.order_id}`,
+                  unit_price: -credit.amount,
+                  quantity: 1,
+                  available_quantity: 999,
+                  is_exchange_credit: true,
+                  exchange_credit_id: credit.transaction_id,
+                  exchange_return_id: credit.return_id
+                }])
+                setShowSummary(false)
+                setShowCustomerDisplay(false)
+                showToast(`Store credit $${credit.amount.toFixed(2)} (order ${credit.order_number || orderNum}) added to cart`, 'success')
+                setTimeout(() => searchInputRef.current?.focus(), 0)
+                return
+              }
+            } catch (e) {
+              console.error('Store credit by order lookup:', e)
+            }
+          }
+          // No store credit for this barcode: try loading as pay-later order (order search)
+          const orderSearchVariants = []
+          if (extractedOrderNumber) orderSearchVariants.push({ type: 'order_number', value: extractedOrderNumber })
+          if (cleanedOrderBarcode && cleanedOrderBarcode.toUpperCase().startsWith('ORD')) orderSearchVariants.push({ type: 'order_number', value: cleanedOrderBarcode })
+          orderSearchVariants.push({ type: 'order_number', value: rawBarcode })
+          if (digitsOnly) orderSearchVariants.push({ type: 'order_id', value: digitsOnly })
+          if (/^\d+$/.test(cleanedOrderBarcode)) orderSearchVariants.push({ type: 'order_id', value: cleanedOrderBarcode })
           for (const { type, value } of orderSearchVariants) {
             if (!value) continue
             if (type === 'order_id' ? value.length < 1 : value.length < 3) continue
@@ -709,63 +842,43 @@ function POS({ employeeId, employeeName }) {
               const orderData = await orderRes.json()
               const order = Array.isArray(orderData.data) && orderData.data.length > 0 ? orderData.data[0] : orderData.data
               if (order) {
-                if ((order.payment_status || 'completed').toLowerCase() === 'pending') {
-                  setShowBarcodeScanner(false)
-                  try {
-                    const itemsRes = await fetch(`/api/order_items?order_id=${order.order_id}`)
-                    const itemsData = await itemsRes.json()
-                    const orderItems = itemsData.data || []
-                    const cartItems = orderItems.map(oi => ({
-                      product_id: oi.product_id,
-                      product_name: oi.product_name || `Product ${oi.product_id}`,
-                      sku: oi.sku || '',
-                      unit_price: parseFloat(oi.unit_price) || 0,
-                      quantity: parseInt(oi.quantity) || 1,
-                      available_quantity: 0,
-                      variant_id: oi.variant_id != null ? Number(oi.variant_id) : null,
-                      variant_name: oi.variant_name || null,
-                      notes: oi.notes || null,
-                      discount: parseFloat(oi.discount) || 0,
-                      tax_rate: parseFloat(oi.tax_rate) != null ? parseFloat(oi.tax_rate) : 0.08
-                    }))
-                    setCart(cartItems)
-                    setPayingForOrderId(order.order_id)
-                    setPayingForOrderNumber(order.order_number || String(order.order_id))
-                    if (order.order_type) setOrderType(order.order_type)
-                    setShowCustomerDisplay(true)
-                    if (order.customer_id) {
-                      const custRes = await fetch(`/api/customers/${order.customer_id}`)
-                      const custJson = await custRes.json()
-                      const cust = custJson?.data || custJson
-                      if (cust && (cust.customer_id != null || custJson.success)) {
-                        setSelectedCustomer({
-                          customer_id: cust.customer_id ?? order.customer_id,
-                          customer_name: cust.customer_name || order.customer_name || 'Customer',
-                          email: cust.email,
-                          phone: cust.phone,
-                          loyalty_points: cust.loyalty_points
-                        })
-                        setCustomerInfo({
-                          name: cust.customer_name || '',
-                          email: cust.email || '',
-                          phone: cust.phone || '',
-                          address: cust.address || ''
-                        })
-                      } else {
-                        setSelectedCustomer({ customer_id: order.customer_id, customer_name: order.customer_name || 'Customer' })
-                      }
-                    } else {
-                      setSelectedCustomer(null)
-                      setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                // Before loading any order for payment: if this order has store credit, add credit to cart only (don't open checkout)
+                const canonicalOrderNum = order.order_number ?? (order.order_id != null ? String(order.order_id) : '')
+                if (canonicalOrderNum) {
+                try {
+                  const storeCreditCheck = await fetch(`/api/store_credit/by_order/${encodeURIComponent(canonicalOrderNum)}`)
+                  const storeCreditCheckData = await storeCreditCheck.json()
+                  if (storeCreditCheckData.success && storeCreditCheckData.credit) {
+                    const credit = storeCreditCheckData.credit
+                    const existingCredit = cart.find(item => item.is_exchange_credit && item.exchange_credit_id === credit.transaction_id)
+                    if (!existingCredit) {
+                      setCart(prev => [...prev, {
+                        product_id: 'EXCHANGE_CREDIT',
+                        product_name: 'Store Credit',
+                        sku: credit.credit_number || `EXC-order-${credit.order_id}`,
+                        unit_price: -credit.amount,
+                        quantity: 1,
+                        available_quantity: 999,
+                        is_exchange_credit: true,
+                        exchange_credit_id: credit.transaction_id,
+                        exchange_return_id: credit.return_id
+                      }])
+                      setShowSummary(false)
+                      setShowCustomerDisplay(false)
+                      showToast(`Store credit $${credit.amount.toFixed(2)} added to cart`, 'success')
+                      setTimeout(() => searchInputRef.current?.focus(), 0)
+                      return
                     }
-                    showToast(`Order #${order.order_number || order.order_id} loaded — add items if needed, then press Pay to complete payment`, 'success')
-                  } catch (loadErr) {
-                    console.error('Error loading order into POS:', loadErr)
-                    showToast('Failed to load order', 'error')
                   }
-                  return
+                } catch (e) { /* ignore */ }
                 }
-                showToast(`Order #${order.order_number || order.order_id} is already paid`, 'success')
+                // Scanning an order barcode = store credit receipt only. Never open checkout or load order for payment.
+                const orderLabel = order.order_number || order.order_id || 'order'
+                if ((order.payment_status || 'completed').toLowerCase() === 'pending') {
+                  showToast(`No store credit for ${orderLabel}. Use Recent Orders to pay for this order.`, 'error')
+                } else {
+                  showToast(`No store credit for ${orderLabel} (already paid).`, 'error')
+                }
                 return
               }
             } catch (orderErr) {
@@ -801,8 +914,10 @@ function POS({ employeeId, employeeName }) {
                 exchange_credit_id: credit.transaction_id,
                 exchange_return_id: credit.return_id
               }])
-              
+              setShowSummary(false)
+              setShowCustomerDisplay(false)
               showToast(`Exchange credit of $${credit.amount.toFixed(2)} added to cart`, 'success')
+              setTimeout(() => searchInputRef.current?.focus(), 0)
               return
             }
           } catch (creditErr) {
@@ -908,9 +1023,23 @@ function POS({ employeeId, employeeName }) {
   }
 
   const calculateTotal = () => {
-    // Exchange credit (negative price) is already included in subtotal
-    return calculateSubtotal() + calculateTax()
+    // Exchange credit (negative price) is already included in subtotal; order discount reduces total
+    const beforeDiscount = calculateSubtotal() + calculateTax()
+    return Math.max(0, beforeDiscount - (orderDiscount || 0))
   }
+
+  // Transaction fee for display (depends on payment method and pos_settings)
+  const calculateTransactionFee = () => {
+    const preFee = calculateTotal()
+    const { rates, mode, charge_cash } = transactionFeeSettings
+    if (!paymentMethodForFee || mode === 'included' || mode === 'none') return 0
+    const method = paymentMethodForFee === 'credit_card' ? 'credit_card' : paymentMethodForFee === 'cash' ? 'cash' : 'credit_card'
+    if (method === 'cash' && !charge_cash) return 0
+    const rate = rates[method] != null ? Number(rates[method]) : 0
+    return Math.round(preFee * rate * 100) / 100
+  }
+
+  const getTotalWithFee = () => calculateTotal() + calculateTransactionFee()
   
   // Get exchange credit amount if present
   const getExchangeCredit = () => {
@@ -918,14 +1047,78 @@ function POS({ employeeId, employeeName }) {
     return creditItem ? Math.abs(parseFloat(creditItem.unit_price) * creditItem.quantity) : 0
   }
 
+  // Total before applying exchange credit (for "remaining" calculation)
+  const getTotalBeforeExchangeCredit = () => {
+    const subtotalNoCredit = cart
+      .filter(item => !item.is_exchange_credit)
+      .reduce((sum, item) => sum + (parseFloat(item.unit_price) || 0) * (item.quantity || 0), 0)
+    const taxNoCredit = subtotalNoCredit * taxRate
+    const beforeFee = Math.max(0, subtotalNoCredit + taxNoCredit - (orderDiscount || 0))
+    const fee = (() => {
+      const { rates, mode, charge_cash } = transactionFeeSettings
+      if (!paymentMethodForFee || mode === 'included' || mode === 'none') return 0
+      const method = paymentMethodForFee === 'credit_card' ? 'credit_card' : paymentMethodForFee === 'cash' ? 'cash' : 'credit_card'
+      if (method === 'cash' && !charge_cash) return 0
+      const rate = rates[method] != null ? Number(rates[method]) : 0
+      return Math.round(beforeFee * rate * 100) / 100
+    })()
+    return beforeFee + fee + (selectedTip || 0)
+  }
+
+  // When credit exceeds order total, amount that rolls over (for display below Total)
+  const getExchangeCreditRemaining = () => {
+    const credit = getExchangeCredit()
+    if (credit <= 0) return 0
+    const totalBeforeCredit = getTotalBeforeExchangeCredit()
+    const amountUsed = Math.min(credit, totalBeforeCredit)
+    return Math.round((credit - amountUsed) * 100) / 100
+  }
+
   const calculateTotalWithTip = () => {
-    return calculateTotal() + selectedTip
+    return getTotalWithFee() + selectedTip
   }
 
   const calculateChange = () => {
     const paid = parseFloat(amountPaid) || 0
     const totalWithTip = calculateTotalWithTip()
     return paid - totalWithTip
+  }
+
+  const applyPresetDiscount = (preset) => {
+    const beforeDiscount = calculateSubtotal() + calculateTax()
+    const amount = Math.min((beforeDiscount * preset.percent) / 100, Math.max(0, beforeDiscount))
+    setOrderDiscount(Math.round(amount * 100) / 100)
+    setOrderDiscountType(preset.id)
+    setShowDiscountModal(false)
+    setDiscountInput('')
+    showToast(`${preset.label} (${preset.percent}%): $${amount.toFixed(2)}`, 'success')
+  }
+
+  const applyDiscountFromModal = () => {
+    const raw = (discountInput || '').trim()
+    if (!raw) {
+      setOrderDiscount(0)
+      setOrderDiscountType('')
+      setShowDiscountModal(false)
+      setDiscountInput('')
+      showToast('Discount cleared', 'success')
+      return
+    }
+    const beforeDiscount = calculateSubtotal() + calculateTax()
+    const isPercent = raw.endsWith('%')
+    const value = parseFloat(isPercent ? raw.slice(0, -1).trim() : raw)
+    if (Number.isNaN(value) || value < 0) {
+      showToast('Enter a valid amount or percentage', 'error')
+      return
+    }
+    let amount = isPercent ? (beforeDiscount * value) / 100 : value
+    const maxDiscount = Math.max(0, beforeDiscount)
+    amount = Math.min(Math.max(0, amount), maxDiscount)
+    setOrderDiscount(Math.round(amount * 100) / 100)
+    setOrderDiscountType('other')
+    setShowDiscountModal(false)
+    setDiscountInput('')
+    showToast(amount > 0 ? `Discount applied: $${amount.toFixed(2)}` : 'Discount cleared', 'success')
   }
 
   const handleDismissChange = () => {
@@ -937,6 +1130,8 @@ function POS({ employeeId, employeeName }) {
     } else {
       // If payment wasn't completed, reset everything
       setCart([])
+      setOrderDiscount(0)
+      setOrderDiscountType('')
       setSearchTerm('')
       setShowPaymentForm(false)
       setAmountPaid('')
@@ -1075,17 +1270,21 @@ function POS({ employeeId, employeeName }) {
   }
 
   const handleReceiptSelect = () => {
-      // Clear cart if payment was completed
+      // Clear cart if payment was completed (called when customer chose receipt on display or when cashier clicks Done)
       if (paymentCompleted) {
         setCart([])
+        setOrderDiscount(0)
+        setOrderDiscountType('')
         setSearchTerm('')
         setAmountPaid('')
         setPaymentCompleted(false)
         setSelectedTip(0) // Reset tip
         setOrderType(null) // Reset order type
         setCustomerInfo({ name: '', email: '', phone: '', address: '' }) // Reset customer info
+        setCustomerInfoConfirmed(false)
         setShowCustomerDisplay(false)
         setShowPaymentForm(false)
+        setShowChangeScreen(false) // No "Show Receipt Options" when they already chose on customer display
       }
   }
 
@@ -1209,10 +1408,59 @@ function POS({ employeeId, employeeName }) {
   const handleClearCustomer = () => {
     setSelectedCustomer(null)
     setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+    setCustomerInfoConfirmed(false)
+    setPayAtPickupOrDelivery(false)
     setCustomerSearchTerm('')
     setCustomerSearchResults([])
     setShowRewardsModal(false)
+    setShowEditCustomerModal(false)
     setCart(prev => prev.filter(item => !item.is_points_redemption))
+  }
+
+  const handleOpenEditCustomer = () => {
+    if (!selectedCustomer) return
+    setEditCustomerForm({
+      customer_name: selectedCustomer.customer_name || customerInfo.name || '',
+      email: selectedCustomer.email || customerInfo.email || '',
+      phone: selectedCustomer.phone || customerInfo.phone || '',
+      address: selectedCustomer.address || customerInfo.address || ''
+    })
+    setShowEditCustomerModal(true)
+  }
+
+  const handleSaveEditCustomer = async () => {
+    if (!selectedCustomer?.customer_id) return
+    try {
+      const token = localStorage.getItem('sessionToken')
+      const res = await fetch(`/api/customers/${selectedCustomer.customer_id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
+        body: JSON.stringify({
+          customer_name: editCustomerForm.customer_name || null,
+          email: editCustomerForm.email || null,
+          phone: editCustomerForm.phone || null,
+          address: editCustomerForm.address || null
+        })
+      })
+      const data = await res.json()
+      if (data.success && data.data) {
+        setSelectedCustomer(prev => ({ ...prev, ...data.data, customer_name: data.data.customer_name ?? editCustomerForm.customer_name, email: data.data.email ?? editCustomerForm.email, phone: data.data.phone ?? editCustomerForm.phone, address: data.data.address ?? editCustomerForm.address }))
+        setCustomerInfo(prev => ({
+          ...prev,
+          name: editCustomerForm.customer_name || prev.name,
+          email: editCustomerForm.email ?? prev.email,
+          phone: editCustomerForm.phone ?? prev.phone,
+          address: editCustomerForm.address ?? prev.address
+        }))
+        setShowEditCustomerModal(false)
+        showToast('Customer updated', 'success')
+      } else {
+        showToast(data.message || 'Failed to update customer', 'error')
+      }
+    } catch (err) {
+      console.error(err)
+      showToast('Failed to update customer', 'error')
+    }
   }
 
   const handleCalculatorInput = (value) => {
@@ -1221,7 +1469,7 @@ function POS({ employeeId, employeeName }) {
     } else if (value === 'backspace') {
       setAmountPaid(prev => prev.slice(0, -1))
     } else if (value === 'exact') {
-      setAmountPaid(calculateTotal().toFixed(2))
+      setAmountPaid(calculateTotalWithTip().toFixed(2))
     } else {
       setAmountPaid(prev => prev + value)
     }
@@ -1272,7 +1520,8 @@ function POS({ employeeId, employeeName }) {
           payment_method: 'cash',
           tax_rate: taxRate,
           tip: selectedTip || 0,
-          discount: 0,
+          discount: orderDiscount || 0,
+          discount_type: orderDiscountType || null,
           order_type: orderType,
           customer_info: customerInfoToSave,
           customer_id: customerId,
@@ -1291,6 +1540,8 @@ function POS({ employeeId, employeeName }) {
           total
         })
         setCart([])
+        setOrderDiscount(0)
+        setOrderDiscountType('')
         setPayAtPickupOrDelivery(false)
         setShowSummary(false)
         setShowPaymentForm(false)
@@ -1317,10 +1568,11 @@ function POS({ employeeId, employeeName }) {
       return
     }
 
-    if (paymentMethod === 'cash') {
+    const totalWithTip = calculateTotalWithTip()
+    // Only require cash amount when total is meaningfully positive (skip when exchange/credit covers it)
+    if (paymentMethod === 'cash' && totalWithTip >= 0.01) {
       const paid = parseFloat(amountPaid) || 0
-      const total = calculateTotal()
-      if (paid < total) {
+      if (paid < totalWithTip) {
         showToast('Amount paid is insufficient', 'error')
         return
       }
@@ -1348,10 +1600,12 @@ function POS({ employeeId, employeeName }) {
           setCurrentOrderId(payingForOrderId)
           setCurrentOrderNumber(payingForOrderNumber || String(payingForOrderId))
           setCart([])
+          setOrderDiscount(0)
+          setOrderDiscountType('')
           setPayingForOrderId(null)
           setPayingForOrderNumber(null)
           if (paymentMethod === 'cash') {
-            const change = (parseFloat(amountPaid) || 0) - calculateTotal()
+            const change = (parseFloat(amountPaid) || 0) - calculateTotalWithTip()
             setChangeAmount(change > 0 ? change : 0)
             setShowChangeScreen(true)
           }
@@ -1414,7 +1668,9 @@ function POS({ employeeId, employeeName }) {
             },
             body: JSON.stringify({
               items: items,
-              customer_id: customerId || undefined
+              customer_id: customerId || undefined,
+              discount: (orderDiscount || 0) + (exchangeCreditAmount || 0),
+              discount_type: orderDiscountType || undefined
             })
           })
           
@@ -1458,7 +1714,8 @@ function POS({ employeeId, employeeName }) {
         )
         
         if (paymentMethodObj) {
-          const paid = paymentMethod === 'cash' ? parseFloat(amountPaid) || 0 : (calculateTotal() + selectedTip)
+          const totalWithTipVal = calculateTotalWithTip()
+          const paid = totalWithTipVal <= 0 ? 0 : (paymentMethod === 'cash' ? parseFloat(amountPaid) || 0 : (calculateTotal() + selectedTip))
           const tipAmount = selectedTip || 0
           
           response = await fetch('/api/payment/process', {
@@ -1478,10 +1735,7 @@ function POS({ employeeId, employeeName }) {
           result = await response.json()
           
           if (result.success && result.data.success) {
-            const successMessage = orderNumber 
-              ? `Order ${orderNumber} processed successfully!`
-              : 'Order processed successfully!'
-            showToast(successMessage, 'success')
+            showToast('Order processed successfully!', 'success')
             
             // Try to get order_id from payment_transactions if not already available
             let foundOrderId = currentOrderId
@@ -1519,7 +1773,8 @@ function POS({ employeeId, employeeName }) {
                   body: JSON.stringify({
                     order_id: foundOrderId,
                     exchange_credit_id: exchangeCreditId,
-                    credit_amount: exchangeCreditAmount
+                    credit_amount: exchangeCreditAmount,
+                    discount_already_included: true
                   })
                 })
                 const creditResult = await creditResponse.json()
@@ -1532,28 +1787,28 @@ function POS({ employeeId, employeeName }) {
             }
             
             // Don't automatically generate receipt - let user choose in customer display popup
-            // Trigger customer display to show receipt screen
             setPaymentCompleted(true)
             
-            // For cash payments, show change screen and wait for user to click
-            if (paymentMethod === 'cash') {
+            const totalWithTipVal = calculateTotalWithTip()
+            if (totalWithTipVal <= 0) {
+              setShowPaymentForm(false)
+            } else if (paymentMethod === 'cash') {
               const change = result.data.data?.change || calculateChange()
               setChangeAmount(change)
               setShowChangeScreen(true)
               setShowPaymentForm(false)
-              // Don't automatically show customer display - wait for user to click
             } else {
-              // For non-cash payments, don't automatically show anything - wait for user action
               setShowPaymentForm(false)
             }
             
             // If exchange credit was used, print exchange receipt after order receipt
             if (exchangeCreditId && foundOrderId) {
-              // Store exchange credit info for receipt printing
+              // Store exchange credit info for receipt printing (order_id used for exchange completion receipt)
               sessionStorage.setItem('exchangeCreditUsed', JSON.stringify({
                 credit_id: exchangeCreditId,
                 return_id: exchangeReturnId,
-                amount_used: exchangeCreditAmount
+                amount_used: exchangeCreditAmount,
+                order_id: foundOrderId
               }))
             }
             
@@ -1576,7 +1831,8 @@ function POS({ employeeId, employeeName }) {
               payment_method: paymentMethod,
               tax_rate: taxRate,
               tip: selectedTip || 0,
-              discount: exchangeCreditAmount, // Apply exchange credit as discount
+              discount: (orderDiscount || 0) + (exchangeCreditAmount || 0),
+              discount_type: orderDiscountType || null,
               order_type: orderTypeToSave,
               customer_info: customerInfoToSave,
               customer_id: customerId,
@@ -1595,7 +1851,8 @@ function POS({ employeeId, employeeName }) {
                   body: JSON.stringify({
                     order_id: result.order_id,
                     exchange_credit_id: exchangeCreditId,
-                    credit_amount: exchangeCreditAmount
+                    credit_amount: exchangeCreditAmount,
+                    discount_already_included: true
                   })
                 })
               } catch (err) {
@@ -1603,7 +1860,7 @@ function POS({ employeeId, employeeName }) {
               }
             }
             
-            showToast(`Order ${result.order_number} processed successfully!`, 'success')
+            showToast('Order processed successfully!', 'success')
             setPaymentCompleted(true)
             
             // Store order information for receipt generation
@@ -1612,11 +1869,12 @@ function POS({ employeeId, employeeName }) {
               setCurrentOrderNumber(result.order_number)
               
               // If exchange credit was used, store for receipt printing
-              if (exchangeCreditId) {
+              if (exchangeCreditId && result.order_id) {
                 sessionStorage.setItem('exchangeCreditUsed', JSON.stringify({
                   credit_id: exchangeCreditId,
                   return_id: exchangeReturnId,
-                  amount_used: exchangeCreditAmount
+                  amount_used: exchangeCreditAmount,
+                  order_id: result.order_id
                 }))
               }
             }
@@ -1651,7 +1909,8 @@ function POS({ employeeId, employeeName }) {
             payment_method: paymentMethod,
             tax_rate: taxRate,
             tip: selectedTip || 0,
-            discount: exchangeCreditAmount,
+            discount: (orderDiscount || 0) + (exchangeCreditAmount || 0),
+            discount_type: orderDiscountType || null,
             order_type: orderTypeToSave,
             customer_info: customerInfoToSave,
             customer_id: customerId,
@@ -1668,14 +1927,15 @@ function POS({ employeeId, employeeName }) {
                 body: JSON.stringify({
                   order_id: result.order_id,
                   exchange_credit_id: exchangeCreditId,
-                  credit_amount: exchangeCreditAmount
+                  credit_amount: exchangeCreditAmount,
+                  discount_already_included: true
                 })
               })
             } catch (err) {
               console.error('Error applying exchange credit:', err)
             }
           }
-          showToast(`Order ${result.order_number} processed successfully!`, 'success')
+          showToast('Order processed successfully!', 'success')
           setPaymentCompleted(true)
           if (result.order_id) {
             setCurrentOrderId(result.order_id)
@@ -1684,7 +1944,8 @@ function POS({ employeeId, employeeName }) {
               sessionStorage.setItem('exchangeCreditUsed', JSON.stringify({
                 credit_id: exchangeCreditId,
                 return_id: exchangeReturnId,
-                amount_used: exchangeCreditAmount
+                amount_used: exchangeCreditAmount,
+                order_id: result.order_id
               }))
             }
           }
@@ -1998,20 +2259,20 @@ function POS({ employeeId, employeeName }) {
                     </button>
                     <button
                       onClick={processOrder}
-                      disabled={processing || cart.length === 0 || (paymentMethod === 'cash' && (!amountPaid || parseFloat(amountPaid) < calculateTotal()))}
+                      disabled={processing || cart.length === 0 || (paymentMethod === 'cash' && calculateTotalWithTip() > 0 && (!amountPaid || parseFloat(amountPaid) < calculateTotalWithTip()))}
                       style={{
                         flex: 2,
                         padding: '12px',
-                        backgroundColor: processing || cart.length === 0 || (paymentMethod === 'cash' && (!amountPaid || parseFloat(amountPaid) < calculateTotal())) ? `rgba(${themeColorRgb}, 0.4)` : `rgba(${themeColorRgb}, 0.7)`,
+                        backgroundColor: processing || cart.length === 0 || (paymentMethod === 'cash' && calculateTotalWithTip() > 0 && (!amountPaid || parseFloat(amountPaid) < calculateTotalWithTip())) ? `rgba(${themeColorRgb}, 0.4)` : `rgba(${themeColorRgb}, 0.7)`,
                         backdropFilter: 'blur(10px)',
                         WebkitBackdropFilter: 'blur(10px)',
                         color: '#fff',
-                        border: processing || cart.length === 0 || (paymentMethod === 'cash' && (!amountPaid || parseFloat(amountPaid) < calculateTotal())) ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.2)',
+                        border: processing || cart.length === 0 || (paymentMethod === 'cash' && calculateTotalWithTip() > 0 && (!amountPaid || parseFloat(amountPaid) < calculateTotalWithTip())) ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.2)',
                         borderRadius: '8px',
                         fontSize: '16px',
                         fontWeight: 600,
-                        cursor: processing || cart.length === 0 || (paymentMethod === 'cash' && (!amountPaid || parseFloat(amountPaid) < calculateTotal())) ? 'not-allowed' : 'pointer',
-                        boxShadow: processing || cart.length === 0 || (paymentMethod === 'cash' && (!amountPaid || parseFloat(amountPaid) < calculateTotal())) ? `0 2px 8px rgba(${themeColorRgb}, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                        cursor: processing || cart.length === 0 || (paymentMethod === 'cash' && calculateTotalWithTip() > 0 && (!amountPaid || parseFloat(amountPaid) < calculateTotalWithTip())) ? 'not-allowed' : 'pointer',
+                        boxShadow: processing || cart.length === 0 || (paymentMethod === 'cash' && calculateTotalWithTip() > 0 && (!amountPaid || parseFloat(amountPaid) < calculateTotalWithTip())) ? `0 2px 8px rgba(${themeColorRgb}, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
                         transition: 'all 0.3s ease',
                         opacity: 1
                       }}
@@ -2059,8 +2320,11 @@ function POS({ employeeId, employeeName }) {
                 cart={cart}
                 subtotal={calculateSubtotal()}
                 tax={calculateTax()}
-                total={calculateTotal()}
+                discount={orderDiscount || 0}
+                transactionFee={calculateTransactionFee()}
+                total={getTotalWithFee()}
                 tip={selectedTip}
+                exchangeCreditRemaining={getExchangeCreditRemaining()}
                 paymentMethod={paymentCompleted ? paymentMethod : (showPaymentForm && paymentMethod === 'credit_card' ? paymentMethod : null)}
                 amountPaid={amountPaid}
                 onClose={() => {
@@ -2068,6 +2332,7 @@ function POS({ employeeId, employeeName }) {
                   setShowPaymentForm(false)
                   setShowSummary(false)
                   setAmountPaid('')
+                  setPaymentMethodForFee(null)
                   setPayingForOrderId(null)
                   setPayingForOrderNumber(null)
                 }}
@@ -2080,16 +2345,21 @@ function POS({ employeeId, employeeName }) {
                   // Payment form will be shown when payment method is selected
                 }}
                 onPaymentMethodSelect={(method) => {
-                  // Set payment method based on customer's selection
                   if (method.method_type === 'cash') {
+                    setPaymentMethodForFee('cash')
                     setPaymentMethod('cash')
-                    setShowPaymentForm(true) // Show payment form for cashier
-                    setShowCustomerDisplay(false) // Hide customer display for cash - cashier handles it
+                    setShowPaymentForm(true)
+                    setShowCustomerDisplay(false)
                   } else if (method.method_type === 'card') {
+                    setPaymentMethodForFee('credit_card')
                     setPaymentMethod('credit_card')
-                    setShowPaymentForm(true) // Show payment form
-                    // Keep customer display open for card payments
+                    setShowPaymentForm(true)
                   }
+                }}
+                onZeroTotalComplete={() => {
+                  setPaymentMethod('cash')
+                  setAmountPaid('0')
+                  processOrder()
                 }}
                 showSummary={showSummary && !showPaymentForm}
                 employeeId={employeeId}
@@ -2135,11 +2405,11 @@ function POS({ employeeId, employeeName }) {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid #eee' }}>
-                  <th style={{ textAlign: 'left', padding: '10px', fontSize: '14px', color: '#666' }}>Item</th>
-                  <th style={{ textAlign: 'right', padding: '10px', fontSize: '14px', color: '#666' }}>Price</th>
-                  <th style={{ textAlign: 'center', padding: '10px', fontSize: '14px', color: '#666' }}>Qty</th>
-                  <th style={{ textAlign: 'right', padding: '10px', fontSize: '14px', color: '#666' }}>Total</th>
-                  <th style={{ padding: '10px', width: '40px' }}></th>
+                  <th style={{ textAlign: 'left', padding: '12.75px 10px 10px 10px', fontSize: '14px', color: '#666' }}>Item</th>
+                  <th style={{ textAlign: 'right', padding: '12.75px 10px 10px 10px', fontSize: '14px', color: '#666' }}>Price</th>
+                  <th style={{ textAlign: 'center', padding: '12.75px 10px 10px 10px', fontSize: '14px', color: '#666' }}>Qty</th>
+                  <th style={{ textAlign: 'right', padding: '12.75px 10px 10px 10px', fontSize: '14px', color: '#666' }}>Total</th>
+                  <th style={{ padding: '12.75px 10px 10px 10px', width: '40px' }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -2238,8 +2508,18 @@ function POS({ employeeId, employeeName }) {
                       setPayAtPickupOrDelivery(false)
                       setCustomerInfo({ name: '', email: '', phone: '', address: '' })
                       setSelectedCustomer(null)
+                      setCustomerInfoConfirmed(false)
                     } else {
                       setOrderType('pickup')
+                      setCustomerInfoConfirmed(false)
+                      if (selectedCustomer) {
+                        setCustomerInfo(prev => ({
+                          ...prev,
+                          name: selectedCustomer.customer_name || prev.name,
+                          phone: selectedCustomer.phone || prev.phone,
+                          email: selectedCustomer.email || prev.email
+                        }))
+                      }
                     }
                   }
                 }}
@@ -2261,15 +2541,44 @@ function POS({ employeeId, employeeName }) {
                 Pickup
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!showPaymentForm) {
                     if (orderType === 'delivery') {
                       setOrderType(null)
                       setPayAtPickupOrDelivery(false)
                       setCustomerInfo({ name: '', email: '', phone: '', address: '' })
                       setSelectedCustomer(null)
+                      setCustomerInfoConfirmed(false)
                     } else {
                       setOrderType('delivery')
+                      setCustomerInfoConfirmed(false)
+                      if (selectedCustomer) {
+                        let info = {
+                          name: selectedCustomer.customer_name || customerInfo.name,
+                          phone: selectedCustomer.phone || customerInfo.phone,
+                          email: selectedCustomer.email || customerInfo.email,
+                          address: selectedCustomer.address ?? customerInfo.address ?? ''
+                        }
+                        if (selectedCustomer.customer_id) {
+                          try {
+                            const res = await fetch(`/api/customers/${selectedCustomer.customer_id}`)
+                            const data = await res.json()
+                            if (data.success && data.data) {
+                              const c = data.data
+                              info = {
+                                name: c.customer_name ?? info.name,
+                                phone: c.phone ?? info.phone,
+                                email: c.email ?? info.email,
+                                address: (c.address != null && c.address !== '') ? c.address : info.address
+                              }
+                              if (c.address != null && c.address !== '') {
+                                setSelectedCustomer(prev => prev ? { ...prev, address: c.address } : null)
+                              }
+                            }
+                          } catch (_) { /* keep existing info */ }
+                        }
+                        setCustomerInfo(info)
+                      }
                     }
                   }
                 }}
@@ -2291,44 +2600,11 @@ function POS({ employeeId, employeeName }) {
                 Delivery
               </button>
             </div>
-            {orderType && customerInfo.name && (
-              <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#f5f5f5', borderRadius: '4px', fontSize: '12px', color: '#666' }}>
-                <div><strong>{orderType === 'pickup' ? 'Pickup' : 'Delivery'}:</strong> {customerInfo.name} - {customerInfo.phone}</div>
-                {orderType === 'delivery' && customerInfo.address && (
-                  <div style={{ marginTop: '4px' }}><strong>Address:</strong> {customerInfo.address}</div>
-                )}
-              </div>
-            )}
-            {/* Pay now vs Pay when pickup/delivery */}
-            {orderType && (orderType === 'pickup' || orderType === 'delivery') && (
-              <div style={{ marginTop: '12px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '13px', color: isDarkMode ? '#ccc' : '#555' }}>Payment:</span>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
-                  <input
-                    type="radio"
-                    name="payWhen"
-                    checked={!payAtPickupOrDelivery}
-                    onChange={() => setPayAtPickupOrDelivery(false)}
-                    style={{ accentColor: themeColor }}
-                  />
-                  Pay now
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
-                  <input
-                    type="radio"
-                    name="payWhen"
-                    checked={payAtPickupOrDelivery}
-                    onChange={() => setPayAtPickupOrDelivery(true)}
-                    style={{ accentColor: themeColor }}
-                  />
-                  {orderType === 'pickup' ? 'Pay when you pick up' : 'Pay on delivery'}
-                </label>
-              </div>
-            )}
+            {/* Combined delivery/pickup summary is shown in Customer section below when orderType && customerInfoConfirmed */}
           </div>
 
-          {/* Inline Customer Info Form for Pickup/Delivery */}
-          {orderType && (
+          {/* Inline Customer Info Form for Pickup/Delivery - hidden after check */}
+          {orderType && !customerInfoConfirmed && (
             <>
               <div style={{ marginBottom: '16px' }}>
                 <input
@@ -2347,47 +2623,279 @@ function POS({ employeeId, employeeName }) {
                 />
               </div>
 
-              <div style={{ marginBottom: '16px' }}>
-                <input
-                  type="tel"
-                  value={customerInfo.phone}
-                  onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value })}
-                  placeholder="Phone number"
-                  disabled={showPaymentForm}
-                  style={{
-                    ...inputBaseStyle(isDarkMode, themeColorRgb),
-                    opacity: showPaymentForm ? 0.3 : 1,
-                    cursor: showPaymentForm ? 'not-allowed' : 'text'
-                  }}
-                  {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                />
-              </div>
-
-              {orderType === 'delivery' && (
-                <div style={{ marginBottom: '16px' }}>
-                  <textarea
-                    value={customerInfo.address}
-                    onChange={(e) => setCustomerInfo({ ...customerInfo, address: e.target.value })}
-                    placeholder="Delivery address"
-                    rows={3}
+              {/* Last field box: phone (pickup) or address (delivery) with Done button at end */}
+              {orderType === 'pickup' ? (
+                <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="tel"
+                    value={customerInfo.phone}
+                    onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value })}
+                    placeholder="Phone number"
                     disabled={showPaymentForm}
                     style={{
                       ...inputBaseStyle(isDarkMode, themeColorRgb),
-                      fontFamily: 'inherit',
-                      resize: 'vertical',
+                      flex: 1,
                       opacity: showPaymentForm ? 0.3 : 1,
                       cursor: showPaymentForm ? 'not-allowed' : 'text'
                     }}
                     {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                   />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (showPaymentForm) return
+                      const needsName = !customerInfo.name?.trim()
+                      const needsPhone = !customerInfo.phone?.trim()
+                      if (needsName || needsPhone) {
+                        showToast('Please enter name and phone', 'error')
+                        return
+                      }
+                      setCustomerInfoConfirmed(true)
+                    }}
+                    disabled={showPaymentForm}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 14px',
+                      backgroundColor: `rgba(${themeColorRgb}, 0.85)`,
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                      opacity: showPaymentForm ? 0.5 : 1,
+                      boxShadow: `0 2px 8px rgba(${themeColorRgb}, 0.3)`
+                    }}
+                    title="Done – close form"
+                  >
+                    <Check size={16} />
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ marginBottom: '16px' }}>
+                    <input
+                      type="tel"
+                      value={customerInfo.phone}
+                      onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value })}
+                      placeholder="Phone number"
+                      disabled={showPaymentForm}
+                      style={{
+                        ...inputBaseStyle(isDarkMode, themeColorRgb),
+                        opacity: showPaymentForm ? 0.3 : 1,
+                        cursor: showPaymentForm ? 'not-allowed' : 'text'
+                      }}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                    />
+                  </div>
+                  <div style={{
+                    ...inputBaseStyle(isDarkMode, themeColorRgb),
+                    padding: '10px 12px',
+                    fontFamily: 'inherit'
+                  }}>
+                    <textarea
+                      value={customerInfo.address}
+                      onChange={(e) => setCustomerInfo({ ...customerInfo, address: e.target.value })}
+                      placeholder="Delivery address"
+                      rows={3}
+                      disabled={showPaymentForm}
+                      style={{
+                        width: '100%',
+                        border: 'none',
+                        background: 'transparent',
+                        fontFamily: 'inherit',
+                        fontSize: 'inherit',
+                        resize: 'vertical',
+                        outline: 'none',
+                        opacity: showPaymentForm ? 0.3 : 1,
+                        cursor: showPaymentForm ? 'not-allowed' : 'text'
+                      }}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (showPaymentForm) return
+                          const needsName = !customerInfo.name?.trim()
+                          const needsPhone = !customerInfo.phone?.trim()
+                          const needsAddress = !customerInfo.address?.trim()
+                          if (needsName || needsPhone) {
+                            showToast('Please enter name and phone', 'error')
+                            return
+                          }
+                          if (needsAddress) {
+                            showToast('Please enter delivery address', 'error')
+                            return
+                          }
+                          setCustomerInfoConfirmed(true)
+                        }}
+                        disabled={showPaymentForm}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '6px 14px',
+                          backgroundColor: `rgba(${themeColorRgb}, 0.85)`,
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                          opacity: showPaymentForm ? 0.5 : 1,
+                          boxShadow: `0 2px 8px rgba(${themeColorRgb}, 0.3)`
+                        }}
+                        title="Done – close form"
+                      >
+                        <Check size={16} />
+                        Done
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </>
           )}
 
-          {/* Customer Lookup (Optional) */}
+          {/* Customer Lookup (Optional) – combined with delivery/pickup summary when confirmed */}
           <div style={{ marginBottom: '16px' }}>
-            {!selectedCustomer ? (
+            {orderType && customerInfoConfirmed ? (
+              /* Combined: customer + delivery/pickup type + address + Pay now / Pay on delivery */
+              <div style={{
+                padding: '12px',
+                backgroundColor: '#f5f5f5',
+                borderRadius: '4px',
+                fontSize: '12px',
+                color: '#666'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px', color: '#333' }}>
+                      {customerInfo.name || selectedCustomer?.customer_name || 'Customer'}
+                    </div>
+                    <div style={{ marginBottom: orderType === 'delivery' && (customerInfo.address || selectedCustomer?.address) ? '6px' : 0 }}>
+                      {(customerInfo.email || customerInfo.phone || selectedCustomer?.email || selectedCustomer?.phone)
+                        ? [customerInfo.email || selectedCustomer?.email, customerInfo.phone || selectedCustomer?.phone].filter(Boolean).join(' • ')
+                        : ''}
+                      {selectedCustomer?.loyalty_points !== undefined && selectedCustomer?.loyalty_points > 0 && (
+                        <span> • {selectedCustomer.loyalty_points} points</span>
+                      )}
+                    </div>
+                    {orderType === 'delivery' && (customerInfo.address || selectedCustomer?.address) && (
+                      <div style={{ marginTop: '4px' }}>
+                        <strong>Address:</strong> {customerInfo.address || selectedCustomer?.address || ''}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      onClick={() => !showPaymentForm && setPayAtPickupOrDelivery(false)}
+                      disabled={showPaymentForm}
+                      style={{
+                        padding: '4px 12px',
+                        border: '1px solid ' + (!payAtPickupOrDelivery ? themeColor : '#ccc'),
+                        borderRadius: '999px',
+                        fontSize: '12px',
+                        fontWeight: !payAtPickupOrDelivery ? 600 : 400,
+                        backgroundColor: !payAtPickupOrDelivery ? themeColor : 'transparent',
+                        color: !payAtPickupOrDelivery ? '#fff' : '#666',
+                        cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                        opacity: showPaymentForm ? 0.3 : 1
+                      }}
+                    >
+                      Pay now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => !showPaymentForm && setPayAtPickupOrDelivery(true)}
+                      disabled={showPaymentForm}
+                      style={{
+                        padding: '4px 12px',
+                        border: '1px solid ' + (payAtPickupOrDelivery ? themeColor : '#ccc'),
+                        borderRadius: '999px',
+                        fontSize: '12px',
+                        fontWeight: payAtPickupOrDelivery ? 600 : 400,
+                        backgroundColor: payAtPickupOrDelivery ? themeColor : 'transparent',
+                        color: payAtPickupOrDelivery ? '#fff' : '#666',
+                        cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                        opacity: showPaymentForm ? 0.3 : 1
+                      }}
+                    >
+                      {orderType === 'pickup' ? 'Pay at pickup' : 'Pay on delivery'}
+                    </button>
+                    {selectedCustomer ? (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleOpenEditCustomer() }}
+                          disabled={showPaymentForm}
+                          type="button"
+                          style={{
+                            padding: 0,
+                            margin: 0,
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            color: '#666',
+                            cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                            opacity: showPaymentForm ? 0.3 : 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            lineHeight: 1
+                          }}
+                          title="Edit customer"
+                        >
+                          <Pencil size={18} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleClearCustomer() }}
+                          disabled={showPaymentForm}
+                          type="button"
+                          style={{
+                            padding: 0,
+                            margin: 0,
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            color: '#666',
+                            cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                            opacity: showPaymentForm ? 0.3 : 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            lineHeight: 1
+                          }}
+                          title="Remove customer"
+                        >
+                          <X size={18} />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => !showPaymentForm && setCustomerInfoConfirmed(false)}
+                        disabled={showPaymentForm}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          backgroundColor: 'transparent',
+                          border: '1px solid #999',
+                          borderRadius: '4px',
+                          color: '#666',
+                          cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                          opacity: showPaymentForm ? 0.3 : 1
+                        }}
+                      >
+                        Change
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : !selectedCustomer ? (
               <div style={{ position: 'relative' }}>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input
@@ -2399,7 +2907,7 @@ function POS({ employeeId, employeeName }) {
                         searchCustomers(e.target.value)
                       }
                     }}
-                    placeholder="Search by name, email, or phone..."
+                    placeholder="Search for customers"
                     disabled={showPaymentForm}
                     style={{
                       ...inputBaseStyle(isDarkMode, themeColorRgb),
@@ -2415,23 +2923,40 @@ function POS({ employeeId, employeeName }) {
                     onClick={handleCreateCustomer}
                     disabled={showPaymentForm}
                     style={{
+                      padding: '4px',
                       width: '40px',
                       height: '40px',
-                      padding: '0',
                       backgroundColor: showPaymentForm ? `rgba(${themeColorRgb}, 0.3)` : `rgba(${themeColorRgb}, 0.7)`,
+                      backdropFilter: 'blur(10px)',
+                      WebkitBackdropFilter: 'blur(10px)',
                       color: '#fff',
-                      border: 'none',
-                      borderRadius: '4px',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      borderRadius: '8px',
+                      cursor: showPaymentForm ? 'not-allowed' : 'pointer',
                       fontSize: '14px',
                       fontWeight: 600,
-                      cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                      boxShadow: showPaymentForm ? `0 2px 8px rgba(${themeColorRgb}, 0.2)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                      transition: 'all 0.3s ease',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       opacity: showPaymentForm ? 0.3 : 1
                     }}
+                    onMouseEnter={(e) => {
+                      if (!showPaymentForm) {
+                        e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.8)`
+                        e.currentTarget.style.boxShadow = `0 4px 20px rgba(${themeColorRgb}, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!showPaymentForm) {
+                        e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+                        e.currentTarget.style.boxShadow = `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+                      }
+                    }}
+                    title="Add Customer"
                   >
-                    <UserPlus size={18} />
+                    <UserPlus size={24} />
                   </button>
                 </div>
                 {customerSearchResults.length > 0 && (
@@ -2497,7 +3022,13 @@ function POS({ employeeId, employeeName }) {
                 justifyContent: 'space-between',
                 alignItems: 'center'
               }}>
-                <div style={{ flex: 1 }}>
+                <div
+                  style={{ flex: 1, cursor: 'pointer' }}
+                  onClick={() => setShowRewardsModal(true)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setShowRewardsModal(true) }}
+                >
                   <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>
                     {selectedCustomer.customer_name || 'No name'}
                   </div>
@@ -2511,20 +3042,47 @@ function POS({ employeeId, employeeName }) {
                   </div>
                 </div>
                 <button
-                  onClick={handleClearCustomer}
+                  onClick={(e) => { e.stopPropagation(); handleOpenEditCustomer() }}
                   disabled={showPaymentForm}
+                  type="button"
                   style={{
-                    padding: '6px 12px',
+                    padding: 0,
+                    margin: 0,
+                    marginRight: '4px',
                     backgroundColor: 'transparent',
+                    border: 'none',
                     color: '#666',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px',
-                    fontSize: '12px',
                     cursor: showPaymentForm ? 'not-allowed' : 'pointer',
-                    opacity: showPaymentForm ? 0.3 : 1
+                    opacity: showPaymentForm ? 0.3 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    lineHeight: 1
                   }}
+                  title="Edit customer"
                 >
-                  Clear
+                  <Pencil size={18} />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleClearCustomer() }}
+                  disabled={showPaymentForm}
+                  type="button"
+                  style={{
+                    padding: 0,
+                    margin: 0,
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    color: '#666',
+                    cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                    opacity: showPaymentForm ? 0.3 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    lineHeight: 1
+                  }}
+                  title="Remove customer"
+                >
+                  <X size={18} />
                 </button>
               </div>
             )}
@@ -2536,10 +3094,26 @@ function POS({ employeeId, employeeName }) {
               ${calculateSubtotal().toFixed(2)}
             </span>
           </div>
+          {orderDiscount > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ color: '#666' }}>
+                Discount{orderDiscountType ? ` (${DISCOUNT_PRESETS.find(p => p.id === orderDiscountType)?.label || orderDiscountType})` : ''}:
+              </span>
+              <span style={{ fontFamily: '"Product Sans", sans-serif', fontWeight: 500 }}>
+                -${orderDiscount.toFixed(2)}
+              </span>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
             <span style={{ color: '#666' }}>Tax ({(taxRate * 100).toFixed(1)}%):</span>
             <span style={{ fontFamily: '"Product Sans", sans-serif', fontWeight: 500 }}>
               ${calculateTax().toFixed(2)}
+            </span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <span style={{ color: '#666' }}>Transaction fee:</span>
+            <span style={{ fontFamily: '"Product Sans", sans-serif', fontWeight: 500 }}>
+              {paymentMethodForFee !== null ? `$${calculateTransactionFee().toFixed(2)}` : '$0.00'}
             </span>
           </div>
           {selectedTip > 0 && (
@@ -2564,6 +3138,14 @@ function POS({ employeeId, employeeName }) {
               ${calculateTotalWithTip().toFixed(2)}
             </span>
           </div>
+          {getExchangeCreditRemaining() > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '14px', color: '#666' }}>
+              <span>Store credit remaining:</span>
+              <span style={{ fontFamily: '"Product Sans", sans-serif', fontWeight: 500 }}>
+                ${getExchangeCreditRemaining().toFixed(2)}
+              </span>
+            </div>
+          )}
 
           {/* Pay and Discount Buttons */}
           <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
@@ -2595,9 +3177,11 @@ function POS({ employeeId, employeeName }) {
                     }
                     const registerOpen = await checkRegisterOpen()
                     if (!registerOpen) {
-                      showToast('Register is closed. Open the register to process payments.', 'warning', {
+                      showToast('Register is closed.', 'warning', {
                         label: 'Open Register',
-                        onClick: () => navigate('/settings?tab=cash')
+                        onClick: () => navigate('/settings?tab=cash'),
+                        iconColor: '#ef4444',
+                        buttonColor: themeColor
                       })
                       return
                     }
@@ -2635,12 +3219,8 @@ function POS({ employeeId, employeeName }) {
               <button
                 onClick={() => {
                   if (!showPaymentForm) {
-                    // TODO: Implement discount functionality
-                    const discountAmount = prompt('Enter discount amount (e.g., 10 for $10 or 10% for 10%):')
-                    if (discountAmount) {
-                      // Handle discount logic here
-                      console.log('Discount:', discountAmount)
-                    }
+                    setDiscountInput(orderDiscount ? String(orderDiscount) : '')
+                    setShowDiscountModal(true)
                   }
                 }}
                 disabled={cart.length === 0 || showPaymentForm}
@@ -2660,7 +3240,7 @@ function POS({ employeeId, employeeName }) {
                   opacity: showPaymentForm ? 0.3 : 1
                 }}
               >
-                Discount
+                %
               </button>
             </ProtectedComponent>
           </div>
@@ -3054,8 +3634,9 @@ function POS({ employeeId, employeeName }) {
                     </span>
                   ))}
                   <input
+                    ref={searchInputRef}
                     type="text"
-                    placeholder={searchFilterChips.length ? "Search…" : "Search… sm then space, roni then space for filters"}
+                    placeholder={searchFilterChips.length ? "Search…" : "Search products…"}
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     onKeyDown={(e) => {
@@ -3475,22 +4056,15 @@ function POS({ employeeId, employeeName }) {
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          backgroundColor: 'transparent',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 2000
         }}>
-          <div style={{
-            backgroundColor: '#fff',
-            borderRadius: '8px',
-            padding: '24px',
-            maxWidth: '400px',
-            width: '90%',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-          }}>
+          <div style={formModalStyle(isDarkMode)}>
             <div style={{ marginBottom: '20px' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>
                 {showCreateCustomer ? 'Add Customer' : (orderType ? (orderType === 'pickup' ? 'Pickup' : 'Delivery') : 'Customer')} Information
               </h3>
             </div>
@@ -3562,153 +4136,98 @@ function POS({ employeeId, employeeName }) {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '24px' }}>
-              <button
-                onClick={() => {
-                  setShowCustomerInfoModal(false)
-                  if (showCreateCustomer) {
-                    // If opened from plus button, reset customer creation flag
-                    setShowCreateCustomer(false)
-                    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
-                  } else if (!orderType) {
-                    // Only reset if not from rewards (rewards modal can be opened without order type)
-                    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
-                  } else {
-                    setOrderType(null)
-                    setCustomerInfo({ name: '', email: '', phone: '', address: '' })
-                  }
-                }}
-                style={{
-                  padding: '4px 16px',
-                  height: '28px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  whiteSpace: 'nowrap',
-                  backgroundColor: 'var(--bg-tertiary)',
-                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  color: 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  transition: 'all 0.3s ease',
-                  boxShadow: 'none'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  // Check requirements based on order type and rewards settings
-                  let requiredFields = false
-                  let errorMessage = ''
-                  
-                  if (showCreateCustomer) {
-                    // When creating a customer from the plus button, require name and phone
-                    requiredFields = customerInfo.name && customerInfo.phone
-                    errorMessage = 'Please fill in name and phone'
-                    
-                    if (requiredFields) {
-                      // Save customer to database
-                      try {
-                        const response = await fetch('/api/customers', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            customer_name: customerInfo.name,
-                            email: customerInfo.email || null,
-                            phone: customerInfo.phone,
-                            address: customerInfo.address || null
-                          })
+            <FormModalActions
+              onCancel={() => {
+                setShowCustomerInfoModal(false)
+                if (showCreateCustomer) {
+                  setShowCreateCustomer(false)
+                  setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                } else if (!orderType) {
+                  setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                } else {
+                  setOrderType(null)
+                  setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                }
+              }}
+              onPrimary={async () => {
+                let requiredFields = false
+                let errorMessage = ''
+                if (showCreateCustomer) {
+                  requiredFields = customerInfo.name && customerInfo.phone
+                  errorMessage = 'Please fill in name and phone'
+                  if (requiredFields) {
+                    try {
+                      const response = await fetch('/api/customers', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          customer_name: customerInfo.name,
+                          email: customerInfo.email || null,
+                          phone: customerInfo.phone,
+                          address: customerInfo.address || null
                         })
-                        
-                        const data = await response.json()
-                        if (data.success) {
-                          // Select the newly created customer
-                          setSelectedCustomer({
-                            customer_id: data.customer_id,
-                            customer_name: customerInfo.name,
-                            email: customerInfo.email,
-                            phone: customerInfo.phone,
-                            address: customerInfo.address
-                          })
-                          showToast('Customer added successfully', 'success')
-                          setShowCustomerInfoModal(false)
-                          setShowCreateCustomer(false)
-                          setCustomerInfo({ name: '', email: '', phone: '', address: '' })
-                        } else {
-                          showToast(data.message || 'Failed to create customer', 'error')
-                        }
-                      } catch (err) {
-                        console.error('Error creating customer:', err)
-                        showToast('Error creating customer. Please try again.', 'error')
+                      })
+                      const data = await response.json()
+                      if (data.success) {
+                        setSelectedCustomer({
+                          customer_id: data.customer_id,
+                          customer_name: customerInfo.name,
+                          email: customerInfo.email,
+                          phone: customerInfo.phone,
+                          address: customerInfo.address
+                        })
+                        showToast('Customer added successfully', 'success')
+                        setShowCustomerInfoModal(false)
+                        setShowCreateCustomer(false)
+                        setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                      } else {
+                        showToast(data.message || 'Failed to create customer', 'error')
                       }
-                    } else {
-                      showToast(errorMessage, 'error')
+                    } catch (err) {
+                      console.error('Error creating customer:', err)
+                      showToast('Error creating customer. Please try again.', 'error')
                     }
                     return
                   }
-                  
-                  if (orderType === 'pickup') {
+                  showToast(errorMessage, 'error')
+                  return
+                }
+                if (orderType === 'pickup') {
+                  requiredFields = customerInfo.name && customerInfo.phone
+                  errorMessage = 'Please fill in name and phone'
+                } else if (orderType === 'delivery') {
+                  requiredFields = customerInfo.name && customerInfo.phone && customerInfo.address
+                  errorMessage = 'Please fill in name, phone, and address'
+                } else if (rewardsSettings.enabled) {
+                  if (rewardsSettings.require_both) {
+                    requiredFields = customerInfo.name && customerInfo.email && customerInfo.phone
+                    errorMessage = 'Please fill in name, email, and phone'
+                  } else if (rewardsSettings.require_email) {
+                    requiredFields = customerInfo.name && customerInfo.email
+                    errorMessage = 'Please fill in name and email'
+                  } else if (rewardsSettings.require_phone) {
                     requiredFields = customerInfo.name && customerInfo.phone
                     errorMessage = 'Please fill in name and phone'
-                  } else if (orderType === 'delivery') {
-                    requiredFields = customerInfo.name && customerInfo.phone && customerInfo.address
-                    errorMessage = 'Please fill in name, phone, and address'
-                  } else if (rewardsSettings.enabled) {
-                    // Check rewards requirements
-                    if (rewardsSettings.require_both) {
-                      requiredFields = customerInfo.name && customerInfo.email && customerInfo.phone
-                      errorMessage = 'Please fill in name, email, and phone'
-                    } else if (rewardsSettings.require_email) {
-                      requiredFields = customerInfo.name && customerInfo.email
-                      errorMessage = 'Please fill in name and email'
-                    } else if (rewardsSettings.require_phone) {
-                      requiredFields = customerInfo.name && customerInfo.phone
-                      errorMessage = 'Please fill in name and phone'
-                    } else {
-                      requiredFields = customerInfo.name
-                      errorMessage = 'Please fill in name'
-                    }
                   } else {
-                    // Just require name
                     requiredFields = customerInfo.name
                     errorMessage = 'Please fill in name'
                   }
-                  
-                  if (requiredFields) {
-                    setShowCustomerInfoModal(false)
-                    // If closing from rewards requirement, show summary
-                    if (rewardsSettings.enabled && !orderType) {
-                      setShowSummary(true)
-                      setShowCustomerDisplay(true)
-                    }
-                  } else {
-                    alert(errorMessage)
+                } else {
+                  requiredFields = customerInfo.name
+                  errorMessage = 'Please fill in name'
+                }
+                if (requiredFields) {
+                  setShowCustomerInfoModal(false)
+                  if (rewardsSettings.enabled && !orderType) {
+                    setShowSummary(true)
+                    setShowCustomerDisplay(true)
                   }
-                }}
-                style={{
-                  padding: '4px 16px',
-                  height: '28px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  whiteSpace: 'nowrap',
-                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                  border: `1px solid rgba(${themeColorRgb}, 0.5)`,
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  color: '#fff',
-                  cursor: 'pointer',
-                  transition: 'all 0.3s ease',
-                  boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3)`
-                }}
-              >
-                {showCreateCustomer ? 'Add Customer' : 'Save'}
-              </button>
-            </div>
+                } else {
+                  alert(errorMessage)
+                }
+              }}
+              primaryLabel={showCreateCustomer ? 'Add Customer' : 'Save'}
+            />
           </div>
         </div>
       )}
@@ -3719,13 +4238,13 @@ function POS({ employeeId, employeeName }) {
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
+            backgroundColor: 'transparent',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1500
+            zIndex: 1500,
+            pointerEvents: 'none'
           }}
-          onClick={() => setShowRewardsModal(false)}
         >
           <div
             style={{
@@ -3736,9 +4255,9 @@ function POS({ employeeId, employeeName }) {
               maxHeight: '85vh',
               overflow: 'auto',
               boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-              padding: '20px'
+              padding: '20px',
+              pointerEvents: 'auto'
             }}
-            onClick={e => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -3837,6 +4356,212 @@ function POS({ employeeId, employeeName }) {
                 )}
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Customer Modal - same style as Add Customer / Customer Info form */}
+      {showEditCustomerModal && selectedCustomer && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'transparent',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000
+        }} onClick={() => setShowEditCustomerModal(false)}>
+          <div style={formModalStyle(isDarkMode)} onClick={e => e.stopPropagation()}>
+            <div style={{ marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>
+                Edit customer
+              </h3>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={formLabelStyle(isDarkMode)}>Name</label>
+              <input
+                type="text"
+                value={editCustomerForm.customer_name}
+                onChange={e => setEditCustomerForm(prev => ({ ...prev, customer_name: e.target.value }))}
+                placeholder="Customer name"
+                style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                autoFocus
+              />
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={formLabelStyle(isDarkMode)}>Email</label>
+              <input
+                type="email"
+                value={editCustomerForm.email}
+                onChange={e => setEditCustomerForm(prev => ({ ...prev, email: e.target.value }))}
+                placeholder="Email address"
+                style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+              />
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={formLabelStyle(isDarkMode)}>Phone Number</label>
+              <input
+                type="tel"
+                value={editCustomerForm.phone}
+                onChange={e => setEditCustomerForm(prev => ({ ...prev, phone: e.target.value }))}
+                placeholder="Phone number"
+                style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+              />
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={formLabelStyle(isDarkMode)}>Address</label>
+              <textarea
+                value={editCustomerForm.address}
+                onChange={e => setEditCustomerForm(prev => ({ ...prev, address: e.target.value }))}
+                placeholder="Address (optional)"
+                rows={3}
+                style={{
+                  ...inputBaseStyle(isDarkMode, themeColorRgb),
+                  fontFamily: 'inherit',
+                  resize: 'vertical'
+                }}
+                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+              />
+            </div>
+
+            <FormModalActions
+              onCancel={() => setShowEditCustomerModal(false)}
+              onPrimary={handleSaveEditCustomer}
+              primaryLabel="Save"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Discount form - no full-page dark overlay; no header, Preset label, or X */}
+      {showDiscountModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'transparent',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1500,
+            pointerEvents: 'none'
+          }}
+        >
+          <div
+            style={{
+              pointerEvents: 'auto',
+              backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+              borderRadius: '12px',
+              maxWidth: '400px',
+              width: '90%',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+              padding: '20px'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+              {DISCOUNT_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => applyPresetDiscount(preset)}
+                  style={{
+                    padding: '8px 14px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    whiteSpace: 'nowrap',
+                    backgroundColor: `rgba(${themeColorRgb}, 0.15)`,
+                    border: `1px solid rgba(${themeColorRgb}, 0.4)`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: `rgb(${themeColorRgb})`,
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    boxShadow: 'none'
+                  }}
+                >
+                  {preset.label} {preset.percent}%
+                </button>
+              ))}
+            </div>
+            <div style={{ marginBottom: '8px', fontSize: '14px', color: 'var(--text-secondary)' }}>Or enter custom amount</div>
+            <input
+              type="text"
+              value={discountInput}
+              onChange={e => setDiscountInput(e.target.value)}
+              placeholder="e.g. 10 or 10%"
+              autoFocus
+              onKeyDown={e => { if (e.key === 'Enter') applyDiscountFromModal(); if (e.key === 'Escape') { setShowDiscountModal(false); setDiscountInput('') } }}
+              style={{
+                ...inputBaseStyle(isDarkMode, themeColorRgb),
+                width: '100%',
+                padding: '10px 12px',
+                marginBottom: '20px',
+                boxSizing: 'border-box'
+              }}
+              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+            />
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '24px' }}>
+              <button
+                type="button"
+                onClick={() => { setShowDiscountModal(false); setDiscountInput('') }}
+                style={{
+                  padding: '4px 16px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  whiteSpace: 'nowrap',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: 'none'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyDiscountFromModal}
+                style={{
+                  padding: '4px 16px',
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  whiteSpace: 'nowrap',
+                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                  border: `1px solid rgba(${themeColorRgb}, 0.5)`,
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: '#fff',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3)`
+                }}
+              >
+                Apply
+              </button>
+            </div>
           </div>
         </div>
       )}

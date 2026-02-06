@@ -1,6 +1,35 @@
 import React, { useState, useEffect } from 'react';
+import { useTheme } from '../contexts/ThemeContext';
+import CustomDropdown from './common/CustomDropdown';
+import {
+  FormField,
+  formModalStyle,
+  inputBaseStyle,
+  getInputFocusHandlers,
+  compactFormLabelStyle,
+  compactFormFieldStyleTight,
+  compactFormActionsStyle,
+  compactCancelButtonStyle,
+  compactPrimaryButtonStyle,
+  requiredIndicatorStyle
+} from './FormStyles';
+
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255';
+}
 
 function EmployeeForm({ employee, roles, onSave, onCancel }) {
+  const { themeColor } = useTheme();
+  const themeColorRgb = hexToRgb(themeColor || '#8400ff');
+  const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains('dark-theme'));
+  useEffect(() => {
+    const check = () => setIsDarkMode(document.documentElement.classList.contains('dark-theme'));
+    const obs = new MutationObserver(check);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
+  }, []);
+
   const [formData, setFormData] = useState({
     username: '',
     first_name: '',
@@ -142,148 +171,194 @@ function EmployeeForm({ employee, roles, onSave, onCancel }) {
     }
   };
 
+  const inputStyle = (opts = {}) => ({ ...inputBaseStyle(isDarkMode, themeColorRgb), ...opts });
+  const focusHandlers = getInputFocusHandlers(themeColorRgb, isDarkMode);
+
   return (
     <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{employee ? 'Edit Employee' : 'Add Employee'}</h2>
-          <button className="btn-close" onClick={onCancel}>×</button>
-        </div>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          ...formModalStyle(isDarkMode),
+          maxWidth: '560px',
+          width: '95%',
+          maxHeight: '90vh',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '24px 24px 0 24px'
+        }}
+      >
+        <h2 style={{
+          margin: '0 0 0 0',
+          fontSize: '14px',
+          fontWeight: 600,
+          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+          flexShrink: 0
+        }}>
+          {employee ? 'Edit Employee' : 'Add Employee'}
+        </h2>
+        <div
+          style={{
+            height: '20px',
+            flexShrink: 0,
+            background: `linear-gradient(to bottom, ${isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'}, transparent)`,
+            pointerEvents: 'none'
+          }}
+        />
 
-        <form onSubmit={handleSubmit}>
-          {error && (
-            <div className="alert alert-error">
-              {error}
-            </div>
-          )}
+        <form onSubmit={handleSubmit} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="form-modal-scroll-hide-bar" style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px' }}>
+            {error && (
+              <div style={{
+                padding: '10px 14px',
+                marginBottom: '16px',
+                backgroundColor: isDarkMode ? 'rgba(198, 40, 40, 0.2)' : '#fee',
+                border: isDarkMode ? '1px solid rgba(198, 40, 40, 0.4)' : '1px solid #fcc',
+                borderRadius: '8px',
+                color: isDarkMode ? '#ef5350' : '#c33',
+                fontSize: '14px'
+              }}>
+                {error}
+              </div>
+            )}
 
-          <div className="form-grid">
-            <div className="form-group">
-              <label>Username *</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px' }}>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Username <span style={requiredIndicatorStyle}>*</span></label>
               <input
                 type="text"
                 name="username"
                 value={formData.username}
                 onChange={handleChange}
                 required
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>First Name *</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>First Name <span style={requiredIndicatorStyle}>*</span></label>
               <input
                 type="text"
                 name="first_name"
                 value={formData.first_name}
                 onChange={handleChange}
                 required
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>Last Name *</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Last Name <span style={requiredIndicatorStyle}>*</span></label>
               <input
                 type="text"
                 name="last_name"
                 value={formData.last_name}
                 onChange={handleChange}
                 required
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>Email</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Email</label>
               <input
                 type="email"
                 name="email"
                 value={formData.email}
                 onChange={handleChange}
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>Phone</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Phone</label>
               <input
                 type="tel"
                 name="phone"
                 value={formData.phone}
                 onChange={handleChange}
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>Position *</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Position <span style={requiredIndicatorStyle}>*</span></label>
               <input
                 type="text"
                 name="position"
                 value={formData.position}
                 onChange={handleChange}
                 required
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>Department</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Department</label>
               <input
                 type="text"
                 name="department"
                 value={formData.department}
                 onChange={handleChange}
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>Date Started *</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Date Started <span style={requiredIndicatorStyle}>*</span></label>
               <input
                 type="date"
                 name="date_started"
                 value={formData.date_started}
                 onChange={handleChange}
                 required
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>{employee ? 'New Password (leave blank to keep current)' : 'Password *'}</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>{employee ? 'New Password (leave blank to keep current)' : 'Password *'}</label>
               <input
                 type="password"
                 name="password"
                 value={formData.password}
                 onChange={handleChange}
                 required={!employee}
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            {formData.password && (
-              <div className="form-group">
-                <label>Confirm Password</label>
+            </FormField>
+            {formData.password ? (
+              <FormField style={compactFormFieldStyleTight}>
+                <label style={compactFormLabelStyle(isDarkMode)}>Confirm Password</label>
                 <input
                   type="password"
                   name="confirm_password"
                   value={formData.confirm_password}
                   onChange={handleChange}
+                  style={inputStyle()}
+                  {...focusHandlers}
                 />
-              </div>
-            )}
-
-            <div className="form-group">
-              <label>Role</label>
-              <select
+              </FormField>
+            ) : <div />}
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Role</label>
+              <CustomDropdown
                 name="role_id"
-                value={formData.role_id}
+                value={formData.role_id ? String(formData.role_id) : ''}
                 onChange={handleChange}
-              >
-                <option value="">No Role</option>
-                {roles.map(role => (
-                  <option key={role.role_id} value={role.role_id}>
-                    {role.role_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label>PIN Code</label>
+                options={[
+                  { value: '', label: 'No Role' },
+                  ...(roles || []).map((r) => ({ value: String(r.role_id), label: r.role_name }))
+                ]}
+                placeholder="No Role"
+                isDarkMode={isDarkMode}
+                themeColorRgb={themeColorRgb}
+                compactTrigger
+              />
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>PIN Code</label>
               <input
                 type="text"
                 name="pin_code"
@@ -291,93 +366,127 @@ function EmployeeForm({ employee, roles, onSave, onCancel }) {
                 onChange={handleChange}
                 maxLength="6"
                 placeholder="6-digit PIN"
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>Employment Type</label>
-              <select
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Employment Type</label>
+              <CustomDropdown
                 name="employment_type"
                 value={formData.employment_type}
                 onChange={handleChange}
-              >
-                <option value="part_time">Part Time</option>
-                <option value="full_time">Full Time</option>
-                <option value="contract">Contract</option>
-                <option value="temporary">Temporary</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label>Hourly Rate</label>
+                options={[
+                  { value: 'part_time', label: 'Part Time' },
+                  { value: 'full_time', label: 'Full Time' },
+                  { value: 'contract', label: 'Contract' },
+                  { value: 'temporary', label: 'Temporary' }
+                ]}
+                placeholder="Part Time"
+                isDarkMode={isDarkMode}
+                themeColorRgb={themeColorRgb}
+                compactTrigger
+              />
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Hourly Rate</label>
               <input
                 type="number"
                 step="0.01"
                 name="hourly_rate"
                 value={formData.hourly_rate}
                 onChange={handleChange}
+                style={inputStyle({ textAlign: 'right' })}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>Salary</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Salary</label>
               <input
                 type="number"
                 step="0.01"
                 name="salary"
                 value={formData.salary}
                 onChange={handleChange}
+                style={inputStyle({ textAlign: 'right' })}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group full-width">
-              <label>Address</label>
+            </FormField>
+            <FormField style={{ ...compactFormFieldStyleTight, gridColumn: '1 / -1' }}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Address</label>
               <textarea
                 name="address"
                 value={formData.address}
                 onChange={handleChange}
-                rows="2"
+                rows={2}
+                style={{ ...inputStyle(), minHeight: '56px', resize: 'vertical' }}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>Emergency Contact Name</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Emergency Contact Name</label>
               <input
                 type="text"
                 name="emergency_contact_name"
                 value={formData.emergency_contact_name}
                 onChange={handleChange}
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group">
-              <label>Emergency Contact Phone</label>
+            </FormField>
+            <FormField style={compactFormFieldStyleTight}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Emergency Contact Phone</label>
               <input
                 type="tel"
                 name="emergency_contact_phone"
                 value={formData.emergency_contact_phone}
                 onChange={handleChange}
+                style={inputStyle()}
+                {...focusHandlers}
               />
-            </div>
-
-            <div className="form-group full-width">
-              <label>Notes</label>
+            </FormField>
+            <FormField style={{ ...compactFormFieldStyleTight, gridColumn: '1 / -1' }}>
+              <label style={compactFormLabelStyle(isDarkMode)}>Notes</label>
               <textarea
                 name="notes"
                 value={formData.notes}
                 onChange={handleChange}
-                rows="3"
+                rows={3}
+                style={{ ...inputStyle(), minHeight: '72px', resize: 'vertical' }}
+                {...focusHandlers}
               />
+            </FormField>
             </div>
           </div>
 
-          <div className="modal-footer">
-            <button type="button" className="btn btn-secondary" onClick={onCancel}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? 'Saving...' : 'Save'}
-            </button>
+          <div style={{ flexShrink: 0 }}>
+            <div
+              style={{
+                height: '24px',
+                background: `linear-gradient(to bottom, transparent, ${isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'})`,
+                pointerEvents: 'none'
+              }}
+            />
+            <div style={{
+              ...compactFormActionsStyle,
+              marginTop: 0,
+              padding: '8px 0 24px 0'
+            }}>
+              <button
+                type="button"
+                onClick={onCancel}
+                style={compactCancelButtonStyle(isDarkMode)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                style={compactPrimaryButtonStyle(themeColorRgb, loading)}
+              >
+                {loading ? 'Saving...' : 'Save'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

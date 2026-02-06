@@ -279,47 +279,82 @@ class PermissionManager:
     
     def log_activity(self, employee_id: int, action: str, resource_type: Optional[str],
                      resource_id: Optional[int], details: str, ip_address: Optional[str] = None):
-        """Log employee activity"""
+        """Log employee activity into audit_log (single audit trail)."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
         try:
+            cursor.execute(
+                "SELECT establishment_id FROM employees WHERE employee_id = %s",
+                (employee_id,),
+            )
+            row = cursor.fetchone()
+            establishment_id = row[0] if row and (isinstance(row, tuple) and row[0]) else None
+            if not establishment_id:
+                cursor.execute("SELECT establishment_id FROM establishments ORDER BY establishment_id LIMIT 1")
+                row = cursor.fetchone()
+                establishment_id = row[0] if row and (isinstance(row, tuple) and row[0]) else 1
             cursor.execute("""
-                INSERT INTO activity_log
-                (employee_id, action, resource_type, resource_id, details, ip_address)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (employee_id, action, resource_type, resource_id, details, ip_address))
-            
+                INSERT INTO audit_log
+                (establishment_id, table_name, record_id, action_type, employee_id, details, ip_address, resource_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                establishment_id,
+                resource_type or "activity",
+                resource_id or 0,
+                action,
+                employee_id,
+                details,
+                ip_address,
+                resource_type,
+            ))
             conn.commit()
         except Exception as e:
             print(f"Error logging activity: {e}")
         finally:
             conn.close()
-    
+
     def get_activity_log(self, limit: int = 100, employee_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get activity log entries"""
+        """Get activity entries from audit_log (single audit trail). Returns shape compatible with former activity_log."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
         try:
             if employee_id:
                 cursor.execute("""
-                    SELECT al.*, CONCAT(e.first_name, ' ', e.last_name) as employee_name
-                    FROM activity_log al
+                    SELECT
+                        al.audit_id AS log_id,
+                        al.establishment_id,
+                        al.employee_id,
+                        al.action_type AS action,
+                        al.resource_type,
+                        al.record_id AS resource_id,
+                        al.details,
+                        al.ip_address,
+                        al.action_timestamp AS created_at,
+                        CONCAT(e.first_name, ' ', e.last_name) AS employee_name
+                    FROM audit_log al
                     LEFT JOIN employees e ON al.employee_id = e.employee_id
                     WHERE al.employee_id = %s
-                    ORDER BY al.created_at DESC
+                    ORDER BY al.action_timestamp DESC
                     LIMIT %s
                 """, (employee_id, limit))
             else:
                 cursor.execute("""
-                    SELECT al.*, CONCAT(e.first_name, ' ', e.last_name) as employee_name
-                    FROM activity_log al
+                    SELECT
+                        al.audit_id AS log_id,
+                        al.establishment_id,
+                        al.employee_id,
+                        al.action_type AS action,
+                        al.resource_type,
+                        al.record_id AS resource_id,
+                        al.details,
+                        al.ip_address,
+                        al.action_timestamp AS created_at,
+                        CONCAT(e.first_name, ' ', e.last_name) AS employee_name
+                    FROM audit_log al
                     LEFT JOIN employees e ON al.employee_id = e.employee_id
-                    ORDER BY al.created_at DESC
+                    ORDER BY al.action_timestamp DESC
                     LIMIT %s
                 """, (limit,))
-            
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
         finally:

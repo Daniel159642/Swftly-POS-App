@@ -19,8 +19,8 @@ class CustomerDisplaySystem:
         conn = get_connection()
         return conn, conn.cursor(cursor_factory=RealDictCursor)
     
-    def start_transaction(self, employee_id, items, customer_id=None):
-        """Start a new transaction"""
+    def start_transaction(self, employee_id, items, customer_id=None, discount=0.0, discount_type=None):
+        """Start a new transaction. discount is order-level discount amount; discount_type e.g. 'student', 'employee'."""
         from database_postgres import get_current_establishment
         conn, cursor = self.get_connection()
         try:
@@ -60,41 +60,60 @@ class CustomerDisplaySystem:
                 subtotal += item_subtotal
                 total_tax += item_tax
             
-            total = subtotal + total_tax
+            order_discount = float(discount) if discount else 0.0
+            order_total = max(0.0, float(subtotal) + float(total_tax) - float(order_discount))
+            # Clamp for DB CHECK (total >= 0); use single var so every INSERT gets same value
+            order_total = max(0.0, float(order_total))
             
             # Generate order number (format: ORD-YYYYMMDD-HHMMSS)
             order_number = f"ORD-{datetime.now().strftime('%Y%m%d')}-{datetime.now().strftime('%H%M%S')}"
             
             # Create order first to get order_id and order_number
-            # Check if tip and order_type columns exist
+            # Check if tip, order_type, discount, discount_type columns exist
             cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'orders' AND table_schema = 'public'")
             columns_result = cursor.fetchall()
             order_columns = [col['column_name'] if isinstance(col, dict) else col[0] for col in columns_result]
             has_tip = 'tip' in order_columns
             has_order_type = 'order_type' in order_columns
             has_tax_rate = 'tax_rate' in order_columns
+            has_discount_col = 'discount' in order_columns
+            has_discount_type_col = 'discount_type' in order_columns
             
-            if has_tip and has_order_type and has_tax_rate:
+            if has_tip and has_order_type and has_tax_rate and has_discount_col and has_discount_type_col:
+                cursor.execute("""
+                    INSERT INTO orders
+                    (establishment_id, order_number, employee_id, customer_id, subtotal, tax_rate, tax_amount, discount, discount_type, total, payment_method, payment_status, order_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'cash', 'pending', 'completed')
+                    RETURNING order_id, order_number
+                """, (establishment_id, order_number, employee_id, customer_id, subtotal, tax_rate, total_tax, order_discount, (discount_type or None), order_total))
+            elif has_tip and has_order_type and has_tax_rate and has_discount_col:
+                cursor.execute("""
+                    INSERT INTO orders
+                    (establishment_id, order_number, employee_id, customer_id, subtotal, tax_rate, tax_amount, discount, total, payment_method, payment_status, order_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'cash', 'pending', 'completed')
+                    RETURNING order_id, order_number
+                """, (establishment_id, order_number, employee_id, customer_id, subtotal, tax_rate, total_tax, order_discount, order_total))
+            elif has_tip and has_order_type and has_tax_rate:
                 cursor.execute("""
                     INSERT INTO orders
                     (establishment_id, order_number, employee_id, customer_id, subtotal, tax_rate, tax_amount, total, payment_method, payment_status, order_status)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'cash', 'pending', 'completed')
                     RETURNING order_id, order_number
-                """, (establishment_id, order_number, employee_id, customer_id, subtotal, tax_rate, total_tax, total))
+                """, (establishment_id, order_number, employee_id, customer_id, subtotal, tax_rate, total_tax, order_total))
             elif has_tax_rate:
                 cursor.execute("""
                     INSERT INTO orders
                     (establishment_id, order_number, employee_id, customer_id, subtotal, tax_rate, tax_amount, total, payment_method, payment_status, order_status)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'cash', 'pending', 'completed')
                     RETURNING order_id, order_number
-                """, (establishment_id, order_number, employee_id, customer_id, subtotal, tax_rate, total_tax, total))
+                """, (establishment_id, order_number, employee_id, customer_id, subtotal, tax_rate, total_tax, order_total))
             else:
                 cursor.execute("""
                     INSERT INTO orders
                     (establishment_id, order_number, employee_id, customer_id, subtotal, tax_amount, total, payment_method, payment_status, order_status)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, 'cash', 'pending', 'completed')
                     RETURNING order_id, order_number
-                """, (establishment_id, order_number, employee_id, customer_id, subtotal, total_tax, total))
+                """, (establishment_id, order_number, employee_id, customer_id, subtotal, total_tax, order_total))
             order_result = cursor.fetchone()
             if isinstance(order_result, dict):
                 order_id = order_result['order_id']
@@ -171,13 +190,13 @@ class CustomerDisplaySystem:
                         pass
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_establishment ON public.transactions(establishment_id)")
             
-            # Now create transaction linked to order
+            # Now create transaction linked to order (use order_total so transaction total reflects discount)
             cursor.execute("""
                 INSERT INTO transactions
                 (establishment_id, order_id, employee_id, customer_id, subtotal, tax, total, status)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending')
                 RETURNING transaction_id
-            """, (establishment_id, order_id, employee_id, customer_id, subtotal, total_tax, total))
+            """, (establishment_id, order_id, employee_id, customer_id, subtotal, total_tax, order_total))
             result = cursor.fetchone()
             transaction_id = result['transaction_id'] if isinstance(result, dict) else result[0]
             
@@ -322,7 +341,7 @@ class CustomerDisplaySystem:
                 'session_id': session_id,
                 'subtotal': float(subtotal),
                 'tax': float(total_tax),
-                'total': float(total),
+                'total': float(order_total),
                 'items': items
             }
         except Exception as e:
@@ -670,60 +689,103 @@ class CustomerDisplaySystem:
         
         if settings:
             settings = dict(settings)
+            # Ensure signature_required is always present (0 or 1)
+            if 'signature_required' not in settings:
+                settings['signature_required'] = 0
             # Parse JSON fields
             if settings.get('tip_suggestions'):
                 try:
                     settings['tip_suggestions'] = json.loads(settings['tip_suggestions'])
                 except:
-                    settings['tip_suggestions'] = [15, 18, 20, 25]
-            if settings.get('checkout_ui'):
+                    settings['tip_suggestions'] = [15, 18, 20]
+            # Always parse and include checkout_ui when column exists so API response is consistent
+            raw_checkout_ui = settings.get('checkout_ui')
+            if raw_checkout_ui is not None:
                 try:
-                    settings['checkout_ui'] = json.loads(settings['checkout_ui']) if isinstance(settings['checkout_ui'], str) else settings['checkout_ui']
+                    settings['checkout_ui'] = json.loads(raw_checkout_ui) if isinstance(raw_checkout_ui, str) else raw_checkout_ui
+                    if not isinstance(settings['checkout_ui'], dict):
+                        settings['checkout_ui'] = None
                 except Exception:
                     settings['checkout_ui'] = None
+            else:
+                settings['checkout_ui'] = None
+            # Tip display options (columns may not exist before migration)
+            if 'tip_custom_in_checkout' not in settings:
+                settings['tip_custom_in_checkout'] = 0
+            if 'tip_allocation' not in settings or settings.get('tip_allocation') not in ('logged_in_employee', 'split_all'):
+                settings['tip_allocation'] = settings.get('tip_allocation') or 'logged_in_employee'
+            if 'tip_refund_from' not in settings or settings.get('tip_refund_from') not in ('employee', 'store'):
+                settings['tip_refund_from'] = settings.get('tip_refund_from') or 'store'
         else:
             # Return defaults if no settings exist
             settings = {
                 'tip_enabled': 0,
                 'tip_after_payment': 0,
-                'tip_suggestions': [15, 18, 20, 25],
-                'theme_color': '#4CAF50'
+                'tip_suggestions': [15, 18, 20],
+                'signature_required': 0,
+                'theme_color': '#4CAF50',
+                'tip_custom_in_checkout': 0,
+                'tip_allocation': 'logged_in_employee',
+                'tip_refund_from': 'store'
             }
         
         conn.close()
         return settings
     
     def update_display_settings(self, **kwargs):
-        """Update customer display settings"""
+        """Update customer display settings for the current establishment."""
+        from database_postgres import get_current_establishment
         conn, cursor = self.get_connection()
         
         try:
-            # Check if settings exist
-            cursor.execute("SELECT setting_id FROM customer_display_settings ORDER BY setting_id DESC LIMIT 1")
-            existing = cursor.fetchone()
+            establishment_id = get_current_establishment()
+            if establishment_id is None:
+                cursor.execute("SELECT establishment_id FROM establishments ORDER BY establishment_id LIMIT 1")
+                row = cursor.fetchone()
+                establishment_id = row['establishment_id'] if row and isinstance(row, dict) else (row[0] if row else None)
+            if establishment_id is None:
+                raise ValueError('No establishment found')
+            
+            # Only update columns that exist in the table (schema may vary)
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'customer_display_settings'
+            """)
+            existing_columns = {r['column_name'] if isinstance(r, dict) else r[0] for r in cursor.fetchall()}
             
             allowed_fields = [
                 'store_location', 'show_promotions', 'show_survey_prompt',
                 'show_loyalty_signup', 'tip_enabled', 'tip_after_payment',
-                'tip_suggestions', 'idle_screen_content', 'branding_logo_path',
-                'theme_color', 'checkout_ui'
+                'tip_suggestions', 'signature_required', 'idle_screen_content',
+                'branding_logo_path', 'theme_color', 'checkout_ui',
+                'tip_custom_in_checkout', 'tip_allocation', 'tip_refund_from'
             ]
             
+            cursor.execute("""
+                SELECT setting_id FROM customer_display_settings
+                WHERE establishment_id = %s
+                ORDER BY setting_id DESC LIMIT 1
+            """, (establishment_id,))
+            existing = cursor.fetchone()
+            
             if existing:
-                # Update existing settings
-                setting_id = existing[0]
+                setting_id = existing['setting_id'] if isinstance(existing, dict) else existing[0]
                 updates = []
                 values = []
-                
                 for field, value in kwargs.items():
-                    if field in allowed_fields:
+                    if field in allowed_fields and field in existing_columns:
                         if field == 'tip_suggestions' and isinstance(value, list):
                             value = json.dumps(value)
                         elif field == 'checkout_ui' and (isinstance(value, dict) or isinstance(value, list)):
                             value = json.dumps(value)
+                        elif field == 'tip_custom_in_checkout':
+                            value = 1 if value else 0
                         updates.append(f"{field} = %s")
                         values.append(value)
-                
+                if 'checkout_ui' in kwargs and 'checkout_ui' not in existing_columns:
+                    raise ValueError(
+                        'checkout_ui column missing. Run migration: migrations/add_checkout_ui_settings_postgres.sql'
+                    )
                 if updates:
                     values.append(setting_id)
                     cursor.execute(f"""
@@ -733,34 +795,49 @@ class CustomerDisplaySystem:
                     """, values)
                     conn.commit()
             else:
-                # Insert new settings
+                # Insert new row for this establishment. Include base columns plus any allowed fields from kwargs
+                # (e.g. checkout_ui) so they are saved on first insert.
+                base_insert_columns = ['establishment_id', 'tip_enabled', 'tip_suggestions', 'receipt_enabled', 'signature_required']
+                insert_fields = set(base_insert_columns)
+                # Add any allowed fields from kwargs so checkout_ui etc. are saved on first save
+                for k in kwargs:
+                    if k in allowed_fields and k in existing_columns:
+                        insert_fields.add(k)
                 fields = []
                 placeholders = []
                 values = []
-                
                 defaults = {
-                    'show_promotions': 1,
-                    'show_survey_prompt': 1,
-                    'show_loyalty_signup': 1,
-                    'tip_enabled': 0,
-                    'tip_after_payment': 0,
-                    'tip_suggestions': json.dumps([15, 18, 20, 25]),
-                    'theme_color': '#4CAF50'
+                    'tip_enabled': kwargs.get('tip_enabled', 0),
+                    'tip_suggestions': kwargs.get('tip_suggestions', [15, 18, 20]),
+                    'signature_required': kwargs.get('signature_required', 0),
+                    'receipt_enabled': 1,
+                    'tip_custom_in_checkout': 1 if kwargs.get('tip_custom_in_checkout') else 0,
+                    'tip_allocation': kwargs.get('tip_allocation', 'logged_in_employee'),
+                    'tip_refund_from': kwargs.get('tip_refund_from', 'store'),
                 }
-                
-                defaults.update(kwargs)
-                
-                for field in allowed_fields:
-                    if field in defaults:
+                for field in insert_fields:
+                    if field not in existing_columns:
+                        continue
+                    if field == 'establishment_id':
                         fields.append(field)
                         placeholders.append('%s')
-                        value = defaults[field]
-                        if field == 'tip_suggestions' and isinstance(value, list):
-                            value = json.dumps(value)
-                        elif field == 'checkout_ui' and (isinstance(value, dict) or isinstance(value, list)):
-                            value = json.dumps(value)
-                        values.append(value)
-                
+                        values.append(establishment_id)
+                        continue
+                    # Prefer kwargs value if provided, else use default
+                    value = kwargs.get(field) if field in kwargs else defaults.get(field)
+                    if value is None and field == 'tip_suggestions':
+                        value = [15, 18, 20]
+                    if field == 'tip_suggestions' and isinstance(value, list):
+                        value = json.dumps(value)
+                    elif field == 'checkout_ui' and (isinstance(value, dict) or isinstance(value, list)):
+                        value = json.dumps(value)
+                    elif field == 'tip_custom_in_checkout':
+                        value = 1 if value else 0
+                    fields.append(field)
+                    placeholders.append('%s')
+                    values.append(value)
+                if not fields:
+                    raise ValueError('customer_display_settings has no insertable columns')
                 cursor.execute(f"""
                     INSERT INTO customer_display_settings ({', '.join(fields)})
                     VALUES ({', '.join(placeholders)})

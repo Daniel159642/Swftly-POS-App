@@ -72,9 +72,15 @@ psql -U postgres -d pos_accounting -f setup_accounting_system.sql
    - Links to accounts, entities, classes, locations
    - Enforced: Debits must equal Credits
 
+### Customer & Vendor Strategy
+
+- **POS:** `public.customers` (orders, loyalty), `public.vendors` (inventory, shipments).
+- **Accounting:** `accounting_customers` (invoicing), `accounting_vendors` (bills).
+- **Link:** `accounting_customers.customer_id` → `public.customers(customer_id)`; `accounting_vendors.vendor_id` → `public.vendors(vendor_id)`. When set, use POS as source of truth for name/contact; avoid duplicating data. See **docs/CUSTOMER_VENDOR_STRATEGY.md**.
+
 ### Customer & Invoice Tables (4)
 
-4. **customers** - Customer master data
+4. **accounting_customers** - Invoicing customer master (link to public.customers via customer_id)
 5. **invoices** - Invoice headers
 6. **invoice_lines** - Invoice line items
 7. **payments** - Customer payments

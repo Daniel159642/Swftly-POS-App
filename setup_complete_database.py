@@ -124,8 +124,13 @@ def main():
     except:
         pass
     
-    print("Step 1: Creating database (if needed)...")
-    create_database_if_needed()
+    # Step 1: Create DB only for local Postgres (skip when using DATABASE_URL e.g. Supabase)
+    db_url = os.getenv('DATABASE_URL') or os.getenv('POSTGRES_URL') or os.getenv('DB_URL')
+    if not db_url:
+        print("Step 1: Creating database (if needed)...")
+        create_database_if_needed()
+    else:
+        print("Step 1: Using DATABASE_URL (skipping local DB creation)...")
     print()
     
     print("Step 2: Running main schema (schema_postgres.sql)...")

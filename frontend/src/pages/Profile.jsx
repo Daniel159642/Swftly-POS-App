@@ -11,8 +11,8 @@ import {
   Trash2,
   PanelLeft
 } from 'lucide-react'
-import { EmployeeList } from '../components/EmployeeManagement'
 import { FormLabel, FormField, inputBaseStyle, getInputFocusHandlers } from '../components/FormStyles'
+import CustomDropdown from '../components/common/CustomDropdown'
 
 function Profile({ employeeId, employeeName }) {
   const { hasPermission, employee } = usePermissions()
@@ -97,26 +97,8 @@ function Profile({ employeeId, employeeName }) {
   const [clockStatus, setClockStatus] = useState(null)
   const [clockLoading, setClockLoading] = useState(false)
   const [clockMessage, setClockMessage] = useState(null)
-  const [employees, setEmployees] = useState([])
-  const [employeesLoading, setEmployeesLoading] = useState(true)
-  const [employeesError, setEmployeesError] = useState(null)
 
   const hasAdminAccess = hasPermission('manage_permissions') || hasPermission('add_employee') || employee?.position?.toLowerCase() === 'admin'
-
-  const loadEmployees = async () => {
-    setEmployeesLoading(true)
-    setEmployeesError(null)
-    try {
-      const response = await fetch('/api/employees')
-      const data = await response.json()
-      setEmployees(data.data || [])
-    } catch (err) {
-      setEmployeesError('Failed to load employees')
-      console.error(err)
-    } finally {
-      setEmployeesLoading(false)
-    }
-  }
 
   useEffect(() => {
     if (employeeId) {
@@ -124,10 +106,7 @@ function Profile({ employeeId, employeeName }) {
       loadAppSettings()
       loadClockStatus()
     }
-    if (hasAdminAccess) {
-      loadEmployees()
-    }
-  }, [employeeId, weekOffset, hasAdminAccess])
+  }, [employeeId, weekOffset])
 
   useEffect(() => {
     // Refresh clock status every 30 seconds
@@ -1027,174 +1006,77 @@ function Profile({ employeeId, employeeName }) {
         </div>
       </div>
 
-      {/* Schedule & Availability Tabs */}
-      <div style={{
-        marginBottom: '32px'
-      }}>
-        {/* Tab Buttons */}
+      {/* Schedule & Availability - same style as This Week / This Month cards */}
         <div style={{
-          display: 'flex',
-          gap: '8px',
-          marginBottom: '24px',
-          borderBottom: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0'
+          marginBottom: '32px',
+          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          padding: '0',
+          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+          boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+          transition: 'transform 0.2s, box-shadow 0.2s',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
         }}>
-          <button
-            onClick={() => setScheduleTab('schedule')}
-            style={{
-              padding: '12px 24px',
-              backgroundColor: scheduleTab === 'schedule' 
-                ? (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5')
-                : 'transparent',
-              border: 'none',
-              borderBottom: scheduleTab === 'schedule' 
-                ? `2px solid rgba(${themeColorRgb}, 0.8)`
-                : '2px solid transparent',
-              cursor: 'pointer',
-              fontSize: '15px',
-              fontWeight: scheduleTab === 'schedule' ? 600 : 400,
-              color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-              transition: 'all 0.2s',
-              marginBottom: '-1px'
-            }}
-            onMouseEnter={(e) => {
-              if (scheduleTab !== 'schedule') {
-                e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (scheduleTab !== 'schedule') {
-                e.currentTarget.style.backgroundColor = 'transparent'
-              }
-            }}
-          >
-            Schedule
-          </button>
-          <button
-            onClick={() => setScheduleTab('availability')}
-            style={{
-              padding: '12px 24px',
-              backgroundColor: scheduleTab === 'availability' 
-                ? (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5')
-                : 'transparent',
-              border: 'none',
-              borderBottom: scheduleTab === 'availability' 
-                ? `2px solid rgba(${themeColorRgb}, 0.8)`
-                : '2px solid transparent',
-              cursor: 'pointer',
-              fontSize: '15px',
-              fontWeight: scheduleTab === 'availability' ? 600 : 400,
-              color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-              transition: 'all 0.2s',
-              marginBottom: '-1px'
-            }}
-            onMouseEnter={(e) => {
-              if (scheduleTab !== 'availability') {
-                e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (scheduleTab !== 'availability') {
-                e.currentTarget.style.backgroundColor = 'transparent'
-              }
-            }}
-          >
-            Availability
-          </button>
-        </div>
+        {/* Content: tab buttons + body - single fixed-height area */}
+        <div style={{ padding: '28px', height: '520px', overflowY: 'auto', boxSizing: 'border-box' }}>
+          {/* Tab buttons - same style as Add Date button, full width */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexShrink: 0, width: '100%' }}>
+            <button
+              type="button"
+              onClick={() => setScheduleTab('schedule')}
+              style={{
+                flex: 1,
+                padding: '10px 20px',
+                backgroundColor: scheduleTab === 'schedule' ? `rgba(${themeColorRgb}, 0.7)` : `rgba(${themeColorRgb}, 0.25)`,
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+                color: '#fff',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 600,
+                fontSize: '14px',
+                boxShadow: scheduleTab === 'schedule' ? `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)` : `0 2px 8px rgba(${themeColorRgb}, 0.15)`,
+                transition: 'all 0.3s ease',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
+              }}
+            >
+              Schedule
+            </button>
+            <button
+              type="button"
+              onClick={() => setScheduleTab('availability')}
+              style={{
+                flex: 1,
+                padding: '10px 20px',
+                backgroundColor: scheduleTab === 'availability' ? `rgba(${themeColorRgb}, 0.7)` : `rgba(${themeColorRgb}, 0.25)`,
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+                color: '#fff',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 600,
+                fontSize: '14px',
+                boxShadow: scheduleTab === 'availability' ? `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)` : `0 2px 8px rgba(${themeColorRgb}, 0.15)`,
+                transition: 'all 0.3s ease',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
+              }}
+            >
+              Availability
+            </button>
+          </div>
 
-        {/* Schedule Tab Content */}
+        {/* Schedule tab: title with arrows on same line, left and right */}
         {scheduleTab === 'schedule' && (
           <div>
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              marginBottom: '24px'
-            }}>
-              <button
-                onClick={() => setWeekOffset(prev => prev - 1)}
-                style={{
-                  padding: '8px 12px',
-                  backgroundColor: 'transparent',
-                  border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontSize: '18px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: '40px',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5'
-                  e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-light, #333)' : '#ccc'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                  e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'
-                }}
-              >
-                ←
-              </button>
-              <h2 style={{ 
-                margin: 0, 
-                fontSize: '22px', 
-                fontWeight: 600,
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                textAlign: 'center'
-              }}>
-                {(() => {
-                  const today = new Date()
-                  const startOfWeek = new Date(today)
-                  startOfWeek.setDate(today.getDate() - today.getDay() + (weekOffset * 7))
-                  
-                  if (weekOffset === 0) {
-                    return "This Week's Schedule"
-                  } else if (weekOffset === 1) {
-                    return "Next Week's Schedule"
-                  } else if (weekOffset === -1) {
-                    return "Last Week's Schedule"
-                  } else {
-                    const weekStartStr = startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                    const weekEnd = new Date(startOfWeek)
-                    weekEnd.setDate(startOfWeek.getDate() + 6)
-                    const weekEndStr = weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                    return `Week of ${weekStartStr} - ${weekEndStr}`
-                  }
-                })()}
+            <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <button type="button" onClick={() => setWeekOffset(prev => prev - 1)} style={{ padding: '2px 6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a', flexShrink: 0 }}>←</button>
+              <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', textAlign: 'center' }}>
+                {weekOffset === 0 ? "This Week's Schedule" : weekOffset === 1 ? "Next Week's Schedule" : weekOffset === -1 ? "Last Week's Schedule" : (() => { const today = new Date(); const startOfWeek = new Date(today); startOfWeek.setDate(today.getDate() - today.getDay() + (weekOffset * 7)); const weekEnd = new Date(startOfWeek); weekEnd.setDate(startOfWeek.getDate() + 6); return `Week of ${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`; })()}
               </h2>
-              <button
-                onClick={() => setWeekOffset(prev => prev + 1)}
-                style={{
-                  padding: '8px 12px',
-                  backgroundColor: 'transparent',
-                  border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontSize: '18px',
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: '40px',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5'
-                  e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-light, #333)' : '#ccc'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                  e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'
-                }}
-              >
-                →
-              </button>
+              <button type="button" onClick={() => setWeekOffset(prev => prev + 1)} style={{ padding: '2px 6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a', flexShrink: 0 }}>→</button>
             </div>
         {(() => {
           // Organize schedules by date in the week
@@ -1272,11 +1154,12 @@ function Profile({ employeeId, employeeName }) {
                 })}
               </div>
               
-              {/* Schedule Content */}
+              {/* Schedule Content - same height as Availability schedule grid (120px) */}
               <div style={{ 
                 display: 'grid', 
                 gridTemplateColumns: 'repeat(7, 1fr)',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
+                height: '120px'
               }}>
                 {weekDays.map((dayInfo, index) => {
                   const schedule = dayInfo.schedule
@@ -1289,7 +1172,7 @@ function Profile({ employeeId, employeeName }) {
                         padding: '20px 8px',
                         borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none',
                         textAlign: 'center',
-                        minHeight: '80px',
+                        height: '120px',
                         display: 'flex',
                         flexDirection: 'column',
                         justifyContent: 'center',
@@ -1338,18 +1221,157 @@ function Profile({ employeeId, employeeName }) {
             </div>
           )
         })()}
+
+            {/* Below schedule: Add Date + Unavailable dates (same on both tabs) */}
+            <div style={{ marginTop: '24px' }}>
+              <button
+                onClick={() => setShowAddDate(!showAddDate)}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                  backdropFilter: 'blur(10px)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                  color: '#fff',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                  transition: 'all 0.3s ease',
+                  marginBottom: '20px'
+                }}
+              >
+                + Add Date
+              </button>
+              {showAddDate && (
+                <div style={{
+                  padding: '24px',
+                  border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
+                  borderRadius: '8px',
+                  marginBottom: '20px',
+                  backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
+                }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <FormField style={{ marginBottom: '12px' }}>
+                      <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Start Date</FormLabel>
+                      <input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                    </FormField>
+                    <FormField style={{ marginBottom: '12px' }}>
+                      <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>End Date (optional - leave blank for single day)</FormLabel>
+                      <input type="date" value={newEndDate} onChange={(e) => setNewEndDate(e.target.value)} min={newDate} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                    </FormField>
+                    <FormField style={{ marginBottom: '12px' }}>
+                      <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Can't work from:</FormLabel>
+                      <div style={{ position: 'relative', cursor: 'text' }} onClick={(e) => { const input = e.currentTarget.querySelector('input'); if (input) input.focus(); }}>
+                        <input type="time" value={unavailableStartTime} onChange={(e) => setUnavailableStartTime(e.target.value)} onFocus={(e) => { setStartTimeFocused(true); getInputFocusHandlers(themeColorRgb, isDarkMode).onFocus(e); }} onBlur={(e) => { setStartTimeFocused(false); getInputFocusHandlers(themeColorRgb, isDarkMode).onBlur(e); }} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), color: (unavailableStartTime || startTimeFocused) ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333') : 'transparent' }} />
+                        {!unavailableStartTime && !startTimeFocused && <div style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', fontStyle: 'italic' }}>All day</div>}
+                      </div>
+                    </FormField>
+                    <FormField style={{ marginBottom: '12px' }}>
+                      <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Can't work until:</FormLabel>
+                      <div style={{ position: 'relative', cursor: 'text' }} onClick={(e) => { const input = e.currentTarget.querySelector('input'); if (input) input.focus(); }}>
+                        <input type="time" value={unavailableEndTime} onChange={(e) => setUnavailableEndTime(e.target.value)} onFocus={(e) => { setEndTimeFocused(true); getInputFocusHandlers(themeColorRgb, isDarkMode).onFocus(e); }} onBlur={(e) => { setEndTimeFocused(false); getInputFocusHandlers(themeColorRgb, isDarkMode).onBlur(e); }} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), color: (unavailableEndTime || endTimeFocused) ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333') : 'transparent' }} />
+                        {!unavailableEndTime && !endTimeFocused && <div style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', fontStyle: 'italic' }}>All day</div>}
+                      </div>
+                    </FormField>
+                    <FormField style={{ marginBottom: '12px' }}>
+                      <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Note (optional)</FormLabel>
+                      <input type="text" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="e.g., Vacation, Doctor appointment" style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                    </FormField>
+                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                      <button type="button" className="button-26 button-26--header" role="button" onClick={() => { setShowAddDate(false); setNewDate(''); setNewEndDate(''); setNewNote(''); setUnavailableStartTime(''); setUnavailableEndTime(''); setStartTimeFocused(false); setEndTimeFocused(false); setEditingDateIndex(null); }}>
+                        <div className="button-26__content"><span className="button-26__text text">Cancel</span></div>
+                      </button>
+                      <button type="button" className="button-26 button-26--header" role="button" onClick={handleAddUnavailableDate}>
+                        <div className="button-26__content"><span className="button-26__text text">Add</span></div>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {unavailableDates.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {unavailableDates.map((item, index) => (
+                    <div key={index} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #e8e8e8', borderRadius: '8px', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', transition: 'all 0.2s' }} onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'; e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#d0d0d0'; }} onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'; e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-light, #333)' : '#e8e8e8'; }}>
+                      <div>
+                        <div style={{ fontSize: '15px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a', marginBottom: '4px' }}>{new Date(item.date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                        {item.startTime && item.endTime ? <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '4px' }}>Can't work: {item.startTime} - {item.endTime}</div> : <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '4px' }}>All day</div>}
+                        {item.note && <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '4px' }}>{item.note}</div>}
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <button onClick={() => handleEditUnavailableDate(index)} style={{ padding: '6px 10px', backgroundColor: 'transparent', border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', transition: 'all 0.2s ease', opacity: 0.7 }} onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'; e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-light, #555)' : '#bbb'; }} onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.7'; e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ddd'; }} title="Edit"><Pencil size={14} style={{ color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }} /></button>
+                        <button onClick={() => handleRemoveUnavailableDate(index)} style={{ padding: '6px 10px', backgroundColor: 'transparent', border: '1px solid rgba(211, 47, 47, 0.3)', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', transition: 'all 0.2s ease', opacity: 0.7 }} onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.backgroundColor = 'rgba(211, 47, 47, 0.1)'; e.currentTarget.style.borderColor = 'rgba(211, 47, 47, 0.5)'; }} onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.7'; e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.borderColor = 'rgba(211, 47, 47, 0.3)'; }} title="Remove"><Trash2 size={14} style={{ color: '#d32f2f' }} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', fontSize: '14px', textAlign: 'center', padding: '40px 20px', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif' }}>No unavailable dates added</div>
+              )}
+            </div>
           </div>
         )}
 
         {/* Availability Tab Content */}
         {scheduleTab === 'availability' && (
           <div>
-
-        {/* Weekly Availability */}
-        <div style={{ marginBottom: '32px' }}>
-          <div style={{ 
+            <div style={{ marginBottom: '12px' }}>
+              <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', textAlign: 'center' }}>
+                My Availability
+              </h2>
+            </div>
+        {/* Weekly Availability - grid first, then Add Date + Unavailable below */}
+        <div style={{ marginBottom: '24px' }}>
+          {(() => {
+            const today = new Date()
+            const startOfWeek = new Date(today)
+            startOfWeek.setDate(today.getDate() - today.getDay())
+            startOfWeek.setHours(0, 0, 0, 0)
+            const dayNameToAvailabilityKey = { 'sunday': 'sunday', 'monday': 'monday', 'tuesday': 'tuesday', 'wednesday': 'wednesday', 'thursday': 'thursday', 'friday': 'friday', 'saturday': 'saturday' }
+            const weekDays = []
+            for (let i = 0; i < 7; i++) {
+              const dayDate = new Date(startOfWeek)
+              dayDate.setDate(startOfWeek.getDate() + i)
+              const dayName = dayDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
+              weekDays.push({ date: dayDate, availabilityKey: dayNameToAvailabilityKey[dayName] || dayName, dayName })
+            }
+            return (
+              <div style={{ border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0', borderRadius: '8px', overflow: 'hidden', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5' }}>
+                  {weekDays.map((dayInfo, index) => {
+                    const isToday = dayInfo.date.toDateString() === new Date().toDateString()
+                    const dayName = dayInfo.date.toLocaleDateString('en-US', { weekday: 'short' })
+                    return (
+                      <div key={dayInfo.availabilityKey} style={{ padding: '12px 8px', borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none', textAlign: 'center', fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#555', backgroundColor: isToday ? (isDarkMode ? `rgba(${themeColorRgb}, 0.2)` : `rgba(${themeColorRgb}, 0.1)`) : 'transparent' }}>
+                        {dayName}
+                        <div style={{ fontSize: '11px', fontWeight: 400, marginTop: '4px', opacity: 0.7 }}>{dayInfo.date.getDate()}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', height: editingAvailability ? 'auto' : '120px', minHeight: editingAvailability ? undefined : '120px' }}>
+                  {weekDays.map((dayInfo, index) => {
+                    const dayAvailability = availability[dayInfo.availabilityKey]
+                    const isAvailable = dayAvailability?.available
+                    return (
+                      <div key={dayInfo.availabilityKey} style={{ padding: editingAvailability ? '12px 8px' : '20px 8px', borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none', textAlign: 'center', height: editingAvailability ? 'auto' : '120px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: editingAvailability ? '8px' : '0', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa' }}>
+                        {editingAvailability ? (
+                          <> <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none', fontSize: '12px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}><input type="checkbox" checked={isAvailable || false} onChange={(e) => handleAvailabilityChange(dayInfo.availabilityKey, 'available', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a' }} /><span>Available</span></label>
+                            {isAvailable && (<> <input type="time" value={dayAvailability?.start || '09:00'} onChange={(e) => handleAvailabilityChange(dayInfo.availabilityKey, 'start', e.target.value)} style={{ width: '100%', padding: '6px 8px', border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc', borderRadius: '4px', fontSize: '12px', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', transition: 'border-color 0.2s' }} onFocus={(e) => e.target.style.borderColor = isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a'} onBlur={(e) => e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ccc'} /><div style={{ fontSize: '11px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>to</div><input type="time" value={dayAvailability?.end || '17:00'} onChange={(e) => handleAvailabilityChange(dayInfo.availabilityKey, 'end', e.target.value)} style={{ width: '100%', padding: '6px 8px', border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc', borderRadius: '4px', fontSize: '12px', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', transition: 'border-color 0.2s' }} onFocus={(e) => e.target.style.borderColor = isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a'} onBlur={(e) => e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ccc'} /> </>)} </> ) : (
+                          <> {isAvailable ? (<> <div style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a', marginBottom: '4px' }}>{formatTime(dayAvailability.start || '09:00')}</div><div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginBottom: '4px' }}>to</div><div style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>{formatTime(dayAvailability.end || '17:00')}</div> </>) : <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', fontStyle: 'italic' }}>Off</div>} </> )}
+                        </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+        <div style={{ 
             display: 'flex',
-            justifyContent: 'flex-end',
+            justifyContent: 'flex-start',
             alignItems: 'center',
             gap: '8px',
             marginBottom: '20px',
@@ -1422,219 +1444,8 @@ function Profile({ employeeId, employeeName }) {
               {editingAvailability ? 'Cancel' : 'Edit'}
             </button>
           </div>
-          
-          {(() => {
-            // Generate current week days (same structure as schedule)
-            const today = new Date()
-            const startOfWeek = new Date(today)
-            startOfWeek.setDate(today.getDate() - today.getDay())
-            startOfWeek.setHours(0, 0, 0, 0)
-            
-            // Map day names to availability keys
-            const dayNameToAvailabilityKey = {
-              'sunday': 'sunday',
-              'monday': 'monday',
-              'tuesday': 'tuesday',
-              'wednesday': 'wednesday',
-              'thursday': 'thursday',
-              'friday': 'friday',
-              'saturday': 'saturday'
-            }
-            
-            // Generate dates for each day of the week
-            const weekDays = []
-            for (let i = 0; i < 7; i++) {
-              const dayDate = new Date(startOfWeek)
-              dayDate.setDate(startOfWeek.getDate() + i)
-              const dayName = dayDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
-              weekDays.push({
-                date: dayDate,
-                availabilityKey: dayNameToAvailabilityKey[dayName] || dayName,
-                dayName: dayName
-              })
-            }
-            
-            return (
-              <div style={{
-                  border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  overflow: 'hidden',
-                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'
-                }}>
-                  {/* Header */}
-                  <div style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: 'repeat(7, 1fr)',
-                    borderBottom: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                    backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'
-                  }}>
-                    {weekDays.map((dayInfo, index) => {
-                      const isToday = dayInfo.date.toDateString() === new Date().toDateString()
-                      const dayName = dayInfo.date.toLocaleDateString('en-US', { weekday: 'short' })
-                      
-                      return (
-                        <div 
-                          key={dayInfo.availabilityKey}
-                          style={{
-                            padding: '12px 8px',
-                            borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none',
-                            textAlign: 'center',
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#555',
-                            backgroundColor: isToday ? (isDarkMode ? `rgba(${themeColorRgb}, 0.2)` : `rgba(${themeColorRgb}, 0.1)`) : 'transparent'
-                          }}
-                        >
-                          {dayName}
-                          <div style={{ fontSize: '11px', fontWeight: 400, marginTop: '4px', opacity: 0.7 }}>
-                            {dayInfo.date.getDate()}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  
-                  {/* Availability Content */}
-                  <div style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: 'repeat(7, 1fr)',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-                  }}>
-                    {weekDays.map((dayInfo, index) => {
-                      const dayAvailability = availability[dayInfo.availabilityKey]
-                      const isAvailable = dayAvailability?.available
-                      
-                      return (
-                        <div 
-                          key={dayInfo.availabilityKey}
-                          style={{
-                            padding: editingAvailability ? '12px 8px' : '20px 8px',
-                            borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none',
-                            textAlign: 'center',
-                            minHeight: editingAvailability ? 'auto' : '80px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'center',
-                            alignItems: 'center',
-                            gap: editingAvailability ? '8px' : '0',
-                            backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'
-                          }}
-                        >
-                          {editingAvailability ? (
-                            <>
-                              <label style={{ 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                gap: '6px', 
-                                cursor: 'pointer',
-                                userSelect: 'none',
-                                fontSize: '12px',
-                                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                              }}>
-                                <input
-                                  type="checkbox"
-                                  checked={isAvailable || false}
-                                  onChange={(e) => handleAvailabilityChange(dayInfo.availabilityKey, 'available', e.target.checked)}
-                                  style={{ 
-                                    cursor: 'pointer', 
-                                    width: '16px', 
-                                    height: '16px',
-                                    accentColor: isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a'
-                                  }}
-                                />
-                                <span>Available</span>
-                              </label>
-                              {isAvailable && (
-                                <>
-                                  <input
-                                    type="time"
-                                    value={dayAvailability?.start || '09:00'}
-                                    onChange={(e) => handleAvailabilityChange(dayInfo.availabilityKey, 'start', e.target.value)}
-                                    style={{
-                                      width: '100%',
-                                      padding: '6px 8px',
-                                      border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc',
-                                      borderRadius: '4px',
-                                      fontSize: '12px',
-                                      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                                      backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                                      transition: 'border-color 0.2s'
-                                    }}
-                                    onFocus={(e) => e.target.style.borderColor = isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a'}
-                                    onBlur={(e) => e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ccc'}
-                                  />
-                                  <div style={{ fontSize: '11px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>to</div>
-                                  <input
-                                    type="time"
-                                    value={dayAvailability?.end || '17:00'}
-                                    onChange={(e) => handleAvailabilityChange(dayInfo.availabilityKey, 'end', e.target.value)}
-                                    style={{
-                                      width: '100%',
-                                      padding: '6px 8px',
-                                      border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc',
-                                      borderRadius: '4px',
-                                      fontSize: '12px',
-                                      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                                      backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                                      transition: 'border-color 0.2s'
-                                    }}
-                                    onFocus={(e) => e.target.style.borderColor = isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a'}
-                                    onBlur={(e) => e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ccc'}
-                                  />
-                                </>
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              {isAvailable ? (
-                                <>
-                                  <div style={{ 
-                                    fontSize: '14px', 
-                                    fontWeight: 600, 
-                                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-                                    marginBottom: '4px'
-                                  }}>
-                                    {formatTime(dayAvailability.start || '09:00')}
-                                  </div>
-                                  <div style={{ 
-                                    fontSize: '12px', 
-                                    color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                                    marginBottom: '4px'
-                                  }}>
-                                    to
-                                  </div>
-                                  <div style={{ 
-                                    fontSize: '14px', 
-                                    fontWeight: 600, 
-                                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a'
-                                  }}>
-                                    {formatTime(dayAvailability.end || '17:00')}
-                                  </div>
-                                </>
-                              ) : (
-                                <div style={{ 
-                                  fontSize: '13px', 
-                                  color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
-                                  fontStyle: 'italic'
-                                }}>
-                                  Off
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-            )
-          })()}
-        </div>
 
-        {/* Unavailable Dates */}
+        {/* Unavailable Dates - below Add Date on both tabs */}
         <div>
 
           {showAddDate && (
@@ -1927,21 +1738,68 @@ function Profile({ employeeId, employeeName }) {
         </div>
           </div>
         )}
+        </div>
       </div>
         </>
       )}
 
       {activeTab === 'settings' && (
         <div>
-          <h2 style={{ 
-            margin: '0 0 28px 0', 
-            fontSize: '22px', 
-            fontWeight: 600,
-            color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-          }}>
-            Application Settings
-          </h2>
+          <style>{`
+            .profile-app-settings-switch .ikxBAC {
+              appearance: none;
+              background-color: #dfe1e4;
+              border-radius: 72px;
+              border-style: none;
+              flex-shrink: 0;
+              height: 20px;
+              margin: 0;
+              position: relative;
+              width: 30px;
+            }
+            .profile-app-settings-switch .ikxBAC::before {
+              bottom: -6px;
+              content: "";
+              left: -6px;
+              position: absolute;
+              right: -6px;
+              top: -6px;
+            }
+            .profile-app-settings-switch .ikxBAC,
+            .profile-app-settings-switch .ikxBAC::after {
+              transition: all 100ms ease-out;
+            }
+            .profile-app-settings-switch .ikxBAC::after {
+              background-color: #fff;
+              border-radius: 50%;
+              content: "";
+              height: 14px;
+              left: 3px;
+              position: absolute;
+              top: 3px;
+              width: 14px;
+            }
+            .profile-app-settings-switch input[type=checkbox] {
+              cursor: default;
+            }
+            .profile-app-settings-switch .ikxBAC:hover {
+              background-color: #c9cbcd;
+              transition-duration: 0s;
+            }
+            .profile-app-settings-switch .ikxBAC:checked {
+              background-color: var(--theme-color, #6ba3f0);
+            }
+            .profile-app-settings-switch .ikxBAC:checked::after {
+              background-color: #fff;
+              left: 13px;
+            }
+            .profile-app-settings-switch :focus:not(.focus-visible) {
+              outline: 0;
+            }
+            .profile-app-settings-switch .ikxBAC:checked:hover {
+              filter: brightness(0.9);
+            }
+          `}</style>
 
           {settingsSaved && (
             <div style={{
@@ -1969,78 +1827,42 @@ function Profile({ employeeId, employeeName }) {
               }}>
                 Appearance
               </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '14px',
-                    color: 'var(--text-secondary, #333)',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-                  }}>
-                    <span>Theme</span>
-                    <select
+                <FormField style={{ marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '280px' }}>
+                    <CustomDropdown
                       value={themeMode}
                       onChange={(e) => handleSettingChange('theme', e.target.value)}
-                      style={{
-                        padding: '8px 12px',
-                        border: '1px solid var(--border-color, #ccc)',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                        backgroundColor: 'var(--bg-primary, white)',
-                        color: 'var(--text-primary, #333)',
-                        cursor: 'pointer',
-                        minWidth: '120px'
-                      }}
-                    >
-                      <option value="light">Light</option>
-                      <option value="dark">Dark</option>
-                      <option value="auto">Auto</option>
-                    </select>
-                  </label>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '14px',
-                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-                  }}>
-                    <span>Theme Color</span>
+                      options={[
+                        { value: 'light', label: 'Light' },
+                        { value: 'dark', label: 'Dark' },
+                        { value: 'auto', label: 'Auto' }
+                      ]}
+                      placeholder="Select theme"
+                      isDarkMode={isDarkMode}
+                      themeColorRgb={themeColorRgb}
+                    />
+                    <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Theme Color</FormLabel>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <input
-                        type="color"
-                        value={themeColor}
-                        onChange={(e) => setThemeColor(e.target.value)}
-                        style={{
-                          width: '60px',
-                          height: '36px',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          padding: '2px'
-                        }}
-                      />
+                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                        <div style={{ position: 'absolute', inset: 0, background: themeColor }} />
+                        <input
+                          type="color"
+                          value={themeColor}
+                          onChange={(e) => setThemeColor(e.target.value)}
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', padding: 0, border: 'none', opacity: 0, cursor: 'pointer' }}
+                        />
+                      </div>
                       <input
                         type="text"
                         value={themeColor}
                         onChange={(e) => setThemeColor(e.target.value)}
                         placeholder="#8400ff"
-                        style={{
-                          padding: '8px 12px',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc',
-                          borderRadius: '6px',
-                          fontSize: '14px',
-                          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                          width: '100px'
-                        }}
+                        style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '100px' }}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                       />
                     </div>
-                  </label>
-                </div>
+                  </div>
+                </FormField>
               </div>
 
             {/* Notification Settings */}
@@ -2058,190 +1880,46 @@ function Profile({ employeeId, employeeName }) {
                   <label style={{
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '14px',
-                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                    cursor: 'pointer',
-                    userSelect: 'none'
+                    gap: '12px',
+                    cursor: 'pointer'
                   }}>
-                    <span>Enable Notifications</span>
-                    <input
-                      type="checkbox"
-                      checked={appSettings.notifications}
-                      onChange={(e) => handleSettingChange('notifications', e.target.checked)}
-                      style={{
-                        cursor: 'pointer',
-                        width: '18px',
-                        height: '18px',
-                        accentColor: isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a'
-                      }}
-                    />
-                  </label>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '14px',
-                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                    cursor: 'pointer',
-                    userSelect: 'none'
-                  }}>
-                    <span>Enable Sounds</span>
-                    <input
-                      type="checkbox"
-                      checked={appSettings.soundEnabled}
-                      onChange={(e) => handleSettingChange('soundEnabled', e.target.checked)}
-                      style={{
-                        cursor: 'pointer',
-                        width: '18px',
-                        height: '18px',
-                        accentColor: isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a'
-                      }}
-                    />
-                  </label>
-                </div>
-              </div>
-
-            {/* Data Refresh Settings */}
-            <div>
-              <h3 style={{
-                margin: '0 0 16px 0',
-                fontSize: '16px',
-                fontWeight: 600,
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-              }}>
-                Data Refresh
-              </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '14px',
-                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                    cursor: 'pointer',
-                    userSelect: 'none'
-                  }}>
-                    <span>Auto Refresh</span>
-                    <input
-                      type="checkbox"
-                      checked={appSettings.autoRefresh}
-                      onChange={(e) => handleSettingChange('autoRefresh', e.target.checked)}
-                      style={{
-                        cursor: 'pointer',
-                        width: '18px',
-                        height: '18px',
-                        accentColor: isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a'
-                      }}
-                    />
-                  </label>
-                  {appSettings.autoRefresh && (
-                    <label style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: '14px',
-                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-                    }}>
-                      <span>Refresh Interval (seconds)</span>
+                    <div className="profile-app-settings-switch">
                       <input
-                        type="number"
-                        min="10"
-                        max="300"
-                        step="10"
-                        value={appSettings.refreshInterval}
-                        onChange={(e) => handleSettingChange('refreshInterval', parseInt(e.target.value))}
-                        style={{
-                          padding: '8px 12px',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc',
-                          borderRadius: '6px',
-                          fontSize: '14px',
-                          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                          width: '100px',
-                          textAlign: 'right'
-                        }}
+                        type="checkbox"
+                        className="sc-gJwTLC ikxBAC"
+                        checked={appSettings.notifications}
+                        onChange={(e) => handleSettingChange('notifications', e.target.checked)}
                       />
-                    </label>
-                  )}
-                </div>
-              </div>
-
-            {/* Date & Time Format */}
-            <div>
-              <h3 style={{
-                margin: '0 0 16px 0',
-                fontSize: '16px',
-                fontWeight: 600,
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-              }}>
-                Date & Time Format
-              </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '14px',
-                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-                  }}>
-                    <span>Date Format</span>
-                    <select
-                      value={appSettings.dateFormat}
-                      onChange={(e) => handleSettingChange('dateFormat', e.target.value)}
-                      style={{
-                        padding: '8px 12px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                        backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        cursor: 'pointer',
-                        minWidth: '150px'
-                      }}
-                    >
-                      <option value="MM/DD/YYYY">MM/DD/YYYY</option>
-                      <option value="DD/MM/YYYY">DD/MM/YYYY</option>
-                      <option value="YYYY-MM-DD">YYYY-MM-DD</option>
-                      <option value="DD MMM YYYY">DD MMM YYYY</option>
-                    </select>
+                    </div>
+                    <span style={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                    }}>
+                      Enable Notifications
+                    </span>
                   </label>
                   <label style={{
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '14px',
-                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
+                    gap: '12px',
+                    cursor: 'pointer'
                   }}>
-                    <span>Time Format</span>
-                    <select
-                      value={appSettings.timeFormat}
-                      onChange={(e) => handleSettingChange('timeFormat', e.target.value)}
-                      style={{
-                        padding: '8px 12px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                        backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        cursor: 'pointer',
-                        minWidth: '120px'
-                      }}
-                    >
-                      <option value="12h">12 Hour</option>
-                      <option value="24h">24 Hour</option>
-                    </select>
+                    <div className="profile-app-settings-switch">
+                      <input
+                        type="checkbox"
+                        className="sc-gJwTLC ikxBAC"
+                        checked={appSettings.soundEnabled}
+                        onChange={(e) => handleSettingChange('soundEnabled', e.target.checked)}
+                      />
+                    </div>
+                    <span style={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                    }}>
+                      Enable Sounds
+                    </span>
                   </label>
                 </div>
               </div>
@@ -2257,59 +1935,35 @@ function Profile({ employeeId, employeeName }) {
               }}>
                 Language
               </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <label style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '14px',
-                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-                  }}>
-                    <span>Language</span>
-                    <select
+                <FormField style={{ marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '280px' }}>
+                    <CustomDropdown
                       value={appSettings.language}
                       onChange={(e) => handleSettingChange('language', e.target.value)}
-                      style={{
-                        padding: '8px 12px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                        backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        cursor: 'pointer',
-                        minWidth: '120px'
-                      }}
-                    >
-                      <option value="en">English</option>
-                      <option value="es">Español</option>
-                      <option value="fr">Français</option>
-                    </select>
-                  </label>
-                </div>
+                      options={[
+                        { value: 'en', label: 'English' },
+                        { value: 'es', label: 'Español' },
+                        { value: 'fr', label: 'Français' }
+                      ]}
+                      placeholder="Select language"
+                      isDarkMode={isDarkMode}
+                      themeColorRgb={themeColorRgb}
+                    />
+                  </div>
+                </FormField>
               </div>
 
             {/* Save Button */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
               <button
+                type="button"
+                className="button-26 button-26--header"
+                role="button"
                 onClick={saveAppSettings}
-                style={{
-                  padding: '12px 24px',
-                  backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#1a1a1a',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                  transition: 'background-color 0.2s'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#333'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#1a1a1a'}
               >
-                Save Settings
+                <div className="button-26__content">
+                  <span className="button-26__text text">Save Settings</span>
+                </div>
               </button>
             </div>
           </div>
@@ -2317,15 +1971,7 @@ function Profile({ employeeId, employeeName }) {
       )}
 
       {activeTab === 'admin' && hasAdminAccess && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <EmployeeList 
-            employees={employees}
-            loading={employeesLoading}
-            error={employeesError}
-            onRefresh={loadEmployees}
-          />
-          <AdminDashboard />
-        </div>
+        <AdminDashboard />
       )}
       </div>
     </div>

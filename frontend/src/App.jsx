@@ -262,7 +262,7 @@ function Layout({ children, employee, onLogout }) {
               color: '#6ba3f0'
             }}
           >
-            Swift
+            Delancey
           </button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

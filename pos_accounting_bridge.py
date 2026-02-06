@@ -310,12 +310,16 @@ def journalize_void_sale_to_accounting(order_id: int, employee_id: int) -> Dict[
 def journalize_return_to_accounting(
     return_id: int, order_id: int, return_amount: float, employee_id: int,
     payment_method: Optional[str] = None,
-    return_type: Optional[str] = None
+    return_type: Optional[str] = None,
+    return_tip_amount: float = 0,
+    tip_refund_from: str = 'store'
 ) -> Dict[str, Any]:
     """
     Create and post a return in accounting.transactions.
     Refund: Debit 4100, Credit Cash or A/R.
     Exchange (store credit): Debit 4100, Credit 2110 Store Credit Liability.
+    When tip_refund_from='employee' and return_tip_amount > 0: also post a second entry to deduct
+    the refunded tip from employee (Debit 2210 Tips Payable, Credit 4100) so store does not absorb the cost.
     Idempotent: skips if a posted transaction already exists for this return.
     """
     if return_amount <= 0:
@@ -348,6 +352,28 @@ def journalize_return_to_accounting(
         result = TransactionRepository.create(data, employee_id)
         txn_id = result['transaction']['id']
         TransactionRepository.post_transaction(txn_id, employee_id)
+
+        # When refunding tip and deducting from employee: reduce tips payable, restore 4100 (store does not absorb)
+        tip_deduction = float(return_tip_amount or 0)
+        if tip_deduction > 0 and (tip_refund_from or '').strip().lower() == 'employee':
+            try:
+                tip_lines = _resolve_lines_to_account_ids([
+                    {'account_number': '2210', 'debit_amount': tip_deduction, 'credit_amount': 0, 'description': 'Tip refund – deduct from employee'},
+                    {'account_number': '4100', 'debit_amount': 0, 'credit_amount': tip_deduction, 'description': 'Tip refund – restore income (employee deduction)'},
+                ])
+                tip_data = {
+                    'transaction_date': datetime.now().date().isoformat(),
+                    'transaction_type': 'journal_entry',
+                    'description': f'Return #{return_id} – Tip refund deducted from employee',
+                    'source_document_id': return_id,
+                    'source_document_type': 'return_tip_deduction',
+                    'lines': tip_lines,
+                }
+                tip_result = TransactionRepository.create(tip_data, employee_id)
+                TransactionRepository.post_transaction(tip_result['transaction']['id'], employee_id)
+            except Exception as te:
+                # 2210 may not exist; log and continue (refund entry already posted)
+                print(f"Tip deduction entry skipped (2210 or create failed): {te}")
         return {'success': True, 'transaction_id': txn_id}
     except Exception as e:
         return {'success': False, 'message': str(e)}

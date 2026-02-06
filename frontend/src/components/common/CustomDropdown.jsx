@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { ChevronDown } from 'lucide-react'
 
 /**
- * Custom dropdown matching Inventory parent-category style.
+ * Custom dropdown matching Store Information store type style.
  * API compatible with native select: onChange receives { target: { value, name? } }.
  */
 function CustomDropdown({
@@ -18,8 +18,9 @@ function CustomDropdown({
   themeColorRgb = '132, 0, 255',
   style = {},
   disabled = false,
-  triggerVariant = 'input', // 'input' (default) or 'button' (Inventory create-dropdown style)
-  triggerFullWidth = false // when true, trigger fills container (e.g. in a flex row)
+  triggerVariant = 'input',
+  triggerFullWidth = false,
+  compactTrigger = false
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 120 })
@@ -50,49 +51,25 @@ function CustomDropdown({
     }
   }, [isOpen])
 
-  const isButtonTrigger = triggerVariant === 'button'
-  const triggerBaseStyle = isButtonTrigger
-    ? {
-        padding: '4px 16px',
-        minHeight: '28px',
-        height: '28px',
-        borderRadius: '8px',
-        fontSize: '14px',
-        fontWeight: 500,
-        backgroundColor: _isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
-        border: _isDark ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
-        color: _isDark ? 'var(--text-primary, #fff)' : '#333',
-        boxShadow: 'none',
-        width: triggerFullWidth ? '100%' : 'auto',
-        minWidth: triggerFullWidth ? 0 : undefined,
-        whiteSpace: 'nowrap'
-      }
-    : {}
-  const triggerInputStyle = !isButtonTrigger
-    ? {
-        width: '100%',
-        padding: '6px 10px',
-        minHeight: '34px',
-        border: error ? '1px solid #ef4444' : _isDark ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-        borderRadius: '6px',
-        fontSize: '14px',
-        backgroundColor: disabled ? (_isDark ? '#2a2a2a' : '#f3f4f6') : _isDark ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-        color: _isDark ? 'var(--text-primary, #fff)' : '#333',
-        ...(isOpen && {
-          borderColor: `rgba(${themeColorRgb}, 0.5)`,
-          boxShadow: `0 0 0 3px rgba(${themeColorRgb}, 0.1)`
-        })
-      }
-    : {}
+  const closeDropdown = () => {
+    setIsOpen(false)
+    // Blur on next tick so focus moves away before any re-render
+    requestAnimationFrame(() => {
+      triggerRef.current?.blur()
+    })
+  }
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      const isClickInsideTrigger = triggerRef.current?.contains(event.target)
-      const isClickInsideMenu = menuRef.current?.contains(event.target)
-      if (!isClickInsideTrigger && !isClickInsideMenu) setIsOpen(false)
+      if (!triggerRef.current || !menuRef.current) return
+      const insideTrigger = triggerRef.current.contains(event.target)
+      const insideMenu = menuRef.current.contains(event.target)
+      if (!insideTrigger && !insideMenu) closeDropdown()
     }
-    if (isOpen) document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
   }, [isOpen])
 
   const selectedOption = options.find((opt) => String(opt.value) === String(value))
@@ -100,62 +77,87 @@ function CustomDropdown({
   const handleSelect = (option) => {
     if (disabled) return
     onChange(name != null ? { target: { name, value: option.value } } : { target: { value: option.value } })
-    setIsOpen(false)
+    closeDropdown()
+  }
+
+  const handleTriggerClick = (e) => {
+    e.preventDefault()
+    if (disabled) return
+    setIsOpen((prev) => !prev)
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      if (!disabled) setIsOpen((prev) => !prev)
+    }
+    if (e.key === 'Escape') closeDropdown()
+  }
+
+  // Trigger styles - only apply focus ring when OPEN, never when closed
+  const borderColor = isOpen ? `rgba(${themeColorRgb}, 0.5)` : (error ? '#ef4444' : (_isDark ? 'var(--border-color, #404040)' : '#ddd'))
+  const boxShadow = isOpen ? `0 0 0 3px rgba(${themeColorRgb}, 0.1)` : 'none'
+
+  const isButtonTrigger = triggerVariant === 'button'
+  const triggerStyle = {
+    width: isButtonTrigger ? undefined : '100%',
+    padding: compactTrigger ? '5px 14px' : (isButtonTrigger ? '4px 16px' : '6px 10px'),
+    minHeight: compactTrigger ? 32 : (isButtonTrigger ? 28 : 34),
+    border: `1px solid ${borderColor}`,
+    borderRadius: isButtonTrigger ? 8 : 6,
+    fontSize: 14,
+    fontFamily: 'inherit',
+    backgroundColor: disabled ? (_isDark ? '#2a2a2a' : '#f3f4f6') : (_isDark ? 'var(--bg-secondary, #2d2d2d)' : '#fff'),
+    color: _isDark ? 'var(--text-primary, #fff)' : '#333',
+    boxShadow,
+    outline: 'none',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    boxSizing: 'border-box',
+    opacity: disabled ? 0.6 : 1,
+    transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+    ...(isButtonTrigger && {
+      minWidth: triggerFullWidth ? 0 : undefined,
+      flex: triggerFullWidth ? 1 : undefined
+    })
   }
 
   return (
-    <div style={{ marginBottom: label || error ? '16px' : 0, ...style }}>
+    <div style={{ marginBottom: label || error ? 16 : 0, ...style }}>
       {label && (
         <label
           style={{
             display: 'block',
-            fontSize: '14px',
+            fontSize: 14,
             fontWeight: 500,
-            color: _isDark ? '#ffffff' : '#374151',
-            marginBottom: '4px'
+            color: _isDark ? '#fff' : '#374151',
+            marginBottom: 4
           }}
         >
           {label}
-          {required && <span style={{ color: '#ef4444', marginLeft: '4px' }}>*</span>}
+          {required && <span style={{ color: '#ef4444', marginLeft: 4 }}>*</span>}
         </label>
       )}
       <div style={{ position: 'relative', width: triggerFullWidth ? '100%' : undefined }}>
-        <div
+        <button
           ref={triggerRef}
-          onClick={() => !disabled && setIsOpen(!isOpen)}
-          role="button"
+          type="button"
+          onClick={handleTriggerClick}
+          onKeyDown={handleKeyDown}
+          disabled={disabled}
           tabIndex={disabled ? -1 : 0}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              if (!disabled) setIsOpen((prev) => !prev)
-            }
-          }}
-          style={{
-            ...triggerBaseStyle,
-            ...triggerInputStyle,
-            transition: 'all 0.2s ease',
-            outline: 'none',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            boxSizing: 'border-box',
-            opacity: disabled ? 0.6 : 1
-          }}
+          style={triggerStyle}
           onMouseEnter={(e) => {
             if (disabled) return
-            if (isButtonTrigger && !isOpen) {
-              e.currentTarget.style.borderColor = `rgba(${themeColorRgb}, 0.3)`
-            } else if (!isButtonTrigger && !isOpen) {
+            if (!isOpen) {
               e.currentTarget.style.borderColor = `rgba(${themeColorRgb}, 0.3)`
             }
           }}
           onMouseLeave={(e) => {
-            if (isButtonTrigger && !isOpen) {
-              e.currentTarget.style.borderColor = _isDark ? 'var(--border-light, #333)' : '#ddd'
-            } else if (!isOpen) {
-              e.currentTarget.style.borderColor = error ? '#ef4444' : _isDark ? 'var(--border-color, #404040)' : '#ddd'
+            if (!isOpen) {
+              e.currentTarget.style.borderColor = error ? '#ef4444' : (_isDark ? 'var(--border-color, #404040)' : '#ddd')
             }
           }}
         >
@@ -171,7 +173,7 @@ function CustomDropdown({
               flexShrink: 0
             }}
           />
-        </div>
+        </button>
       </div>
       {isOpen && (
         <div
@@ -183,10 +185,10 @@ function CustomDropdown({
             width: `${dropdownPosition.width}px`,
             backgroundColor: _isDark ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
             border: _isDark ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-            borderRadius: '6px',
-            boxShadow: _isDark ? '0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.1)',
+            borderRadius: 6,
+            boxShadow: _isDark ? '0 4px 12px rgba(0,0,0,0.3)' : '0 4px 12px rgba(0,0,0,0.1)',
             zIndex: 10000,
-            maxHeight: '200px',
+            maxHeight: 200,
             overflowY: 'auto',
             overflowX: 'hidden'
           }}
@@ -194,19 +196,22 @@ function CustomDropdown({
           {options.map((option) => (
             <div
               key={String(option.value)}
+              role="option"
+              aria-selected={String(value) === String(option.value)}
               onClick={() => handleSelect(option)}
+              onMouseDown={(e) => e.preventDefault()}
               style={{
                 padding: '10px 14px',
                 cursor: 'pointer',
-                fontSize: '14px',
+                fontSize: 14,
                 color: _isDark ? 'var(--text-primary, #fff)' : '#333',
                 backgroundColor: String(value) === String(option.value) ? `rgba(${themeColorRgb}, 0.2)` : 'transparent',
                 transition: 'background-color 0.15s ease',
-                borderLeft: String(value) === String(option.value) ? `3px solid rgba(${themeColorRgb}, 0.7)` : '3px solid transparent'
+                borderLeft: `3px solid ${String(value) === String(option.value) ? `rgba(${themeColorRgb}, 0.7)` : 'transparent'}`
               }}
               onMouseEnter={(e) => {
                 if (String(value) !== String(option.value)) {
-                  e.currentTarget.style.backgroundColor = _isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
+                  e.currentTarget.style.backgroundColor = _isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'
                 }
               }}
               onMouseLeave={(e) => {
@@ -219,7 +224,7 @@ function CustomDropdown({
         </div>
       )}
       {error && (
-        <p style={{ marginTop: '4px', fontSize: '12px', color: '#ef4444' }}>{error}</p>
+        <p style={{ marginTop: 4, fontSize: 12, color: '#ef4444' }}>{error}</p>
       )}
     </div>
   )

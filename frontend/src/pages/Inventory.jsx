@@ -2,6 +2,17 @@ import { useState, useEffect, useRef } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import Table from '../components/Table'
 import BarcodeScanner from '../components/BarcodeScanner'
+import CustomDropdown from '../components/common/CustomDropdown'
+import {
+  inputBaseStyle,
+  getInputFocusHandlers,
+  FormField,
+  compactFormLabelStyle,
+  compactFormFieldStyle,
+  compactFormGridStyle,
+  compactFormSectionStyle,
+  CompactFormActions
+} from '../components/FormStyles'
 import { ScanBarcode, Plus, ChevronDown, Upload, Image as ImageIcon, Share2, Download, Printer, X } from 'lucide-react'
 
 function Inventory() {
@@ -66,7 +77,7 @@ function Inventory() {
     item_type: 'product',
     unit: ''
   })
-  const [inventoryFilter, setInventoryFilter] = useState('all') // 'all' | 'product' | 'ingredient'
+  const [inventoryFilter, setInventoryFilter] = useState('all') // 'all' | 'product' | 'ingredient' | 'archived'
   const [editingVariants, setEditingVariants] = useState([])
   const [editingIngredients, setEditingIngredients] = useState([])
   const [newVariant, setNewVariant] = useState({ variant_name: '', price: '', cost: '0' })
@@ -109,7 +120,8 @@ function Inventory() {
   const [barcodeLoading, setBarcodeLoading] = useState(false)
   const [barcodeError, setBarcodeError] = useState(null)
   const barcodeObjectUrlRef = useRef(null)
-  
+  const isArchivedView = inventoryFilter === 'archived'
+
   // Determine if dark mode is active
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return document.documentElement.classList.contains('dark-theme')
@@ -136,9 +148,17 @@ function Inventory() {
   }, [])
 
   useEffect(() => {
+    const archived = inventoryFilter === 'archived'
+    if (archived) {
+      setSelectedCategory(null)
+      setSelectedVendor(null)
+      setInventory([])
+      setAllCategories([])
+      setAllVendors([])
+    }
     loadInventory(inventoryFilter)
-    loadVendors()
-    loadCategories()
+    loadVendors(archived)
+    loadCategories(archived)
   }, [inventoryFilter])
 
   // Hide scrollbar for inventory buttons
@@ -180,7 +200,12 @@ function Inventory() {
     setLoading(true)
     setError(null)
     try {
-      const url = filter && filter !== 'all' ? `/api/inventory?item_type=${filter}` : '/api/inventory'
+      let url = '/api/inventory'
+      if (filter === 'archived') {
+        url += '?archived=1'
+      } else if (filter && filter !== 'all') {
+        url += `?item_type=${filter}`
+      }
       const response = await fetch(url)
       const result = await response.json()
       if (result.data) {
@@ -194,9 +219,11 @@ function Inventory() {
     }
   }
 
-  const loadVendors = async () => {
+  const loadVendors = async (archivedOnly) => {
     try {
-      const response = await fetch('/api/vendors')
+      const archived = archivedOnly ?? isArchivedView
+      const url = archived ? '/api/vendors?archived=1' : '/api/vendors'
+      const response = await fetch(url)
       const result = await response.json()
       if (result.data) {
         setAllVendors(result.data)
@@ -211,9 +238,11 @@ function Inventory() {
     }
   }
 
-  const loadCategories = async () => {
+  const loadCategories = async (archivedOnly) => {
     try {
-      const response = await fetch('/api/categories')
+      const archived = archivedOnly ?? isArchivedView
+      const url = archived ? '/api/categories?archived=1' : '/api/categories'
+      const response = await fetch(url)
       const result = await response.json()
       if (result.data) {
         setAllCategories(result.data)
@@ -311,6 +340,79 @@ function Inventory() {
     setBarcodeError(null)
   }
 
+  const doArchiveProduct = async (item) => {
+    const res = await fetch(`/api/inventory/${item.product_id}/archive`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || 'Archive failed')
+    setEditingProduct((prev) => (prev?.product_id === item.product_id ? null : prev))
+    loadInventory(inventoryFilter)
+  }
+  const doUnarchiveProduct = async (item) => {
+    const res = await fetch(`/api/inventory/${item.product_id}/unarchive`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || 'Unarchive failed')
+    setEditingProduct((prev) => (prev?.product_id === item.product_id ? null : prev))
+    loadInventory(inventoryFilter)
+  }
+  const doDeleteProduct = async (item) => {
+    const res = await fetch(`/api/inventory/${item.product_id}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || 'Delete failed')
+    setEditingProduct((prev) => (prev?.product_id === item.product_id ? null : prev))
+    loadInventory(inventoryFilter)
+  }
+  const doArchiveCategory = async (item) => {
+    const res = await fetch(`/api/categories/${item.category_id}/archive`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || 'Archive failed')
+    setEditingCategory((prev) => (prev?.category_id === item.category_id ? null : prev))
+    loadCategories()
+  }
+  const doUnarchiveCategory = async (item) => {
+    const res = await fetch(`/api/categories/${item.category_id}/unarchive`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || 'Unarchive failed')
+    setEditingCategory((prev) => (prev?.category_id === item.category_id ? null : prev))
+    loadCategories()
+  }
+  const doDeleteCategory = async (item) => {
+    const res = await fetch(`/api/categories/${item.category_id}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || 'Delete failed')
+    setEditingCategory((prev) => (prev?.category_id === item.category_id ? null : prev))
+    loadCategories()
+  }
+  const doArchiveVendor = async (item) => {
+    const res = await fetch(`/api/vendors/${item.vendor_id}/archive`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || 'Archive failed')
+    setEditingVendor((prev) => (prev?.vendor_id === item.vendor_id ? null : prev))
+    loadVendors()
+  }
+  const doUnarchiveVendor = async (item) => {
+    const res = await fetch(`/api/vendors/${item.vendor_id}/unarchive`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || 'Unarchive failed')
+    setEditingVendor((prev) => (prev?.vendor_id === item.vendor_id ? null : prev))
+    loadVendors()
+  }
+  const doDeleteVendor = async (item) => {
+    const res = await fetch(`/api/vendors/${item.vendor_id}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || 'Delete failed')
+    setEditingVendor((prev) => (prev?.vendor_id === item.vendor_id ? null : prev))
+    loadVendors()
+  }
+
+  const wrapAction = (fn) => async (item) => {
+    try {
+      await fn(item)
+    } catch (err) {
+      console.error(err)
+      alert(err.message || 'Action failed')
+    }
+  }
+
   const handleGenerateBarcode = async (product) => {
     const pid = product?.product_id
     if (!pid) return
@@ -340,6 +442,8 @@ function Inventory() {
       const url = URL.createObjectURL(blob)
       barcodeObjectUrlRef.current = url
       setBarcodePreview({ product, imageDataUrl: url, blob })
+      // Backend may have saved the barcode to the product when it had none; refresh table so the row updates
+      loadInventory(inventoryFilter)
     } catch (e) {
       setBarcodeError(e.message || 'Failed to generate barcode')
     } finally {
@@ -1490,8 +1594,11 @@ function Inventory() {
                 data={allCategories}
                 onEdit={handleEditCategory}
                 actionsAsEllipsis
+                themeColorRgb={themeColorRgb}
                 ellipsisMenuItems={[
-                  { label: 'Edit', onClick: (r) => handleEditCategory(r) }
+                  { label: 'Edit', onClick: (r) => handleEditCategory(r) },
+                  { label: isArchivedView ? 'Unarchive' : 'Archive', onClick: wrapAction(isArchivedView ? doUnarchiveCategory : doArchiveCategory), confirm: true, confirmMessage: (r) => `${isArchivedView ? 'Unarchive' : 'Archive'} "${r.category_path || r.category_name || 'this category'}"?`, confirmButtonLabel: isArchivedView ? 'Unarchive' : 'Archive' },
+                  { label: 'Delete', onClick: wrapAction(doDeleteCategory), confirm: true, confirmDanger: true, confirmMessage: (r) => `Delete "${r.category_path || r.category_name || 'this category'}"? This cannot be undone.`, confirmButtonLabel: 'Delete' }
                 ]}
               />
             ) : (
@@ -1511,9 +1618,12 @@ function Inventory() {
                   data={items}
                   onEdit={handleEditProduct}
                   actionsAsEllipsis
+                  themeColorRgb={themeColorRgb}
                   ellipsisMenuItems={[
                     { label: 'Edit', onClick: (r) => handleEditProduct(r) },
-                    { label: 'Barcode', onClick: (r) => handleGenerateBarcode(r) }
+                    { label: 'Barcode', onClick: (r) => handleGenerateBarcode(r) },
+                    { label: isArchivedView ? 'Unarchive' : 'Archive', onClick: wrapAction(isArchivedView ? doUnarchiveProduct : doArchiveProduct), confirm: true, confirmMessage: (r) => `${isArchivedView ? 'Unarchive' : 'Archive'} "${r.product_name || 'this product'}"?`, confirmButtonLabel: isArchivedView ? 'Unarchive' : 'Archive' },
+                    { label: 'Delete', onClick: wrapAction(doDeleteProduct), confirm: true, confirmDanger: true, confirmMessage: (r) => `Delete "${r.product_name || 'this product'}"? This cannot be undone.`, confirmButtonLabel: 'Delete' }
                   ]}
                 />
               ) : (
@@ -1608,8 +1718,11 @@ function Inventory() {
                 data={allVendors}
                 onEdit={handleEditVendor}
                 actionsAsEllipsis
+                themeColorRgb={themeColorRgb}
                 ellipsisMenuItems={[
-                  { label: 'Edit', onClick: (r) => handleEditVendor(r) }
+                  { label: 'Edit', onClick: (r) => handleEditVendor(r) },
+                  { label: isArchivedView ? 'Unarchive' : 'Archive', onClick: wrapAction(isArchivedView ? doUnarchiveVendor : doArchiveVendor), confirm: true, confirmMessage: (r) => `${isArchivedView ? 'Unarchive' : 'Archive'} "${r.vendor_name || 'this vendor'}"?`, confirmButtonLabel: isArchivedView ? 'Unarchive' : 'Archive' },
+                  { label: 'Delete', onClick: wrapAction(doDeleteVendor), confirm: true, confirmDanger: true, confirmMessage: (r) => `Delete "${r.vendor_name || 'this vendor'}"? This cannot be undone.`, confirmButtonLabel: 'Delete' }
                 ]}
               />
             ) : (
@@ -1629,9 +1742,12 @@ function Inventory() {
                   data={items}
                   onEdit={handleEditProduct}
                   actionsAsEllipsis
+                  themeColorRgb={themeColorRgb}
                   ellipsisMenuItems={[
                     { label: 'Edit', onClick: (r) => handleEditProduct(r) },
-                    { label: 'Barcode', onClick: (r) => handleGenerateBarcode(r) }
+                    { label: 'Barcode', onClick: (r) => handleGenerateBarcode(r) },
+                    { label: isArchivedView ? 'Unarchive' : 'Archive', onClick: wrapAction(isArchivedView ? doUnarchiveProduct : doArchiveProduct), confirm: true, confirmMessage: (r) => `${isArchivedView ? 'Unarchive' : 'Archive'} "${r.product_name || 'this product'}"?`, confirmButtonLabel: isArchivedView ? 'Unarchive' : 'Archive' },
+                    { label: 'Delete', onClick: wrapAction(doDeleteProduct), confirm: true, confirmDanger: true, confirmMessage: (r) => `Delete "${r.product_name || 'this product'}"? This cannot be undone.`, confirmButtonLabel: 'Delete' }
                   ]}
                 />
               ) : (
@@ -1663,9 +1779,12 @@ function Inventory() {
           data={filteredInventory}
           onEdit={handleEditProduct}
           actionsAsEllipsis
+          themeColorRgb={themeColorRgb}
           ellipsisMenuItems={[
             { label: 'Edit', onClick: (r) => handleEditProduct(r) },
-            { label: 'Barcode', onClick: (r) => handleGenerateBarcode(r) }
+            { label: 'Barcode', onClick: (r) => handleGenerateBarcode(r) },
+            { label: isArchivedView ? 'Unarchive' : 'Archive', onClick: wrapAction(isArchivedView ? doUnarchiveProduct : doArchiveProduct), confirm: true, confirmMessage: (r) => `${isArchivedView ? 'Unarchive' : 'Archive'} "${r.product_name || 'this product'}"?`, confirmButtonLabel: isArchivedView ? 'Unarchive' : 'Archive' },
+            { label: 'Delete', onClick: wrapAction(doDeleteProduct), confirm: true, confirmDanger: true, confirmMessage: (r) => `Delete "${r.product_name || 'this product'}"? This cannot be undone.`, confirmButtonLabel: 'Delete' }
           ]}
         />
       </div>
@@ -1689,26 +1808,39 @@ function Inventory() {
   }
 
   return (
-    <div style={{ padding: '20px 40px 40px 40px', maxWidth: '1600px', margin: '0 auto', backgroundColor: 'white' }}>
+    <div style={{
+      padding: '20px 40px 40px 40px',
+      maxWidth: '1600px',
+      margin: '0 auto',
+      backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
+      height: 'calc(100vh - 52px)',
+      boxSizing: 'border-box',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden'
+    }}>
       {/* Header with Create Buttons */}
       <div style={{ 
         display: 'flex', 
         gap: '12px', 
         marginBottom: '20px',
         flexWrap: 'wrap',
-        marginTop: '0'
+        marginTop: '0',
+        flexShrink: 0
       }}>
       </div>
 
-      <div style={{ display: 'flex', gap: '30px', height: 'calc(100vh - 200px)' }}>
+      <div style={{ display: 'flex', gap: '30px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* Left Column - Search */}
         <div style={{ 
           width: '300px', 
           flexShrink: 0,
           display: 'flex',
-          flexDirection: 'column'
+          flexDirection: 'column',
+          minHeight: 0,
+          overflow: 'hidden'
         }}>
-          <div style={{ marginBottom: '0px', display: 'flex', alignItems: 'center', gap: '8px', marginTop: '0' }}>
+          <div style={{ marginBottom: '0px', display: 'flex', alignItems: 'center', gap: '8px', marginTop: '0', flexShrink: 0 }}>
             <input
               type="text"
               placeholder="Search by name, SKU, barcode..."
@@ -1772,7 +1904,8 @@ function Inventory() {
               borderRadius: '8px',
               backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
               border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-              boxShadow: isDarkMode ? '0 2px 8px rgba(0, 0, 0, 0.2)' : '0 2px 8px rgba(0, 0, 0, 0.1)'
+              boxShadow: isDarkMode ? '0 2px 8px rgba(0, 0, 0, 0.2)' : '0 2px 8px rgba(0, 0, 0, 0.1)',
+              flexShrink: 0
             }}>
               {barcodeError && !barcodeLoading && (
                 <div style={{
@@ -1999,7 +2132,8 @@ function Inventory() {
             <div style={{
               marginTop: '20px',
               marginBottom: '20px',
-              maxHeight: 'calc(100vh - 300px)',
+              flex: 1,
+              minHeight: 0,
               overflowY: 'auto'
             }}>
               {createError && (
@@ -2030,18 +2164,11 @@ function Inventory() {
                 </div>
               )}
 
-              <form onSubmit={handleCreateProduct}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Product Name
+              <form onSubmit={handleCreateProduct} id="create-product-form">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>
+                      Product Name <span style={{ color: '#f44336' }}>*</span>
                     </label>
                     <input
                       type="text"
@@ -2049,90 +2176,44 @@ function Inventory() {
                       onChange={(e) => setCreateProductData({ ...createProductData, product_name: e.target.value })}
                       placeholder={createProductData.item_type === 'ingredient' ? 'Ingredient Name *' : 'Product Name *'}
                       required
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Type
-                    </label>
-                    <select
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Type</label>
+                    <CustomDropdown
+                      name="item_type"
                       value={createProductData.item_type || 'product'}
                       onChange={(e) => setCreateProductData({ ...createProductData, item_type: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
-                    >
-                      <option value="product">Product (sold at POS)</option>
-                      <option value="ingredient">Ingredient (used in recipes, not sold)</option>
-                    </select>
-                  </div>
+                      options={[
+                        { value: 'product', label: 'Product (sold at POS)' },
+                        { value: 'ingredient', label: 'Ingredient (used in recipes, not sold)' }
+                      ]}
+                      placeholder="Select type"
+                      isDarkMode={isDarkMode}
+                      themeColorRgb={themeColorRgb}
+                    />
+                  </FormField>
 
                   {createProductData.item_type === 'ingredient' && (
-                    <div>
-                      <label style={{
-                        display: 'block',
-                        marginBottom: '4px',
-                        fontSize: '11px',
-                        fontWeight: 500,
-                        color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                        fontFamily: '"Product Sans", sans-serif'
-                      }}>
-                        Unit
-                      </label>
+                    <FormField style={compactFormFieldStyle}>
+                      <label style={compactFormLabelStyle(isDarkMode)}>Unit</label>
                       <input
                         type="text"
                         value={createProductData.unit || ''}
                         onChange={(e) => setCreateProductData({ ...createProductData, unit: e.target.value })}
                         placeholder="e.g. oz, lb, g, ml, each"
-                        style={{
-                          width: '100%',
-                          padding: '6px',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                          borderRadius: '4px',
-                          fontSize: '13px',
-                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                          boxSizing: 'border-box'
-                        }}
+                        style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                       />
-                    </div>
+                    </FormField>
                   )}
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      SKU
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>
+                      SKU <span style={{ color: '#f44336' }}>*</span>
                     </label>
                     <input
                       type="text"
@@ -2140,59 +2221,27 @@ function Inventory() {
                       onChange={(e) => setCreateProductData({ ...createProductData, sku: e.target.value })}
                       placeholder="SKU *"
                       required
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Barcode
-                    </label>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Barcode</label>
                     <input
                       type="text"
                       value={createProductData.barcode}
                       onChange={(e) => setCreateProductData({ ...createProductData, barcode: e.target.value })}
                       placeholder="Barcode"
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                    <div>
-                      <label style={{
-                        display: 'block',
-                        marginBottom: '4px',
-                        fontSize: '11px',
-                        fontWeight: 500,
-                        color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                        fontFamily: '"Product Sans", sans-serif'
-                      }}>
-                        Price
+                  <div style={compactFormGridStyle('12px')}>
+                    <FormField style={compactFormFieldStyle}>
+                      <label style={compactFormLabelStyle(isDarkMode)}>
+                        Price <span style={{ color: '#f44336' }}>*</span>
                       </label>
                       <input
                         type="number"
@@ -2202,29 +2251,13 @@ function Inventory() {
                         onChange={(e) => setCreateProductData({ ...createProductData, product_price: e.target.value })}
                         placeholder="Price *"
                         required
-                        style={{
-                          width: '100%',
-                          padding: '6px',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                          borderRadius: '4px',
-                          fontSize: '13px',
-                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                          boxSizing: 'border-box'
-                        }}
+                        style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), textAlign: 'right' }}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                       />
-                    </div>
-
-                    <div>
-                      <label style={{
-                        display: 'block',
-                        marginBottom: '4px',
-                        fontSize: '11px',
-                        fontWeight: 500,
-                        color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                        fontFamily: '"Product Sans", sans-serif'
-                      }}>
-                        Cost
+                    </FormField>
+                    <FormField style={compactFormFieldStyle}>
+                      <label style={compactFormLabelStyle(isDarkMode)}>
+                        Cost <span style={{ color: '#f44336' }}>*</span>
                       </label>
                       <input
                         type="number"
@@ -2234,30 +2267,15 @@ function Inventory() {
                         onChange={(e) => setCreateProductData({ ...createProductData, product_cost: e.target.value })}
                         placeholder="Cost *"
                         required
-                        style={{
-                          width: '100%',
-                          padding: '6px',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                          borderRadius: '4px',
-                          fontSize: '13px',
-                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                          boxSizing: 'border-box'
-                        }}
+                        style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), textAlign: 'right' }}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                       />
-                    </div>
+                    </FormField>
                   </div>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Quantity
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>
+                      Quantity <span style={{ color: '#f44336' }}>*</span>
                     </label>
                     <input
                       type="number"
@@ -2266,50 +2284,27 @@ function Inventory() {
                       onChange={(e) => setCreateProductData({ ...createProductData, current_quantity: e.target.value })}
                       placeholder="Quantity *"
                       required
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Category
-                    </label>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Category</label>
                     <input
                       type="text"
                       value={createProductData.category}
                       onChange={(e) => setCreateProductData({ ...createProductData, category: e.target.value })}
                       placeholder="Category (e.g., Electronics > Phones)"
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Vendor</label>
                     <CustomDropdown
+                      name="vendor"
                       value={createProductData.vendor || ''}
                       onChange={(e) => {
                         const vendor = allVendors.find(v => v.vendor_name === e.target.value)
@@ -2321,84 +2316,62 @@ function Inventory() {
                       }}
                       options={[
                         { value: '', label: 'Vendor (optional)' },
-                        ...allVendors.map(vendor => ({
-                          value: vendor.vendor_name,
-                          label: vendor.vendor_name
-                        }))
+                        ...allVendors.map(v => ({ value: v.vendor_name, label: v.vendor_name }))
                       ]}
                       placeholder="Vendor (optional)"
                       isDarkMode={isDarkMode}
                       themeColorRgb={themeColorRgb}
-                      style={{ width: '100%' }}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Photo</label>
                     {!createProductData.photo ? (
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
                         style={{
                           width: '100%',
-                          padding: '6px',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                          borderRadius: '4px',
-                          fontSize: '13px',
-                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                          boxSizing: 'border-box',
+                          ...inputBaseStyle(isDarkMode, themeColorRgb),
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          gap: '8px',
-                          transition: 'all 0.2s ease',
-                          fontFamily: '"Product Sans", sans-serif'
+                          gap: '8px'
                         }}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                         onMouseEnter={(e) => {
-                          e.target.style.borderColor = `rgba(${themeColorRgb}, 0.5)`
-                          e.target.style.backgroundColor = isDarkMode 
-                            ? `rgba(${themeColorRgb}, 0.1)` 
-                            : `rgba(${themeColorRgb}, 0.05)`
+                          e.currentTarget.style.borderColor = `rgba(${themeColorRgb}, 0.5)`
+                          e.currentTarget.style.backgroundColor = isDarkMode ? `rgba(${themeColorRgb}, 0.1)` : `rgba(${themeColorRgb}, 0.05)`
                         }}
                         onMouseLeave={(e) => {
-                          e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ddd'
-                          e.target.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'
+                          e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ddd'
+                          e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'
                         }}
                       >
                         <Upload size={16} />
                         <span>Choose File</span>
                       </button>
                     ) : (
-                      <div style={{ position: 'relative' }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsCroppingPhoto(false)
-                            setShowPhotoPreview((prev) => !prev)
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '6px',
-                            border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                            borderRadius: '4px',
-                            fontSize: '13px',
-                            backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                            boxSizing: 'border-box',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '8px',
-                            transition: 'all 0.2s ease',
-                            fontFamily: '"Product Sans", sans-serif'
-                          }}
-                        >
-                          <ImageIcon size={16} />
-                          <span>Preview</span>
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCroppingPhoto(false)
+                          setShowPhotoPreview((prev) => !prev)
+                        }}
+                        style={{
+                          width: '100%',
+                          ...inputBaseStyle(isDarkMode, themeColorRgb),
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px'
+                        }}
+                      >
+                        <ImageIcon size={16} />
+                        <span>Preview</span>
+                      </button>
                     )}
                     <input
                       ref={fileInputRef}
@@ -2407,12 +2380,12 @@ function Inventory() {
                       onChange={handlePhotoChange}
                       style={{ display: 'none' }}
                     />
-                  </div>
+                  </FormField>
 
                   {(createProductData.item_type || 'product') === 'product' && (
                     <>
-                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #eee' }}>
-                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#555' }}>Sizes / Variants (e.g. Small $3, Large $5)</label>
+                      <FormField style={compactFormSectionStyle(isDarkMode)}>
+                        <label style={compactFormLabelStyle(isDarkMode)}>Sizes / Variants (e.g. Small $3, Large $5)</label>
                         {createVariants.length > 0 && (
                           <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px 0' }}>
                             {createVariants.map((v, idx) => (
@@ -2424,14 +2397,14 @@ function Inventory() {
                           </ul>
                         )}
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                          <input type="text" placeholder="Size name" value={createNewVariant.variant_name} onChange={(e) => setCreateNewVariant({ ...createNewVariant, variant_name: e.target.value })} style={{ width: '100px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
-                          <input type="number" step="0.01" min="0" placeholder="Price" value={createNewVariant.price} onChange={(e) => setCreateNewVariant({ ...createNewVariant, price: e.target.value })} style={{ width: '80px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
-                          <input type="number" step="0.01" min="0" placeholder="Cost" value={createNewVariant.cost} onChange={(e) => setCreateNewVariant({ ...createNewVariant, cost: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
-                          <button type="button" onClick={addCreateVariant} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Add size</button>
+                          <input type="text" placeholder="Size name" value={createNewVariant.variant_name} onChange={(e) => setCreateNewVariant({ ...createNewVariant, variant_name: e.target.value })} style={{ width: '100px', ...inputBaseStyle(isDarkMode, themeColorRgb) }} />
+                          <input type="number" step="0.01" min="0" placeholder="Price" value={createNewVariant.price} onChange={(e) => setCreateNewVariant({ ...createNewVariant, price: e.target.value })} style={{ width: '80px', ...inputBaseStyle(isDarkMode, themeColorRgb) }} />
+                          <input type="number" step="0.01" min="0" placeholder="Cost" value={createNewVariant.cost} onChange={(e) => setCreateNewVariant({ ...createNewVariant, cost: e.target.value })} style={{ width: '70px', ...inputBaseStyle(isDarkMode, themeColorRgb) }} />
+                          <button type="button" onClick={addCreateVariant} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Add size</button>
                         </div>
-                      </div>
-                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #eee' }}>
-                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#555' }}>Ingredients used (recipe)</label>
+                      </FormField>
+                      <FormField style={compactFormSectionStyle(isDarkMode)}>
+                        <label style={compactFormLabelStyle(isDarkMode)}>Ingredients used (recipe)</label>
                         {createRecipeRows.length > 0 && (
                           <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px 0' }}>
                             {createRecipeRows.map((r, idx) => (
@@ -2443,80 +2416,61 @@ function Inventory() {
                           </ul>
                         )}
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                          <select value={createNewRecipeRow.ingredient_id} onChange={(e) => setCreateNewRecipeRow({ ...createNewRecipeRow, ingredient_id: e.target.value })} style={{ minWidth: '140px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }}>
-                            <option value="">Select ingredient</option>
-                            {inventory.filter((i) => i.item_type === 'ingredient').map((ing) => (
-                              <option key={ing.product_id} value={ing.product_id}>{ing.product_name} ({ing.unit || '—'})</option>
-                            ))}
-                          </select>
-                          <input type="number" step="0.0001" min="0.0001" placeholder="Qty" value={createNewRecipeRow.quantity_required} onChange={(e) => setCreateNewRecipeRow({ ...createNewRecipeRow, quantity_required: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
-                          <input type="text" placeholder="Unit" value={createNewRecipeRow.unit} onChange={(e) => setCreateNewRecipeRow({ ...createNewRecipeRow, unit: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
-                          <button type="button" onClick={addCreateRecipeRow} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Add</button>
+                          <CustomDropdown
+                            name="ingredient_id"
+                            value={createNewRecipeRow.ingredient_id || ''}
+                            onChange={(e) => setCreateNewRecipeRow({ ...createNewRecipeRow, ingredient_id: e.target.value })}
+                            options={[
+                              { value: '', label: 'Select ingredient' },
+                              ...inventory.filter((i) => i.item_type === 'ingredient').map((ing) => ({
+                                value: String(ing.product_id),
+                                label: `${ing.product_name} (${ing.unit || '—'})`
+                              }))
+                            ]}
+                            placeholder="Select ingredient"
+                            isDarkMode={isDarkMode}
+                            themeColorRgb={themeColorRgb}
+                            style={{ minWidth: '140px' }}
+                          />
+                          <input type="number" step="0.0001" min="0.0001" placeholder="Qty" value={createNewRecipeRow.quantity_required} onChange={(e) => setCreateNewRecipeRow({ ...createNewRecipeRow, quantity_required: e.target.value })} style={{ width: '70px', ...inputBaseStyle(isDarkMode, themeColorRgb) }} />
+                          <input type="text" placeholder="Unit" value={createNewRecipeRow.unit} onChange={(e) => setCreateNewRecipeRow({ ...createNewRecipeRow, unit: e.target.value })} style={{ width: '70px', ...inputBaseStyle(isDarkMode, themeColorRgb) }} />
+                          <button type="button" onClick={addCreateRecipeRow} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Add</button>
                         </div>
-                      </div>
+                      </FormField>
                     </>
                   )}
 
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowCreateProduct(false)
-                        setCreateError(null)
-                        setCreateSuccess(false)
-                        setCreateProductData({
-                          product_name: '',
-                          sku: '',
-                          barcode: '',
-                          product_price: '',
-                          product_cost: '',
-                          current_quantity: '0',
-                          category: '',
-                          vendor: '',
-                          vendor_id: null,
-                          photo: null,
-                          item_type: 'product',
-                          unit: ''
-                        })
-                        setCreateVariants([])
-                        setCreateRecipeRows([])
-                        setCreateNewVariant({ variant_name: '', price: '', cost: '0' })
-                        setCreateNewRecipeRow({ ingredient_id: '', quantity_required: '', unit: '' })
-                        setPhotoPreview(null)
-                      }}
-                      disabled={createLoading}
-                      style={{
-                        flex: 1,
-                        padding: '8px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f0f0f0',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        cursor: createLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 500,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={createLoading}
-                      style={{
-                        flex: 1,
-                        padding: '8px',
-                        backgroundColor: createLoading ? '#ccc' : `rgba(${themeColorRgb}, 0.7)`,
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: createLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 500
-                      }}
-                    >
-                      {createLoading ? 'Creating...' : 'Create'}
-                    </button>
-                  </div>
+                  <CompactFormActions
+                    onCancel={() => {
+                      setShowCreateProduct(false)
+                      setCreateError(null)
+                      setCreateSuccess(false)
+                      setCreateProductData({
+                        product_name: '',
+                        sku: '',
+                        barcode: '',
+                        product_price: '',
+                        product_cost: '',
+                        current_quantity: '0',
+                        category: '',
+                        vendor: '',
+                        vendor_id: null,
+                        photo: null,
+                        item_type: 'product',
+                        unit: ''
+                      })
+                      setCreateVariants([])
+                      setCreateRecipeRows([])
+                      setCreateNewVariant({ variant_name: '', price: '', cost: '0' })
+                      setCreateNewRecipeRow({ ingredient_id: '', quantity_required: '', unit: '' })
+                      setPhotoPreview(null)
+                    }}
+                    primaryLabel={createLoading ? 'Creating...' : 'Create'}
+                    primaryDisabled={createLoading}
+                    primaryType="submit"
+                    isDarkMode={isDarkMode}
+                    themeColorRgb={themeColorRgb}
+                  />
                 </div>
               </form>
             </div>
@@ -2526,7 +2480,10 @@ function Inventory() {
           {showCreateCategory && (
             <div style={{
               marginTop: '20px',
-              marginBottom: '20px'
+              marginBottom: '20px',
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto'
             }}>
               {createError && (
                 <div style={{
@@ -2557,19 +2514,11 @@ function Inventory() {
               )}
 
               <form onSubmit={handleCreateCategory}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Parent category
-                    </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Parent category</label>
                     <CustomDropdown
+                      name="parent_path"
                       value={createCategoryData.parent_path}
                       onChange={(e) => setCreateCategoryData(prev => ({ ...prev, parent_path: e.target.value }))}
                       options={[
@@ -2587,19 +2536,11 @@ function Inventory() {
                       placeholder="Top level (no parent)"
                       isDarkMode={isDarkMode}
                       themeColorRgb={themeColorRgb}
-                      style={{ width: '100%' }}
                     />
-                  </div>
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Category name
+                  </FormField>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>
+                      Category name <span style={{ color: '#f44336' }}>*</span>
                     </label>
                     <input
                       type="text"
@@ -2607,67 +2548,30 @@ function Inventory() {
                       onChange={(e) => setCreateCategoryData(prev => ({ ...prev, category_name: e.target.value }))}
                       placeholder={createCategoryData.parent_path ? 'e.g. Fruit, Produce' : 'e.g. Food & Beverage, Electronics'}
                       required
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
                     {createCategoryData.parent_path && (
                       <p style={{ marginTop: '6px', fontSize: '11px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>
                         Full path: {createCategoryData.parent_path} &gt; {createCategoryData.category_name || '…'}
                       </p>
                     )}
-                  </div>
+                  </FormField>
 
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowCreateCategory(false)
-                        setCreateError(null)
-                        setCreateSuccess(false)
-                        setCreateCategoryData({ parent_path: '', category_name: '' })
-                        setEditingCategory(null)
-                      }}
-                      disabled={createLoading}
-                      style={{
-                        flex: 1,
-                        padding: '8px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f0f0f0',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        cursor: createLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 500,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={createLoading}
-                      style={{
-                        flex: 1,
-                        padding: '8px',
-                        backgroundColor: createLoading ? '#ccc' : `rgba(${themeColorRgb}, 0.7)`,
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: createLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 500
-                      }}
-                    >
-                      {createLoading ? (editingCategory ? 'Updating...' : 'Creating...') : (editingCategory ? 'Update' : 'Create')}
-                    </button>
-                  </div>
+                  <CompactFormActions
+                    onCancel={() => {
+                      setShowCreateCategory(false)
+                      setCreateError(null)
+                      setCreateSuccess(false)
+                      setCreateCategoryData({ parent_path: '', category_name: '' })
+                      setEditingCategory(null)
+                    }}
+                    primaryLabel={createLoading ? (editingCategory ? 'Updating...' : 'Creating...') : (editingCategory ? 'Update' : 'Create')}
+                    primaryDisabled={createLoading}
+                    primaryType="submit"
+                    isDarkMode={isDarkMode}
+                    themeColorRgb={themeColorRgb}
+                  />
                 </div>
               </form>
             </div>
@@ -2678,7 +2582,8 @@ function Inventory() {
             <div style={{
               marginTop: '20px',
               marginBottom: '20px',
-              maxHeight: 'calc(100vh - 300px)',
+              flex: 1,
+              minHeight: 0,
               overflowY: 'auto'
             }}>
               {createError && (
@@ -2710,17 +2615,10 @@ function Inventory() {
               )}
 
               <form onSubmit={handleCreateVendor}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Vendor Name
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>
+                      Vendor Name <span style={{ color: '#f44336' }}>*</span>
                     </label>
                     <input
                       type="text"
@@ -2728,185 +2626,83 @@ function Inventory() {
                       onChange={(e) => setCreateVendorData({ ...createVendorData, vendor_name: e.target.value })}
                       placeholder="Vendor Name *"
                       required
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Contact Person
-                    </label>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Contact Person</label>
                     <input
                       type="text"
                       value={createVendorData.contact_person}
                       onChange={(e) => setCreateVendorData({ ...createVendorData, contact_person: e.target.value })}
                       placeholder="Contact Person"
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Email
-                    </label>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Email</label>
                     <input
                       type="email"
                       value={createVendorData.email}
                       onChange={(e) => setCreateVendorData({ ...createVendorData, email: e.target.value })}
                       placeholder="Email"
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Phone
-                    </label>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Phone</label>
                     <input
                       type="tel"
                       value={createVendorData.phone}
                       onChange={(e) => setCreateVendorData({ ...createVendorData, phone: e.target.value })}
                       placeholder="Phone"
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Address
-                    </label>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Address</label>
                     <textarea
                       value={createVendorData.address}
                       onChange={(e) => setCreateVendorData({ ...createVendorData, address: e.target.value })}
                       placeholder="Address"
                       rows={3}
                       style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box',
+                        ...inputBaseStyle(isDarkMode, themeColorRgb),
+                        fontFamily: 'inherit',
                         resize: 'vertical'
                       }}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowCreateVendor(false)
-                        setCreateError(null)
-                        setCreateSuccess(false)
-                        setCreateVendorData({
-                          vendor_name: '',
-                          contact_person: '',
-                          email: '',
-                          phone: '',
-                          address: ''
-                        })
-                        setEditingVendor(null)
-                      }}
-                      disabled={createLoading}
-                      style={{
-                        flex: 1,
-                        padding: '8px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f0f0f0',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        cursor: createLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 500,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={createLoading}
-                      style={{
-                        flex: 1,
-                        padding: '8px',
-                        backgroundColor: createLoading ? '#ccc' : `rgba(${themeColorRgb}, 0.7)`,
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: createLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 500
-                      }}
-                    >
-                      {createLoading ? (editingVendor ? 'Updating...' : 'Creating...') : (editingVendor ? 'Update' : 'Create')}
-                    </button>
-                  </div>
+                  <CompactFormActions
+                    onCancel={() => {
+                      setShowCreateVendor(false)
+                      setCreateError(null)
+                      setCreateSuccess(false)
+                      setCreateVendorData({
+                        vendor_name: '',
+                        contact_person: '',
+                        email: '',
+                        phone: '',
+                        address: ''
+                      })
+                      setEditingVendor(null)
+                    }}
+                    primaryLabel={createLoading ? (editingVendor ? 'Updating...' : 'Creating...') : (editingVendor ? 'Update' : 'Create')}
+                    primaryDisabled={createLoading}
+                    primaryType="submit"
+                    isDarkMode={isDarkMode}
+                    themeColorRgb={themeColorRgb}
+                  />
                 </div>
               </form>
             </div>
@@ -2917,7 +2713,8 @@ function Inventory() {
             <div style={{
               marginTop: '20px',
               marginBottom: '20px',
-              maxHeight: 'calc(100vh - 300px)',
+              flex: 1,
+              minHeight: 0,
               overflowY: 'auto'
             }}>
               {editError && (
@@ -2949,17 +2746,10 @@ function Inventory() {
               )}
 
               <form onSubmit={handleSaveProduct}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Product Name
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>
+                      Product Name <span style={{ color: '#f44336' }}>*</span>
                     </label>
                     <input
                       type="text"
@@ -2968,30 +2758,14 @@ function Inventory() {
                       onChange={handleEditChange}
                       placeholder="Product Name *"
                       required
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        boxSizing: 'border-box',
-                        fontFamily: '"Product Sans", sans-serif',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      SKU
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>
+                      SKU <span style={{ color: '#f44336' }}>*</span>
                     </label>
                     <input
                       type="text"
@@ -3000,87 +2774,59 @@ function Inventory() {
                       onChange={handleEditChange}
                       placeholder="SKU *"
                       required
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        boxSizing: 'border-box',
-                        fontFamily: '"Product Sans", sans-serif',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Barcode
-                    </label>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Barcode</label>
                     <input
                       type="text"
                       name="barcode"
                       value={editFormData.barcode || ''}
                       onChange={handleEditChange}
                       placeholder="Barcode"
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px', fontWeight: 500, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontFamily: '"Product Sans", sans-serif' }}>Type</label>
-                    <select
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Type</label>
+                    <CustomDropdown
                       name="item_type"
                       value={editFormData.item_type || 'product'}
-                      onChange={handleEditChange}
-                      style={{ width: '100%', padding: '6px', border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd', borderRadius: '4px', fontSize: '13px', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', boxSizing: 'border-box' }}
-                    >
-                      <option value="product">Product (sold at POS)</option>
-                      <option value="ingredient">Ingredient (used in recipes)</option>
-                    </select>
-                  </div>
+                      onChange={(e) => setEditFormData({ ...editFormData, item_type: e.target.value })}
+                      options={[
+                        { value: 'product', label: 'Product (sold at POS)' },
+                        { value: 'ingredient', label: 'Ingredient (used in recipes)' }
+                      ]}
+                      placeholder="Select type"
+                      isDarkMode={isDarkMode}
+                      themeColorRgb={themeColorRgb}
+                    />
+                  </FormField>
+
                   {(editFormData.item_type || 'product') === 'ingredient' && (
-                    <div>
-                      <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px', fontWeight: 500, color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontFamily: '"Product Sans", sans-serif' }}>Unit</label>
+                    <FormField style={compactFormFieldStyle}>
+                      <label style={compactFormLabelStyle(isDarkMode)}>Unit</label>
                       <input
                         type="text"
                         name="unit"
                         value={editFormData.unit || ''}
                         onChange={handleEditChange}
                         placeholder="e.g. oz, lb, g, ml, each"
-                        style={{ width: '100%', padding: '6px', border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd', borderRadius: '4px', fontSize: '13px', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', boxSizing: 'border-box' }}
+                        style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                       />
-                    </div>
+                    </FormField>
                   )}
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                    <div>
-                      <label style={{
-                        display: 'block',
-                        marginBottom: '4px',
-                        fontSize: '11px',
-                        fontWeight: 500,
-                        color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                        fontFamily: '"Product Sans", sans-serif'
-                      }}>
-                        Price
+                  <div style={compactFormGridStyle('12px')}>
+                    <FormField style={compactFormFieldStyle}>
+                      <label style={compactFormLabelStyle(isDarkMode)}>
+                        Price <span style={{ color: '#f44336' }}>*</span>
                       </label>
                       <input
                         type="number"
@@ -3091,29 +2837,13 @@ function Inventory() {
                         onChange={handleEditChange}
                         placeholder="Price *"
                         required
-                        style={{
-                          width: '100%',
-                          padding: '6px',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                          borderRadius: '4px',
-                          fontSize: '13px',
-                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                          boxSizing: 'border-box'
-                        }}
+                        style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), textAlign: 'right' }}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                       />
-                    </div>
-
-                    <div>
-                      <label style={{
-                        display: 'block',
-                        marginBottom: '4px',
-                        fontSize: '11px',
-                        fontWeight: 500,
-                        color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                        fontFamily: '"Product Sans", sans-serif'
-                      }}>
-                        Cost
+                    </FormField>
+                    <FormField style={compactFormFieldStyle}>
+                      <label style={compactFormLabelStyle(isDarkMode)}>
+                        Cost <span style={{ color: '#f44336' }}>*</span>
                       </label>
                       <input
                         type="number"
@@ -3124,30 +2854,15 @@ function Inventory() {
                         onChange={handleEditChange}
                         placeholder="Cost *"
                         required
-                        style={{
-                          width: '100%',
-                          padding: '6px',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                          borderRadius: '4px',
-                          fontSize: '13px',
-                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                          boxSizing: 'border-box'
-                        }}
+                        style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), textAlign: 'right' }}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                       />
-                    </div>
+                    </FormField>
                   </div>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Quantity
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>
+                      Quantity <span style={{ color: '#f44336' }}>*</span>
                     </label>
                     <input
                       type="number"
@@ -3157,150 +2872,95 @@ function Inventory() {
                       onChange={handleEditChange}
                       placeholder="Quantity *"
                       required
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Category
-                    </label>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Category</label>
                     <input
                       type="text"
                       name="category"
                       value={editFormData.category || ''}
                       onChange={handleEditChange}
                       placeholder="Category (e.g., Electronics > Phones)"
-                      style={{
-                        width: '100%',
-                        padding: '6px',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        boxSizing: 'border-box'
-                      }}
+                      style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label style={{
-                      display: 'block',
-                      marginBottom: '4px',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                      fontFamily: '"Product Sans", sans-serif'
-                    }}>
-                      Vendor
-                    </label>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Vendor</label>
                     <CustomDropdown
+                      name="vendor"
                       value={editFormData.vendor || ''}
                       onChange={(e) => {
                         const vendor = allVendors.find(v => v.vendor_name === e.target.value)
-                        setEditFormData({ 
-                          ...editFormData, 
+                        setEditFormData({
+                          ...editFormData,
                           vendor: e.target.value,
                           vendor_id: vendor ? vendor.vendor_id : null
                         })
                       }}
                       options={[
                         { value: '', label: 'Vendor (optional)' },
-                        ...allVendors.map(vendor => ({
-                          value: vendor.vendor_name,
-                          label: vendor.vendor_name
-                        }))
+                        ...allVendors.map(v => ({ value: v.vendor_name, label: v.vendor_name }))
                       ]}
                       placeholder="Vendor (optional)"
                       isDarkMode={isDarkMode}
                       themeColorRgb={themeColorRgb}
-                      style={{ width: '100%' }}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
+                  <FormField style={compactFormFieldStyle}>
+                    <label style={compactFormLabelStyle(isDarkMode)}>Photo</label>
                     {!editFormData.photo && !editPhotoPreview ? (
                       <button
                         type="button"
                         onClick={() => editFileInputRef.current?.click()}
                         style={{
                           width: '100%',
-                          padding: '6px',
-                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                          borderRadius: '4px',
-                          fontSize: '13px',
-                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                          boxSizing: 'border-box',
+                          ...inputBaseStyle(isDarkMode, themeColorRgb),
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          gap: '8px',
-                          transition: 'all 0.2s ease',
-                          fontFamily: '"Product Sans", sans-serif'
+                          gap: '8px'
                         }}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                         onMouseEnter={(e) => {
-                          e.target.style.borderColor = `rgba(${themeColorRgb}, 0.5)`
-                          e.target.style.backgroundColor = isDarkMode 
-                            ? `rgba(${themeColorRgb}, 0.1)` 
-                            : `rgba(${themeColorRgb}, 0.05)`
+                          e.currentTarget.style.borderColor = `rgba(${themeColorRgb}, 0.5)`
+                          e.currentTarget.style.backgroundColor = isDarkMode ? `rgba(${themeColorRgb}, 0.1)` : `rgba(${themeColorRgb}, 0.05)`
                         }}
                         onMouseLeave={(e) => {
-                          e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ddd'
-                          e.target.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'
+                          e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ddd'
+                          e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'
                         }}
                       >
                         <Upload size={16} />
                         <span>Choose File</span>
                       </button>
                     ) : (
-                      <div style={{ position: 'relative' }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditIsCroppingPhoto(false)
-                            setEditShowPhotoPreview((prev) => !prev)
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '6px',
-                            border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                            borderRadius: '4px',
-                            fontSize: '13px',
-                            backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                            boxSizing: 'border-box',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '8px',
-                            transition: 'all 0.2s ease',
-                            fontFamily: '"Product Sans", sans-serif'
-                          }}
-                        >
-                          <ImageIcon size={16} />
-                          <span>Preview</span>
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditIsCroppingPhoto(false)
+                          setEditShowPhotoPreview((prev) => !prev)
+                        }}
+                        style={{
+                          width: '100%',
+                          ...inputBaseStyle(isDarkMode, themeColorRgb),
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px'
+                        }}
+                      >
+                        <ImageIcon size={16} />
+                        <span>Preview</span>
+                      </button>
                     )}
                     <input
                       ref={editFileInputRef}
@@ -3309,12 +2969,12 @@ function Inventory() {
                       onChange={handleEditPhotoChange}
                       style={{ display: 'none' }}
                     />
-                  </div>
+                  </FormField>
 
                   {(editFormData.item_type || editingProduct?.item_type) !== 'ingredient' && editingProduct?.product_id && (
                     <>
-                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #eee' }}>
-                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#555' }}>Sizes / Variants (e.g. Small $3, Large $5)</label>
+                      <FormField style={compactFormSectionStyle(isDarkMode)}>
+                        <label style={compactFormLabelStyle(isDarkMode)}>Sizes / Variants (e.g. Small $3, Large $5)</label>
                         {editingVariants.length > 0 && (
                           <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px 0' }}>
                             {editingVariants.map((v) => (
@@ -3326,14 +2986,14 @@ function Inventory() {
                           </ul>
                         )}
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                          <input type="text" placeholder="Size name" value={newVariant.variant_name} onChange={(e) => setNewVariant({ ...newVariant, variant_name: e.target.value })} style={{ width: '100px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
-                          <input type="number" step="0.01" min="0" placeholder="Price" value={newVariant.price} onChange={(e) => setNewVariant({ ...newVariant, price: e.target.value })} style={{ width: '80px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
-                          <input type="number" step="0.01" min="0" placeholder="Cost" value={newVariant.cost} onChange={(e) => setNewVariant({ ...newVariant, cost: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
-                          <button type="button" onClick={handleAddVariant} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Add size</button>
+                          <input type="text" placeholder="Size name" value={newVariant.variant_name} onChange={(e) => setNewVariant({ ...newVariant, variant_name: e.target.value })} style={{ width: '100px', ...inputBaseStyle(isDarkMode, themeColorRgb) }} />
+                          <input type="number" step="0.01" min="0" placeholder="Price" value={newVariant.price} onChange={(e) => setNewVariant({ ...newVariant, price: e.target.value })} style={{ width: '80px', ...inputBaseStyle(isDarkMode, themeColorRgb) }} />
+                          <input type="number" step="0.01" min="0" placeholder="Cost" value={newVariant.cost} onChange={(e) => setNewVariant({ ...newVariant, cost: e.target.value })} style={{ width: '70px', ...inputBaseStyle(isDarkMode, themeColorRgb) }} />
+                          <button type="button" onClick={handleAddVariant} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Add size</button>
                         </div>
-                      </div>
-                      <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #eee' }}>
-                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#555' }}>Ingredients used (recipe)</label>
+                      </FormField>
+                      <FormField style={compactFormSectionStyle(isDarkMode)}>
+                        <label style={compactFormLabelStyle(isDarkMode)}>Ingredients used (recipe)</label>
                         {editingIngredients.length > 0 && (
                           <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px 0' }}>
                             {editingIngredients.map((r) => (
@@ -3345,59 +3005,38 @@ function Inventory() {
                           </ul>
                         )}
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                          <select value={newRecipeRow.ingredient_id} onChange={(e) => setNewRecipeRow({ ...newRecipeRow, ingredient_id: e.target.value })} style={{ minWidth: '140px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }}>
-                            <option value="">Select ingredient</option>
-                            {inventory.filter((i) => i.item_type === 'ingredient').map((ing) => (
-                              <option key={ing.product_id} value={ing.product_id}>{ing.product_name} ({ing.unit || '—'})</option>
-                            ))}
-                          </select>
-                          <input type="number" step="0.0001" min="0.0001" placeholder="Qty" value={newRecipeRow.quantity_required} onChange={(e) => setNewRecipeRow({ ...newRecipeRow, quantity_required: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
-                          <input type="text" placeholder="Unit" value={newRecipeRow.unit} onChange={(e) => setNewRecipeRow({ ...newRecipeRow, unit: e.target.value })} style={{ width: '70px', padding: '6px', border: isDarkMode ? '1px solid #404040' : '1px solid #ddd', borderRadius: '4px', fontSize: '12px', backgroundColor: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#fff' : '#333' }} />
-                          <button type="button" onClick={handleAddRecipeIngredient} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Add</button>
+                          <CustomDropdown
+                            name="ingredient_id"
+                            value={newRecipeRow.ingredient_id || ''}
+                            onChange={(e) => setNewRecipeRow({ ...newRecipeRow, ingredient_id: e.target.value })}
+                            options={[
+                              { value: '', label: 'Select ingredient' },
+                              ...inventory.filter((i) => i.item_type === 'ingredient').map((ing) => ({
+                                value: String(ing.product_id),
+                                label: `${ing.product_name} (${ing.unit || '—'})`
+                              }))
+                            ]}
+                            placeholder="Select ingredient"
+                            isDarkMode={isDarkMode}
+                            themeColorRgb={themeColorRgb}
+                            style={{ minWidth: '140px' }}
+                          />
+                          <input type="number" step="0.0001" min="0.0001" placeholder="Qty" value={newRecipeRow.quantity_required} onChange={(e) => setNewRecipeRow({ ...newRecipeRow, quantity_required: e.target.value })} style={{ width: '70px', ...inputBaseStyle(isDarkMode, themeColorRgb) }} />
+                          <input type="text" placeholder="Unit" value={newRecipeRow.unit} onChange={(e) => setNewRecipeRow({ ...newRecipeRow, unit: e.target.value })} style={{ width: '70px', ...inputBaseStyle(isDarkMode, themeColorRgb) }} />
+                          <button type="button" onClick={handleAddRecipeIngredient} style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: `rgba(${themeColorRgb}, 0.7)`, color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Add</button>
                         </div>
-                      </div>
+                      </FormField>
                     </>
                   )}
 
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                    <button
-                      type="button"
-                      onClick={handleCloseEdit}
-                      disabled={editLoading}
-                      style={{
-                        flex: 1,
-                        padding: '8px',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f0f0f0',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '4px',
-                        cursor: editLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 500,
-                        fontFamily: '"Product Sans", sans-serif',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={editLoading}
-                      style={{
-                        flex: 1,
-                        padding: '8px',
-                        backgroundColor: editLoading ? '#ccc' : `rgba(${themeColorRgb}, 0.7)`,
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: editLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 500,
-                        fontFamily: '"Product Sans", sans-serif'
-                      }}
-                    >
-                      {editLoading ? 'Saving...' : 'Save'}
-                    </button>
-                  </div>
+                  <CompactFormActions
+                    onCancel={handleCloseEdit}
+                    primaryLabel={editLoading ? 'Saving...' : 'Save'}
+                    primaryDisabled={editLoading}
+                    primaryType="submit"
+                    isDarkMode={isDarkMode}
+                    themeColorRgb={themeColorRgb}
+                  />
                 </div>
               </form>
             </div>
@@ -3407,15 +3046,16 @@ function Inventory() {
         {/* Right Column - Grid with Filters */}
         <div style={{ 
           flex: 1,
+          minHeight: 0,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
           borderLeft: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
           paddingLeft: '30px'
         }}>
-          {/* Item type filter: All | Products | Ingredients */}
+          {/* Item type filter: All | Products | Ingredients | Archived */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', marginTop: '3px' }}>
-            {['all', 'product', 'ingredient'].map((f) => (
+            {['all', 'product', 'ingredient', 'archived'].map((f) => (
               <button
                 key={f}
                 type="button"
@@ -3432,7 +3072,7 @@ function Inventory() {
                   cursor: 'pointer'
                 }}
               >
-                {f === 'all' ? 'All items' : f === 'product' ? 'Products' : 'Ingredients'}
+                {f === 'all' ? 'All items' : f === 'product' ? 'Products' : f === 'ingredient' ? 'Ingredients' : 'Archived'}
               </button>
             ))}
           </div>
@@ -4211,157 +3851,6 @@ function Inventory() {
         </div>
       )}
     </div>
-  )
-}
-
-// Custom Dropdown Component
-function CustomDropdown({ value, onChange, options, placeholder, required, isDarkMode, themeColorRgb, style = {} }) {
-  const [isOpen, setIsOpen] = useState(false)
-  const dropdownRef = useRef(null)
-  const triggerRef = useRef(null)
-  const menuRef = useRef(null)
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      const isClickInsideTrigger = triggerRef.current && triggerRef.current.contains(event.target)
-      const isClickInsideMenu = menuRef.current && menuRef.current.contains(event.target)
-      
-      if (!isClickInsideTrigger && !isClickInsideMenu) {
-        setIsOpen(false)
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isOpen])
-
-  const selectedOption = options.find(opt => opt.value === value)
-
-  // Calculate position for fixed dropdown
-  const getDropdownPosition = () => {
-    if (!triggerRef.current) return { top: 0, left: 0, width: 0 }
-    const rect = triggerRef.current.getBoundingClientRect()
-    return {
-      top: rect.bottom + window.scrollY + 4,
-      left: rect.left + window.scrollX,
-      width: rect.width
-    }
-  }
-
-  const dropdownPosition = isOpen ? getDropdownPosition() : { top: 0, left: 0, width: 0 }
-
-  return (
-    <>
-      <div ref={dropdownRef} style={{ position: 'relative', ...style }}>
-        <div
-          ref={triggerRef}
-          onClick={() => setIsOpen(!isOpen)}
-          style={{
-            width: '100%',
-            padding: '6px',
-            border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-            borderRadius: '4px',
-            fontSize: '13px',
-            backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-            transition: 'all 0.2s ease',
-            outline: 'none',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            boxSizing: 'border-box',
-            ...(isOpen && {
-              borderColor: `rgba(${themeColorRgb}, 0.5)`,
-              boxShadow: `0 0 0 3px rgba(${themeColorRgb}, 0.1)`
-            })
-          }}
-          onMouseEnter={(e) => {
-            if (!isOpen) {
-              e.target.style.borderColor = `rgba(${themeColorRgb}, 0.3)`
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isOpen) {
-              e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ddd'
-            }
-          }}
-        >
-          <span style={{ 
-            color: selectedOption ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333') : (isDarkMode ? 'var(--text-tertiary, #999)' : '#999')
-          }}>
-            {selectedOption ? selectedOption.label : placeholder}
-          </span>
-          <ChevronDown 
-            size={16} 
-            style={{ 
-              transition: 'transform 0.2s ease',
-              transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-              color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
-            }} 
-          />
-        </div>
-      </div>
-      {isOpen && (
-        <div
-          ref={menuRef}
-          style={{
-            position: 'fixed',
-            top: `${dropdownPosition.top}px`,
-            left: `${dropdownPosition.left}px`,
-            width: `${dropdownPosition.width}px`,
-            backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-            border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-            borderRadius: '4px',
-            boxShadow: isDarkMode ? '0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.1)',
-            zIndex: 10000,
-            maxHeight: '200px',
-            overflowY: 'auto',
-            overflowX: 'hidden'
-          }}
-        >
-          {options.map((option) => (
-            <div
-              key={option.value}
-              onClick={() => {
-                onChange({ target: { value: option.value } })
-                setIsOpen(false)
-              }}
-              style={{
-                padding: '10px 14px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                backgroundColor: value === option.value 
-                  ? `rgba(${themeColorRgb}, 0.2)` 
-                  : 'transparent',
-                transition: 'background-color 0.15s ease',
-                borderLeft: value === option.value 
-                  ? `3px solid rgba(${themeColorRgb}, 0.7)` 
-                  : '3px solid transparent'
-              }}
-              onMouseEnter={(e) => {
-                if (value !== option.value) {
-                  e.target.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (value !== option.value) {
-                  e.target.style.backgroundColor = 'transparent'
-                }
-              }}
-            >
-              {option.label}
-            </div>
-          ))}
-        </div>
-      )}
-    </>
   )
 }
 

@@ -14,7 +14,7 @@ export default function Home() {
 
       <div className="home-hero">
         <BlurText
-          text="Swift"
+          text="Delancey"
           delay={200}
           animateBy="words"
           direction="top"

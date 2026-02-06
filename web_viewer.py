@@ -30,7 +30,6 @@ from database import (
     get_employee_by_clerk_user_id, link_clerk_user_to_employee, verify_pin_login, generate_pin,
     get_connection,
     get_discrepancies, get_audit_trail,
-    create_pending_return, approve_pending_return, reject_pending_return,
     get_pending_return, list_pending_returns,
     get_employee_role, assign_role_to_employee,
     start_verification_session, scan_item, report_shipment_issue,
@@ -54,7 +53,6 @@ from database import (
     create_stripe_credentials, update_stripe_credentials, get_stripe_credentials, get_stripe_config,
 )
 from permission_manager import get_permission_manager
-from sms_service_email_to_aws import EmailToAWSSMSService
 import os
 # QuickBooks-style accounting backend (accounting schema)
 try:
@@ -130,9 +128,6 @@ def get_barcode_scanner():
 
 app = Flask(__name__)
 
-# Initialize SMS service
-sms_service = EmailToAWSSMSService()
-
 # ============================================================================
 # DATABASE CONNECTION - Initialize after database import
 # ============================================================================
@@ -183,6 +178,23 @@ def get_establishment_from_request():
 def set_establishment_context():
     """No-op for local PostgreSQL (no multi-tenant establishment context needed)"""
     pass
+
+
+def _table_has_archived_column(table_name):
+    """Return True if the given table has an 'archived' column (migration applied)."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = %s AND column_name = 'archived'",
+            (table_name,),
+        )
+        out = cursor.fetchone() is not None
+        conn.close()
+        return out
+    except Exception:
+        return False
+
 
 # Initialize Socket.IO
 if SOCKETIO_AVAILABLE:
@@ -506,6 +518,13 @@ def api_inventory():
                     WHERE 1=1
                 """
                 params = []
+                archived_only = request.args.get('archived', '').lower() in ('1', 'true', 'yes')
+                cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'inventory' AND column_name = 'archived'")
+                if cursor.fetchone():
+                    if archived_only:
+                        sql += " AND i.archived = TRUE"
+                    else:
+                        sql += " AND (i.archived IS NULL OR i.archived = FALSE)"
                 cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'inventory' AND column_name = 'item_type'")
                 has_item_type = cursor.fetchone() is not None
                 if has_item_type and item_type_filter == 'product':
@@ -622,6 +641,58 @@ def api_update_inventory(product_id):
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
 
+@app.route('/api/inventory/<int:product_id>', methods=['DELETE'])
+def api_delete_inventory(product_id):
+    """Delete a product from inventory."""
+    try:
+        from database import delete_product
+        success = delete_product(product_id)
+        if success:
+            return jsonify({'success': True, 'message': 'Product deleted successfully'}), 200
+        return jsonify({'success': False, 'message': 'Product not found'}), 404
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/<int:product_id>/archive', methods=['POST', 'PATCH'])
+def api_archive_inventory(product_id):
+    """Archive a product (soft delete)."""
+    try:
+        from database import set_archived_product
+        success = set_archived_product(product_id, archived=True)
+        if success:
+            return jsonify({'success': True, 'message': 'Product archived successfully'}), 200
+        if not _table_has_archived_column('inventory'):
+            return jsonify({
+                'success': False,
+                'message': 'Archive not available. Run migration: migrations/add_archived_inventory_categories_vendors.sql',
+            }), 503
+        return jsonify({'success': False, 'message': 'Product not found'}), 404
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/inventory/<int:product_id>/unarchive', methods=['POST', 'PATCH'])
+def api_unarchive_inventory(product_id):
+    """Unarchive a product."""
+    try:
+        from database import set_archived_product
+        success = set_archived_product(product_id, archived=False)
+        if success:
+            return jsonify({'success': True, 'message': 'Product unarchived successfully'}), 200
+        if not _table_has_archived_column('inventory'):
+            return jsonify({
+                'success': False,
+                'message': 'Archive not available. Run migration: migrations/add_archived_inventory_categories_vendors.sql',
+            }), 503
+        return jsonify({'success': False, 'message': 'Product not found'}), 404
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 # ---------------------------------------------------------------------------
 # Product variants (sizes with different prices) and ingredients (recipes)
 # ---------------------------------------------------------------------------
@@ -731,8 +802,60 @@ def api_delete_product_ingredient(recipe_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
-@app.route('/api/vendors/<int:vendor_id>', methods=['PUT'])
-def api_update_vendor(vendor_id):
+@app.route('/api/vendors/<int:vendor_id>', methods=['PUT', 'DELETE'])
+def api_vendor_by_id(vendor_id):
+    if request.method == 'DELETE':
+        try:
+            from database import delete_vendor
+            success = delete_vendor(vendor_id)
+            if success:
+                return jsonify({'success': True, 'message': 'Vendor deleted successfully'}), 200
+            return jsonify({'success': False, 'message': 'Vendor not found'}), 404
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+    return api_update_vendor_impl(vendor_id)
+
+
+@app.route('/api/vendors/<int:vendor_id>/archive', methods=['POST', 'PATCH'])
+def api_archive_vendor(vendor_id):
+    """Archive a vendor (soft delete)."""
+    try:
+        from database import set_archived_vendor
+        success = set_archived_vendor(vendor_id, archived=True)
+        if success:
+            return jsonify({'success': True, 'message': 'Vendor archived successfully'}), 200
+        if not _table_has_archived_column('vendors'):
+            return jsonify({
+                'success': False,
+                'message': 'Archive not available. Run migration: migrations/add_archived_inventory_categories_vendors.sql',
+            }), 503
+        return jsonify({'success': False, 'message': 'Vendor not found'}), 404
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/vendors/<int:vendor_id>/unarchive', methods=['POST', 'PATCH'])
+def api_unarchive_vendor(vendor_id):
+    """Unarchive a vendor."""
+    try:
+        from database import set_archived_vendor
+        success = set_archived_vendor(vendor_id, archived=False)
+        if success:
+            return jsonify({'success': True, 'message': 'Vendor unarchived successfully'}), 200
+        if not _table_has_archived_column('vendors'):
+            return jsonify({
+                'success': False,
+                'message': 'Archive not available. Run migration: migrations/add_archived_inventory_categories_vendors.sql',
+            }), 503
+        return jsonify({'success': False, 'message': 'Vendor not found'}), 404
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+def api_update_vendor_impl(vendor_id):
     """Update a vendor"""
     try:
         from database import update_vendor
@@ -756,6 +879,7 @@ def api_update_vendor(vendor_id):
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @app.route('/api/vendors', methods=['GET', 'POST'])
 def api_vendors():
@@ -785,9 +909,10 @@ def api_vendors():
             traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500
     else:
-        # GET request
+        # GET request - optional archived=1 to list only archived vendors
         try:
-            vendors = list_vendors()
+            archived_only = request.args.get('archived', '').lower() in ('1', 'true', 'yes')
+            vendors = list_vendors(archived_only=archived_only)
             if not vendors:
                 return jsonify({'columns': [], 'data': []})
             
@@ -797,8 +922,62 @@ def api_vendors():
             traceback.print_exc()
             return jsonify({'error': str(e), 'columns': [], 'data': []}), 500
 
-@app.route('/api/categories/<int:category_id>', methods=['PUT'])
-def api_update_category(category_id):
+@app.route('/api/categories/<int:category_id>', methods=['PUT', 'DELETE'])
+def api_category_by_id(category_id):
+    if request.method == 'DELETE':
+        try:
+            from database import delete_category
+            success = delete_category(category_id)
+            if success:
+                return jsonify({'success': True, 'message': 'Category deleted successfully'}), 200
+            return jsonify({'success': False, 'message': 'Category not found'}), 404
+        except ValueError as e:
+            return jsonify({'success': False, 'message': str(e)}), 400
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+    return api_update_category_impl(category_id)
+
+
+@app.route('/api/categories/<int:category_id>/archive', methods=['POST', 'PATCH'])
+def api_archive_category(category_id):
+    """Archive a category (soft delete)."""
+    try:
+        from database import set_archived_category
+        success = set_archived_category(category_id, archived=True)
+        if success:
+            return jsonify({'success': True, 'message': 'Category archived successfully'}), 200
+        if not _table_has_archived_column('categories'):
+            return jsonify({
+                'success': False,
+                'message': 'Archive not available. Run migration: migrations/add_archived_inventory_categories_vendors.sql',
+            }), 503
+        return jsonify({'success': False, 'message': 'Category not found'}), 404
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/categories/<int:category_id>/unarchive', methods=['POST', 'PATCH'])
+def api_unarchive_category(category_id):
+    """Unarchive a category."""
+    try:
+        from database import set_archived_category
+        success = set_archived_category(category_id, archived=False)
+        if success:
+            return jsonify({'success': True, 'message': 'Category unarchived successfully'}), 200
+        if not _table_has_archived_column('categories'):
+            return jsonify({
+                'success': False,
+                'message': 'Archive not available. Run migration: migrations/add_archived_inventory_categories_vendors.sql',
+            }), 503
+        return jsonify({'success': False, 'message': 'Category not found'}), 404
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+def api_update_category_impl(category_id):
     """Update a category - supports updating the full category path"""
     try:
         from database import get_connection, create_or_get_category_with_hierarchy
@@ -856,6 +1035,7 @@ def api_update_category(category_id):
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
+
 @app.route('/api/categories', methods=['GET', 'POST'])
 def api_categories():
     """Get categories (with category_path) or create a new category"""
@@ -880,7 +1060,8 @@ def api_categories():
             traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500
     try:
-        categories = list_categories(include_path=True)
+        archived_only = request.args.get('archived', '').lower() in ('1', 'true', 'yes')
+        categories = list_categories(include_path=True, archived_only=archived_only)
         if not categories:
             return jsonify({'columns': [], 'data': []})
         columns = list(categories[0].keys())
@@ -1828,7 +2009,27 @@ def api_create_order():
             tax_rate = pct / 100.0
         else:
             tax_rate = float(tax_rate)
-        fee_rates = settings.get('transaction_fee_rates')
+        fee_rates = settings.get('transaction_fee_rates') or {}
+        # Apply POS transaction fee mode (included / additional / none) and charge_cash
+        try:
+            pconn, pcur = _pg_conn()
+            try:
+                pcur.execute("SELECT transaction_fee_mode, transaction_fee_charge_cash FROM pos_settings ORDER BY id DESC LIMIT 1")
+                row = pcur.fetchone()
+                if row:
+                    mode = (row.get('transaction_fee_mode') if isinstance(row, dict) else (row[0] if row else None)) or 'additional'
+                    if isinstance(mode, str):
+                        mode = mode.strip().lower()
+                    charge_cash = row.get('transaction_fee_charge_cash') if isinstance(row, dict) else (row[1] if len(row) > 1 else False)
+                    if mode in ('included', 'none'):
+                        fee_rates = {k: 0.0 for k in (fee_rates or {}).keys()} or {'credit_card': 0, 'debit_card': 0, 'mobile_payment': 0, 'cash': 0, 'check': 0, 'store_credit': 0}
+                    elif not charge_cash and fee_rates is not None:
+                        fee_rates = dict(fee_rates)
+                        fee_rates['cash'] = 0.0
+            finally:
+                pconn.close()
+        except Exception:
+            pass
         # Resolve employee_id: request body, then session, then first active employee
         employee_id = data.get('employee_id')
         if not employee_id and request.headers.get('Authorization'):
@@ -1873,7 +2074,8 @@ def api_create_order():
             points_used=int(data.get('points_used', 0) or 0),
             transaction_fee_rates=fee_rates,
             payment_status=pay_status,
-            order_status_override=order_status_val
+            order_status_override=order_status_val,
+            discount_type=(data.get('discount_type') or '').strip() or None
         )
         
         # Post to accounting only when order was paid (not pay-later)
@@ -1916,6 +2118,23 @@ def api_generate_transaction_receipt(transaction_id):
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/receipt/test', methods=['POST'])
+def api_generate_test_receipt():
+    """Generate a test receipt PDF from current template settings (for Settings Print test)."""
+    try:
+        from receipt_generator import generate_test_receipt_pdf
+        data = request.get_json(silent=True) or {}
+        settings_override = data.get('settings') or data
+        pdf_bytes = generate_test_receipt_pdf(settings_override=settings_override)
+        response = Response(pdf_bytes, mimetype='application/pdf')
+        response.headers['Content-Disposition'] = 'attachment; filename=receipt_test.pdf'
+        return response
+    except ImportError as e:
+        return jsonify({'success': False, 'message': 'Receipt generation not available. Install reportlab.'}), 500
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/receipt/<int:order_id>', methods=['GET'])
 def api_generate_receipt(order_id):
     """Generate receipt PDF for an order"""
@@ -1949,7 +2168,8 @@ def api_get_receipt_settings():
 
 @app.route('/api/receipt-settings', methods=['POST'])
 def api_update_receipt_settings():
-    """Update receipt settings (PostgreSQL)"""
+    """Update receipt settings (PostgreSQL). Saves template_styles (full receipt template) so
+    PDF generation uses the same fonts, sizes, alignment as the Settings receipt editor."""
     try:
         if not request.is_json:
             return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
@@ -1958,6 +2178,7 @@ def api_update_receipt_settings():
         try:
             cursor.execute("SELECT COUNT(*) AS c FROM receipt_settings")
             count = cursor.fetchone()['c']
+            template_preset = data.get('template_preset', 'custom') or 'custom'
             vals = (
                 data.get('store_name', 'Store'),
                 data.get('store_address', ''),
@@ -1972,25 +2193,70 @@ def api_update_receipt_settings():
                 data.get('show_tax_breakdown', 1),
                 data.get('show_payment_method', 1),
                 data.get('show_signature', 0),
+                template_preset,
             )
+            # Check if template_preset column exists before including it
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'receipt_settings' AND column_name = 'template_preset'
+            """)
+            has_template_preset = cursor.fetchone() is not None
+            # Check if template_styles column exists (stores full receipt template for PDF generation)
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'receipt_settings' AND column_name = 'template_styles'
+            """)
+            has_template_styles = cursor.fetchone() is not None
+            # Full receipt template from Settings UI - variables inserted at print time
+            template_styles = data if isinstance(data, dict) else {}
             if count == 0:
-                cursor.execute("""
-                    INSERT INTO receipt_settings (
-                        store_name, store_address, store_city, store_state, store_zip,
-                        store_phone, store_email, store_website, footer_message, return_policy,
-                        show_tax_breakdown, show_payment_method, show_signature
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, vals)
+                if has_template_preset:
+                    cursor.execute("""
+                        INSERT INTO receipt_settings (
+                            store_name, store_address, store_city, store_state, store_zip,
+                            store_phone, store_email, store_website, footer_message, return_policy,
+                            show_tax_breakdown, show_payment_method, show_signature, template_preset
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, vals)
+                else:
+                    cursor.execute("""
+                        INSERT INTO receipt_settings (
+                            store_name, store_address, store_city, store_state, store_zip,
+                            store_phone, store_email, store_website, footer_message, return_policy,
+                            show_tax_breakdown, show_payment_method, show_signature
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, vals[:-1])
+                if has_template_styles:
+                    cursor.execute("""
+                        UPDATE receipt_settings SET template_styles = %s
+                        WHERE id = (SELECT id FROM receipt_settings ORDER BY id DESC LIMIT 1)
+                    """, (json.dumps(template_styles),))
             else:
-                cursor.execute("""
-                    UPDATE receipt_settings SET
-                        store_name = %s, store_address = %s, store_city = %s, store_state = %s,
-                        store_zip = %s, store_phone = %s, store_email = %s, store_website = %s,
-                        footer_message = %s, return_policy = %s,
-                        show_tax_breakdown = %s, show_payment_method = %s, show_signature = %s,
-                        updated_at = NOW()
-                    WHERE id = (SELECT id FROM receipt_settings ORDER BY id DESC LIMIT 1)
-                """, vals)
+                if has_template_preset:
+                    cursor.execute("""
+                        UPDATE receipt_settings SET
+                            store_name = %s, store_address = %s, store_city = %s, store_state = %s,
+                            store_zip = %s, store_phone = %s, store_email = %s, store_website = %s,
+                            footer_message = %s, return_policy = %s,
+                            show_tax_breakdown = %s, show_payment_method = %s, show_signature = %s,
+                            template_preset = %s, updated_at = NOW()
+                        WHERE id = (SELECT id FROM receipt_settings ORDER BY id DESC LIMIT 1)
+                    """, vals)
+                else:
+                    cursor.execute("""
+                        UPDATE receipt_settings SET
+                            store_name = %s, store_address = %s, store_city = %s, store_state = %s,
+                            store_zip = %s, store_phone = %s, store_email = %s, store_website = %s,
+                            footer_message = %s, return_policy = %s,
+                            show_tax_breakdown = %s, show_payment_method = %s, show_signature = %s,
+                            updated_at = NOW()
+                        WHERE id = (SELECT id FROM receipt_settings ORDER BY id DESC LIMIT 1)
+                    """, vals[:-1])
+                if has_template_styles:
+                    cursor.execute("""
+                        UPDATE receipt_settings SET template_styles = %s, updated_at = NOW()
+                        WHERE id = (SELECT id FROM receipt_settings ORDER BY id DESC LIMIT 1)
+                    """, (json.dumps(template_styles),))
             conn.commit()
             return jsonify({'success': True, 'message': 'Receipt settings updated successfully'})
         finally:
@@ -2063,6 +2329,39 @@ def api_create_receipt_template():
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/receipt-templates/clear', methods=['POST'])
+def api_clear_receipt_templates():
+    """Clear all saved receipt templates."""
+    try:
+        conn, cursor = _pg_conn()
+        try:
+            cursor.execute("DELETE FROM receipt_templates")
+            count = cursor.rowcount
+            conn.commit()
+            return jsonify({'success': True, 'deleted': count, 'message': f'Cleared {count} template(s)'})
+        finally:
+            conn.close()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/receipt-templates/<int:template_id>', methods=['DELETE'])
+def api_delete_receipt_template(template_id):
+    """Delete a single receipt template by id."""
+    try:
+        conn, cursor = _pg_conn()
+        try:
+            cursor.execute("DELETE FROM receipt_templates WHERE id = %s", (template_id,))
+            conn.commit()
+            if cursor.rowcount == 0:
+                return jsonify({'success': False, 'message': 'Template not found'}), 404
+            return jsonify({'success': True, 'message': 'Template deleted'})
+        finally:
+            conn.close()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/pos-settings', methods=['GET'])
 def api_get_pos_settings():
     """Get POS settings (PostgreSQL)"""
@@ -2072,9 +2371,22 @@ def api_get_pos_settings():
             cursor.execute("SELECT * FROM pos_settings ORDER BY id DESC LIMIT 1")
             row = cursor.fetchone()
             if row:
-                settings = {'num_registers': row.get('num_registers', 1), 'register_type': row.get('register_type', 'one_screen')}
+                row = dict(row) if row else {}
+                raw_mode = row.get('transaction_fee_mode')
+                mode = (raw_mode if isinstance(raw_mode, str) and raw_mode else 'additional').strip().lower()
+                if mode not in ('additional', 'included', 'none'):
+                    mode = 'additional'
+                settings = {
+                    'num_registers': row.get('num_registers', 1),
+                    'register_type': row.get('register_type', 'one_screen'),
+                    'return_transaction_fee_take_loss': bool(row.get('return_transaction_fee_take_loss', False)),
+                    'return_tip_refund': bool(row.get('return_tip_refund', False)),
+                    'require_signature_for_return': bool(row.get('require_signature_for_return', False)),
+                    'transaction_fee_mode': mode,
+                    'transaction_fee_charge_cash': bool(row.get('transaction_fee_charge_cash', False))
+                }
             else:
-                settings = {'num_registers': 1, 'register_type': 'one_screen'}
+                settings = {'num_registers': 1, 'register_type': 'one_screen', 'return_transaction_fee_take_loss': False, 'return_tip_refund': False, 'require_signature_for_return': False, 'transaction_fee_mode': 'additional', 'transaction_fee_charge_cash': False}
             return jsonify({'success': True, 'settings': settings})
         finally:
             conn.close()
@@ -2101,17 +2413,83 @@ def api_update_pos_settings():
                 num_registers = 1
         except (ValueError, TypeError):
             num_registers = 1
+        return_transaction_fee_take_loss = bool(data.get('return_transaction_fee_take_loss', False))
+        return_tip_refund = bool(data.get('return_tip_refund', False))
+        require_signature_for_return = bool(data.get('require_signature_for_return', False))
+        transaction_fee_mode = (data.get('transaction_fee_mode') or 'additional').strip().lower()
+        if transaction_fee_mode not in ('additional', 'included', 'none'):
+            transaction_fee_mode = 'additional'
+        transaction_fee_charge_cash = bool(data.get('transaction_fee_charge_cash', False))
         conn, cursor = _pg_conn()
         try:
+            # Ensure require_signature_for_return column exists so the setting saves
+            try:
+                cursor.execute("ALTER TABLE pos_settings ADD COLUMN IF NOT EXISTS require_signature_for_return BOOLEAN DEFAULT false")
+            except Exception:
+                pass
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'pos_settings'
+                AND column_name IN ('return_transaction_fee_take_loss', 'return_tip_refund', 'require_signature_for_return', 'transaction_fee_mode', 'transaction_fee_charge_cash')
+            """)
+            cols = [r['column_name'] for r in cursor.fetchall()]
+            has_return_opts = 'return_transaction_fee_take_loss' in cols and 'return_tip_refund' in cols
+            has_signature_return = 'require_signature_for_return' in cols
+            has_fee_mode = 'transaction_fee_mode' in cols and 'transaction_fee_charge_cash' in cols
             cursor.execute("SELECT COUNT(*) AS c FROM pos_settings")
             count = cursor.fetchone()['c']
             if count == 0:
-                cursor.execute("INSERT INTO pos_settings (num_registers, register_type) VALUES (%s, %s)", (num_registers, register_type))
+                if has_return_opts and has_fee_mode and has_signature_return:
+                    cursor.execute("""
+                        INSERT INTO pos_settings (num_registers, register_type, return_transaction_fee_take_loss, return_tip_refund, require_signature_for_return, transaction_fee_mode, transaction_fee_charge_cash)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (num_registers, register_type, return_transaction_fee_take_loss, return_tip_refund, require_signature_for_return, transaction_fee_mode, transaction_fee_charge_cash))
+                elif has_return_opts and has_fee_mode:
+                    cursor.execute("""
+                        INSERT INTO pos_settings (num_registers, register_type, return_transaction_fee_take_loss, return_tip_refund, transaction_fee_mode, transaction_fee_charge_cash)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (num_registers, register_type, return_transaction_fee_take_loss, return_tip_refund, transaction_fee_mode, transaction_fee_charge_cash))
+                elif has_return_opts:
+                    cursor.execute("""
+                        INSERT INTO pos_settings (num_registers, register_type, return_transaction_fee_take_loss, return_tip_refund)
+                        VALUES (%s, %s, %s, %s)
+                    """, (num_registers, register_type, return_transaction_fee_take_loss, return_tip_refund))
+                else:
+                    cursor.execute("INSERT INTO pos_settings (num_registers, register_type) VALUES (%s, %s)", (num_registers, register_type))
             else:
+                if has_return_opts and has_fee_mode and has_signature_return:
+                    cursor.execute("""
+                        UPDATE pos_settings SET num_registers = %s, register_type = %s,
+                        return_transaction_fee_take_loss = %s, return_tip_refund = %s, require_signature_for_return = %s,
+                        transaction_fee_mode = %s, transaction_fee_charge_cash = %s, updated_at = NOW()
+                        WHERE id = (SELECT id FROM pos_settings ORDER BY id DESC LIMIT 1)
+                    """, (num_registers, register_type, return_transaction_fee_take_loss, return_tip_refund, require_signature_for_return, transaction_fee_mode, transaction_fee_charge_cash))
+                elif has_return_opts and has_fee_mode:
+                    cursor.execute("""
+                        UPDATE pos_settings SET num_registers = %s, register_type = %s,
+                        return_transaction_fee_take_loss = %s, return_tip_refund = %s,
+                        transaction_fee_mode = %s, transaction_fee_charge_cash = %s, updated_at = NOW()
+                        WHERE id = (SELECT id FROM pos_settings ORDER BY id DESC LIMIT 1)
+                    """, (num_registers, register_type, return_transaction_fee_take_loss, return_tip_refund, transaction_fee_mode, transaction_fee_charge_cash))
+                elif has_return_opts:
+                    cursor.execute("""
+                        UPDATE pos_settings SET num_registers = %s, register_type = %s,
+                        return_transaction_fee_take_loss = %s, return_tip_refund = %s, updated_at = NOW()
+                        WHERE id = (SELECT id FROM pos_settings ORDER BY id DESC LIMIT 1)
+                    """, (num_registers, register_type, return_transaction_fee_take_loss, return_tip_refund))
+                else:
+                    cursor.execute("""
+                        UPDATE pos_settings SET num_registers = %s, register_type = %s, updated_at = NOW()
+                        WHERE id = (SELECT id FROM pos_settings ORDER BY id DESC LIMIT 1)
+                    """, (num_registers, register_type))
+            # Always persist require_signature_for_return (column added by ALTER above; row exists after INSERT or UPDATE)
+            try:
                 cursor.execute("""
-                    UPDATE pos_settings SET num_registers = %s, register_type = %s, updated_at = NOW()
+                    UPDATE pos_settings SET require_signature_for_return = %s, updated_at = NOW()
                     WHERE id = (SELECT id FROM pos_settings ORDER BY id DESC LIMIT 1)
-                """, (num_registers, register_type))
+                """, (require_signature_for_return,))
+            except Exception:
+                pass
             conn.commit()
             return jsonify({'success': True, 'message': 'POS settings updated successfully'})
         finally:
@@ -2130,6 +2508,155 @@ def api_get_pos_search_filters():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/pos-bootstrap', methods=['GET'])
+def api_pos_bootstrap():
+    """Single request for POS initial load: pos settings, rewards settings, search filters, and inventory (products + variants). Cuts 4 round-trips to 1."""
+    try:
+        conn, cursor = _pg_conn()
+        try:
+            # 1) POS settings
+            cursor.execute("SELECT * FROM pos_settings ORDER BY id DESC LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                row = dict(row) if row else {}
+                raw_mode = row.get('transaction_fee_mode')
+                mode = (raw_mode if isinstance(raw_mode, str) and raw_mode else 'additional').strip().lower()
+                if mode not in ('additional', 'included', 'none'):
+                    mode = 'additional'
+                pos_settings = {
+                    'num_registers': row.get('num_registers', 1),
+                    'register_type': row.get('register_type', 'one_screen'),
+                    'return_transaction_fee_take_loss': bool(row.get('return_transaction_fee_take_loss', False)),
+                    'return_tip_refund': bool(row.get('return_tip_refund', False)),
+                    'require_signature_for_return': bool(row.get('require_signature_for_return', False)),
+                    'transaction_fee_mode': mode,
+                    'transaction_fee_charge_cash': bool(row.get('transaction_fee_charge_cash', False))
+                }
+            else:
+                pos_settings = {'num_registers': 1, 'register_type': 'one_screen', 'return_transaction_fee_take_loss': False, 'return_tip_refund': False, 'require_signature_for_return': False, 'transaction_fee_mode': 'additional', 'transaction_fee_charge_cash': False}
+
+            # 2) Customer rewards settings (ensure table exists)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS customer_rewards_settings (
+                id SERIAL PRIMARY KEY,
+                enabled INTEGER DEFAULT 0 CHECK(enabled IN (0, 1)),
+                require_email INTEGER DEFAULT 0, require_phone INTEGER DEFAULT 0, require_both INTEGER DEFAULT 0,
+                reward_type TEXT DEFAULT 'points', points_per_dollar REAL DEFAULT 1.0, points_redemption_value REAL DEFAULT 0.01,
+                percentage_discount REAL DEFAULT 0.0, fixed_discount REAL DEFAULT 0.0, minimum_spend REAL DEFAULT 0.0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+            cursor.execute("""
+                SELECT * FROM customer_rewards_settings ORDER BY id DESC LIMIT 1
+            """)
+            rew_row = cursor.fetchone()
+            if rew_row:
+                rew_row = dict(rew_row)
+                rewards_settings = {
+                    'enabled': rew_row.get('enabled', 0),
+                    'require_email': rew_row.get('require_email', 0),
+                    'require_phone': rew_row.get('require_phone', 0),
+                    'require_both': rew_row.get('require_both', 0),
+                    'reward_type': rew_row.get('reward_type', 'points'),
+                    'points_per_dollar': float(rew_row.get('points_per_dollar', 1.0)),
+                    'points_redemption_value': float(rew_row.get('points_redemption_value', 0.01)),
+                    'percentage_discount': float(rew_row.get('percentage_discount', 0.0)),
+                    'fixed_discount': float(rew_row.get('fixed_discount', 0.0)),
+                    'minimum_spend': float(rew_row.get('minimum_spend', 0.0)),
+                }
+            else:
+                rewards_settings = {'enabled': 0, 'require_email': 0, 'require_phone': 0, 'require_both': 0, 'reward_type': 'points', 'points_per_dollar': 1.0, 'points_redemption_value': 0.01, 'percentage_discount': 0.0, 'fixed_discount': 0.0, 'minimum_spend': 0.0}
+
+            # 3) POS search filters (from establishment settings)
+            cursor.execute("SELECT establishment_id FROM establishments ORDER BY establishment_id LIMIT 1")
+            est_row = cursor.fetchone()
+            establishment_id = est_row.get('establishment_id') if est_row and isinstance(est_row, dict) else (est_row[0] if est_row else None)
+            pos_search_filters = None
+            if establishment_id:
+                cursor.execute("SELECT settings FROM establishments WHERE establishment_id = %s", (establishment_id,))
+                set_row = cursor.fetchone()
+                if set_row:
+                    raw = set_row.get('settings') if isinstance(set_row, dict) else (set_row[0] if set_row else None)
+                    if raw and isinstance(raw, dict):
+                        pos_search_filters = raw.get('pos_search_filters')
+            if pos_search_filters is None:
+                pos_search_filters = _default_pos_search_filters()
+
+            # 4) Inventory (products + variants) – same shape as GET /api/inventory?item_type=product&include_variants=1
+            from database import ensure_metadata_tables, list_categories
+            ensure_metadata_tables()
+            sql = """
+                SELECT i.*, v.vendor_name, pm.keywords, pm.tags, pm.attributes, pm.brand, pm.color, pm.size,
+                    pm.category_id as metadata_category_id, c.category_name as metadata_category_name, pm.category_confidence
+                FROM inventory i
+                LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
+                LEFT JOIN product_metadata pm ON i.product_id = pm.product_id
+                LEFT JOIN categories c ON pm.category_id = c.category_id
+                WHERE 1=1
+            """
+            cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'inventory' AND column_name = 'archived'")
+            if cursor.fetchone():
+                sql += " AND (i.archived IS NULL OR i.archived = FALSE)"
+            cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'inventory' AND column_name = 'item_type'")
+            has_item_type = cursor.fetchone() is not None
+            if has_item_type:
+                sql += " AND (i.item_type = 'product' OR i.item_type IS NULL) ORDER BY i.item_type NULLS LAST, i.product_name"
+            else:
+                sql += " ORDER BY i.product_name"
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+            columns = list(rows[0].keys()) if rows else []
+            data = [dict(r) for r in rows]
+            try:
+                cats = list_categories(include_path=True)
+                category_id_to_path = {c['category_id']: c.get('category_path') or c.get('category_name') for c in (cats or []) if c.get('category_id')}
+                for row in data:
+                    cid = row.get('metadata_category_id')
+                    if cid and cid in category_id_to_path and category_id_to_path[cid]:
+                        row['category'] = category_id_to_path[cid]
+            except Exception:
+                pass
+            if data:
+                product_ids = [r.get('product_id') for r in data if r.get('product_id')]
+                if product_ids:
+                    placeholders = ','.join(['%s'] * len(product_ids))
+                    cursor.execute(
+                        "SELECT variant_id, product_id, variant_name, price, cost, sort_order FROM product_variants WHERE product_id IN (" + placeholders + ") ORDER BY product_id, sort_order, variant_name",
+                        tuple(product_ids)
+                    )
+                    variant_rows = cursor.fetchall()
+                    variants_by_product = {}
+                    for v in variant_rows:
+                        vd = dict(v)
+                        pid = vd.get('product_id')
+                        if pid not in variants_by_product:
+                            variants_by_product[pid] = []
+                        variants_by_product[pid].append(vd)
+                    for row in data:
+                        row['variants'] = variants_by_product.get(row.get('product_id')) or []
+                else:
+                    for row in data:
+                        row['variants'] = []
+            else:
+                for row in data:
+                    row['variants'] = []
+
+            return jsonify({
+                'success': True,
+                'posSettings': pos_settings,
+                'rewardsSettings': rewards_settings,
+                'posSearchFilters': pos_search_filters,
+                'inventory': {'columns': columns, 'data': data}
+            })
+        finally:
+            conn.close()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 def _default_pos_search_filters():
     """Default filter groups for pizza/drinks (configurable per store)."""
@@ -2306,6 +2833,58 @@ def api_delete_table_rows(table_name):
             conn.close()
     except Exception as e:
         print(f"Error deleting rows from {table_name}: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/tables/<table_name>/rows', methods=['PUT'])
+def api_update_table_row(table_name):
+    """
+    Update one row in a table (PostgreSQL).
+    Request JSON: { "row": { "col1": val1, "col2": val2, ... } }.
+    Primary key column(s) in row identify the row; other columns are updated.
+    """
+    try:
+        allowed_tables = _pg_allowed_tables()
+    except Exception as e:
+        print(f"Error getting table list: {e}")
+        return jsonify({'success': False, 'message': 'Database error'}), 500
+    if table_name not in allowed_tables:
+        return jsonify({'success': False, 'message': 'Table not found'}), 404
+    if not request.is_json:
+        return jsonify({'success': False, 'message': 'Invalid request data'}), 400
+    payload = request.get_json(silent=True) or {}
+    row_data = payload.get('row')
+    if not row_data or not isinstance(row_data, dict):
+        return jsonify({'success': False, 'message': 'Missing or invalid "row" object'}), 400
+    pk_cols = get_table_primary_key_columns(table_name)
+    if not pk_cols or not all(pk in row_data for pk in pk_cols):
+        return jsonify({'success': False, 'message': 'Table has no primary key or row missing primary key values'}), 400
+    # Columns to update: all in row_data except primary key columns
+    update_cols = [c for c in row_data if c not in pk_cols]
+    if not update_cols:
+        return jsonify({'success': False, 'message': 'No updatable columns (only primary key provided)'}), 400
+    try:
+        conn, cursor = _pg_conn()
+        try:
+            set_parts = sql.SQL(', ').join(
+                sql.SQL('{} = %s').format(sql.Identifier(c)) for c in update_cols
+            )
+            where_parts = sql.SQL(' AND ').join(
+                sql.SQL('{} = %s').format(sql.Identifier(pk)) for pk in pk_cols
+            )
+            params = [row_data[c] for c in update_cols] + [row_data[pk] for pk in pk_cols]
+            cursor.execute(
+                sql.SQL('UPDATE {} SET {} WHERE {}').format(
+                    sql.Identifier(table_name), set_parts, where_parts
+                ),
+                params
+            )
+            conn.commit()
+            return jsonify({'success': True, 'updated': cursor.rowcount})
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"Error updating row in {table_name}: {e}")
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -3641,50 +4220,78 @@ def api_face_clock():
 
 @app.route('/api/journal_entries')
 def api_journal_entries():
-    """Get journal entries with employee names"""
+    """Get journal entries from accounting schema (single ledger). Aliased for backward compatibility."""
     conn, cursor = _pg_conn()
-    
-    cursor.execute("""
-        SELECT 
-            je.*,
-            e.first_name || ' ' || e.last_name as employee_name
-        FROM journal_entries je
-        JOIN employees e ON je.employee_id = e.employee_id
-        ORDER BY je.entry_date DESC, je.journal_entry_id DESC
-    """)
-    
-    rows = cursor.fetchall()
-    columns = [description[0] for description in cursor.description]
-    data = [{col: row[col] for col in columns} for row in rows]
-    
-    conn.close()
-    return jsonify({'columns': columns, 'data': data})
+    try:
+        cursor.execute("""
+            SELECT 
+                t.id AS journal_entry_id,
+                t.transaction_number AS entry_number,
+                t.transaction_date AS entry_date,
+                t.transaction_type AS entry_type,
+                t.transaction_type AS transaction_source,
+                t.source_document_id AS source_id,
+                t.description,
+                t.is_posted AS posted,
+                CASE WHEN t.is_posted THEN t.updated_at ELSE NULL END AS posted_date,
+                t.created_by AS employee_id,
+                t.created_at,
+                t.updated_at,
+                e.first_name || ' ' || e.last_name AS employee_name
+            FROM accounting.transactions t
+            LEFT JOIN public.employees e ON e.employee_id = t.created_by
+            WHERE t.is_void = FALSE
+            ORDER BY t.transaction_date DESC, t.id DESC
+        """)
+        rows = cursor.fetchall()
+        columns = [d[0] for d in cursor.description] if cursor.description else []
+        data = [dict(row) for row in rows]
+        return jsonify({'columns': columns, 'data': data})
+    except Exception as e:
+        if conn and not conn.closed:
+            conn.close()
+        return jsonify({'columns': [], 'data': [], 'error': str(e)}), 500
+    finally:
+        if conn and not conn.closed:
+            conn.close()
+
 
 @app.route('/api/journal_entry_lines')
 def api_journal_entry_lines():
-    """Get journal entry lines with account details"""
+    """Get journal entry lines from accounting schema (single ledger). Aliased for backward compatibility."""
     conn, cursor = _pg_conn()
-    
-    cursor.execute("""
-        SELECT 
-            jel.*,
-            coa.account_number,
-            coa.account_name,
-            coa.account_type,
-            je.entry_number,
-            je.entry_date
-        FROM journal_entry_lines jel
-        JOIN chart_of_accounts coa ON jel.account_id = coa.account_id
-        JOIN journal_entries je ON jel.journal_entry_id = je.journal_entry_id
-        ORDER BY je.entry_date DESC, jel.journal_entry_id, jel.line_number
-    """)
-    
-    rows = cursor.fetchall()
-    columns = [description[0] for description in cursor.description]
-    data = [{col: row[col] for col in columns} for row in rows]
-    
-    conn.close()
-    return jsonify({'columns': columns, 'data': data})
+    try:
+        cursor.execute("""
+            SELECT 
+                tl.id AS line_id,
+                tl.transaction_id AS journal_entry_id,
+                tl.account_id,
+                tl.line_number,
+                tl.debit_amount,
+                tl.credit_amount,
+                tl.description,
+                a.account_number,
+                a.account_name,
+                a.account_type,
+                t.transaction_number AS entry_number,
+                t.transaction_date AS entry_date
+            FROM accounting.transaction_lines tl
+            JOIN accounting.accounts a ON a.id = tl.account_id
+            JOIN accounting.transactions t ON t.id = tl.transaction_id
+            WHERE t.is_void = FALSE
+            ORDER BY t.transaction_date DESC, tl.transaction_id, tl.line_number
+        """)
+        rows = cursor.fetchall()
+        columns = [d[0] for d in cursor.description] if cursor.description else []
+        data = [dict(row) for row in rows]
+        return jsonify({'columns': columns, 'data': data})
+    except Exception as e:
+        if conn and not conn.closed:
+            conn.close()
+        return jsonify({'columns': [], 'data': [], 'error': str(e)}), 500
+    finally:
+        if conn and not conn.closed:
+            conn.close()
 
 @app.route('/api/shipment_discrepancies')
 def api_shipment_discrepancies():
@@ -4509,7 +5116,8 @@ def api_image_identifications():
 # ============================================================================
 
 def _product_barcode_value(product):
-    """Get or generate barcode value for a product (12 digits for EAN13)."""
+    """Return the barcode value to encode. If product already has a barcode (8+ digits), use it (first 12 for EAN13).
+    If not, generate a new 12-digit value from product_id. Caller must only persist this when product had no barcode."""
     b = (product.get('barcode') or '').strip()
     if b and b.isdigit() and len(b) >= 8:
         return b[:12].zfill(12) if len(b) < 12 else b[:12]
@@ -4521,12 +5129,16 @@ def _product_barcode_value(product):
     return base + str(checksum)
 
 def _generate_product_barcode_png(barcode_value):
-    """Generate barcode PNG bytes using existing system (EAN13/Code128)."""
+    """Generate barcode PNG bytes. Returns (png_bytes, encoded_value) so we can store the exact value that was encoded.
+    For EAN13 the library recalculates the 13th digit, so encoded_value may differ from '0'+barcode_value."""
     if not _BARCODE_GEN_AVAILABLE:
-        return None
+        return None, None
     try:
+        encoded_value = barcode_value
         if barcode_value.isdigit() and len(barcode_value) == 12:
-            code = barcode.get('ean13', '0' + barcode_value, writer=ImageWriter())
+            # EAN13 expects 12 digits and adds the 13th (checksum). Pass 12 digits as-is so existing barcodes are not changed.
+            code = barcode.get('ean13', barcode_value, writer=ImageWriter())
+            encoded_value = str(code)
         elif barcode_value.isdigit():
             code = barcode.get('code128', barcode_value, writer=ImageWriter())
         else:
@@ -4540,19 +5152,19 @@ def _generate_product_barcode_png(barcode_value):
             'background': 'white',
             'foreground': 'black',
             'write_text': True,
-            'text': barcode_value,
+            'text': encoded_value,
         }
         img = code.render(options)
         buf = io.BytesIO()
         img.save(buf, format='PNG')
-        return buf.getvalue()
+        return buf.getvalue(), encoded_value
     except Exception as e:
         traceback.print_exc()
-        return None
+        return None, None
 
 @app.route('/api/product_barcode_image')
 def api_product_barcode_image():
-    """Generate product barcode PNG. Query: product_id=."""
+    """Generate product barcode PNG. Query: product_id=. If product has no barcode, assigns the generated value to the product."""
     product_id = request.args.get('product_id', type=int)
     if not product_id:
         return jsonify({'success': False, 'error': 'product_id required'}), 400
@@ -4562,9 +5174,17 @@ def api_product_barcode_image():
     if not _BARCODE_GEN_AVAILABLE:
         return jsonify({'success': False, 'error': 'Barcode generation not available. Install python-barcode[images].'}), 503
     barcode_value = _product_barcode_value(product)
-    png_bytes = _generate_product_barcode_png(barcode_value)
+    png_bytes, encoded_value = _generate_product_barcode_png(barcode_value)
     if not png_bytes:
         return jsonify({'success': False, 'error': 'Failed to generate barcode image'}), 500
+    # If product had no barcode, save the exact value that was encoded in the image (EAN13 recalculates the 13th digit)
+    existing = (product.get('barcode') or '').strip()
+    if (not existing or (existing.isdigit() and len(existing) < 8)) and encoded_value:
+        try:
+            from database import update_product
+            update_product(product_id, barcode=encoded_value)
+        except Exception as e:
+            traceback.print_exc()
     return Response(png_bytes, mimetype='image/png', headers={
         'Cache-Control': 'no-store',
         'Content-Disposition': f'inline; filename="barcode_{product_id}.png"',
@@ -4689,20 +5309,31 @@ def api_scan_barcodes():
 
 @app.route('/api/create_return', methods=['POST'])
 def api_create_return():
-    """Create a pending return"""
+    """Process a return immediately (pending return flow is not used; same as /api/process_return)"""
     try:
         if not request.json:
             return jsonify({'success': False, 'message': 'Invalid request data'}), 400
         
         data = request.json
-        result = create_pending_return(
+        from database import process_return_immediate
+        result = process_return_immediate(
             order_id=data.get('order_id'),
             items_to_return=data.get('items', []),
             employee_id=data.get('employee_id'),
             customer_id=data.get('customer_id'),
             reason=data.get('reason'),
-            notes=data.get('notes')
+            notes=data.get('notes'),
+            return_type=data.get('return_type', 'refund'),
+            exchange_timing=data.get('exchange_timing'),
+            return_subtotal=data.get('return_subtotal', 0),
+            return_tax=data.get('return_tax', 0),
+            return_processing_fee=data.get('return_processing_fee', 0),
+            return_total=data.get('return_total', 0),
+            payment_method=data.get('payment_method'),
+            return_tip_amount=float(data.get('return_tip_amount') or 0),
         )
+        if not result.get('success'):
+            return jsonify(result), 400
         return jsonify(result)
     except Exception as e:
         print(f"Create return error: {e}")
@@ -4711,55 +5342,14 @@ def api_create_return():
 
 @app.route('/api/approve_return', methods=['POST'])
 def api_approve_return():
-    """Approve a pending return"""
-    try:
-        if not request.json:
-            return jsonify({'success': False, 'message': 'Invalid request data'}), 400
-        
-        data = request.json
-        result = approve_pending_return(
-            return_id=data.get('return_id'),
-            approved_by=data.get('approved_by'),
-            notes=data.get('notes')
-        )
-        if result.get('success') and result.get('refund_amount') and result.get('return_id') is not None and result.get('order_id') is not None:
-            try:
-                from pos_accounting_bridge import journalize_return_to_accounting
-                jr = journalize_return_to_accounting(
-                    result['return_id'],
-                    result['order_id'],
-                    float(result['refund_amount']),
-                    result.get('approved_by'),
-                    None
-                )
-                if not jr.get('success'):
-                    print(f"Accounting journalize_return (approve return {result['return_id']}): {jr.get('message', 'unknown')}")
-            except Exception as je:
-                print(f"Accounting journalize_return error (approve return): {je}")
-        return jsonify(result)
-    except Exception as e:
-        print(f"Approve return error: {e}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
+    """Not used: returns are processed immediately only."""
+    return jsonify({'success': False, 'message': 'Returns are processed immediately only; use /api/process_return'}), 400
+
 
 @app.route('/api/reject_return', methods=['POST'])
 def api_reject_return():
-    """Reject a pending return"""
-    try:
-        if not request.json:
-            return jsonify({'success': False, 'message': 'Invalid request data'}), 400
-        
-        data = request.json
-        result = reject_pending_return(
-            return_id=data.get('return_id'),
-            rejected_by=data.get('rejected_by'),
-            reason=data.get('reason')
-        )
-        return jsonify(result)
-    except Exception as e:
-        print(f"Reject return error: {e}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
+    """Not used: returns are processed immediately only."""
+    return jsonify({'success': False, 'message': 'Returns are processed immediately only; use /api/process_return'}), 400
 
 @app.route('/api/pending_returns')
 def api_pending_returns():
@@ -4833,7 +5423,8 @@ def api_process_return():
             return_tax=data.get('return_tax', 0),
             return_processing_fee=data.get('return_processing_fee', 0),
             return_total=data.get('return_total', 0),
-            payment_method=data.get('payment_method')
+            payment_method=data.get('payment_method'),
+            return_tip_amount=float(data.get('return_tip_amount') or 0),
         )
         
         if not result.get('success'):
@@ -4856,7 +5447,9 @@ def api_process_return():
                     float(result['return_total']),
                     employee_id,
                     data.get('payment_method'),
-                    data.get('return_type', 'refund')
+                    data.get('return_type', 'refund'),
+                    return_tip_amount=float(data.get('return_tip_amount') or 0),
+                    tip_refund_from=data.get('tip_refund_from') or 'store'
                 )
                 if not jr.get('success'):
                     print(f"Accounting journalize_return (return {result['return_id']}): {jr.get('message', 'unknown')}")
@@ -4877,6 +5470,46 @@ def api_process_return():
         print(f"Process return error: {e}")
         traceback.print_exc()
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
+
+@app.route('/api/return_receipt_options', methods=['POST'])
+def api_return_receipt_options():
+    """Save customer signature for a return and optionally return receipt URL for print/email.
+    Called after Process Return when POS setting 'Require signature for return' is on."""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        data = request.get_json() or {}
+        return_id = data.get('return_id')
+        signature = data.get('signature')  # base64 image
+        receipt_action = (data.get('receipt_action') or 'none').strip().lower()
+        if receipt_action not in ('print', 'email', 'none'):
+            receipt_action = 'none'
+        if not return_id:
+            return jsonify({'success': False, 'message': 'return_id is required'}), 400
+        conn, cursor = _pg_conn()
+        try:
+            cursor.execute("SELECT return_id FROM pending_returns WHERE return_id = %s", (return_id,))
+            if not cursor.fetchone():
+                return jsonify({'success': False, 'message': 'Return not found'}), 404
+            try:
+                cursor.execute("ALTER TABLE pending_returns ADD COLUMN IF NOT EXISTS signature TEXT")
+            except Exception:
+                pass
+            cursor.execute(
+                "UPDATE pending_returns SET signature = %s WHERE return_id = %s",
+                (signature if signature else None, return_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({
+            'success': True,
+            'return_receipt_url': f"/api/receipt/return/{return_id}" if receipt_action in ('print', 'email') else None
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @app.route('/api/receipt/return/<int:return_id>', methods=['GET'])
 def api_generate_return_receipt(return_id):
@@ -4905,13 +5538,14 @@ def api_generate_exchange_receipt(exchange_credit_id):
         from database import get_connection
         from psycopg2.extras import RealDictCursor
         
-        # Get exchange credit details
+        # Get exchange credit details and return_id for credit number
         conn = get_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("""
-            SELECT transaction_id, amount, notes
-            FROM payment_transactions
-            WHERE transaction_id = %s AND payment_method = 'store_credit'
+            SELECT pt.transaction_id, pt.amount, pt.transaction_date, pr.return_id, pr.return_date
+            FROM payment_transactions pt
+            LEFT JOIN pending_returns pr ON pr.exchange_transaction_id = pt.transaction_id
+            WHERE pt.transaction_id = %s AND pt.payment_method = 'store_credit'
         """, (exchange_credit_id,))
         
         credit_data = cursor.fetchone()
@@ -4921,8 +5555,10 @@ def api_generate_exchange_receipt(exchange_credit_id):
             return jsonify({'success': False, 'message': 'Exchange credit not found'}), 404
         
         credit_data = dict(credit_data)
-        # Extract credit number from notes
-        credit_number = credit_data.get('notes', '').split('Credit: ')[-1] if 'Credit: ' in credit_data.get('notes', '') else f"EXC-{exchange_credit_id}"
+        return_id = credit_data.get('return_id')
+        return_date = credit_data.get('return_date') or credit_data.get('transaction_date')
+        date_str = return_date.strftime('%Y%m%d') if hasattr(return_date, 'strftime') else str(return_date or '')[:10].replace('-', '')
+        credit_number = f"EXC-{date_str}-{return_id}" if return_id else f"EXC-{exchange_credit_id}"
         
         pdf_bytes = generate_exchange_receipt(
             exchange_credit_id,
@@ -4940,6 +5576,38 @@ def api_generate_exchange_receipt(exchange_credit_id):
         print(f"Generate exchange receipt error: {e}")
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/receipt/exchange_completion/<int:order_id>', methods=['GET'])
+def api_generate_exchange_completion_receipt(order_id):
+    """Generate combined exchange receipt (returned items + new items + new total) for an order that used exchange credit."""
+    try:
+        from receipt_generator import generate_exchange_completion_receipt
+        from database import get_connection
+        from psycopg2.extras import RealDictCursor
+
+        conn = get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT exchange_return_id FROM orders WHERE order_id = %s", (order_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({'success': False, 'message': 'Order not found'}), 404
+        data = dict(row)
+        return_id = data.get('exchange_return_id')
+        if not return_id:
+            return jsonify({'success': False, 'message': 'Order is not an exchange completion'}), 400
+
+        pdf_bytes = generate_exchange_completion_receipt(return_id, order_id)
+        if pdf_bytes:
+            response = Response(pdf_bytes, mimetype='application/pdf')
+            response.headers['Content-Disposition'] = f'attachment; filename=exchange_receipt_order_{order_id}.pdf'
+            return response
+        return jsonify({'success': False, 'message': 'Failed to generate receipt'}), 500
+    except Exception as e:
+        print(f"Exchange completion receipt error: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @app.route('/api/apply_exchange_credit', methods=['POST'])
 def api_apply_exchange_credit():
@@ -4959,6 +5627,7 @@ def api_apply_exchange_credit():
             order_id = data.get('order_id')
             exchange_credit_id = data.get('exchange_credit_id')
             credit_amount = float(data.get('credit_amount', 0))
+            discount_already_included = data.get('discount_already_included', False)
             
             # Get current order total
             cursor.execute("SELECT total, subtotal, discount FROM orders WHERE order_id = %s", (order_id,))
@@ -4971,25 +5640,55 @@ def api_apply_exchange_credit():
             current_subtotal = float(order['subtotal'])
             current_discount = float(order.get('discount', 0))
             
-            # Apply credit as discount
-            new_discount = current_discount + credit_amount
-            new_total = current_total - credit_amount
+            new_total = current_total
+            if not discount_already_included:
+                # Apply credit as discount (cap so total never goes below 0)
+                credit_to_apply = min(credit_amount, current_total)
+                new_discount = current_discount + credit_to_apply
+                new_total = max(0.0, current_total - credit_to_apply)
+                cursor.execute("""
+                    UPDATE orders
+                    SET discount = %s,
+                        total = %s
+                    WHERE order_id = %s
+                """, (new_discount, new_total, order_id))
             
-            # Update order
+            # Deduct used amount and mark store credit fully used when nothing left (so it can't be scanned again)
+            try:
+                cursor.execute("""
+                    UPDATE payment_transactions
+                    SET amount_remaining = GREATEST(0, COALESCE(amount_remaining, amount) - %s)
+                    WHERE transaction_id = %s AND payment_method = 'store_credit'
+                """, (credit_amount, exchange_credit_id))
+                cursor.execute("""
+                    UPDATE payment_transactions
+                    SET status = 'used'
+                    WHERE transaction_id = %s AND payment_method = 'store_credit'
+                    AND (amount_remaining IS NULL OR amount_remaining <= 0)
+                """, (exchange_credit_id,))
+            except Exception:
+                conn.rollback()
+                # Re-apply order discount/total (rollback undid it)
+                cursor.execute("""
+                    UPDATE orders SET discount = %s, total = %s WHERE order_id = %s
+                """, (new_discount, new_total, order_id))
+                # No amount_remaining column: mark as fully used so credit expires immediately
+                cursor.execute("""
+                    UPDATE payment_transactions
+                    SET status = 'used'
+                    WHERE transaction_id = %s AND payment_method = 'store_credit'
+                """, (exchange_credit_id,))
+            # Link this order to the return for exchange completion receipt
             cursor.execute("""
-                UPDATE orders
-                SET discount = %s,
-                    total = %s
-                WHERE order_id = %s
-            """, (new_discount, new_total, order_id))
-            
-            # Mark exchange credit as used
-            cursor.execute("""
-                UPDATE payment_transactions
-                SET status = 'refunded',
-                    notes = COALESCE(notes, '') || ' | Used on order ' || %s
-                WHERE transaction_id = %s AND payment_method = 'store_credit'
-            """, (order_id, exchange_credit_id))
+                SELECT return_id FROM pending_returns
+                WHERE exchange_transaction_id = %s
+            """, (exchange_credit_id,))
+            row = cursor.fetchone()
+            if row:
+                return_id_linked = row['return_id'] if isinstance(row, dict) else row[0]
+                cursor.execute("""
+                    UPDATE orders SET exchange_return_id = %s WHERE order_id = %s
+                """, (return_id_linked, order_id))
             
             conn.commit()
             conn.close()
@@ -5009,6 +5708,145 @@ def api_apply_exchange_credit():
         traceback.print_exc()
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
+@app.route('/api/store_credit/by_order/<path:order_number>', methods=['GET'])
+def api_store_credit_by_order(order_number):
+    """Get store credit for an order (by order number) so scanning order barcode adds credit to cart."""
+    try:
+        from database import get_connection
+        from psycopg2.extras import RealDictCursor
+        import re
+        conn = get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        # Normalize order number (strip, collapse dashes)
+        order_number = (order_number or '').strip()
+        cleaned = re.sub(r'[^A-Za-z0-9-]', '', order_number)
+        digits_only = re.sub(r'[^0-9]', '', order_number)
+        if not cleaned and not digits_only:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Order number required'}), 400
+        # Same flexible matching as /api/orders/search so we find the same order
+        pattern = f'%{cleaned or digits_only}%'
+        norm = cleaned or digits_only
+        params = [pattern, order_number, norm]
+        sql = """
+            SELECT o.order_id, o.order_number
+            FROM orders o
+            WHERE o.order_number::text ILIKE %s
+               OR o.order_number::text = %s
+               OR REPLACE(o.order_number::text, '-', '') = REPLACE(%s, '-', '')
+            ORDER BY o.order_date DESC
+            LIMIT 1
+        """
+        cursor.execute(sql, params)
+        order_row = cursor.fetchone()
+        if not order_row and digits_only and digits_only.isdigit():
+            cursor.execute("""
+                SELECT o.order_id, o.order_number
+                FROM orders o
+                WHERE o.order_id = %s
+                LIMIT 1
+            """, (int(digits_only),))
+            order_row = cursor.fetchone()
+        if not order_row:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Order not found'}), 404
+        order_id = order_row['order_id'] if isinstance(order_row, dict) else order_row[0]
+        order_num = order_row['order_number'] if isinstance(order_row, dict) else order_row[1]
+        # Store credit for this order (works with or without notes/amount_remaining columns)
+        credit = None
+        try:
+            cursor.execute("""
+                SELECT pt.transaction_id, pt.amount, pt.notes, pt.order_id, pt.amount_remaining
+                FROM payment_transactions pt
+                WHERE pt.payment_method = 'store_credit'
+                AND pt.status = 'approved'
+                AND pt.order_id = %s
+                AND (pt.amount_remaining IS NULL OR pt.amount_remaining > 0)
+                ORDER BY pt.transaction_id DESC
+                LIMIT 1
+            """, (order_id,))
+            credit = cursor.fetchone()
+        except Exception:
+            conn.rollback()
+        if not credit:
+            cursor.execute("""
+                SELECT transaction_id, amount, order_id
+                FROM payment_transactions
+                WHERE payment_method = 'store_credit'
+                AND status = 'approved'
+                AND order_id = %s
+                ORDER BY transaction_id DESC
+                LIMIT 1
+            """, (order_id,))
+            credit = cursor.fetchone()
+        # Fallback: find store credit via return (in case it was linked by exchange_transaction_id only)
+        if not credit:
+            try:
+                cursor.execute("""
+                    SELECT pt.transaction_id, pt.amount, pt.order_id
+                    FROM payment_transactions pt
+                    INNER JOIN pending_returns pr ON pr.exchange_transaction_id = pt.transaction_id
+                    WHERE pr.order_id = %s AND pt.payment_method = 'store_credit' AND pt.status = 'approved'
+                    ORDER BY pt.transaction_id DESC
+                    LIMIT 1
+                """, (order_id,))
+                credit = cursor.fetchone()
+            except Exception:
+                conn.rollback()
+        if not credit:
+            # Check if credit existed but was fully used (so we can show a clearer message)
+            try:
+                cursor.execute("""
+                    SELECT 1 FROM payment_transactions
+                    WHERE order_id = %s AND payment_method = 'store_credit' AND status IN ('used', 'refunded')
+                    LIMIT 1
+                """, (order_id,))
+                if cursor.fetchone():
+                    conn.close()
+                    return jsonify({'success': False, 'message': 'Store credit fully used'}), 404
+            except Exception:
+                conn.rollback()
+            conn.close()
+            return jsonify({'success': False, 'message': 'No store credit for this order'}), 404
+        credit = dict(credit)
+        avail = credit.get('amount_remaining')
+        if avail is not None:
+            avail = float(avail)
+        else:
+            avail = float(credit['amount'])
+        if avail <= 0:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Store credit fully used'}), 404
+        credit_number = None
+        if credit.get('notes') and 'Credit:' in (credit.get('notes') or ''):
+            credit_number = (credit['notes'] or '').replace('Credit:', '').strip()
+        if not credit_number:
+            credit_number = 'EXC-order-%s' % order_id
+        return_id = None
+        try:
+            cursor.execute("SELECT return_id FROM pending_returns WHERE exchange_transaction_id = %s", (credit['transaction_id'],))
+            pr = cursor.fetchone()
+            return_id = pr['return_id'] if (pr and isinstance(pr, dict)) else (pr[0] if pr else None)
+        except Exception:
+            pass
+        conn.close()
+        return jsonify({
+            'success': True,
+            'credit': {
+                'transaction_id': credit['transaction_id'],
+                'credit_number': credit_number,
+                'amount': avail,
+                'return_id': return_id,
+                'order_id': credit.get('order_id'),
+                'order_number': order_num
+            }
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @app.route('/api/exchange_credit/<credit_number>', methods=['GET'])
 def api_get_exchange_credit(credit_number):
     """Get exchange credit by credit number (for scanning at checkout)"""
@@ -5019,40 +5857,56 @@ def api_get_exchange_credit(credit_number):
         conn = get_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
-        # Look up exchange credit by credit number in notes
-        cursor.execute("""
-            SELECT transaction_id, amount, notes, order_id
-            FROM payment_transactions
-            WHERE payment_method = 'store_credit'
-            AND status = 'approved'
-            AND notes LIKE %s
-        """, (f'%Credit: {credit_number}%',))
-        
-        credit = cursor.fetchone()
-        conn.close()
+        # Look up store credit by credit number in notes; use amount_remaining for partial use
+        try:
+            cursor.execute("""
+                SELECT pt.transaction_id, pt.amount, pt.notes, pt.order_id,
+                       pt.amount_remaining
+                FROM payment_transactions pt
+                WHERE pt.payment_method = 'store_credit'
+                AND pt.status = 'approved'
+                AND (pt.notes LIKE %s OR pt.notes = %s)
+                AND (pt.amount_remaining IS NULL OR pt.amount_remaining > 0)
+            """, (f'%Credit: {credit_number}%', f'Credit: {credit_number}'))
+            credit = cursor.fetchone()
+        except Exception:
+            cursor.execute("""
+                SELECT transaction_id, amount, notes, order_id
+                FROM payment_transactions
+                WHERE payment_method = 'store_credit'
+                AND status = 'approved'
+                AND (notes LIKE %s OR notes = %s)
+            """, (f'%Credit: {credit_number}%', f'Credit: {credit_number}'))
+            credit = cursor.fetchone()
         
         if not credit:
-            return jsonify({'success': False, 'message': 'Exchange credit not found'}), 404
+            conn.close()
+            return jsonify({'success': False, 'message': 'Store credit not found or fully used'}), 404
         
         credit = dict(credit)
+        avail = credit.get('amount_remaining')
+        if avail is not None:
+            avail = float(avail)
+        else:
+            avail = float(credit['amount'])
+        if avail <= 0:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Store credit fully used'}), 404
         
-        # Extract return_id from notes if available
+        # return_id from pending_returns linked to this transaction
         return_id = None
-        if credit.get('notes'):
-            import re
-            match = re.search(r'return (\w+)', credit['notes'])
-            if match:
-                try:
-                    return_id = int(match.group(1))
-                except:
-                    pass
+        cursor.execute("SELECT return_id FROM pending_returns WHERE exchange_transaction_id = %s", (credit['transaction_id'],))
+        pr = cursor.fetchone()
+        if pr:
+            return_id = pr['return_id'] if isinstance(pr, dict) else pr[0]
+        conn.close()
         
         return jsonify({
             'success': True,
             'credit': {
                 'transaction_id': credit['transaction_id'],
                 'credit_number': credit_number,
-                'amount': float(credit['amount']),
+                'amount': avail,
                 'return_id': return_id,
                 'order_id': credit.get('order_id')
             }
@@ -6510,13 +7364,17 @@ def start_transaction():
         if not data or not isinstance(data, dict):
             return make_response(jsonify({'success': False, 'message': 'Invalid request body'}), 400)
         items = data.get('items')
-        if not items:
+        if items is None:
             return make_response(jsonify({'success': False, 'message': 'items required'}), 400)
+        if not isinstance(items, list):
+            return make_response(jsonify({'success': False, 'message': 'items must be a list'}), 400)
         employee_id = session_data['employee_id']
         customer_id = data.get('customer_id')
+        discount = float(data.get('discount', 0) or 0)
+        discount_type = (data.get('discount_type') or '').strip() or None
         from customer_display_system import CustomerDisplaySystem
         cds = CustomerDisplaySystem()
-        result = cds.start_transaction(employee_id, items, customer_id)
+        result = cds.start_transaction(employee_id, items, customer_id, discount=discount, discount_type=discount_type)
         if SOCKETIO_AVAILABLE and socketio:
             socketio.emit('transaction_started', result, room='customer_display')
         return make_response(jsonify({'success': True, 'data': result}))
@@ -6689,6 +7547,8 @@ def get_display_settings():
             # Update settings
             cds.update_display_settings(**data)
             updated_settings = cds.get_display_settings()
+            if 'checkout_ui' in data:
+                updated_settings['checkout_ui'] = data['checkout_ui']
             return jsonify({'success': True, 'data': updated_settings})
     except Exception as e:
         traceback.print_exc()
@@ -6814,23 +7674,34 @@ def api_add_to_inventory(shipment_id):
 
 @app.route('/api/store-location-settings', methods=['GET'])
 def api_get_store_location_settings():
-    """Get store location settings"""
+    """Get store location settings (includes store_hours, contact, address fields)."""
     try:
         settings = get_store_location_settings()
         if settings:
-            return jsonify(settings)
+            # Ensure store_hours is JSON-serializable (dict)
+            if 'store_hours' in settings and settings['store_hours'] is not None:
+                if hasattr(settings['store_hours'], 'copy'):
+                    settings = {**settings, 'store_hours': dict(settings['store_hours'])}
+            return jsonify({'success': True, 'settings': settings})
         else:
             return jsonify({
-                'store_name': 'Store',
-                'latitude': None,
-                'longitude': None,
-                'address': '',
-                'allowed_radius_meters': 100.0,
-                'require_location': 1
+                'success': True,
+                'settings': {
+                    'store_name': 'Store',
+                    'latitude': None,
+                    'longitude': None,
+                    'address': '',
+                    'allowed_radius_meters': 100.0,
+                    'require_location': 1,
+                    'city': '', 'state': '', 'zip': '', 'country': '',
+                    'store_phone': '', 'store_email': '', 'store_website': '',
+                    'store_type': '', 'store_logo': '',
+                    'store_hours': None
+                }
             })
     except Exception as e:
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/store-location-settings', methods=['POST'])
 def api_update_store_location_settings():
@@ -6894,16 +7765,59 @@ def api_update_store_location_settings():
             except (ValueError, TypeError):
                 require_location = None
         
+        store_hours = data.get('store_hours')
+        if store_hours is not None and not isinstance(store_hours, dict):
+            store_hours = None
+
         success = update_store_location_settings(
             store_name=data.get('store_name') or None,
             latitude=latitude,
             longitude=longitude,
             address=data.get('address') or None,
             allowed_radius_meters=allowed_radius,
-            require_location=require_location
+            require_location=require_location,
+            city=data.get('city') or None,
+            state=data.get('state') or None,
+            zip_code=data.get('zip') or None,
+            country=data.get('country') or None,
+            store_phone=data.get('store_phone') or None,
+            store_email=data.get('store_email') or None,
+            store_website=data.get('store_website') or None,
+            store_type=data.get('store_type') or None,
+            store_logo=data.get('store_logo') or None,
+            store_hours=store_hours
         )
         
         if success:
+            # Sync store info to receipt_settings so receipts use the same store name/address/contact
+            try:
+                conn, cursor = _pg_conn()
+                try:
+                    cursor.execute("SELECT COUNT(*) AS c FROM receipt_settings")
+                    count = cursor.fetchone()['c']
+                    vals = (
+                        data.get('store_name') or 'Store',
+                        data.get('address') or '',
+                        data.get('city') or '',
+                        data.get('state') or '',
+                        data.get('zip') or '',
+                        data.get('store_phone') or '',
+                        data.get('store_email') or '',
+                        data.get('store_website') or '',
+                    )
+                    if count > 0:
+                        cursor.execute("""
+                            UPDATE receipt_settings SET
+                                store_name = %s, store_address = %s, store_city = %s, store_state = %s,
+                                store_zip = %s, store_phone = %s, store_email = %s, store_website = %s,
+                                updated_at = NOW()
+                            WHERE id = (SELECT id FROM receipt_settings ORDER BY id DESC LIMIT 1)
+                        """, vals)
+                        conn.commit()
+                finally:
+                    conn.close()
+            except Exception as sync_err:
+                print(f"Receipt settings sync after store update: {sync_err}")
             return jsonify({'success': True, 'message': 'Store location settings updated'})
         else:
             return jsonify({'success': False, 'message': 'Failed to update settings'}), 500
@@ -7414,385 +8328,6 @@ def serve_upload(filename):
         return jsonify({'error': 'File not found'}), 404
 
 # ============================================================================
-# SMS CRM API ENDPOINTS
-# ============================================================================
-
-@app.route('/api/sms/settings/<int:store_id>', methods=['GET', 'POST'])
-def api_sms_settings(store_id):
-    """Get or update SMS settings for a store"""
-    try:
-        if request.method == 'GET':
-            settings = sms_service.get_store_sms_settings(store_id)
-            if settings:
-                # Hide sensitive data
-                if settings.get('smtp_password'):
-                    settings['smtp_password'] = '***'
-                if settings.get('aws_secret_access_key'):
-                    settings['aws_secret_access_key'] = '***'
-                if settings.get('twilio_auth_token'):
-                    settings['twilio_auth_token'] = '***'
-            return jsonify(settings or {})
-        
-        # POST - Update settings
-        if not request.is_json:
-            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-        
-        data = request.json
-        
-        # Verify session
-        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
-        if not session_token:
-            return jsonify({'success': False, 'message': 'Session token required'}), 401
-        
-        session_result = verify_session(session_token)
-        if not session_result.get('valid'):
-            return jsonify({'success': False, 'message': 'Invalid session'}), 401
-        
-        employee_id = session_result.get('employee_id')
-        employee = get_employee(employee_id)
-        is_admin = employee and employee.get('position', '').lower() == 'admin'
-        
-        pm = get_permission_manager()
-        has_permission = pm.has_permission(employee_id, 'manage_settings')
-        
-        if not is_admin and not has_permission:
-            return jsonify({'success': False, 'message': 'Permission denied'}), 403
-        
-        conn, cursor = _pg_conn()
-        
-        cursor.execute("SELECT setting_id FROM sms_settings WHERE store_id = %s", (store_id,))
-        exists = cursor.fetchone()
-        
-        provider = data.get('sms_provider', 'email')
-        
-        if exists:
-            if provider == 'email':
-                cursor.execute("""
-                    UPDATE sms_settings SET
-                        sms_provider = %s,
-                        smtp_server = %s,
-                        smtp_port = %s,
-                        smtp_user = %s,
-                        smtp_password = %s,
-                        smtp_use_tls = %s,
-                        business_name = %s,
-                        store_phone_number = %s,
-                        auto_send_rewards_earned = %s,
-                        auto_send_rewards_redeemed = %s,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE store_id = %s
-                """, (
-                    provider,
-                    data.get('smtp_server', 'smtp.gmail.com'),
-                    data.get('smtp_port', 587),
-                    data.get('smtp_user'),
-                    data.get('smtp_password'),
-                    data.get('smtp_use_tls', 1),
-                    data.get('business_name'),
-                    data.get('store_phone_number'),
-                    data.get('auto_send_rewards_earned', 1),
-                    data.get('auto_send_rewards_redeemed', 1),
-                    store_id
-                ))
-            elif provider == 'aws_sns':
-                cursor.execute("""
-                    UPDATE sms_settings SET
-                        sms_provider = %s,
-                        aws_access_key_id = %s,
-                        aws_secret_access_key = %s,
-                        aws_region = %s,
-                        business_name = %s,
-                        auto_send_rewards_earned = %s,
-                        auto_send_rewards_redeemed = %s,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE store_id = %s
-                """, (
-                    provider,
-                    data.get('aws_access_key_id'),
-                    data.get('aws_secret_access_key'),
-                    data.get('aws_region', 'us-east-1'),
-                    data.get('business_name'),
-                    data.get('auto_send_rewards_earned', 1),
-                    data.get('auto_send_rewards_redeemed', 1),
-                    store_id
-                ))
-        else:
-            # Insert new settings
-            if provider == 'email':
-                cursor.execute("""
-                    INSERT INTO sms_settings (
-                        store_id, sms_provider, smtp_server, smtp_port,
-                        smtp_user, smtp_password, smtp_use_tls, business_name,
-                        auto_send_rewards_earned, auto_send_rewards_redeemed
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    store_id, provider,
-                    data.get('smtp_server', 'smtp.gmail.com'),
-                    data.get('smtp_port', 587),
-                    data.get('smtp_user'),
-                    data.get('smtp_password'),
-                    data.get('smtp_use_tls', 1),
-                    data.get('business_name'),
-                    data.get('auto_send_rewards_earned', 1),
-                    data.get('auto_send_rewards_redeemed', 1)
-                ))
-            elif provider == 'aws_sns':
-                cursor.execute("""
-                    INSERT INTO sms_settings (
-                        store_id, sms_provider, aws_access_key_id,
-                        aws_secret_access_key, aws_region, business_name,
-                        auto_send_rewards_earned, auto_send_rewards_redeemed
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    store_id, provider,
-                    data.get('aws_access_key_id'),
-                    data.get('aws_secret_access_key'),
-                    data.get('aws_region', 'us-east-1'),
-                    data.get('business_name'),
-                    data.get('auto_send_rewards_earned', 1),
-                    data.get('auto_send_rewards_redeemed', 1)
-                ))
-        
-        conn.commit()
-        conn.close()
-        return jsonify({'success': True})
-        
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/sms/migrate-to-aws/<int:store_id>', methods=['POST'])
-def api_migrate_to_aws(store_id):
-    """Migrate store from email to AWS SNS"""
-    try:
-        if not request.is_json:
-            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-        
-        data = request.json
-        
-        # Verify session
-        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
-        if not session_token:
-            return jsonify({'success': False, 'message': 'Session token required'}), 401
-        
-        session_result = verify_session(session_token)
-        if not session_result.get('valid'):
-            return jsonify({'success': False, 'message': 'Invalid session'}), 401
-        
-        result = sms_service.migrate_to_aws(
-            store_id=store_id,
-            aws_access_key=data.get('aws_access_key_id'),
-            aws_secret=data.get('aws_secret_access_key'),
-            region=data.get('aws_region', 'us-east-1')
-        )
-        return jsonify(result)
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/sms/send', methods=['POST'])
-def api_sms_send():
-    """Send SMS message"""
-    try:
-        if not request.is_json:
-            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-        
-        data = request.json
-        store_id = data.get('store_id', 1)
-        phone_number = data.get('phone_number')
-        message_text = data.get('message_text')
-        customer_id = data.get('customer_id')
-        carrier_preference = data.get('carrier_preference')  # att, verizon, tmobile, sprint (for email-to-SMS)
-        
-        if not phone_number or not message_text:
-            return jsonify({'success': False, 'message': 'Phone number and message text required'}), 400
-        
-        # Verify session
-        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
-        employee_id = None
-        if session_token:
-            session_result = verify_session(session_token)
-            if session_result.get('valid'):
-                employee_id = session_result.get('employee_id')
-        
-        result = sms_service.send_sms(
-            store_id=store_id,
-            phone_number=phone_number,
-            message=message_text,
-            customer_id=customer_id,
-            employee_id=employee_id,
-            carrier_preference=carrier_preference
-        )
-        # Debug: log result so terminal shows what happened (gateway, phone_cleaned, error)
-        if result.get('success'):
-            print(f"[SMS] Sent OK: phone_cleaned={result.get('phone_cleaned')} gateway={result.get('gateway_used')} carrier_tried={result.get('carrier_tried')}")
-        else:
-            print(f"[SMS] Send failed: {result.get('error')} phone_cleaned={result.get('phone_cleaned')}")
-        return jsonify(result)
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/sms/rewards/earned', methods=['POST'])
-def api_sms_rewards_earned():
-    """Automatically send rewards earned message"""
-    try:
-        if not request.is_json:
-            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-        
-        data = request.json
-        store_id = data.get('store_id', 1)
-        customer_id = data.get('customer_id')
-        points_earned = data.get('points_earned')
-        total_points = data.get('total_points')
-        
-        if not customer_id or points_earned is None or total_points is None:
-            return jsonify({'success': False, 'message': 'Missing required fields'}), 400
-        
-        result = sms_service.send_rewards_earned_message(
-            store_id=store_id,
-            customer_id=customer_id,
-            points_earned=points_earned,
-            total_points=total_points
-        )
-        
-        return jsonify(result)
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/sms/messages', methods=['GET'])
-def api_sms_messages():
-    """Get SMS messages"""
-    try:
-        conn, cursor = _pg_conn()
-        
-        store_id = request.args.get('store_id')
-        customer_id = request.args.get('customer_id')
-        phone_number = request.args.get('phone_number')
-        status = request.args.get('status')
-        limit = int(request.args.get('limit', 100))
-        
-        query = """
-            SELECT 
-                sm.*,
-                c.customer_name,
-                e.first_name || ' ' || e.last_name as employee_name,
-                s.store_name
-            FROM sms_messages sm
-            LEFT JOIN customers c ON sm.customer_id = c.customer_id
-            LEFT JOIN employees e ON sm.created_by = e.employee_id
-            LEFT JOIN stores s ON sm.store_id = s.store_id
-            WHERE 1=1
-        """
-        params = []
-        
-        if store_id:
-            query += " AND sm.store_id = %s"
-            params.append(store_id)
-        
-        if customer_id:
-            query += " AND sm.customer_id = %s"
-            params.append(customer_id)
-        
-        if phone_number:
-            query += " AND sm.phone_number = %s"
-            params.append(phone_number)
-        
-        if status:
-            query += " AND sm.status = %s"
-            params.append(status)
-        
-        query += " ORDER BY sm.created_at DESC LIMIT %s"
-        params.append(limit)
-        
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
-        
-        return jsonify([dict(row) for row in rows])
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/sms/templates', methods=['GET', 'POST'])
-def api_sms_templates():
-    """Get or create SMS templates"""
-    try:
-        if request.method == 'GET':
-            conn, cursor = _pg_conn()
-            
-            store_id = request.args.get('store_id')
-            if store_id:
-                cursor.execute("SELECT * FROM sms_templates WHERE store_id = %s AND is_active = 1 ORDER BY template_name", (store_id,))
-            else:
-                cursor.execute("SELECT * FROM sms_templates WHERE is_active = 1 ORDER BY template_name")
-            
-            rows = cursor.fetchall()
-            conn.close()
-            return jsonify([dict(row) for row in rows])
-        
-        # POST - Create template
-        if not request.is_json:
-            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-        
-        data = request.json
-        
-        # Verify session
-        session_token = data.get('session_token') or request.headers.get('X-Session-Token')
-        if not session_token:
-            return jsonify({'success': False, 'message': 'Session token required'}), 401
-        
-        session_result = verify_session(session_token)
-        if not session_result.get('valid'):
-            return jsonify({'success': False, 'message': 'Invalid session'}), 401
-        
-        employee_id = session_result.get('employee_id')
-        
-        conn, cursor = _pg_conn()
-        cursor.execute("""
-            INSERT INTO sms_templates (store_id, template_name, template_text, category, variables, created_by)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (
-            data.get('store_id', 1),
-            data.get('template_name'),
-            data.get('template_text'),
-            data.get('category', 'rewards'),
-            json.dumps(data.get('variables', [])),
-            employee_id
-        ))
-        conn.commit()
-        conn.close()
-        return jsonify({'success': True})
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/sms/stores', methods=['GET'])
-def api_sms_stores():
-    """Get all stores. Returns empty list if stores table does not exist."""
-    conn = None
-    try:
-        conn, cursor = _pg_conn()
-        try:
-            cursor.execute("SELECT * FROM stores WHERE is_active = 1 ORDER BY store_name")
-            rows = cursor.fetchall()
-            return jsonify([dict(row) for row in rows])
-        except Exception as db_err:
-            if 'does not exist' in str(db_err) or 'UndefinedTable' in type(db_err).__name__:
-                return jsonify([])
-            raise
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-# ============================================================================
 # CASH REGISTER CONTROL API ENDPOINTS
 # ============================================================================
 
@@ -7987,16 +8522,17 @@ def api_get_register_session():
         
         if session_id:
             result = get_register_session(session_id=int(session_id))
+            if result is None:
+                return jsonify({'success': False, 'message': 'Session not found'}), 404
+            return jsonify({'success': True, 'data': result}), 200
         else:
             result = get_register_session(
                 register_id=int(register_id) if register_id else None,
                 status=status
             )
-        
-        if result:
-            return jsonify({'success': True, 'data': result}), 200
-        else:
-            return jsonify({'success': False, 'message': 'Session not found'}), 404
+            # Empty list = no matching sessions (e.g. register closed) - valid response, not 404
+            data = result if result is not None else []
+            return jsonify({'success': True, 'data': data}), 200
             
     except Exception as e:
         print(f"Error getting register session: {e}")
@@ -8950,8 +9486,12 @@ def api_accounting_settings():
         employee_id = session_result.get('employee_id')
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID not found'}), 401
-        employee_role = get_employee_role(employee_id)
-        if employee_role not in ['manager', 'admin']:
+        # Allow if RBAC role is manager/admin, or legacy position is Admin/Manager
+        role_info = get_employee_role(employee_id)
+        role_name = (role_info or {}).get('role_name') or ''
+        employee = get_employee(employee_id)
+        position = (employee or {}).get('position') or ''
+        if role_name.lower() not in ('manager', 'admin') and position.lower() not in ('manager', 'admin'):
             return jsonify({'success': False, 'message': 'Manager or Admin required'}), 403
 
         if request.method == 'GET':
@@ -8967,6 +9507,18 @@ def api_accounting_settings():
             updates['transaction_fee_rates'] = dict(data['transaction_fee_rates'])
         if 'delivery_pay_on_delivery_cash_only' in data:
             updates['delivery_pay_on_delivery_cash_only'] = bool(data['delivery_pay_on_delivery_cash_only'])
+        if 'allow_delivery' in data:
+            updates['allow_delivery'] = bool(data['allow_delivery'])
+        if 'allow_pickup' in data:
+            updates['allow_pickup'] = bool(data['allow_pickup'])
+        if 'allow_pay_at_pickup' in data:
+            updates['allow_pay_at_pickup'] = bool(data['allow_pay_at_pickup'])
+        if 'delivery_fee_enabled' in data:
+            updates['delivery_fee_enabled'] = bool(data['delivery_fee_enabled'])
+        if 'allow_scheduled_pickup' in data:
+            updates['allow_scheduled_pickup'] = bool(data['allow_scheduled_pickup'])
+        if 'allow_scheduled_delivery' in data:
+            updates['allow_scheduled_delivery'] = bool(data['allow_scheduled_delivery'])
         if not updates:
             return jsonify({'success': False, 'message': 'No settings to update'}), 400
         ok = update_establishment_settings(None, updates)
@@ -8992,8 +9544,11 @@ def api_accounting_labor_summary():
         employee_id = session_result.get('employee_id')
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID not found'}), 401
-        employee_role = get_employee_role(employee_id)
-        if employee_role not in ['manager', 'admin']:
+        role_info = get_employee_role(employee_id)
+        role_name = (role_info or {}).get('role_name') or ''
+        employee = get_employee(employee_id)
+        position = (employee or {}).get('position') or ''
+        if role_name.lower() not in ('manager', 'admin') and position.lower() not in ('manager', 'admin'):
             return jsonify({'success': False, 'message': 'Manager or Admin required'}), 403
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
@@ -9023,10 +9578,12 @@ def api_accounting_dashboard():
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
         
-        # Check permissions (Manager or Admin required)
-        permission_manager = get_permission_manager()
-        employee_role = get_employee_role(employee_id)
-        if employee_role not in ['manager', 'admin']:
+        # Check permissions: RBAC role or legacy position must be Manager/Admin
+        role_info = get_employee_role(employee_id)
+        role_name = (role_info or {}).get('role_name') or ''
+        employee = get_employee(employee_id)
+        position = (employee or {}).get('position') or ''
+        if role_name.lower() not in ('manager', 'admin') and position.lower() not in ('manager', 'admin'):
             return jsonify({'success': False, 'message': 'Manager or Admin access required'}), 403
         
         # Get date range
@@ -9174,6 +9731,13 @@ if __name__ == '__main__':
                 print(result.stdout.decode('utf-8', errors='ignore'))
     except Exception as e:
         # Silently fail - don't block startup if sync fails
+        pass
+    # Warm connection pool so first request doesn't wait for DB connections (helps remote/Supabase)
+    try:
+        for _ in range(2):
+            c = get_connection()
+            c.close()
+    except Exception:
         pass
     print("Starting web viewer...")
     print("Open your browser to: http://localhost:5001")

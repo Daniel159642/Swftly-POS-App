@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { io } from 'socket.io-client'
 import { useTheme } from '../contexts/ThemeContext'
+import { mergeCheckoutUiFromApi } from '../utils/checkoutUi'
 import './CustomerDisplay.css'
 import './CustomerDisplayButtons.css'
 
-function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymentMethod, amountPaid, onClose, onPaymentMethodSelect, onTipSelect, onReceiptSelect, onProceedToPayment, showSummary, employeeId, paymentCompleted, transactionId: propTransactionId, orderId: propOrderId, orderNumber: propOrderNumber }) {
+function CustomerDisplayPopup({ cart, subtotal, tax, discount = 0, transactionFee = 0, total, tip: propTip, paymentMethod, amountPaid, onClose, onPaymentMethodSelect, onTipSelect, onReceiptSelect, onProceedToPayment, showSummary, employeeId, paymentCompleted, transactionId: propTransactionId, orderId: propOrderId, orderNumber: propOrderNumber, returnId, onReturnReceiptSelect, initialCheckoutUi, onZeroTotalComplete, exchangeCreditRemaining = 0 }) {
   const { themeColor, themeMode } = useTheme()
   
   // Convert hex to RGB for rgba usage
@@ -40,8 +41,9 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
   const [paymentMethods, setPaymentMethods] = useState([])
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(null)
   const [selectedTip, setSelectedTip] = useState(propTip || 0)
-  const [tipSuggestions, setTipSuggestions] = useState([15, 18, 20, 25])
+  const [tipSuggestions, setTipSuggestions] = useState([15, 18, 20])
   const [tipEnabled, setTipEnabled] = useState(false)
+  const [customTipInCheckout, setCustomTipInCheckout] = useState(true)
   const [amountDue, setAmountDue] = useState(total)
   const [cardStatus, setCardStatus] = useState('waiting')
   const [receiptType, setReceiptType] = useState(null)
@@ -54,7 +56,24 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
   const [customTipAmount, setCustomTipAmount] = useState('')
   const [signatureData, setSignatureData] = useState(null)
   const [isDrawing, setIsDrawing] = useState(false)
-  const [checkoutUi, setCheckoutUi] = useState(null) // { review_order, cash_confirmation, receipt } with backgroundColor, buttonColor, fontFamily, fontWeight, textColor
+  // When opening for return receipt with initialCheckoutUi, set from first render so background/colors match API immediately
+  const [checkoutUi, setCheckoutUi] = useState(() =>
+    (returnId != null && initialCheckoutUi != null) ? mergeCheckoutUiFromApi(initialCheckoutUi) : null
+  )
+  // When user picks Cash/Card and tip is enabled, we show tip screen first; this holds the method until they pick a tip
+  const [pendingPaymentMethod, setPendingPaymentMethod] = useState(null)
+  const [requireSignature, setRequireSignature] = useState(false) // from display settings: block Print/No receipt/Email until signed
+
+  // Treat amount due as zero when exchange/credit exactly covers (avoids float noise and shows single Continue)
+  const amountWithTip = total + selectedTip
+  const isEffectivelyZero = amountWithTip <= 0 || amountWithTip < 0.01
+
+  // Return receipt mode: require signature and start on receipt screen
+  useEffect(() => {
+    if (returnId != null) {
+      setRequireSignature(true)
+    }
+  }, [returnId])
 
   // Initialize Socket.IO connection – use same origin so Vite proxy (or Flask) handles /socket.io
   useEffect(() => {
@@ -105,6 +124,26 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
     loadPaymentMethods()
   }, [])
 
+  // Refetch display settings when popup becomes visible so edits saved in Settings are applied
+  useEffect(() => {
+    if (showSummary) {
+      loadDisplaySettings()
+    }
+  }, [showSummary])
+
+  // When opening for return receipt: use initialCheckoutUi immediately so background/colors match API from first frame; also refetch to stay in sync
+  useEffect(() => {
+    if (returnId != null && initialCheckoutUi != null) {
+      setCheckoutUi(mergeCheckoutUiFromApi(initialCheckoutUi))
+    }
+  }, [returnId, initialCheckoutUi])
+
+  useEffect(() => {
+    if (returnId != null) {
+      loadDisplaySettings()
+    }
+  }, [returnId])
+
   useEffect(() => {
     // Update amount due when total or tip changes
     setAmountDue(total + selectedTip)
@@ -117,35 +156,26 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
     }
   }, [propTip])
 
-  // Sync props to state when used inline (not as popup)
+  // Sync props to state when used inline (not as popup). Tip screen is shown only after Cash/Card choice, not before.
   useEffect(() => {
-    // Don't interfere if payment is completed - we should be on receipt screen
-    if (paymentCompleted) {
+    if (returnId != null) {
+      setCurrentScreen('receipt')
       return
     }
-    
-    // Don't interfere if we're already in payment flow
-    if (currentScreen === 'card' || currentScreen === 'receipt' || currentScreen === 'success' || currentScreen === 'cash_confirmation') {
+    if (paymentCompleted) return
+    if (currentScreen === 'card' || currentScreen === 'receipt' || currentScreen === 'success' || currentScreen === 'cash_confirmation' || currentScreen === 'tip') {
       return
     }
-    
     if (showSummary) {
-      // Show tip screen first if enabled and no tip selected, otherwise show summary
-      if (tipEnabled && selectedTip === 0 && currentScreen !== 'tip') {
-        setCurrentScreen('tip')
-      } else if (currentScreen !== 'tip') {
-        setCurrentScreen('transaction')
-      }
+      setCurrentScreen('transaction')
     } else if (cart && cart.length > 0) {
-      // Cart has items, show transaction screen if we're on idle
       if (currentScreen === 'idle' || (!currentScreen && cart.length > 0)) {
         setCurrentScreen('transaction')
       }
     } else if (cart && cart.length === 0) {
-      // Cart is empty, reset to transaction screen
       setCurrentScreen('transaction')
     }
-  }, [cart, currentScreen, showSummary, tipEnabled, selectedTip, paymentCompleted])
+  }, [cart, currentScreen, showSummary, paymentCompleted, returnId])
 
   useEffect(() => {
     // Don't interfere if payment is completed - we should be on receipt screen
@@ -348,14 +378,13 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
       const result = await response.json()
       if (result.success) {
         setTipEnabled(result.data.tip_enabled || false)
+        setRequireSignature(result.data.signature_required === 1 || result.data.signature_required === true)
+        setCustomTipInCheckout(result.data.tip_custom_in_checkout === 1 || result.data.tip_custom_in_checkout === true)
         if (result.data.tip_suggestions) {
-          setTipSuggestions(Array.isArray(result.data.tip_suggestions) 
-            ? result.data.tip_suggestions 
-            : [15, 18, 20, 25])
+          const arr = Array.isArray(result.data.tip_suggestions) ? result.data.tip_suggestions : [15, 18, 20]
+          setTipSuggestions(arr.slice(0, 3))
         }
-        if (result.data.checkout_ui && typeof result.data.checkout_ui === 'object') {
-          setCheckoutUi(result.data.checkout_ui)
-        }
+        setCheckoutUi(mergeCheckoutUiFromApi(result.data.checkout_ui))
       }
     } catch (err) {
       console.error('Error loading display settings:', err)
@@ -390,28 +419,50 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
     setCurrentScreen('payment')
   }
 
+  const goToPaymentScreenAfterTip = (method) => {
+    if (!method) return
+    setPendingPaymentMethod(null)
+    if (method.method_type === 'cash') {
+      setCurrentScreen('cash_confirmation')
+    } else {
+      if (onPaymentMethodSelect) onPaymentMethodSelect(method)
+      setCurrentScreen('card')
+      setCardStatus('waiting')
+    }
+  }
+
   const selectTip = (percent) => {
     const tipAmount = (total * percent / 100).toFixed(2)
-    setSelectedTip(parseFloat(tipAmount))
-    // After selecting tip, show summary screen
-    setCurrentScreen('transaction')
-    setAmountDue(total + parseFloat(tipAmount))
+    const amount = parseFloat(tipAmount)
+    setSelectedTip(amount)
+    setAmountDue(total + amount)
     setShowCustomTip(false)
     setCustomTipAmount('')
-    if (onTipSelect) {
-      onTipSelect(parseFloat(tipAmount))
+    if (onTipSelect) onTipSelect(amount)
+    const newTotalWithTip = total + amount
+    if ((newTotalWithTip <= 0 || newTotalWithTip < 0.01) && onZeroTotalComplete) {
+      return
+    }
+    if (pendingPaymentMethod) {
+      goToPaymentScreenAfterTip(pendingPaymentMethod)
+    } else {
+      setCurrentScreen('transaction')
     }
   }
 
   const skipTip = () => {
     setSelectedTip(0)
-    // After skipping tip, show summary screen
-    setCurrentScreen('transaction')
     setAmountDue(total)
     setShowCustomTip(false)
     setCustomTipAmount('')
-    if (onTipSelect) {
-      onTipSelect(0)
+    if (onTipSelect) onTipSelect(0)
+    if ((total <= 0 || total < 0.01) && onZeroTotalComplete) {
+      return
+    }
+    if (pendingPaymentMethod) {
+      goToPaymentScreenAfterTip(pendingPaymentMethod)
+    } else {
+      setCurrentScreen('transaction')
     }
   }
 
@@ -432,30 +483,33 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
 
   const applyCustomTip = () => {
     const tipValue = parseFloat(customTipAmount) || 0
-    if (tipValue > 0) {
-      setSelectedTip(tipValue)
-      setAmountDue(total + tipValue)
-      setShowCustomTip(false)
-      setCustomTipAmount('')
-      // After selecting custom tip, show summary screen
+    setSelectedTip(tipValue)
+    setAmountDue(total + tipValue)
+    setShowCustomTip(false)
+    setCustomTipAmount('')
+    if (onTipSelect) onTipSelect(tipValue)
+    const newTotalWithTip = total + tipValue
+    if ((newTotalWithTip <= 0 || newTotalWithTip < 0.01) && onZeroTotalComplete) {
+      return
+    }
+    if (pendingPaymentMethod) {
+      goToPaymentScreenAfterTip(pendingPaymentMethod)
+    } else {
       setCurrentScreen('transaction')
-      if (onTipSelect) {
-        onTipSelect(tipValue)
-      }
     }
   }
 
   const selectPaymentMethod = async (method) => {
     setSelectedPaymentMethod(method)
-    
+    if (tipEnabled) {
+      setPendingPaymentMethod(method)
+      setCurrentScreen('tip')
+      return
+    }
     if (method.method_type === 'cash') {
-      // Show cash confirmation screen
       setCurrentScreen('cash_confirmation')
-    } else if (method.method_type === 'card' || method.requires_terminal) {
-      // For card, trigger calculator directly
-      if (onPaymentMethodSelect) {
-        onPaymentMethodSelect(method)
-      }
+    } else if (method.method_type === 'card' || method.method_type === 'credit_card' || method.requires_terminal) {
+      if (onPaymentMethodSelect) onPaymentMethodSelect(method)
       setCurrentScreen('card')
       setCardStatus('waiting')
     }
@@ -517,6 +571,18 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
 
   const selectReceipt = async (type) => {
     setReceiptType(type)
+
+    // Return receipt mode: delegate to parent and close
+    if (returnId != null) {
+      if (type === 'email' || type === 'sms') {
+        return // show email/sms input; submit will go through submitReceiptPreference
+      }
+      if (onReturnReceiptSelect) {
+        onReturnReceiptSelect(type, signatureData)
+      }
+      if (onClose) onClose()
+      return
+    }
     
     // Save signature first if available (before generating receipt)
     if (signatureData && transactionId) {
@@ -542,11 +608,18 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
     }
     
     if (type === 'print') {
-      // Generate and download receipt PDF
-      // Try transaction_id first, then fall back to order_id
+      // If this order used exchange credit, use combined exchange completion receipt (one PDF: returned items + new items + total)
+      const exchangeCreditUsed = sessionStorage.getItem('exchangeCreditUsed')
+      const creditInfo = exchangeCreditUsed ? (() => { try { return JSON.parse(exchangeCreditUsed) } catch { return null } })() : null
+      const exchangeOrderId = creditInfo?.order_id
+
       const generateReceiptForId = async (id, isOrder = false) => {
         try {
-          const endpoint = isOrder ? `/api/receipt/${id}` : `/api/receipt/transaction/${id}`
+          // Prefer exchange completion receipt when this order used exchange credit
+          let endpoint = isOrder ? `/api/receipt/${id}` : `/api/receipt/transaction/${id}`
+          if (isOrder && exchangeOrderId && parseInt(id, 10) === parseInt(exchangeOrderId, 10)) {
+            endpoint = `/api/receipt/exchange_completion/${exchangeOrderId}`
+          }
           console.log('Generating receipt for:', endpoint, 'ID:', id, 'isOrder:', isOrder)
           const response = await fetch(endpoint)
           console.log('Receipt response status:', response.status, 'Content-Type:', response.headers.get('content-type'))
@@ -561,158 +634,22 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
               
               // Double-check blob type or size
               if (blob.type === 'application/pdf' || blob.size > 0) {
-                // Create blob URL for download
+                const isExchangeCompletion = endpoint.includes('exchange_completion')
                 const downloadUrl = window.URL.createObjectURL(blob)
-                
-                // Download the PDF file once with proper name
                 const link = document.createElement('a')
                 link.href = downloadUrl
-                link.download = `receipt-${isOrder ? 'order' : 'transaction'}-${id}.pdf`
+                link.download = isExchangeCompletion ? `exchange_receipt_order_${id}.pdf` : `receipt-${isOrder ? 'order' : 'transaction'}-${id}.pdf`
                 link.style.display = 'none'
                 document.body.appendChild(link)
-                
-                // Trigger download
                 link.click()
-                
-                // Clean up link after download starts
                 setTimeout(() => {
-                  if (link.parentNode) {
-                    document.body.removeChild(link)
-                  }
+                  if (link.parentNode) document.body.removeChild(link)
+                  window.URL.revokeObjectURL(downloadUrl)
                 }, 500)
                 
-                // For printing, use a hidden iframe (won't trigger download)
-                // Create a separate blob URL for the iframe
-                const printBlobUrl = window.URL.createObjectURL(blob)
-                setTimeout(() => {
-                  const iframe = document.createElement('iframe')
-                  iframe.style.position = 'fixed'
-                  iframe.style.right = '0'
-                  iframe.style.bottom = '0'
-                  iframe.style.width = '0'
-                  iframe.style.height = '0'
-                  iframe.style.border = 'none'
-                  iframe.style.opacity = '0'
-                  iframe.style.pointerEvents = 'none'
-                  iframe.src = printBlobUrl
-                  document.body.appendChild(iframe)
-                  
-                  iframe.onload = () => {
-                    setTimeout(() => {
-                      try {
-                        iframe.contentWindow.focus()
-                        iframe.contentWindow.print()
-                        // Clean up after printing
-                        setTimeout(() => {
-                          if (iframe.parentNode) {
-                            document.body.removeChild(iframe)
-                          }
-                          window.URL.revokeObjectURL(printBlobUrl)
-                          setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 2000)
-                        }, 1000)
-                      } catch (printErr) {
-                        console.error('Error printing from iframe:', printErr)
-                        // Clean up on error
-                        if (iframe.parentNode) {
-                          document.body.removeChild(iframe)
-                        }
-                        window.URL.revokeObjectURL(printBlobUrl)
-                        setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 2000)
-                      }
-                    }, 500)
-                  }
-                  
-                  // Fallback if onload doesn't fire
-                  setTimeout(() => {
-                    if (iframe.parentNode) {
-                      try {
-                        if (iframe.contentWindow) {
-                          iframe.contentWindow.focus()
-                          iframe.contentWindow.print()
-                        }
-                        setTimeout(() => {
-                          if (iframe.parentNode) {
-                            document.body.removeChild(iframe)
-                          }
-                          window.URL.revokeObjectURL(printBlobUrl)
-                          setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 2000)
-                        }, 1000)
-                      } catch (printErr) {
-                        console.error('Error in fallback print:', printErr)
-                        if (iframe.parentNode) {
-                          document.body.removeChild(iframe)
-                        }
-                        window.URL.revokeObjectURL(printBlobUrl)
-                        setTimeout(() => window.URL.revokeObjectURL(downloadUrl), 2000)
-                      }
-                    }
-                  }, 2000)
-                }, 300)
-                
-                console.log('Receipt downloaded and print dialog opened successfully')
-                
-                // Check for exchange credit and print exchange receipt
-                const exchangeCreditUsed = sessionStorage.getItem('exchangeCreditUsed')
-                if (exchangeCreditUsed) {
-                  try {
-                    const creditInfo = JSON.parse(exchangeCreditUsed)
-                    // Wait a bit before printing exchange receipt
-                    setTimeout(async () => {
-                      try {
-                        const exchangeResponse = await fetch(`/api/receipt/exchange/${creditInfo.credit_id}`)
-                        if (exchangeResponse.ok) {
-                          const exchangeBlob = await exchangeResponse.blob()
-                          if (exchangeBlob.type === 'application/pdf') {
-                            const exchangeUrl = window.URL.createObjectURL(exchangeBlob)
-                            const exchangeA = document.createElement('a')
-                            exchangeA.href = exchangeUrl
-                            exchangeA.download = `exchange_receipt_${creditInfo.credit_id}.pdf`
-                            document.body.appendChild(exchangeA)
-                            exchangeA.click()
-                            document.body.removeChild(exchangeA)
-                            window.URL.revokeObjectURL(exchangeUrl)
-                            
-                            // Open print dialog
-                            const exchangeIframe = document.createElement('iframe')
-                            exchangeIframe.style.display = 'none'
-                            document.body.appendChild(exchangeIframe)
-                            const exchangePrintBlobUrl = window.URL.createObjectURL(exchangeBlob)
-                            exchangeIframe.src = exchangePrintBlobUrl
-                            
-                            exchangeIframe.onload = () => {
-                              setTimeout(() => {
-                                try {
-                                  if (exchangeIframe.contentWindow) {
-                                    exchangeIframe.contentWindow.focus()
-                                    exchangeIframe.contentWindow.print()
-                                  }
-                                  setTimeout(() => {
-                                    if (exchangeIframe.parentNode) {
-                                      document.body.removeChild(exchangeIframe)
-                                    }
-                                    window.URL.revokeObjectURL(exchangePrintBlobUrl)
-                                  }, 1000)
-                                } catch (printErr) {
-                                  console.error('Error printing exchange receipt:', printErr)
-                                  if (exchangeIframe.parentNode) {
-                                    document.body.removeChild(exchangeIframe)
-                                  }
-                                  window.URL.revokeObjectURL(exchangePrintBlobUrl)
-                                }
-                              }, 500)
-                            }
-                            
-                            // Clear exchange credit from sessionStorage
-                            sessionStorage.removeItem('exchangeCreditUsed')
-                          }
-                        }
-                      } catch (exErr) {
-                        console.error('Error generating exchange receipt:', exErr)
-                      }
-                    }, 1000)
-                  } catch (e) {
-                    console.error('Error parsing exchange credit info:', e)
-                  }
+                console.log('Receipt downloaded successfully')
+                if (isExchangeCompletion && creditInfo) {
+                  sessionStorage.removeItem('exchangeCreditUsed')
                 }
                 
                 return true
@@ -738,34 +675,36 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
         }
       }
       
-      // Try transaction_id first if available
+      // When order used exchange credit, use exchange completion receipt (one PDF). Otherwise transaction then order fallback.
+      if (exchangeOrderId) {
+        const success = await generateReceiptForId(exchangeOrderId, true)
+        if (success) {
+          await submitReceiptPreference(type)
+          return
+        }
+      }
       if (transactionId) {
         const success = await generateReceiptForId(transactionId, false)
         if (success) {
           await submitReceiptPreference(type)
           return
         }
-        // If transaction_id failed, try order_id as fallback
-        if (orderId) {
+        if (orderId && orderId !== exchangeOrderId) {
           const success2 = await generateReceiptForId(orderId, true)
           if (success2) {
             await submitReceiptPreference(type)
             return
           }
         }
-        // Both failed, still save preference
         await submitReceiptPreference(type)
       } else if (orderId) {
-        // No transaction_id, try order_id directly
         const success = await generateReceiptForId(orderId, true)
         if (success) {
           await submitReceiptPreference(type)
         } else {
-          // Failed, still save preference
           await submitReceiptPreference(type)
         }
       } else {
-        // No transaction ID or order ID, just save preference
         submitReceiptPreference(type)
       }
     } else if (type === 'email' || type === 'sms') {
@@ -776,6 +715,13 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
   }
 
   const submitReceiptPreference = async (type = receiptType, contact = receiptContact) => {
+    if (returnId != null) {
+      if (onReturnReceiptSelect) {
+        onReturnReceiptSelect(type, signatureData)
+      }
+      if (onClose) onClose()
+      return
+    }
     if (!transactionId) {
       // If no transaction ID, just call the callback
       if (onReceiptSelect) {
@@ -851,7 +797,7 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
     return 0
   }
 
-  const checkoutScreenKey = currentScreen === 'transaction' ? 'review_order' : currentScreen === 'cash_confirmation' ? 'cash_confirmation' : currentScreen === 'receipt' ? 'receipt' : null
+  const checkoutScreenKey = currentScreen === 'transaction' ? 'review_order' : currentScreen === 'cash_confirmation' ? 'cash_confirmation' : currentScreen === 'receipt' ? 'receipt' : currentScreen === 'tip' ? 'tip_selection' : currentScreen === 'card' ? 'card' : null
   const screenStyle = checkoutScreenKey && checkoutUi?.[checkoutScreenKey] ? checkoutUi[checkoutScreenKey] : null
   const popupBackground = screenStyle?.backgroundColor || getGradientBackground()
   const popupColor = screenStyle?.textColor || '#333'
@@ -969,12 +915,32 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
         flex: 1,
         color: popupColor,
         fontFamily: popupFontFamily,
-        fontWeight: popupFontWeight
+        fontWeight: popupFontWeight,
+        background: 'transparent',
+        boxShadow: 'none'
       }}>
-        {/* Transaction Screen - Summary before payment */}
+        {/* Transaction Screen - Summary before payment (choose Cash or Card) */}
         {currentScreen === 'transaction' && (
-          <div className="transaction-screen-popup">
-            <div className="screen-header">
+          <div className="transaction-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: '4px' }}>
+              <button
+                onClick={() => onClose && onClose()}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: 'transparent',
+                  color: '#999',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  fontWeight: 400,
+                  cursor: 'pointer',
+                  opacity: 0.6
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="screen-header" style={{ marginTop: 0, marginBottom: '20px' }}>
               <h2 style={titleStyle}>Review Your Order</h2>
             </div>
             
@@ -993,9 +959,19 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
                 <span>Subtotal:</span>
                 <span>${subtotal.toFixed(2)}</span>
               </div>
+              {discount > 0 && (
+                <div className="total-row">
+                  <span>Discount:</span>
+                  <span>-${Number(discount).toFixed(2)}</span>
+                </div>
+              )}
               <div className="total-row">
                 <span>Tax:</span>
                 <span>${tax.toFixed(2)}</span>
+              </div>
+              <div className="total-row">
+                <span>Fee:</span>
+                <span>${Number(transactionFee || 0).toFixed(2)}</span>
               </div>
               {selectedTip > 0 && (
                 <div className="total-row">
@@ -1007,10 +983,23 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
                 <span>Total:</span>
                 <span>${(total + selectedTip).toFixed(2)}</span>
               </div>
+              {exchangeCreditRemaining > 0 && isEffectivelyZero && (
+                <div className="total-row" style={{ marginTop: '8px', fontSize: '0.95em', opacity: 0.9 }}>
+                  <span>Store credit remaining:</span>
+                  <span>${Number(exchangeCreditRemaining).toFixed(2)}</span>
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: '20px', width: '100%', marginTop: '20px' }}>
               {(() => {
+                // When exchange/credit covers (or nearly covers), show single Continue so they can complete without Cash/Card
+                if (isEffectivelyZero && onZeroTotalComplete) {
+                  return renderCheckoutButton('Continue', () => onZeroTotalComplete())
+                }
+                if (isEffectivelyZero) {
+                  return renderCheckoutButton('Continue', () => setCurrentScreen('tip'))
+                }
                 const cashMethod = paymentMethods.find(m => m.method_type === 'cash')
                 const cardMethod = paymentMethods.find(m => m.method_type === 'card' || m.method_type === 'credit_card')
                 const cash = cashMethod || { method_type: 'cash', payment_method_id: 'cash_default' }
@@ -1026,81 +1015,119 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
           </div>
         )}
 
-        {/* Tip Screen */}
+        {/* Tip Screen - shown after Cash/Card when tip enabled; 4 options: 3 percentages + No tip */}
         {currentScreen === 'tip' && (
-          <div className="payment-screen-popup">
-            <div className="screen-header">
+          <div className="payment-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: '8px' }}>
+              {(pendingPaymentMethod || (isEffectivelyZero && onZeroTotalComplete)) ? (
+                <button
+                  type="button"
+                  onClick={() => { setPendingPaymentMethod(null); setCurrentScreen('transaction') }}
+                  style={{ padding: '6px 12px', background: 'transparent', color: popupColor, border: 'none', fontSize: '14px', cursor: 'pointer', opacity: 0.8 }}
+                >
+                  Back
+                </button>
+              ) : <span />}
+            </div>
+            <div className="screen-header" style={titleStyle}>
               <h2>Add a tip?</h2>
             </div>
-            
             {!showCustomTip ? (
-              <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', width: '100%', maxWidth: '600px' }}>
-                  {tipSuggestions.map((percent) => {
-                    const tipAmount = (total * percent / 100).toFixed(2)
-                    const isSelected = selectedTip > 0 && Math.abs(selectedTip - (total * percent / 100)) < 0.01
-                    return (
-                      <div
-                        key={percent}
-                        onClick={() => selectTip(percent)}
-                        style={{
-                          padding: '32px 20px',
-                          backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                          backdropFilter: 'blur(10px)',
-                          WebkitBackdropFilter: 'blur(10px)',
-                          color: '#fff',
-                          border: '1px solid rgba(255, 255, 255, 0.2)',
-                          borderRadius: '8px',
-                          textAlign: 'center',
-                          cursor: 'pointer',
-                          boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                          transition: 'all 0.3s ease'
-                        }}
-                      >
-                        <div style={{ fontSize: '40px', fontWeight: 600, marginBottom: '10px' }}>{percent}%</div>
-                        <div style={{ fontSize: '24px', opacity: 0.9 }}>${tipAmount}</div>
-                      </div>
-                    )
-                  })}
-                  <div 
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', width: '100%', maxWidth: '400px', margin: '0 auto', flex: 1, alignContent: 'start' }}>
+                {(tipSuggestions.slice(0, 3)).map((percent) => {
+                  const tipAmount = (total * percent / 100).toFixed(2)
+                  return (
+                    <button
+                      key={percent}
+                      type="button"
+                      onClick={() => selectTip(percent)}
+                      style={{
+                        aspectRatio: '1',
+                        minHeight: 0,
+                        padding: '16px',
+                        backgroundColor: buttonBg,
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        ...buttonTextStyle
+                      }}
+                      onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.96)' }}
+                      onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+                    >
+                      <div style={{ fontSize: 'clamp(28px, 6vw, 36px)', fontWeight: 600, marginBottom: '4px' }}>{percent}%</div>
+                      <div style={{ fontSize: 'clamp(16px, 3.5vw, 20px)', opacity: 0.95 }}>${tipAmount}</div>
+                    </button>
+                  )
+                })}
+                <button
+                  type="button"
+                  onClick={skipTip}
+                  style={{
+                    aspectRatio: '1',
+                    minHeight: 0,
+                    padding: '16px',
+                    backgroundColor: buttonBg,
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 'clamp(22px, 5vw, 28px)',
+                    fontWeight: 600,
+                    ...buttonTextStyle
+                  }}
+                  onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.96)' }}
+                  onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+                >
+                  No tip
+                </button>
+                {customTipInCheckout && (
+                  <button
+                    type="button"
                     onClick={() => setShowCustomTip(true)}
                     style={{
-                      padding: '32px 20px',
-                      backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                      backdropFilter: 'blur(10px)',
-                      WebkitBackdropFilter: 'blur(10px)',
-                      color: '#fff',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      gridColumn: '1 / -1',
+                      padding: '20px 16px',
+                      backgroundColor: `rgba(${themeColorRgb}, 0.35)`,
+                      color: popupColor,
+                      border: `2px solid ${buttonBg}`,
                       borderRadius: '8px',
                       textAlign: 'center',
                       cursor: 'pointer',
-                      boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                      transition: 'all 0.3s ease'
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                      transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 'clamp(18px, 4vw, 22px)',
+                      fontWeight: 600,
+                      ...buttonTextStyle
                     }}
+                    onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.96)' }}
+                    onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
                   >
-                    <div style={{ fontSize: '40px', fontWeight: 600, marginBottom: '10px' }}>Custom</div>
-                    <div style={{ fontSize: '20px', opacity: 0.9 }}>Enter Amount</div>
-                  </div>
-                  <div 
-                    onClick={skipTip}
-                    style={{
-                      padding: '32px 20px',
-                      backgroundColor: `rgba(${themeColorRgb}, 0.5)`,
-                      backdropFilter: 'blur(10px)',
-                      WebkitBackdropFilter: 'blur(10px)',
-                      color: '#fff',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
-                      borderRadius: '8px',
-                      textAlign: 'center',
-                      cursor: 'pointer',
-                      boxShadow: `0 2px 8px rgba(${themeColorRgb}, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)`,
-                      transition: 'all 0.3s ease'
-                    }}
-                  >
-                    <div style={{ fontSize: '40px', fontWeight: 600 }}>No Tip</div>
-                  </div>
-                </div>
-              </>
+                    Custom
+                  </button>
+                )}
+              </div>
             ) : (
               <div style={{ 
                 display: 'flex', 
@@ -1188,6 +1215,11 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
                 </div>
               </div>
             )}
+            {isEffectivelyZero && onZeroTotalComplete && (
+              <div style={{ display: 'flex', justifyContent: 'center', width: '100%', marginTop: '24px' }}>
+                {renderCheckoutButton('Continue', () => onZeroTotalComplete())}
+              </div>
+            )}
           </div>
         )}
 
@@ -1242,10 +1274,22 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
                   <span>Subtotal:</span>
                   <span>${subtotal.toFixed(2)}</span>
                 </div>
+                {discount > 0 && (
+                  <div className="total-row">
+                    <span>Discount:</span>
+                    <span>-${Number(discount).toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="total-row">
                   <span>Tax:</span>
                   <span>${tax.toFixed(2)}</span>
                 </div>
+                {transactionFee > 0 && (
+                  <div className="total-row">
+                    <span>Transaction fee:</span>
+                    <span>${Number(transactionFee).toFixed(2)}</span>
+                  </div>
+                )}
                 {selectedTip > 0 && (
                   <div className="total-row">
                     <span>Tip:</span>
@@ -1263,26 +1307,65 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
 
         {/* Card Processing Screen */}
         {currentScreen === 'card' && (
-          <div className="card-processing-screen-popup">
-            <div className="card-animation">💳</div>
-            <div className="card-instruction">
-              Please insert, tap, or swipe your card
+          <div className="card-processing-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'flex-start', alignItems: 'stretch' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: '10px', marginTop: '-10px' }}>
+              <button
+                onClick={() => onClose && onClose()}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: 'transparent',
+                  color: '#999',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  fontWeight: 400,
+                  cursor: 'pointer',
+                  opacity: 0.6
+                }}
+              >
+                Cancel
+              </button>
             </div>
-            <div className="card-status">
-              {cardStatus === 'waiting' && 'Waiting for card...'}
-              {cardStatus === 'reading' && 'Reading card...'}
-              {cardStatus === 'processing' && 'Processing payment...'}
-              {cardStatus === 'approved' && 'Payment approved!'}
-              {cardStatus === 'declined' && 'Payment declined. Please try again.'}
+            <div className="card-animation" style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px', marginTop: '48px' }}>
+              <img src="/contactless-svgrepo-com.svg" alt="" style={{ width: '320px', height: '320px', color: 'inherit' }} />
             </div>
+            <div className="card-instruction" style={{ fontSize: '1.25rem', textAlign: 'center', ...bodyStyle }}>
+              {checkoutUi?.card?.instruction_text ?? 'Please insert or tap your card'}
+            </div>
+            {cardStatus !== 'waiting' && cardStatus !== 'reading' && (
+              <div className="card-status" style={{ marginTop: '12px', textAlign: 'center' }}>
+                {cardStatus === 'processing' && 'Processing payment...'}
+                {cardStatus === 'approved' && 'Payment approved!'}
+                {cardStatus === 'declined' && 'Payment declined. Please try again.'}
+              </div>
+            )}
           </div>
         )}
 
         {/* Receipt Screen */}
         {currentScreen === 'receipt' && (
           <div className="receipt-screen-popup" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+            {returnId != null && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%', marginBottom: '8px' }}>
+                <button
+                  onClick={() => onClose && onClose()}
+                  style={{
+                    padding: '6px 12px',
+                    backgroundColor: 'transparent',
+                    color: popupColor || '#999',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    opacity: 0.8,
+                    ...bodyStyle
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
             <div className="screen-header" style={{ width: '100%', marginBottom: '30px' }}>
-              <h2 style={titleStyle}>Sign Below</h2>
+              <h2 style={titleStyle}>{returnId != null ? 'Sign below for return receipt' : 'Sign Below'}</h2>
             </div>
             
             {/* Signature Area */}
@@ -1306,13 +1389,44 @@ function CustomerDisplayPopup({ cart, subtotal, tax, total, tip: propTip, paymen
               />
             </div>
             
-            {/* Receipt Options */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', marginTop: '20px' }}>
-              <div style={{ display: 'flex', gap: '20px', width: '100%' }}>
-                {renderCheckoutButton('Print', () => selectReceipt('print'))}
-                {renderCheckoutButton('No Receipt', () => selectReceipt('none'))}
-              </div>
-              {renderCheckoutButton('Email', () => selectReceipt('email'), true)}
+            {/* Receipt Options - when requireSignature is on, must sign before Print/No receipt/Email */}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '20px',
+                width: '100%',
+                marginTop: '20px',
+                opacity: requireSignature && !signatureData ? 0.5 : 1,
+                pointerEvents: requireSignature && !signatureData ? 'none' : 'auto'
+              }}
+            >
+              {(() => {
+                const opts = checkoutUi?.receipt?.receipt_options_offered || {}
+                const showPrint = opts.print !== false
+                const showEmail = opts.email !== false
+                const showNoReceipt = opts.no_receipt !== false
+                const hasAnyOption = showPrint || showEmail || showNoReceipt
+                if (!hasAnyOption) {
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', width: '100%' }}>
+                      <div style={{ textAlign: 'center', fontSize: '18px', color: popupColor, opacity: 0.9 }}>
+                        Thank you for your purchase
+                      </div>
+                      {renderCheckoutButton('Done', () => submitReceiptPreference('none'), true)}
+                    </div>
+                  )
+                }
+                return (
+                  <>
+                    <div style={{ display: 'flex', gap: '20px', width: '100%' }}>
+                      {showPrint && renderCheckoutButton('Print', () => selectReceipt('print'))}
+                      {showNoReceipt && renderCheckoutButton('No Receipt', () => selectReceipt('none'))}
+                    </div>
+                    {showEmail && renderCheckoutButton('Email', () => selectReceipt('email'), true)}
+                  </>
+                )
+              })()}
             </div>
             
             {receiptType === 'email' && (
