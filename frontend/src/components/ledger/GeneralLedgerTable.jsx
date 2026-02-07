@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
 
-function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransaction }) {
+function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransaction, fixedHeader = false }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const [sortField, setSortField] = useState('transaction_date')
   const [sortDirection, setSortDirection] = useState('desc')
@@ -139,6 +139,147 @@ function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransac
     )
   }
 
+  const colWidths = showRunningBalance ? '11% 12% 18% 32% 9% 9% 9%' : '11% 14% 20% 35% 10% 10%'
+  const headerRow = (
+    <tr>
+      <th
+        style={columnHeaderStyle}
+        onClick={() => handleSort('transaction_date')}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? '#4a6577' : '#b8d0d8' }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = subHeaderBg }}
+      >
+        Date <SortIcon field="transaction_date" />
+      </th>
+      <th style={columnHeaderStyle}>Transaction #</th>
+      <th
+        style={columnHeaderStyle}
+        onClick={() => handleSort('account_name')}
+        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? '#4a6577' : '#b8d0d8' }}
+        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = subHeaderBg }}
+      >
+        Account <SortIcon field="account_name" />
+      </th>
+      <th style={columnHeaderStyle}>Description</th>
+      <th style={{ ...columnHeaderStyle, textAlign: 'right' }}>Debit</th>
+      <th style={{ ...columnHeaderStyle, textAlign: 'right' }}>Credit</th>
+      {showRunningBalance && (
+        <th style={{ ...columnHeaderStyle, textAlign: 'right' }}>Balance</th>
+      )}
+    </tr>
+  )
+
+  if (fixedHeader) {
+    return (
+      <div style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        border: `1px solid ${borderColor}`,
+        borderRadius: '8px',
+        backgroundColor: isDarkMode ? '#1f2a33' : '#fff'
+      }}>
+        <div style={{ flexShrink: 0 }}>
+          <div style={bannerStyle}>
+            <span style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>General Ledger</span>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ ...tableStyle, tableLayout: 'fixed', width: '100%' }}>
+              <colgroup>
+                {colWidths.split(' ').map((w, i) => <col key={i} style={{ width: w }} />)}
+              </colgroup>
+              <thead>{headerRow}</thead>
+            </table>
+          </div>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <table style={{ ...tableStyle, tableLayout: 'fixed', width: '100%' }}>
+            <colgroup>
+              {colWidths.split(' ').map((w, i) => <col key={i} style={{ width: w }} />)}
+            </colgroup>
+            {groupedByTransaction.map((group) => {
+              const isGroupHovered = hoveredTransactionId === group.transaction_id
+              const groupRowBg = isGroupHovered ? hoverBg : rowBg
+              const cellBg = groupRowBg
+              const baseCell = getCellStyle(cellBg)
+              const txId = group.entries[0]?.transaction_id
+              return (
+                <tbody
+                  key={String(group.transaction_id)}
+                  onMouseEnter={() => setHoveredTransactionId(group.transaction_id)}
+                  onMouseLeave={() => setHoveredTransactionId(null)}
+                >
+                  {group.entries.map((entry) => (
+                    <tr
+                      key={`${entry.transaction_id}-${entry.line_id}`}
+                      style={{
+                        cursor: 'pointer',
+                        backgroundColor: cellBg,
+                        transition: 'background-color 0.15s ease'
+                      }}
+                      onClick={() => onViewTransaction(entry.transaction_id != null ? entry.transaction_id : txId)}
+                    >
+                      <td style={baseCell}>
+                        {new Date(entry.transaction_date).toLocaleDateString()}
+                      </td>
+                      <td style={{ ...baseCell, fontWeight: 600, color: isDarkMode ? '#93c5fd' : '#2563eb' }}>
+                        {entry.transaction_number}
+                      </td>
+                      <td style={baseCell}>
+                        <div style={{ fontWeight: 500 }}>
+                          {entry.account_number && `${entry.account_number} - `}
+                          {entry.account_name}
+                        </div>
+                        <div style={{ fontSize: '12px', color: subHeaderText, marginTop: '2px' }}>
+                          {entry.account_type}
+                        </div>
+                      </td>
+                      <td style={baseCell}>
+                        <div>{entry.line_description}</div>
+                        {entry.reference_number && (
+                          <div style={{ fontSize: '12px', color: subHeaderText, marginTop: '2px' }}>
+                            Ref: {entry.reference_number}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ ...baseCell, textAlign: 'right', fontWeight: 600 }}>
+                        {(parseFloat(entry.debit_amount) || 0) > 0 ? `$${(parseFloat(entry.debit_amount) || 0).toFixed(2)}` : '-'}
+                      </td>
+                      <td style={{ ...baseCell, textAlign: 'right', fontWeight: 600 }}>
+                        {(parseFloat(entry.credit_amount) || 0) > 0 ? `$${(parseFloat(entry.credit_amount) || 0).toFixed(2)}` : '-'}
+                      </td>
+                      {showRunningBalance && entry.running_balance !== undefined && (
+                        <td style={{ ...baseCell, textAlign: 'right', fontWeight: 700 }}>
+                          ${(parseFloat(entry.running_balance) || 0).toFixed(2)}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              )
+            })}
+          </table>
+        </div>
+        <div style={{ flexShrink: 0, overflowX: 'auto', borderTop: `2px solid ${borderColor}` }}>
+          <table style={{ ...tableStyle, tableLayout: 'fixed', width: '100%' }}>
+            <colgroup>
+              {colWidths.split(' ').map((w, i) => <col key={i} style={{ width: w }} />)}
+            </colgroup>
+            <tfoot>
+              <tr>
+                <td colSpan={4} style={{ ...totalRowStyle, textAlign: 'right' }}>Totals:</td>
+                <td style={{ ...totalRowStyle, textAlign: 'right' }}>${totalDebits.toFixed(2)}</td>
+                <td style={{ ...totalRowStyle, textAlign: 'right' }}>${totalCredits.toFixed(2)}</td>
+                {showRunningBalance && <td style={{ ...totalRowStyle }}></td>}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{
       border: `1px solid ${borderColor}`,
@@ -151,33 +292,7 @@ function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransac
       </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th
-                style={columnHeaderStyle}
-                onClick={() => handleSort('transaction_date')}
-                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? '#4a6577' : '#b8d0d8' }}
-                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = subHeaderBg }}
-              >
-                Date <SortIcon field="transaction_date" />
-              </th>
-              <th style={columnHeaderStyle}>Transaction #</th>
-              <th
-                style={columnHeaderStyle}
-                onClick={() => handleSort('account_name')}
-                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? '#4a6577' : '#b8d0d8' }}
-                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = subHeaderBg }}
-              >
-                Account <SortIcon field="account_name" />
-              </th>
-              <th style={columnHeaderStyle}>Description</th>
-              <th style={{ ...columnHeaderStyle, textAlign: 'right' }}>Debit</th>
-              <th style={{ ...columnHeaderStyle, textAlign: 'right' }}>Credit</th>
-              {showRunningBalance && (
-                <th style={{ ...columnHeaderStyle, textAlign: 'right' }}>Balance</th>
-              )}
-            </tr>
-          </thead>
+          <thead>{headerRow}</thead>
           {groupedByTransaction.map((group) => {
             const isGroupHovered = hoveredTransactionId === group.transaction_id
             const groupRowBg = isGroupHovered ? hoverBg : rowBg

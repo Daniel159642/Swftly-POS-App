@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, Fragment } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
@@ -30,10 +30,12 @@ import {
   Undo2,
   Redo2,
   ScanBarcode,
-  Package
+  Package,
+  MoreVertical,
+  RefreshCw
 } from 'lucide-react'
 import BarcodeScanner from '../components/BarcodeScanner'
-import { FormTitle, FormLabel, FormField, inputBaseStyle, getInputFocusHandlers } from '../components/FormStyles'
+import { FormTitle, FormLabel, FormField, inputBaseStyle, getInputFocusHandlers, compactCancelButtonStyle, compactPrimaryButtonStyle } from '../components/FormStyles'
 import Table from '../components/Table'
 import '../components/CustomerDisplay.css'
 import '../components/CustomerDisplayButtons.css'
@@ -1297,7 +1299,6 @@ function Settings() {
       sunday: { open: '09:00', close: '17:00', closed: false }
     }
   })
-  const [editingStoreHours, setEditingStoreHours] = useState(false)
   const storeLocationLoadedRef = useRef(false)
   const storeLocationSaveTimeoutRef = useRef(null)
   const previousActiveTabRef = useRef('location')
@@ -1557,6 +1558,11 @@ function Settings() {
   const [showCloseModal, setShowCloseModal] = useState(false)
   const [showTakeOutModal, setShowTakeOutModal] = useState(false)
   const [showCountDropModal, setShowCountDropModal] = useState(false)
+  const [registerToDelete, setRegisterToDelete] = useState(null) // { id, name } when dropdown confirm open
+  const [registerMenuOpenId, setRegisterMenuOpenId] = useState(null) // which register's ⋮ menu is open
+  const [registerEditingId, setRegisterEditingId] = useState(null) // which register name is in edit mode
+  const [registerRefreshSpinning, setRegisterRefreshSpinning] = useState(false)
+  const [expandedRegisterEventId, setExpandedRegisterEventId] = useState(null) // event id for expanded row details
   const [openRegisterForm, setOpenRegisterForm] = useState({
     register_id: 1,
     cash_mode: 'total',
@@ -1698,6 +1704,7 @@ function Settings() {
     }
   }
 
+  const SETTINGS_BOOTSTRAP_KEY = 'pos_settings_bootstrap'
   const {
     data: bootstrapData,
     isLoading: bootstrapLoading,
@@ -1710,7 +1717,18 @@ function Settings() {
       const res = await cachedFetch('/api/settings-bootstrap', { headers: { 'X-Session-Token': sessionToken || '' } })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Failed to load settings')
+      try {
+        localStorage.setItem(SETTINGS_BOOTSTRAP_KEY, JSON.stringify(data))
+      } catch (_) {}
       return data
+    },
+    initialData: () => {
+      try {
+        const raw = localStorage.getItem(SETTINGS_BOOTSTRAP_KEY)
+        return raw ? JSON.parse(raw) : undefined
+      } catch {
+        return undefined
+      }
     },
     staleTime: 2 * 60 * 1000,
     retry: 1
@@ -1883,6 +1901,28 @@ function Settings() {
       setCashSettings({...cashSettings, register_id: registers[0].id})
     }
   }, [registers])
+
+  // Close delete-register dropdown on click outside
+  useEffect(() => {
+    if (!registerToDelete) return
+    const handleClick = (e) => {
+      if (e.target.closest('[data-register-delete-area]')) return
+      setRegisterToDelete(null)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [registerToDelete])
+
+  // Close register menu (ellipsis dropdown) on click outside
+  useEffect(() => {
+    if (registerMenuOpenId == null) return
+    const handleClick = (e) => {
+      if (e.target.closest('[data-register-menu-area]')) return
+      setRegisterMenuOpenId(null)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [registerMenuOpenId])
 
   const loadReceiptSettings = async () => {
     try {
@@ -2249,7 +2289,7 @@ function Settings() {
     try {
       const sessionToken = localStorage.getItem('sessionToken')
       const today = new Date().toISOString().split('T')[0]
-      const response = await fetch(`/api/register/daily-count?count_date=${today}&session_token=${sessionToken}`)
+      const response = await cachedFetch(`/api/register/daily-count?count_date=${today}&session_token=${sessionToken}`)
       const data = await response.json()
       if (data.success && data.data) {
         setDailyCounts(data.data)
@@ -2392,7 +2432,7 @@ function Settings() {
   const loadRegisterEvents = async () => {
     try {
       const sessionToken = localStorage.getItem('sessionToken')
-      const response = await fetch(`/api/register/events?register_id=${cashSettings.register_id}&limit=100&session_token=${sessionToken}`)
+      const response = await cachedFetch(`/api/register/events?register_id=${cashSettings.register_id}&limit=100&session_token=${sessionToken}`)
       const data = await response.json()
       if (data.success && data.data) {
         // Map events to transaction format for the table
@@ -2939,8 +2979,10 @@ function Settings() {
   return (
     <div style={{ 
       display: 'flex',
-      minHeight: '100vh',
-      width: '100%'
+      minHeight: activeTab === 'cash' ? 0 : '100vh',
+      height: activeTab === 'cash' ? '100%' : undefined,
+      width: '100%',
+      ...(activeTab === 'cash' ? { overflow: 'hidden' } : {})
     }}>
       {/* Sidebar Navigation - 1/4 of page */}
       <div 
@@ -3146,7 +3188,8 @@ function Settings() {
           padding: '48px 64px 64px 64px',
           backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
           maxWidth: isInitialMount ? '1200px' : (sidebarMinimized ? 'none' : '1200px'),
-          transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+          transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+          ...(activeTab === 'cash' ? { height: 'calc(100vh - 56px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' } : {})
         }}
       >
         {message && (
@@ -3166,7 +3209,7 @@ function Settings() {
         )}
 
         {/* Content – skeleton when loading so nav and shell are visible immediately */}
-        <div>
+        <div style={activeTab === 'cash' ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' } : undefined}>
           {loading ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }} aria-busy="true" aria-label="Loading settings">
               <div style={{ height: '28px', width: '200px', borderRadius: '6px', backgroundColor: isDarkMode ? 'rgba(255,255,255,0.08)' : '#e8e8e8' }} />
@@ -3201,7 +3244,7 @@ function Settings() {
 
       {/* Store Information Settings Tab */}
       {activeTab === 'location' && (
-        <div style={{ maxWidth: '480px' }}>
+        <div style={{ maxWidth: '480px', marginLeft: 'auto', marginRight: 'auto' }}>
           <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
             Store Information
           </FormTitle>
@@ -3233,16 +3276,9 @@ function Settings() {
                   placeholder="Select store type"
                   isDarkMode={isDarkMode}
                   themeColorRgb={themeColorRgb}
+                  compactTrigger
                 />
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                  <input
-                    type="text"
-                    placeholder="Logo URL or file path"
-                    value={storeLocationSettings.store_logo ?? ''}
-                    onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_logo: e.target.value })}
-                    style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), flex: 1 }}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
+                <div style={{ width: '100%' }}>
                   <input
                     type="file"
                     accept="image/*"
@@ -3262,18 +3298,17 @@ function Settings() {
                   <label
                     htmlFor="logo-upload"
                     style={{
-                      padding: '8px 16px',
-                      backgroundColor: `rgba(${themeColorRgb}, 0.1)`,
-                      color: `rgb(${themeColorRgb})`,
-                      border: `1px solid rgba(${themeColorRgb}, 0.3)`,
-                      borderRadius: '8px',
+                      ...compactCancelButtonStyle(isDarkMode, false),
+                      width: '100%',
+                      height: '32px',
+                      minHeight: '32px',
                       cursor: 'pointer',
-                      fontSize: '14px',
-                      fontWeight: 500,
-                      whiteSpace: 'nowrap'
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
                     }}
                   >
-                    Upload
+                    Upload logo
                   </label>
                 </div>
                 {storeLocationSettings.store_logo && (
@@ -3382,289 +3417,84 @@ function Settings() {
 
             {/* Store Hours */}
             <FormField style={{ marginBottom: '8px' }}>
-              <div style={{ 
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '20px'
-              }}>
-                <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: 0, fontSize: '15px', fontWeight: 600 }}>
-                  Store Hours
-                </FormTitle>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                  {editingStoreHours && (
-                    <button
-                      onClick={async () => {
-                        await saveStoreLocationSettings(false)
-                        setEditingStoreHours(false)
-                      }}
-                      disabled={saving}
-                      style={{
-                        padding: '8px 16px',
-                        backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                        color: '#fff',
-                        border: '1px solid rgba(255, 255, 255, 0.2)',
-                        borderRadius: '8px',
-                        cursor: saving ? 'not-allowed' : 'pointer',
-                        fontWeight: 600,
-                        fontSize: '13px',
-                        transition: 'all 0.3s ease',
-                        opacity: saving ? 0.7 : 1
-                      }}
-                    >
-                      {saving ? 'Saving...' : 'Save'}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setEditingStoreHours(!editingStoreHours)}
-                    style={{
-                      padding: '8px 16px',
-                      backgroundColor: editingStoreHours 
-                        ? `rgba(${themeColorRgb}, 0.2)`
-                        : `rgba(${themeColorRgb}, 0.7)`,
-                      color: '#fff',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: '13px',
-                      transition: 'all 0.3s ease'
-                    }}
-                  >
-                    {editingStoreHours ? 'Cancel' : 'Edit'}
-                  </button>
-                </div>
-              </div>
+              <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '16px', fontSize: '15px', fontWeight: 600 }}>
+                Store Hours
+              </FormTitle>
               {(() => {
-                // Generate current week days
-                const today = new Date()
-                const startOfWeek = new Date(today)
-                startOfWeek.setDate(today.getDate() - today.getDay())
-                startOfWeek.setHours(0, 0, 0, 0)
-                
-                // Map day names to store hours keys
-                const dayNameToHoursKey = {
-                  'sunday': 'sunday',
-                  'monday': 'monday',
-                  'tuesday': 'tuesday',
-                  'wednesday': 'wednesday',
-                  'thursday': 'thursday',
-                  'friday': 'friday',
-                  'saturday': 'saturday'
-                }
-                
-                // Generate dates for each day of the week
-                const weekDays = []
-                for (let i = 0; i < 7; i++) {
-                  const dayDate = new Date(startOfWeek)
-                  dayDate.setDate(startOfWeek.getDate() + i)
-                  const dayName = dayDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
-                  weekDays.push({
-                    date: dayDate,
-                    hoursKey: dayNameToHoursKey[dayName] || dayName,
-                    dayName: dayName
-                  })
-                }
-                
-                const formatTime = (timeStr) => {
-                  if (!timeStr) return ''
-                  const [hours, minutes] = timeStr.split(':')
-                  const hour = parseInt(hours)
-                  const ampm = hour >= 12 ? 'PM' : 'AM'
-                  const displayHour = hour % 12 || 12
-                  return `${displayHour}:${minutes} ${ampm}`
-                }
-                
+                const dayOrder = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+                const dayLabels = { sunday: 'Sunday', monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday' }
                 return (
-                  <div style={{
-                    border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-                    borderRadius: '8px',
-                    overflow: 'hidden',
-                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'
-                  }}>
-                    {/* Header */}
-                    <div style={{ 
-                      display: 'grid', 
-                      gridTemplateColumns: 'repeat(7, 1fr)',
-                      borderBottom: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-                      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                      backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'
-                    }}>
-                      {weekDays.map((dayInfo, index) => {
-                        const isToday = dayInfo.date.toDateString() === new Date().toDateString()
-                        const dayName = dayInfo.date.toLocaleDateString('en-US', { weekday: 'short' })
-                        
-                        return (
-                          <div 
-                            key={dayInfo.hoursKey}
-                            style={{
-                              padding: '12px 8px',
-                              borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none',
-                              textAlign: 'center',
-                              fontSize: '13px',
-                              fontWeight: 600,
-                              color: isDarkMode ? 'var(--text-primary, #fff)' : '#555',
-                              backgroundColor: isToday ? (isDarkMode ? `rgba(${themeColorRgb}, 0.2)` : `rgba(${themeColorRgb}, 0.1)`) : 'transparent'
-                            }}
-                          >
-                            {dayName}
-                            <div style={{ fontSize: '11px', fontWeight: 400, marginTop: '4px', opacity: 0.7 }}>
-                              {dayInfo.date.getDate()}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {dayOrder.map((hoursKey) => {
+                      const dayHours = storeLocationSettings.store_hours[hoursKey]
+                      const isOpen = !dayHours?.closed
+                      return (
+                        <div
+                          key={hoursKey}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '12px',
+                            flexWrap: 'wrap'
+                          }}
+                        >
+                          <span style={{ width: '90px', flexShrink: 0, fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                            {dayLabels[hoursKey]}
+                          </span>
+                          {isOpen ? (
+                            <>
+                              <input
+                                type="time"
+                                value={dayHours?.open || '09:00'}
+                                onChange={(e) => {
+                                  const newHours = { ...storeLocationSettings.store_hours }
+                                  newHours[hoursKey] = { ...newHours[hoursKey], open: e.target.value }
+                                  setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours })
+                                }}
+                                style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box' }}
+                                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                              />
+                              <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>–</span>
+                              <input
+                                type="time"
+                                value={dayHours?.close || '17:00'}
+                                onChange={(e) => {
+                                  const newHours = { ...storeLocationSettings.store_hours }
+                                  newHours[hoursKey] = { ...newHours[hoursKey], close: e.target.value }
+                                  setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours })
+                                }}
+                                style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box' }}
+                                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <div style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', cursor: 'default' }}>
+                                Closed
+                              </div>
+                              <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>–</span>
+                              <div style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', cursor: 'default' }}>
+                                Closed
+                              </div>
+                            </>
+                          )}
+                          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}>
+                            <div className="checkbox-wrapper-2">
+                              <input
+                                type="checkbox"
+                                className="sc-gJwTLC ikxBAC"
+                                checked={isOpen || false}
+                                onChange={(e) => {
+                                  const newHours = { ...storeLocationSettings.store_hours }
+                                  newHours[hoursKey] = { ...newHours[hoursKey], closed: !e.target.checked }
+                                  setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours })
+                                }}
+                              />
                             </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    
-                    {/* Store Hours Content */}
-                    <div style={{ 
-                      display: 'grid', 
-                      gridTemplateColumns: 'repeat(7, 1fr)',
-                      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-                    }}>
-                      {weekDays.map((dayInfo, index) => {
-                        const dayHours = storeLocationSettings.store_hours[dayInfo.hoursKey]
-                        const isOpen = !dayHours?.closed
-                        
-                        return (
-                          <div 
-                            key={dayInfo.hoursKey}
-                            style={{
-                              padding: editingStoreHours ? '12px 8px' : '20px 8px',
-                              borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none',
-                              textAlign: 'center',
-                              minHeight: editingStoreHours ? 'auto' : '80px',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              gap: editingStoreHours ? '8px' : '0',
-                              backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'
-                            }}
-                          >
-                            {editingStoreHours ? (
-                              <>
-                                <label style={{ 
-                                  display: 'flex', 
-                                  alignItems: 'center', 
-                                  gap: '6px', 
-                                  cursor: 'pointer',
-                                  userSelect: 'none',
-                                  fontSize: '12px',
-                                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                                }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={isOpen || false}
-                                    onChange={(e) => {
-                                      const newHours = { ...storeLocationSettings.store_hours }
-                                      newHours[dayInfo.hoursKey] = { 
-                                        ...newHours[dayInfo.hoursKey], 
-                                        closed: !e.target.checked 
-                                      }
-                                      setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours })
-                                    }}
-                                    style={{ 
-                                      cursor: 'pointer', 
-                                      width: '16px', 
-                                      height: '16px',
-                                      accentColor: isDarkMode ? `rgb(${themeColorRgb})` : '#1a1a1a'
-                                    }}
-                                  />
-                                  <span>Open</span>
-                                </label>
-                                {isOpen && (
-                                  <>
-                                    <input
-                                      type="time"
-                                      value={dayHours?.open || '09:00'}
-                                      onChange={(e) => {
-                                        const newHours = { ...storeLocationSettings.store_hours }
-                                        newHours[dayInfo.hoursKey] = { ...newHours[dayInfo.hoursKey], open: e.target.value }
-                                        setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours })
-                                      }}
-                                      style={{
-                                        width: '100%',
-                                        padding: '6px 8px',
-                                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc',
-                                        borderRadius: '4px',
-                                        fontSize: '12px',
-                                        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                                        backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                                        transition: 'border-color 0.2s'
-                                      }}
-                                      onFocus={(e) => e.target.style.borderColor = isDarkMode ? `rgb(${themeColorRgb})` : '#1a1a1a'}
-                                      onBlur={(e) => e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ccc'}
-                                    />
-                                    <div style={{ fontSize: '11px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>to</div>
-                                    <input
-                                      type="time"
-                                      value={dayHours?.close || '17:00'}
-                                      onChange={(e) => {
-                                        const newHours = { ...storeLocationSettings.store_hours }
-                                        newHours[dayInfo.hoursKey] = { ...newHours[dayInfo.hoursKey], close: e.target.value }
-                                        setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours })
-                                      }}
-                                      style={{
-                                        width: '100%',
-                                        padding: '6px 8px',
-                                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc',
-                                        borderRadius: '4px',
-                                        fontSize: '12px',
-                                        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                                        backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                                        transition: 'border-color 0.2s'
-                                      }}
-                                      onFocus={(e) => e.target.style.borderColor = isDarkMode ? `rgb(${themeColorRgb})` : '#1a1a1a'}
-                                      onBlur={(e) => e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ccc'}
-                                    />
-                                  </>
-                                )}
-                              </>
-                            ) : (
-                              <>
-                                {isOpen ? (
-                                  <>
-                                    <div style={{ 
-                                      fontSize: '14px', 
-                                      fontWeight: 600, 
-                                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-                                      marginBottom: '4px'
-                                    }}>
-                                      {formatTime(dayHours?.open || '09:00')}
-                                    </div>
-                                    <div style={{ 
-                                      fontSize: '12px', 
-                                      color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                                      marginBottom: '4px'
-                                    }}>
-                                      to
-                                    </div>
-                                    <div style={{ 
-                                      fontSize: '14px', 
-                                      fontWeight: 600, 
-                                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a'
-                                    }}>
-                                      {formatTime(dayHours?.close || '17:00')}
-                                    </div>
-                                  </>
-                                ) : (
-                                  <div style={{ 
-                                    fontSize: '13px', 
-                                    color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
-                                    fontStyle: 'italic'
-                                  }}>
-                                    Closed
-                                  </div>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
+                          </label>
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               })()}
@@ -3674,9 +3504,7 @@ function Settings() {
             <div style={{ 
               display: 'flex', 
               justifyContent: 'flex-end', 
-              marginTop: '16px',
-              paddingTop: '12px',
-              borderTop: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`
+              marginTop: '16px'
             }}>
               <button
                 type="button"
@@ -3702,7 +3530,7 @@ function Settings() {
 
       {/* Customer Rewards Settings Tab */}
       {activeTab === 'rewards' && (
-        <div style={{ maxWidth: '480px' }}>
+        <div style={{ maxWidth: '520px', marginLeft: 'auto', marginRight: 'auto' }}>
           <style>{`
             .checkbox-wrapper-2 .ikxBAC {
               appearance: none;
@@ -3768,32 +3596,38 @@ function Settings() {
             }
           `}</style>
           <h2 style={{
-            marginBottom: '20px',
+            marginBottom: '8px',
             fontSize: '16px',
             fontWeight: 700,
             color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
           }}>
             Customer Rewards Program
           </h2>
+          <p style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '20px', marginTop: 0 }}>
+            Let customers earn and redeem rewards. Choose what info you need at checkout, then enable one or more reward types: points, percentage off, or a fixed discount.
+          </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {/* Customer Info Requirements - same switch style as Enable */}
+            {/* Customer Info Requirements */}
                 <div>
                   <h3 style={{
-                    marginBottom: '12px',
+                    marginBottom: '4px',
                     fontSize: '14px',
                     fontWeight: 600,
                     color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
                   }}>
                     Customer Information Requirements
                   </h3>
+                  <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '12px', marginTop: 0 }}>
+                    When rewards are enabled, you can require email and/or phone so you can track who earns and redeems.
+                  </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <label style={{
                       display: 'flex',
-                      alignItems: 'center',
+                      alignItems: 'flex-start',
                       gap: '12px',
                       cursor: 'pointer'
                     }}>
-                      <div className="checkbox-wrapper-2">
+                      <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
                         <input
                           type="checkbox"
                           className="sc-gJwTLC ikxBAC"
@@ -3805,21 +3639,18 @@ function Settings() {
                           })}
                         />
                       </div>
-                      <span style={{
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}>
-                        Require email
-                      </span>
+                      <div>
+                        <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Require email</span>
+                        <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customer must enter an email to earn or use rewards.</div>
+                      </div>
                     </label>
                     <label style={{
                       display: 'flex',
-                      alignItems: 'center',
+                      alignItems: 'flex-start',
                       gap: '12px',
                       cursor: 'pointer'
                     }}>
-                      <div className="checkbox-wrapper-2">
+                      <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
                         <input
                           type="checkbox"
                           className="sc-gJwTLC ikxBAC"
@@ -3831,19 +3662,27 @@ function Settings() {
                           })}
                         />
                       </div>
-                      <span style={{
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}>
-                        Require phone number
-                      </span>
+                      <div>
+                        <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Require phone number</span>
+                        <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customer must enter a phone number to earn or use rewards.</div>
+                      </div>
                     </label>
                   </div>
                 </div>
 
-                {/* Points - switch + input, no container */}
+                {/* Points */}
                 <div style={{ marginBottom: '16px', opacity: rewardsSettings.points_enabled ? 1 : 0.7 }}>
+                  <h3 style={{
+                    marginBottom: '4px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    Points (earn points per dollar spent)
+                  </h3>
+                  <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '12px', marginTop: 0 }}>
+                    Customers earn points on each purchase and can redeem them for a discount later.
+                  </p>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
                     <div className="checkbox-wrapper-2">
                       <input
@@ -3853,11 +3692,9 @@ function Settings() {
                         onChange={(e) => setRewardsSettings({ ...rewardsSettings, points_enabled: e.target.checked, reward_type: e.target.checked ? 'points' : rewardsSettings.reward_type })}
                       />
                     </div>
-                    <span style={{ fontSize: '15px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
-                      Points (earn points per dollar spent)
-                    </span>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Enable points</span>
                   </label>
-                  <div style={{ marginLeft: '42px', pointerEvents: rewardsSettings.points_enabled ? 'auto' : 'none' }}>
+                  <div style={{ pointerEvents: rewardsSettings.points_enabled ? 'auto' : 'none' }}>
                     <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Points per Dollar Spent</FormLabel>
                     <input
                       type="number"
@@ -3901,6 +3738,17 @@ function Settings() {
 
                 {/* Percentage discount */}
                 <div style={{ marginBottom: '16px', opacity: rewardsSettings.percentage_enabled ? 1 : 0.7 }}>
+                  <h3 style={{
+                    marginBottom: '4px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    Percentage discount
+                  </h3>
+                  <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '12px', marginTop: 0 }}>
+                    Give enrolled customers a percent off their order (e.g. 10% off).
+                  </p>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
                     <div className="checkbox-wrapper-2">
                       <input
@@ -3910,11 +3758,9 @@ function Settings() {
                         onChange={(e) => setRewardsSettings({ ...rewardsSettings, percentage_enabled: e.target.checked, reward_type: e.target.checked ? 'percentage' : rewardsSettings.reward_type })}
                       />
                     </div>
-                    <span style={{ fontSize: '15px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
-                      Percentage discount
-                    </span>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Enable percentage discount</span>
                   </label>
-                  <div style={{ marginLeft: '42px', pointerEvents: rewardsSettings.percentage_enabled ? 'auto' : 'none' }}>
+                  <div style={{ pointerEvents: rewardsSettings.percentage_enabled ? 'auto' : 'none' }}>
                     <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Percentage Discount (%)</FormLabel>
                     <input
                       type="number"
@@ -3943,6 +3789,17 @@ function Settings() {
 
                 {/* Fixed discount */}
                 <div style={{ marginBottom: '16px', opacity: rewardsSettings.fixed_enabled ? 1 : 0.7 }}>
+                  <h3 style={{
+                    marginBottom: '4px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                  }}>
+                    Fixed discount amount
+                  </h3>
+                  <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '12px', marginTop: 0 }}>
+                    Give enrolled customers a set dollar amount off (e.g. $5 off).
+                  </p>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
                     <div className="checkbox-wrapper-2">
                       <input
@@ -3952,11 +3809,9 @@ function Settings() {
                         onChange={(e) => setRewardsSettings({ ...rewardsSettings, fixed_enabled: e.target.checked, reward_type: e.target.checked ? 'fixed' : rewardsSettings.reward_type })}
                       />
                     </div>
-                    <span style={{ fontSize: '15px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
-                      Fixed discount amount
-                    </span>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Enable fixed discount</span>
                   </label>
-                  <div style={{ marginLeft: '42px', pointerEvents: rewardsSettings.fixed_enabled ? 'auto' : 'none' }}>
+                  <div style={{ pointerEvents: rewardsSettings.fixed_enabled ? 'auto' : 'none' }}>
                     <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Fixed Discount Amount ($)</FormLabel>
                     <input
                       type="number"
@@ -3983,11 +3838,7 @@ function Settings() {
                 </div>
 
                 {/* Rewards campaigns / Promotions */}
-                <div style={{
-                  marginTop: '24px',
-                  paddingTop: '16px',
-                  borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
-                }}>
+                <div style={{ marginTop: '24px' }}>
                   <h3 style={{
                     marginBottom: '12px',
                     fontSize: '15px',
@@ -4070,13 +3921,7 @@ function Settings() {
                 </div>
 
                 {/* Save Button */}
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'flex-end',
-                  marginTop: '24px',
-                  paddingTop: '12px',
-                  borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
-                }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
                   <button
                     type="button"
                     className="button-26 button-26--header"
@@ -4288,16 +4133,7 @@ function Settings() {
                         <button
                           type="button"
                           onClick={() => setShowCreateCampaignModal(false)}
-                          style={{
-                            padding: '10px 18px',
-                            borderRadius: '8px',
-                            border: `1px solid ${isDarkMode ? '#444' : '#ddd'}`,
-                            background: 'transparent',
-                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                            cursor: 'pointer',
-                            fontSize: '14px',
-                            fontWeight: 600
-                          }}
+                          style={compactCancelButtonStyle(isDarkMode, false)}
                         >
                           Cancel
                         </button>
@@ -4329,16 +4165,7 @@ function Settings() {
                             setShowCreateCampaignModal(false)
                             setNewCampaign(defaultNewCampaign())
                           }}
-                          style={{
-                            padding: '10px 18px',
-                            borderRadius: '8px',
-                            border: 'none',
-                            background: `rgba(${themeColorRgb}, 0.9)`,
-                            color: '#fff',
-                            cursor: 'pointer',
-                            fontSize: '14px',
-                            fontWeight: 600
-                          }}
+                          style={compactPrimaryButtonStyle(themeColorRgb, false)}
                         >
                           Create campaign
                         </button>
@@ -4568,7 +4395,7 @@ function Settings() {
 
       {/* POS Settings Tab */}
       {activeTab === 'pos' && (
-        <div style={{ maxWidth: '480px' }}>
+        <div style={{ maxWidth: '480px', marginLeft: 'auto', marginRight: 'auto' }}>
           <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
             POS Configuration
           </FormTitle>
@@ -4594,12 +4421,15 @@ function Settings() {
 
             {/* Orders & Delivery: master switches + sub options */}
             <div style={{ marginTop: '16px' }}>
-              <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px', fontSize: '15px', fontWeight: 600 }}>
+              <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '4px', fontSize: '15px', fontWeight: 600 }}>
                 Orders &amp; Delivery
               </FormTitle>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-                  <div className="checkbox-wrapper-2">
+              <p style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '14px', marginTop: 0 }}>
+                Choose which order types to offer and how customers can pay or schedule.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+                  <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
                     <input
                       type="checkbox"
                       className="sc-gJwTLC ikxBAC"
@@ -4611,10 +4441,13 @@ function Settings() {
                       }}
                     />
                   </div>
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Delivery</span>
+                  <div>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Delivery</span>
+                    <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customers can place orders for delivery to an address.</div>
+                  </div>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-                  <div className="checkbox-wrapper-2">
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+                  <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
                     <input
                       type="checkbox"
                       className="sc-gJwTLC ikxBAC"
@@ -4626,14 +4459,20 @@ function Settings() {
                       }}
                     />
                   </div>
-                  <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Pickup</span>
+                  <div>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Pickup</span>
+                    <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customers can place orders to pick up in store.</div>
+                  </div>
                 </label>
               </div>
-              <div style={{ marginTop: '16px', borderLeft: `3px solid ${isDarkMode ? 'var(--border-light, #444)' : '#ddd'}`, paddingLeft: '12px' }}>
-                <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '10px' }}>Options</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-                    <div className="checkbox-wrapper-2">
+              <div style={{ marginTop: '20px', borderLeft: `3px solid ${isDarkMode ? 'var(--border-light, #444)' : '#ddd'}`, paddingLeft: '12px' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', marginBottom: '4px' }}>Options</div>
+                <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '12px', marginTop: 0 }}>
+                  Additional settings for how orders can be paid and scheduled.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+                    <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
                       <input
                         type="checkbox"
                         className="sc-gJwTLC ikxBAC"
@@ -4645,10 +4484,13 @@ function Settings() {
                         }}
                       />
                     </div>
-                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow pay at pickup</span>
+                    <div>
+                      <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow pay at pickup</span>
+                      <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customer pays when they arrive to pick up the order.</div>
+                    </div>
                   </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-                    <div className="checkbox-wrapper-2">
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+                    <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
                       <input
                         type="checkbox"
                         className="sc-gJwTLC ikxBAC"
@@ -4656,10 +4498,13 @@ function Settings() {
                         onChange={(e) => saveDeliveryPayOnDeliveryCashOnly(e.target.checked)}
                       />
                     </div>
-                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow pay at delivery (cash)</span>
+                    <div>
+                      <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow pay at delivery (cash)</span>
+                      <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customer can pay with cash when the order is delivered.</div>
+                    </div>
                   </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-                    <div className="checkbox-wrapper-2">
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+                    <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
                       <input
                         type="checkbox"
                         className="sc-gJwTLC ikxBAC"
@@ -4671,10 +4516,13 @@ function Settings() {
                         }}
                       />
                     </div>
-                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Delivery fee</span>
+                    <div>
+                      <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Delivery fee</span>
+                      <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Add a delivery fee to delivery orders (amount can be set in order/delivery settings).</div>
+                    </div>
                   </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-                    <div className="checkbox-wrapper-2">
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+                    <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
                       <input
                         type="checkbox"
                         className="sc-gJwTLC ikxBAC"
@@ -4686,10 +4534,13 @@ function Settings() {
                         }}
                       />
                     </div>
-                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow scheduled pickup</span>
+                    <div>
+                      <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow scheduled pickup</span>
+                      <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customers can choose a date and time to pick up their order.</div>
+                    </div>
                   </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
-                    <div className="checkbox-wrapper-2">
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+                    <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
                       <input
                         type="checkbox"
                         className="sc-gJwTLC ikxBAC"
@@ -4701,14 +4552,15 @@ function Settings() {
                         }}
                       />
                     </div>
-                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow scheduled delivery</span>
+                    <div>
+                      <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow scheduled delivery</span>
+                      <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customers can choose a date and time for delivery.</div>
+                    </div>
                   </label>
                 </div>
               </div>
               <div style={{
                 marginTop: '12px',
-                paddingTop: '12px',
-                borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`,
                 display: 'flex',
                 justifyContent: 'flex-end'
               }}>
@@ -4732,12 +4584,9 @@ function Settings() {
               </div>
             </div>
 
-            {/* Checkout UI – receipt and checkout previews side by side; click to open edit modal */}
-            <div style={{ marginTop: '16px' }}>
-              <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px', fontSize: '15px', fontWeight: 600 }}>
-                Checkout UI
-              </FormTitle>
-              <div style={{ display: 'flex', flexDirection: 'row', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            {/* Receipt Preview and Checkout UI Preview – each title above its preview; group centered */}
+            <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center' }}>
+              <div style={{ display: 'flex', flexDirection: 'row', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'center' }}>
                 {!receiptEditModalOpen && (
                   <div
                     role="button"
@@ -4746,6 +4595,10 @@ function Settings() {
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReceiptEditModalOpen(true); } }}
                     style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', outline: 'none' }}
                   >
+                    <div style={{ marginBottom: '8px', textAlign: 'center', width: '100%' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Receipt Preview</div>
+                      <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '2px' }}>Click to edit</div>
+                    </div>
                     <ReceiptPreview
                       settings={receiptSettings}
                       id="receipt-preview-print"
@@ -4762,6 +4615,10 @@ function Settings() {
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCheckoutUiEditModalOpen(true); } }}
                   style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', outline: 'none' }}
                 >
+                  <div style={{ marginBottom: '8px', textAlign: 'center', width: '100%' }}>
+                    <div style={{ fontSize: '15px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Checkout UI Preview</div>
+                    <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '2px' }}>Click to edit</div>
+                  </div>
                   <div
                     style={{
                       width: CHECKOUT_PREVIEW_CONTAINER_WIDTH,
@@ -6738,61 +6595,227 @@ function Settings() {
       )}
 
       {activeTab === 'cash' && (
-        <div style={{ maxWidth: '480px' }}>
+        <div style={{
+          width: '100%',
+          maxWidth: '600px',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+          overflow: 'visible'
+        }}>
+          <div style={{ flexShrink: 0, width: '100%', minWidth: 0, overflow: 'visible' }}>
           <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
             Cash Register Management
           </FormTitle>
           
-          {/* Register Management */}
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
-            <FormLabel isDarkMode={isDarkMode} style={{ margin: 0 }}>
+          {/* Register Management - fixed width so add/delete doesn't change form width */}
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', width: '100%', minWidth: '100%', overflow: 'visible' }}>
+            <FormLabel isDarkMode={isDarkMode} style={{ margin: 0, flexShrink: 0 }}>
               Registers:
             </FormLabel>
             {registers.map((register) => (
-              <div key={register.id} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <input
-                  type="text"
-                  value={register.name}
-                  onChange={(e) => {
-                    const updated = registers.map(r => 
-                      r.id === register.id ? { ...r, name: e.target.value } : r
-                    )
-                    setRegisters(updated)
-                    localStorage.setItem('cash_registers', JSON.stringify(updated))
-                  }}
-                  style={{
-                    ...inputBaseStyle(isDarkMode, themeColorRgb),
-                    width: '150px',
-                    fontSize: '14px',
-                    padding: '6px 10px'
-                  }}
-                  placeholder="Register name"
-                  {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                />
-                {registers.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const updated = registers.filter(r => r.id !== register.id)
+              <div
+                key={register.id}
+                data-register-menu-area
+                data-register-delete-area={registerToDelete?.id === register.id ? true : undefined}
+                role="button"
+                tabIndex={0}
+                onClick={() => setCashSettings({ ...cashSettings, register_id: register.id })}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCashSettings({ ...cashSettings, register_id: register.id }); } }}
+                style={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                  border: cashSettings.register_id === register.id
+                    ? `2px solid rgb(${themeColorRgb})`
+                    : (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd'),
+                  borderRadius: '8px',
+                  overflow: 'visible',
+                  zIndex: registerToDelete?.id === register.id ? 10001 : undefined,
+                  backgroundColor: cashSettings.register_id === register.id
+                    ? (isDarkMode ? `rgba(${themeColorRgb}, 0.12)` : `rgba(${themeColorRgb}, 0.08)`)
+                    : (isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff'),
+                  width: '180px',
+                  cursor: 'pointer'
+                }}
+              >
+                {registerEditingId === register.id ? (
+                  <input
+                    type="text"
+                    data-register-input-id={register.id}
+                    value={register.name}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      const updated = registers.map(r =>
+                        r.id === register.id ? { ...r, name: e.target.value } : r
+                      )
                       setRegisters(updated)
                       localStorage.setItem('cash_registers', JSON.stringify(updated))
-                      if (cashSettings.register_id === register.id && updated.length > 0) {
-                        setCashSettings({...cashSettings, register_id: updated[0].id})
-                      }
                     }}
+                    onBlur={() => setRegisterEditingId(null)}
                     style={{
-                      padding: '6px 10px',
-                      backgroundColor: '#d32f2f',
-                      color: '#fff',
+                      ...inputBaseStyle(isDarkMode, themeColorRgb),
                       border: 'none',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '12px'
+                      borderRadius: 0,
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: '14px',
+                      padding: '6px 10px',
+                      boxShadow: 'none'
+                    }}
+                    placeholder="Register name"
+                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                  />
+                ) : (
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: '14px',
+                      padding: '6px 10px',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
                     }}
                   >
-                    ×
-                  </button>
+                    {register.name || 'Register name'}
+                  </span>
                 )}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setRegisterMenuOpenId(registerMenuOpenId === register.id ? null : register.id); }}
+                  style={{
+                    flexShrink: 0,
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: 'transparent',
+                    color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0
+                  }}
+                  aria-label="Options"
+                >
+                  <MoreVertical size={18} />
+                </button>
+                    {registerMenuOpenId === register.id && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          position: 'absolute',
+                          top: '100%',
+                          right: 0,
+                          marginTop: '4px',
+                          padding: '4px 0',
+                          borderRadius: '8px',
+                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                          zIndex: 1001,
+                          minWidth: '120px'
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setRegisterEditingId(register.id)
+                            setRegisterMenuOpenId(null)
+                            setTimeout(() => document.querySelector(`[data-register-input-id="${register.id}"]`)?.focus(), 0)
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '8px 14px',
+                            textAlign: 'left',
+                            border: 'none',
+                            background: 'none',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                          }}
+                        >
+                          Edit
+                        </button>
+                        {registers.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setRegisterMenuOpenId(null)
+                              setRegisterToDelete({ id: register.id, name: register.name })
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '8px 14px',
+                              textAlign: 'left',
+                              border: 'none',
+                              background: 'none',
+                              cursor: 'pointer',
+                              fontSize: '14px',
+                              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                            }}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {registerToDelete?.id === register.id && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          position: 'absolute',
+                          top: '100%',
+                          left: 0,
+                          right: 0,
+                          marginTop: '4px',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                          zIndex: 10002,
+                          width: '100%',
+                          minWidth: '200px',
+                          boxSizing: 'border-box'
+                        }}
+                      >
+                        <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginBottom: '10px' }}>
+                          Delete &quot;{register.name}&quot;?
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                          <button
+                            type="button"
+                            onClick={() => setRegisterToDelete(null)}
+                            style={{ ...compactCancelButtonStyle(isDarkMode, false), flexShrink: 0, minWidth: '80px' }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = registers.filter(r => r.id !== register.id)
+                              setRegisters(updated)
+                              localStorage.setItem('cash_registers', JSON.stringify(updated))
+                              if (cashSettings.register_id === register.id && updated.length > 0) {
+                                setCashSettings({ ...cashSettings, register_id: updated[0].id })
+                              }
+                              setRegisterToDelete(null)
+                            }}
+                            style={{ ...compactPrimaryButtonStyle(themeColorRgb, false), flexShrink: 0, minWidth: '80px' }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    )}
               </div>
             ))}
             <button
@@ -6803,37 +6826,21 @@ function Settings() {
                 setRegisters(updated)
                 localStorage.setItem('cash_registers', JSON.stringify(updated))
               }}
+              aria-label="Add register"
               style={{
-                padding: '6px 12px',
-                backgroundColor: `rgb(${themeColorRgb})`,
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: 500
+                ...compactPrimaryButtonStyle(themeColorRgb, false),
+                width: '32px',
+                minWidth: '32px',
+                height: '32px',
+                padding: 0
               }}
             >
-              + Add
+              <Plus size={18} />
             </button>
           </div>
           
           {/* Action Buttons */}
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <CustomDropdown
-              value={cashSettings.register_id}
-              onChange={(e) => {
-                setCashSettings({...cashSettings, register_id: parseInt(e.target.value) || 1})
-              }}
-              options={registers.map(r => ({
-                value: r.id,
-                label: r.name
-              }))}
-              placeholder="Select register..."
-              isDarkMode={isDarkMode}
-              themeColorRgb={themeColorRgb}
-              style={{ width: '150px' }}
-            />
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', flexWrap: 'nowrap', alignItems: 'center' }}>
             <button
               type="button"
               className="button-26 button-26--header"
@@ -6861,7 +6868,7 @@ function Settings() {
               }}
             >
               <div className="button-26__content">
-                <span className="button-26__text text">Open Register</span>
+                <span className="button-26__text text" style={{ whiteSpace: 'nowrap' }}>Open Register</span>
               </div>
             </button>
             <button
@@ -6892,7 +6899,7 @@ function Settings() {
               }}
             >
               <div className="button-26__content">
-                <span className="button-26__text text">Count Drop</span>
+                <span className="button-26__text text" style={{ whiteSpace: 'nowrap' }}>Count Drop</span>
               </div>
             </button>
             <button
@@ -6923,7 +6930,7 @@ function Settings() {
               }}
             >
               <div className="button-26__content">
-                <span className="button-26__text text">Close Register</span>
+                <span className="button-26__text text" style={{ whiteSpace: 'nowrap' }}>Close Register</span>
               </div>
             </button>
             <button
@@ -6933,7 +6940,7 @@ function Settings() {
               onClick={() => setShowTakeOutModal(true)}
             >
               <div className="button-26__content">
-                <span className="button-26__text text">Take Out Money</span>
+                <span className="button-26__text text" style={{ whiteSpace: 'nowrap' }}>Take Out Money</span>
               </div>
             </button>
           </div>
@@ -6966,31 +6973,14 @@ function Settings() {
                 </div>
                 <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '12px' }}>
                   {currentSession && (
-                    <>
-                      <div>
-                        <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666' }}>
-                          Starting Cash: ${(parseFloat(currentSession?.starting_cash) || 0).toFixed(2)}
-                        </div>
-                        <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666', marginTop: '4px' }}>
-                          Expected Cash: ${calculateExpectedCash().toFixed(2)}
-                        </div>
+                    <div>
+                      <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666' }}>
+                        Starting Cash: ${(parseFloat(currentSession?.starting_cash) || 0).toFixed(2)}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => { loadRegisterSessions(); loadRegisterEvents() }}
-                        style={{
-                          padding: '6px 12px',
-                          fontSize: '13px',
-                          backgroundColor: isDarkMode ? 'var(--bg-tertiary, #333)' : '#eee',
-                          color: isDarkMode ? 'var(--text-primary)' : '#333',
-                          border: `1px solid ${isDarkMode ? '#555' : '#ccc'}`,
-                          borderRadius: '6px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Refresh
-                      </button>
-                    </>
+                      <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#666', marginTop: '4px' }}>
+                        Expected Cash: ${calculateExpectedCash().toFixed(2)}
+                      </div>
+                    </div>
                   )}
                   {!currentSession && lastClosedSession && (
                     <>
@@ -7008,26 +6998,124 @@ function Settings() {
               </div>
             </div>
           )}
-          
-          {/* Register Events Table */}
-          <div style={{ marginBottom: '12px' }}>
-            <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 600 }}>
-              Register Events
-            </FormTitle>
+          </div>
+
+          {/* Register Events Table - only this area scrolls */}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <FormTitle isDarkMode={isDarkMode} style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>
+                Register Events
+              </FormTitle>
+              <button
+                type="button"
+                onClick={() => {
+                  setRegisterRefreshSpinning(true)
+                  loadRegisterSessions()
+                  loadRegisterEvents()
+                  setTimeout(() => setRegisterRefreshSpinning(false), 600)
+                }}
+                aria-label="Refresh register"
+                style={{
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{
+                  display: 'inline-flex',
+                  animation: registerRefreshSpinning ? 'register-refresh-spin 0.6s ease' : 'none'
+                }}>
+                  <RefreshCw size={18} />
+                </span>
+              </button>
+            </div>
+            <style>{`
+              @keyframes register-refresh-spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+              }
+            `}</style>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
             {registerTransactions.length > 0 ? (
-              <Table
-                columns={['event_type', 'amount', 'timestamp', 'employee_name', 'notes']}
-                data={registerTransactions.map(t => ({
-                  event_type: t.transaction_type === 'open' ? 'Open' : 
-                             t.transaction_type === 'close' ? 'Close' :
-                             t.transaction_type === 'drop' ? 'Drop' :
-                             t.transaction_type === 'take_out' ? 'Take Out' : 'Cash In',
-                  amount: parseFloat(t.amount || 0),
-                  timestamp: t.timestamp ? new Date(t.timestamp).toLocaleString() : 'N/A',
-                  employee_name: t.employee_name || 'N/A',
-                  notes: t.notes || t.reason || ''
-                }))}
-              />
+              <div style={{ border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #dee2e6', borderRadius: '8px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa',
+                      position: 'sticky',
+                      top: 0,
+                      zIndex: 1,
+                      boxShadow: isDarkMode ? '0 1px 0 0 var(--border-color, #404040)' : '0 1px 0 0 #dee2e6'
+                    }}>
+                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #dee2e6', color: isDarkMode ? 'var(--text-primary)' : '#495057', fontSize: '13px', backgroundColor: 'inherit' }}>Event</th>
+                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #dee2e6', color: isDarkMode ? 'var(--text-primary)' : '#495057', fontSize: '13px', backgroundColor: 'inherit' }}>Amount</th>
+                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #dee2e6', color: isDarkMode ? 'var(--text-primary)' : '#495057', fontSize: '13px', backgroundColor: 'inherit' }}>Time</th>
+                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #dee2e6', color: isDarkMode ? 'var(--text-primary)' : '#495057', fontSize: '13px', backgroundColor: 'inherit' }}>Employee</th>
+                      <th style={{ width: '28px', padding: '8px', borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #dee2e6', backgroundColor: 'inherit' }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {registerTransactions.map((t, idx) => {
+                      const ts = t.timestamp ? new Date(t.timestamp) : null
+                      const now = new Date()
+                      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+                      const yesterday = new Date(today)
+                      yesterday.setDate(yesterday.getDate() - 1)
+                      let timeStr = 'N/A'
+                      if (ts) {
+                        const timePart = ts.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+                        const tsDay = new Date(ts.getFullYear(), ts.getMonth(), ts.getDate())
+                        if (tsDay.getTime() === today.getTime()) timeStr = `Today ${timePart}`
+                        else if (tsDay.getTime() === yesterday.getTime()) timeStr = `Yesterday ${timePart}`
+                        else timeStr = ts.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+                      }
+                      const eventLabel = t.transaction_type === 'open' ? 'Open' : t.transaction_type === 'close' ? 'Close' : t.transaction_type === 'drop' ? 'Drop' : t.transaction_type === 'take_out' ? 'Take Out' : 'Cash In'
+                      const amount = parseFloat(t.amount || 0)
+                      const eventId = t.transaction_id != null ? String(t.transaction_id) : `evt-${idx}-${t.timestamp || ''}`
+                      const isExpanded = expandedRegisterEventId === eventId
+                      const detailLine = t.transaction_type === 'open'
+                        ? `Starting cash: $${amount.toFixed(2)}`
+                        : t.transaction_type === 'close'
+                          ? `Ending cash: $${amount.toFixed(2)}`
+                          : t.transaction_type === 'drop'
+                            ? `Drop amount: $${amount.toFixed(2)}`
+                            : t.transaction_type === 'take_out'
+                              ? `Amount taken out: $${amount.toFixed(2)}`
+                              : amount ? `Amount: $${amount.toFixed(2)}` : ''
+                      return (
+                        <Fragment key={eventId}>
+                          <tr
+                            onClick={() => setExpandedRegisterEventId(isExpanded ? null : eventId)}
+                            style={{
+                              cursor: 'pointer',
+                              backgroundColor: isExpanded ? (isDarkMode ? 'var(--bg-tertiary, #333)' : '#f0f0f0') : (idx % 2 === 0 ? (isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff') : (isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#fafafa'))
+                            }}
+                          >
+                            <td style={{ padding: '10px 12px', borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>{eventLabel}</td>
+                            <td style={{ padding: '10px 12px', borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>${amount.toFixed(2)}</td>
+                            <td style={{ padding: '10px 12px', borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>{timeStr}</td>
+                            <td style={{ padding: '10px 12px', borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>{t.employee_name || 'N/A'}</td>
+                            <td style={{ padding: '8px', borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee', color: isDarkMode ? '#999' : '#666' }}>{isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</td>
+                          </tr>
+                          {isExpanded && (
+                            <tr style={{ backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#f5f5f5' }}>
+                              <td colSpan={5} style={{ padding: '12px 12px 12px 24px', borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee', fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #ccc)' : '#555' }}>
+                                {detailLine && <div style={{ marginBottom: (t.notes || t.reason) ? '6px' : 0 }}><strong>{detailLine}</strong></div>}
+                                {(t.notes || t.reason) ? <div>Notes: {t.notes || t.reason}</div> : null}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <div style={{
                 padding: '40px',
@@ -7039,6 +7127,7 @@ function Settings() {
                 No register events. Click "Open Register" to start.
               </div>
             )}
+            </div>
           </div>
           
           {/* Open Register Modal */}

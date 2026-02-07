@@ -9,7 +9,6 @@ import BillForm from '../components/bills/BillForm'
 import BillFilters from '../components/bills/BillFilters'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
-import LoadingSpinner from '../components/common/LoadingSpinner'
 import { useToast } from '../contexts/ToastContext'
 
 function BillDetailView({ bill }) {
@@ -298,14 +297,6 @@ function Bills() {
   const totalPages = pagination.total_pages || 1
   const total = pagination.total || 0
 
-  if (loading && bills.length === 0) {
-    return (
-      <div style={{ padding: '32px' }}>
-        <LoadingSpinner size="lg" text="Loading bills..." />
-      </div>
-    )
-  }
-
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
@@ -353,26 +344,21 @@ function Bills() {
           </div>
         </div>
 
-        {loading ? (
-          <div style={{ padding: '48px' }}>
-            <LoadingSpinner size="md" text="Loading..." />
-          </div>
-        ) : (
-          <BillTable
-            bills={bills}
-            onView={(item) => {
-              setSelectedBill(item)
-              setIsViewModalOpen(true)
-            }}
-            onEdit={(item) => {
-              setSelectedBill(item)
-              setIsEditModalOpen(true)
-            }}
-            onDelete={handleDeleteBill}
-            onVoid={handleVoidBill}
-            onPayBill={handlePayBill}
-          />
-        )}
+        <BillTable
+          bills={bills}
+          loading={loading}
+          onView={(item) => {
+            setSelectedBill(item)
+            setIsViewModalOpen(true)
+          }}
+          onEdit={(item) => {
+            setSelectedBill(item)
+            setIsEditModalOpen(true)
+          }}
+          onDelete={handleDeleteBill}
+          onVoid={handleVoidBill}
+          onPayBill={handlePayBill}
+        />
       </div>
 
       <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Create New Bill" size="xl">

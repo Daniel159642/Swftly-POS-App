@@ -2,14 +2,43 @@ import { useState, useEffect } from 'react'
 import { usePermissions } from '../contexts/PermissionContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { useToast } from '../contexts/ToastContext'
+import { cachedFetch } from '../services/offlineSync'
+
+const REGISTER_SESSIONS_KEY = 'pos_register_sessions'
+const REGISTER_CURRENT_SESSION_KEY = 'pos_register_current_session'
+const REGISTER_SESSIONS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+function getStoredRegisterSessions() {
+  try {
+    const raw = localStorage.getItem(REGISTER_SESSIONS_KEY)
+    if (!raw) return []
+    const { data, savedAt } = JSON.parse(raw)
+    if (!Array.isArray(data) || !savedAt || Date.now() - savedAt > REGISTER_SESSIONS_MAX_AGE_MS) return []
+    return data.slice(0, 10)
+  } catch {
+    return []
+  }
+}
+
+function getStoredCurrentSession() {
+  try {
+    const raw = localStorage.getItem(REGISTER_CURRENT_SESSION_KEY)
+    if (!raw) return null
+    const { session, savedAt } = JSON.parse(raw)
+    if (!session || !savedAt || Date.now() - savedAt > REGISTER_SESSIONS_MAX_AGE_MS) return null
+    return session
+  } catch {
+    return null
+  }
+}
 
 function CashRegister() {
   const { hasPermission } = usePermissions()
   const { themeColor } = useTheme()
   const { show: showToast } = useToast()
   const [sessionToken, setSessionToken] = useState(localStorage.getItem('sessionToken'))
-  const [currentSession, setCurrentSession] = useState(null)
-  const [sessions, setSessions] = useState([])
+  const [currentSession, setCurrentSession] = useState(getStoredCurrentSession)
+  const [sessions, setSessions] = useState(getStoredRegisterSessions)
   const [loading, setLoading] = useState(false)
   const [showOpenModal, setShowOpenModal] = useState(false)
   const [showCloseModal, setShowCloseModal] = useState(false)
@@ -36,12 +65,19 @@ function CashRegister() {
 
   const loadCurrentSession = async () => {
     try {
-      const response = await fetch(`/api/register/session?status=open&session_token=${sessionToken}`)
+      const response = await cachedFetch(`/api/register/session?status=open&session_token=${sessionToken}`)
       const data = await response.json()
       if (data.success && data.data && data.data.length > 0) {
-        setCurrentSession(data.data[0])
+        const session = data.data[0]
+        setCurrentSession(session)
+        try {
+          localStorage.setItem(REGISTER_CURRENT_SESSION_KEY, JSON.stringify({ session, savedAt: Date.now() }))
+        } catch (_) {}
       } else {
         setCurrentSession(null)
+        try {
+          localStorage.removeItem(REGISTER_CURRENT_SESSION_KEY)
+        } catch (_) {}
       }
     } catch (error) {
       console.error('Error loading current session:', error)
@@ -50,10 +86,14 @@ function CashRegister() {
 
   const loadRecentSessions = async () => {
     try {
-      const response = await fetch(`/api/register/session?session_token=${sessionToken}`)
+      const response = await cachedFetch(`/api/register/session?session_token=${sessionToken}`)
       const data = await response.json()
       if (data.success && data.data) {
-        setSessions(data.data.slice(0, 10)) // Show last 10 sessions
+        const list = data.data.slice(0, 10)
+        setSessions(list)
+        try {
+          localStorage.setItem(REGISTER_SESSIONS_KEY, JSON.stringify({ data: list, savedAt: Date.now() }))
+        } catch (_) {}
       }
     } catch (error) {
       console.error('Error loading sessions:', error)
@@ -230,7 +270,7 @@ function CashRegister() {
     setLoading(true)
 
     try {
-      const response = await fetch(`/api/register/summary?session_id=${session.session_id}&session_token=${sessionToken}`)
+      const response = await cachedFetch(`/api/register/summary?session_id=${session.session_id}&session_token=${sessionToken}`)
       const data = await response.json()
       if (data.success) {
         setSessionSummary(data)

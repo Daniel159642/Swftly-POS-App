@@ -1149,7 +1149,11 @@ function RecentOrders() {
   }
 
   // Filter out hidden fields and insert Status column (replacing order_status / payment_method)
-  const baseVisible = data && data.columns ? data.columns.filter(col => !hiddenFields.includes(col)) : []
+  // Use default columns when loading so table headers are always visible
+  const defaultVisibleColumns = ['order_number', 'order_date', 'order_type', 'customer_name', 'total']
+  const baseVisible = (data && data.columns && data.columns.length)
+    ? data.columns.filter(col => !hiddenFields.includes(col))
+    : defaultVisibleColumns
   const orderNumIdx = baseVisible.indexOf('order_number')
   const visibleColumns = orderNumIdx >= 0
     ? [...baseVisible.slice(0, orderNumIdx + 1), 'Status', ...baseVisible.slice(orderNumIdx + 1)]
@@ -1160,8 +1164,21 @@ function RecentOrders() {
   const pageMaxWidth = isMobile ? '100%' : '1400px'
 
   return (
-    <div style={{ padding: pagePadding, maxWidth: pageMaxWidth, margin: '0 auto', backgroundColor: isDarkMode ? 'var(--bg-primary)' : '#ffffff', minHeight: '100vh', boxSizing: 'border-box' }}>
-      <div style={{ marginBottom: isMobile ? '12px' : '20px', paddingTop: isMobile ? '12px' : 0 }}>
+    <div
+      style={{
+        padding: pagePadding,
+        maxWidth: pageMaxWidth,
+        margin: '0 auto',
+        backgroundColor: isDarkMode ? 'var(--bg-primary)' : '#ffffff',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        minHeight: 0,
+        overflow: 'hidden'
+      }}
+    >
+      <div style={{ flexShrink: 0, marginBottom: isMobile ? '12px' : '20px', paddingTop: isMobile ? '12px' : 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '12px', flexWrap: 'wrap' }}>
           <div style={{ 
             position: 'relative', 
@@ -1559,37 +1576,59 @@ function RecentOrders() {
         />
       )}
 
-      <div style={{ overflowX: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
         {error && <div style={{ padding: isMobile ? '24px' : '40px', textAlign: 'center', color: isDarkMode ? '#e57373' : '#c62828' }}>{error}</div>}
-        {loading && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: isMobile ? '24px' : '40px' }} aria-busy="true" aria-label="Loading orders">
-            {Array.from({ length: 6 }, (_, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: '14px',
-                  borderRadius: '10px',
-                  backgroundColor: isDarkMode ? 'var(--bg-secondary)' : '#fafafa',
-                  border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <div style={{ height: '16px', width: '80px', borderRadius: '4px', backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e0e0e0' }} />
-                  <div style={{ height: '16px', width: '56px', borderRadius: '4px', backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e0e0e0' }} />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-                  <div style={{ height: '12px', width: '100px', borderRadius: '4px', backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : '#eee' }} />
-                  <div style={{ height: '24px', width: '70px', borderRadius: '6px', backgroundColor: isDarkMode ? 'rgba(255,255,255,0.08)' : '#e8e8e8' }} />
-                </div>
+        {!error && (
+          loading ? (
+            /* Desktop: table with headers + loading row. Mobile: loading message. */
+            isMobile ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', fontSize: '14px' }}>Loading…</div>
+            ) : (
+              <div style={{
+                backgroundColor: isDarkMode ? 'var(--bg-primary)' : '#fff',
+                borderRadius: '4px',
+                overflowX: 'auto',
+                boxShadow: isDarkMode ? '0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.1)',
+                width: '100%'
+              }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 'max-content' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa' }}>
+                      {columnsWithActions.map(col => (
+                        <th
+                          key={col}
+                          style={{
+                            position: 'sticky',
+                            top: 0,
+                            zIndex: 1,
+                            padding: '12px',
+                            textAlign: 'left',
+                            fontWeight: 600,
+                            borderBottom: '2px solid #dee2e6',
+                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#495057',
+                            fontSize: '13px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.5px',
+                            backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa',
+                            boxShadow: '0 1px 0 0 #dee2e6'
+                          }}
+                        >
+                          {getColumnHeaderLabel(col)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td colSpan={columnsWithActions.length} style={{ textAlign: 'center', padding: '40px 20px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', fontSize: '14px' }}>
+                        Loading…
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
-            ))}
-          </div>
-        )}
-        {!loading && !error && data && (
-          data.data && data.data.length > 0 ? (
+            )
+          ) : data.data && data.data.length > 0 ? (
             <>
             {isMobile ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1767,19 +1806,24 @@ function RecentOrders() {
             }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 'max-content' }}>
                 <thead>
-                  <tr style={{ backgroundColor: '#f8f9fa' }}>
+                  <tr style={{ backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa' }}>
                     {columnsWithActions.map(col => (
                       <th
                         key={col}
                         style={{
+                          position: 'sticky',
+                          top: 0,
+                          zIndex: 1,
                           padding: '12px',
                           textAlign: 'left',
                           fontWeight: 600,
                           borderBottom: '2px solid #dee2e6',
-                          color: '#495057',
+                          color: isDarkMode ? 'var(--text-primary, #fff)' : '#495057',
                           fontSize: '13px',
                           textTransform: 'uppercase',
-                          letterSpacing: '0.5px'
+                          letterSpacing: '0.5px',
+                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa',
+                          boxShadow: '0 1px 0 0 #dee2e6'
                         }}
                       >
                         {getColumnHeaderLabel(col)}

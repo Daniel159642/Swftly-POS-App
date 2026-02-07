@@ -22,12 +22,22 @@ import {
   MapPin,
   DollarSign
 } from 'lucide-react'
-import { Document, Page, pdfjs } from 'react-pdf'
-import 'react-pdf/dist/Page/AnnotationLayer.css'
-import 'react-pdf/dist/Page/TextLayer.css'
-
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 import accountService from '../services/accountService'
+
+const ACCOUNTING_SETTINGS_LOCAL_KEY = 'pos_accounting_settings_local'
+function getAccountingSettingsFromLocal() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(ACCOUNTING_SETTINGS_LOCAL_KEY) : null
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+function persistAccountingSettingsLocal(partial) {
+  try {
+    const existing = getAccountingSettingsFromLocal() || {}
+    const next = { ...existing, ...partial }
+    if (typeof localStorage !== 'undefined') localStorage.setItem(ACCOUNTING_SETTINGS_LOCAL_KEY, JSON.stringify(next))
+  } catch (e) { console.warn('[Accounting] persist local error', e) }
+}
 import transactionService from '../services/transactionService'
 import AccountTable from '../components/accounts/AccountTable'
 import AccountForm from '../components/accounts/AccountForm'
@@ -57,6 +67,7 @@ import Input from '../components/common/Input'
 import CustomDropdown from '../components/common/CustomDropdown'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import { useToast } from '../contexts/ToastContext'
+import AccountingDirectoryTab from './AccountingDirectoryTab'
 import {
   formTitleStyle,
   formLabelStyle,
@@ -161,7 +172,13 @@ function Accounting() {
   ]
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
+    <div style={{
+      display: 'flex',
+      width: '100%',
+      ...(['dashboard', 'chart-of-accounts', 'transactions', 'bills', 'customers', 'vendors', 'invoices', 'general-ledger', 'financial-statements'].includes(activeTab)
+        ? { height: '100%', minHeight: 0, overflow: 'hidden' }
+        : { minHeight: '100vh' })
+    }}>
       {/* Sidebar Navigation - same as Profile */}
       <div style={{
         position: 'fixed',
@@ -290,19 +307,25 @@ function Accounting() {
         padding: '48px 64px 64px 64px',
         backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
         maxWidth: sidebarMinimized ? 'none' : '1200px',
-        transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+        transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+        ...(['dashboard', 'chart-of-accounts', 'transactions', 'bills', 'customers', 'vendors', 'invoices', 'general-ledger', 'financial-statements'].includes(activeTab) ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' } : {})
       }}>
         {/* Error Display */}
         {error && (
-          <div style={{ padding: '16px', marginBottom: '20px', backgroundColor: isDarkMode ? '#4a1a1a' : '#fee', border: `1px solid ${isDarkMode ? '#6a2a2a' : '#fcc'}`, borderRadius: '8px', color: isDarkMode ? '#ff6b6b' : '#c33', ...formFieldContainerStyle }}>
+          <div style={{ padding: '16px', marginBottom: '20px', backgroundColor: isDarkMode ? '#4a1a1a' : '#fee', border: `1px solid ${isDarkMode ? '#6a2a2a' : '#fcc'}`, borderRadius: '8px', color: isDarkMode ? '#ff6b6b' : '#c33', ...formFieldContainerStyle, ...(['dashboard', 'chart-of-accounts', 'transactions', 'bills', 'customers', 'vendors', 'invoices', 'general-ledger', 'financial-statements'].includes(activeTab) ? { flexShrink: 0 } : {}) }}>
             Error: {error}
           </div>
         )}
 
         {/* Tab Content */}
-        {activeTab === 'dashboard' && <DashboardTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} onDirectoryRefresh={directoryRefreshRef} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />}
+        {activeTab === 'dashboard' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <AccountingDirectoryTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} onDirectoryRefresh={directoryRefreshRef} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />
+          </div>
+        )}
         {activeTab === 'settings' && <SettingsTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />}
         {activeTab === 'chart-of-accounts' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <ChartOfAccountsTab
             formatCurrency={formatCurrency}
             getAuthHeaders={getAuthHeaders}
@@ -314,9 +337,15 @@ function Accounting() {
               setActiveTab('general-ledger')
             }}
           />
+          </div>
         )}
-        {activeTab === 'transactions' && <TransactionsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />}
+        {activeTab === 'transactions' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <TransactionsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />
+          </div>
+        )}
         {activeTab === 'general-ledger' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <GeneralLedgerTab
             dateRange={dateRange}
             formatCurrency={formatCurrency}
@@ -326,6 +355,7 @@ function Accounting() {
             accountIdForLedgerModal={accountIdForLedgerModal}
             onCloseAccountLedgerModal={() => setAccountIdForLedgerModal(null)}
           />
+          </div>
         )}
         {activeTab === 'account-ledger' && (
           <AccountLedgerTab
@@ -339,836 +369,39 @@ function Accounting() {
           />
         )}
         {activeTab === 'financial-statements' && (
-          <FinancialStatementsTab
-            dateRange={dateRange}
-            formatCurrency={formatCurrency}
-            getAuthHeaders={getAuthHeaders}
-            setActiveTab={setActiveTab}
-            themeColorRgb={themeColorRgb}
-            isDarkMode={isDarkMode}
-            directoryRefreshRef={directoryRefreshRef}
-          />
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <FinancialStatementsTab
+              dateRange={dateRange}
+              formatCurrency={formatCurrency}
+              getAuthHeaders={getAuthHeaders}
+              setActiveTab={setActiveTab}
+              themeColorRgb={themeColorRgb}
+              isDarkMode={isDarkMode}
+              directoryRefreshRef={directoryRefreshRef}
+            />
+          </div>
         )}
-        {activeTab === 'invoices' && <InvoicesTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
-        {activeTab === 'bills' && <BillsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
-        {activeTab === 'customers' && <CustomersTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
-        {activeTab === 'vendors' && <VendorsTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />}
-      </div>
-    </div>
-  )
-}
-
-// Dashboard Tab – Directory view: saved reports and shipment documents
-function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRefresh, themeColorRgb = '59, 130, 246', isDarkMode: isDarkModeProp }) {
-  const { show: showToast } = useToast()
-  const [data, setData] = useState({ saved_reports: [], shipment_documents: [] })
-  const [loading, setLoading] = useState(true)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [openMenuKey, setOpenMenuKey] = useState(null) // 'report:name' or 'shipment:id'
-  const [confirmDeleteKey, setConfirmDeleteKey] = useState(null) // 'report:name' or 'shipment:id' when showing confirm
-  const [renameReport, setRenameReport] = useState(null) // { currentName, newName } when renaming a report
-  const menuRef = useRef(null)
-  const [viewingFile, setViewingFile] = useState(null) // { type: 'report'|'shipment', name, url?, isPdf, csvText?, isExcel?, excelHtml? }
-  const [pdfNumPages, setPdfNumPages] = useState(null)
-  const [pdfZoom, setPdfZoom] = useState(100)
-  const pdfViewerRef = useRef(null)
-  const [pdfViewerWidth, setPdfViewerWidth] = useState(600)
-  const isDarkMode = isDarkModeProp ?? document.documentElement.classList.contains('dark-theme')
-  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
-  const cardBg = isDarkMode ? '#1f1f1f' : '#f9f9f9'
-  const borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#e0e0e0'
-  const borderColorLight = isDarkMode ? '#555' : '#ccc'
-  const bgPrimary = isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff'
-  const bgSecondary = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5'
-  const textSecondary = isDarkMode ? 'var(--text-secondary, #ccc)' : '#666'
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
-        setOpenMenuKey(null)
-        setConfirmDeleteKey(null)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  const loadDirectory = async () => {
-    try {
-      setLoading(true)
-      const res = await fetch('/api/accounting/directory', { headers: getAuthHeaders() })
-      const json = await res.json()
-      if (json.success && json.data) {
-        setData({
-          saved_reports: json.data.saved_reports || [],
-          shipment_documents: json.data.shipment_documents || []
-        })
-      }
-    } catch (err) {
-      console.error('Error loading directory:', err)
-      showToast('Failed to load directory', 'error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadDirectory()
-  }, [])
-  useEffect(() => {
-    if (onDirectoryRefresh) onDirectoryRefresh.current = loadDirectory
-  }, [onDirectoryRefresh, loadDirectory])
-
-  const baseUrl = window.location.origin
-
-  const closeViewer = () => {
-    if (viewingFile?.url && viewingFile.url.startsWith('blob:')) {
-      try { URL.revokeObjectURL(viewingFile.url) } catch (_) {}
-    }
-    setViewingFile(null)
-    setPdfNumPages(null)
-    setPdfZoom(100)
-  }
-
-  const viewReport = async (name) => {
-    try {
-      const res = await fetch(`${baseUrl}/api/accounting/directory/report/${encodeURIComponent(name)}`, { headers: getAuthHeaders() })
-      if (!res.ok) throw new Error(res.statusText)
-      const contentType = (res.headers.get('content-type') || '').toLowerCase()
-      const isPdf = name.toLowerCase().endsWith('.pdf') || contentType.includes('application/pdf')
-      if (isPdf) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        setViewingFile({ type: 'report', name, url, isPdf: true })
-      } else {
-        const csvText = await res.text()
-        setViewingFile({ type: 'report', name, isPdf: false, csvText })
-      }
-    } catch (err) {
-      console.error(err)
-      showToast('Failed to load report', 'error')
-    }
-  }
-
-  const viewShipment = async (id) => {
-    try {
-      const item = data.shipment_documents.find(d => d.id === id)
-      const name = item?.name || `Shipment ${id}`
-      const res = await fetch(`${baseUrl}/api/accounting/directory/shipment/${id}`, { headers: getAuthHeaders() })
-      if (!res.ok) throw new Error(res.statusText)
-      const blob = await res.blob()
-      const ext = (name.split('.').pop() || '').toLowerCase()
-      if (ext === 'pdf') {
-        const url = URL.createObjectURL(blob)
-        setViewingFile({ type: 'shipment', name, url, isPdf: true })
-        return
-      }
-      if (['xlsx', 'xls'].includes(ext)) {
-        const arrayBuffer = await blob.arrayBuffer()
-        const XLSX = await import('xlsx')
-        const data = new Uint8Array(arrayBuffer)
-        const workbook = XLSX.read(data, { type: 'array' })
-        const firstSheetName = workbook.SheetNames[0]
-        const worksheet = workbook.Sheets[firstSheetName]
-        const excelHtml = XLSX.utils.sheet_to_html(worksheet)
-        setViewingFile({ type: 'shipment', name, isPdf: false, isExcel: true, excelHtml })
-        return
-      }
-      if (ext === 'csv') {
-        const csvText = await blob.text()
-        setViewingFile({ type: 'shipment', name, isPdf: false, csvText })
-        return
-      }
-      const contentType = (res.headers.get('content-type') || '').toLowerCase()
-      if (contentType.includes('application/pdf')) {
-        const url = URL.createObjectURL(blob)
-        setViewingFile({ type: 'shipment', name, url, isPdf: true })
-      } else {
-        const csvText = await blob.text()
-        setViewingFile({ type: 'shipment', name, isPdf: false, csvText })
-      }
-    } catch (err) {
-      console.error(err)
-      showToast('Failed to load document', 'error')
-    }
-  }
-
-  // Measure PDF viewer container width (same as ShipmentVerification)
-  useEffect(() => {
-    if (!viewingFile?.isPdf) return
-    const el = pdfViewerRef.current
-    if (!el) return
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect?.width
-      if (typeof w === 'number' && w > 0) setPdfViewerWidth(w)
-    })
-    ro.observe(el)
-    setPdfViewerWidth(el.getBoundingClientRect().width || 600)
-    return () => ro.disconnect()
-  }, [viewingFile?.isPdf])
-
-  const formatDate = (iso) => {
-    if (!iso) return '—'
-    try {
-      const d = new Date(iso)
-      return isNaN(d.getTime()) ? iso : d.toLocaleString()
-    } catch {
-      return iso
-    }
-  }
-
-  const searchLower = (searchQuery || '').toLowerCase().trim()
-  const filteredReports = searchLower
-    ? data.saved_reports.filter((r) => (r.name || '').toLowerCase().includes(searchLower) || (formatDate(r.saved_at) || '').toLowerCase().includes(searchLower))
-    : data.saved_reports
-  const filteredShipments = searchLower
-    ? data.shipment_documents.filter((s) => (s.name || '').toLowerCase().includes(searchLower) || (formatDate(s.saved_at) || '').toLowerCase().includes(searchLower))
-    : data.shipment_documents
-
-  const deleteReport = async (name) => {
-    try {
-      const res = await fetch(`${baseUrl}/api/accounting/directory/report/${encodeURIComponent(name)}`, { method: 'DELETE', headers: getAuthHeaders() })
-      const json = await res.json()
-      if (!res.ok || !json.success) throw new Error(json.message || 'Failed to delete')
-      showToast('Report deleted', 'success')
-      setOpenMenuKey(null)
-      setConfirmDeleteKey(null)
-      loadDirectory()
-    } catch (err) {
-      showToast(err.message || 'Failed to delete report', 'error')
-    }
-  }
-
-  const renameReportSubmit = async () => {
-    if (!renameReport || !renameReport.newName?.trim()) return
-    const newName = renameReport.newName.trim()
-    if (newName === renameReport.currentName) {
-      setRenameReport(null)
-      return
-    }
-    try {
-      const res = await fetch(`${baseUrl}/api/accounting/directory/report/${encodeURIComponent(renameReport.currentName)}`, {
-        method: 'PATCH',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ new_name: newName })
-      })
-      const json = await res.json()
-      if (!res.ok || !json.success) throw new Error(json.message || 'Failed to rename')
-      showToast('Report renamed', 'success')
-      setRenameReport(null)
-      loadDirectory()
-    } catch (err) {
-      showToast(err.message || 'Failed to rename report', 'error')
-    }
-  }
-
-  const deleteShipment = async (id, name) => {
-    try {
-      const res = await fetch(`${baseUrl}/api/accounting/directory/shipment/${id}`, { method: 'DELETE', headers: getAuthHeaders() })
-      const json = await res.json()
-      if (!res.ok || !json.success) throw new Error(json.message || 'Failed to delete')
-      showToast('Document removed', 'success')
-      setOpenMenuKey(null)
-      setConfirmDeleteKey(null)
-      loadDirectory()
-    } catch (err) {
-      showToast(err.message || 'Failed to remove document', 'error')
-    }
-  }
-
-  const menuStyle = {
-    position: 'absolute',
-    top: '100%',
-    right: 0,
-    marginTop: '4px',
-    minWidth: '120px',
-    backgroundColor: isDarkMode ? '#2d2d2d' : '#fff',
-    border: isDarkMode ? '1px solid #333' : '1px solid #e5e7eb',
-    borderRadius: '6px',
-    boxShadow: isDarkMode ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.15)',
-    zIndex: 9999,
-    overflow: 'hidden'
-  }
-  const menuItemStyle = {
-    display: 'block',
-    width: '100%',
-    padding: '10px 14px',
-    textAlign: 'left',
-    border: 'none',
-    background: 'none',
-    color: isDarkMode ? '#fff' : '#333',
-    fontSize: '14px',
-    cursor: 'pointer',
-    transition: 'background-color 0.15s'
-  }
-
-  if (loading) {
-    return <div style={{ color: textColor, padding: '40px', textAlign: 'center' }}>Loading directory...</div>
-  }
-
-  return (
-    <div>
-      {renameReport && (
-        <Modal
-          isOpen={!!renameReport}
-          onClose={() => setRenameReport(null)}
-          title="Rename report"
-        >
-          <div style={{ padding: '8px 0' }}>
-            <label style={{ display: 'block', fontSize: '14px', color: textSecondary, marginBottom: '8px' }}>File name</label>
-            <Input
-              value={renameReport.newName}
-              onChange={(e) => setRenameReport((r) => r ? { ...r, newName: e.target.value } : null)}
-              placeholder="Report name with extension"
-              style={{ width: '100%', marginBottom: '16px' }}
-            />
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <Button variant="secondary" onClick={() => setRenameReport(null)}>Cancel</Button>
-              <Button onClick={renameReportSubmit} disabled={!renameReport.newName?.trim() || renameReport.newName.trim() === renameReport.currentName}>
-                Save
-              </Button>
-            </div>
+        {activeTab === 'invoices' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <InvoicesTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />
           </div>
-        </Modal>
-      )}
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Directory</h1>
-        <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Saved reports and shipment documents. Use <strong>Save</strong> on each report to add it here.</p>
-      </div>
-
-      <div style={{ marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center' }}>
-            <input
-              type="text"
-              placeholder="Search reports and documents..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{
-                flex: 1,
-                padding: '8px 0',
-                border: 'none',
-                borderBottom: isDarkMode ? '2px solid #404040' : '2px solid #ddd',
-                borderRadius: 0,
-                backgroundColor: 'transparent',
-                outline: 'none',
-                fontSize: '14px',
-                boxSizing: 'border-box',
-                color: isDarkMode ? '#fff' : '#333',
-                transition: 'border-color 0.2s ease'
-              }}
-              onFocus={(e) => {
-                e.target.style.borderBottomColor = `rgba(${themeColorRgb}, 0.7)`
-              }}
-              onBlur={(e) => {
-                e.target.style.borderBottomColor = isDarkMode ? '#404040' : '#ddd'
-              }}
-            />
+        )}
+        {activeTab === 'bills' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <BillsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />
           </div>
-        </div>
-      </div>
-
-      <div style={{ marginBottom: '32px' }}>
-        <h4 style={{ color: textColor, marginBottom: '12px', fontSize: '16px', fontWeight: 600 }}>Saved Reports</h4>
-        <div
-          style={{
-            backgroundColor: isDarkMode ? '#2a2a2a' : 'white',
-            borderRadius: '8px',
-            boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-            overflow: 'visible'
-          }}
-        >
-          <div style={{ padding: '16px 24px', borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-            <p style={{ fontSize: '14px', color: textSecondary, margin: 0 }}>Showing {filteredReports.length} of {data.saved_reports.length} reports</p>
+        )}
+        {activeTab === 'customers' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <CustomersTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />
           </div>
-          {filteredReports.length === 0 ? (
-            <div style={{ padding: '24px', color: textColor, opacity: 0.7 }}>No saved reports yet. Generate a report (Trial Balance, P&amp;L, Balance Sheet, Cash Flow) and click <strong>Save</strong> to add it here.</div>
-          ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                <thead>
-                <tr style={{ borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9fafb' }}>
-                  <th style={{ textAlign: 'left', padding: '12px 24px', fontSize: '12px', fontWeight: 500, color: textSecondary, textTransform: 'uppercase' }}>Name</th>
-                  <th style={{ textAlign: 'left', padding: '12px 24px', fontSize: '12px', fontWeight: 500, color: textSecondary, textTransform: 'uppercase' }}>Saved</th>
-                  <th style={{ textAlign: 'right', padding: '12px 24px', fontSize: '12px', fontWeight: 500, color: textSecondary, textTransform: 'uppercase' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                {filteredReports.map((item) => (
-                  <tr key={item.name} style={{ borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}` }}>
-                    <td style={{ padding: '12px 24px', color: isDarkMode ? '#e5e7eb' : '#111', fontWeight: 500 }}>{item.name}</td>
-                    <td style={{ padding: '12px 24px', color: textSecondary }}>{formatDate(item.saved_at)}</td>
-                    <td style={{ padding: '12px 24px', textAlign: 'right' }}>
-                      <div ref={(openMenuKey === ('report:' + item.name) || confirmDeleteKey === ('report:' + item.name)) ? menuRef : null} style={{ position: 'relative', display: 'inline-block' }}>
-                        <button
-                          type="button"
-                          onClick={() => { setOpenMenuKey((k) => (k === 'report:' + item.name ? null : 'report:' + item.name)); setConfirmDeleteKey(null) }}
-                          aria-label="Actions"
-                          style={{
-                            padding: '4px 8px',
-                            backgroundColor: openMenuKey === 'report:' + item.name ? (isDarkMode ? '#3a3a3a' : '#eee') : 'transparent',
-                            color: textSecondary,
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '18px',
-                            lineHeight: 1
-                          }}
-                          onMouseEnter={(e) => { if (openMenuKey !== 'report:' + item.name) { e.target.style.color = textColor; e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#eee' } }}
-                          onMouseLeave={(e) => { if (openMenuKey !== 'report:' + item.name) { e.target.style.color = textSecondary; e.target.style.backgroundColor = 'transparent' } }}
-                        >
-                          ⋮
-                        </button>
-                        {openMenuKey === 'report:' + item.name && !confirmDeleteKey && (
-                          <div role="menu" style={menuStyle}>
-                            <button
-                              role="menuitem"
-                              type="button"
-                              style={menuItemStyle}
-                              onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }}
-                              onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }}
-                              onClick={() => { viewReport(item.name); setOpenMenuKey(null) }}
-                            >
-                              View
-                            </button>
-                            <button
-                              role="menuitem"
-                              type="button"
-                              style={menuItemStyle}
-                              onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }}
-                              onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }}
-                              onClick={() => { setOpenMenuKey(null); setRenameReport({ currentName: item.name, newName: item.name }) }}
-                            >
-                              Rename
-                            </button>
-                            <button
-                              role="menuitem"
-                              type="button"
-                              style={menuItemStyle}
-                              onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }}
-                              onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }}
-                              onClick={() => { setOpenMenuKey(null); setConfirmDeleteKey('report:' + item.name) }}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                        {confirmDeleteKey === 'report:' + item.name && (
-                          <div role="dialog" aria-label="Confirm delete" style={{ ...menuStyle, minWidth: '200px', padding: '12px 14px' }}>
-                            <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: textColor }}>Delete &quot;{item.name}&quot;?</p>
-                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteKey(null)}
-                                style={{
-                                  padding: '6px 12px',
-                                  fontSize: '13px',
-                                  borderRadius: '6px',
-                                  border: `1px solid ${borderColorLight}`,
-                                  background: bgPrimary,
-                                  color: textColor,
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteReport(item.name)}
-                                style={{
-                                  padding: '6px 12px',
-                                  fontSize: '13px',
-                                  borderRadius: '6px',
-                                  border: 'none',
-                                  background: isDarkMode ? '#dc2626' : '#ef4444',
-                                  color: '#fff',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-          )}
-        </div>
-      </div>
-
-      <div>
-        <h4 style={{ color: textColor, marginBottom: '12px', fontSize: '16px', fontWeight: 600 }}>Shipment Documents (uploaded)</h4>
-        <div
-          style={{
-            backgroundColor: isDarkMode ? '#2a2a2a' : 'white',
-            borderRadius: '8px',
-            boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-            overflow: 'visible'
-          }}
-        >
-          <div style={{ padding: '16px 24px', borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-            <p style={{ fontSize: '14px', color: textSecondary, margin: 0 }}>Showing {filteredShipments.length} of {data.shipment_documents.length} documents</p>
+        )}
+        {activeTab === 'vendors' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <VendorsTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />
           </div>
-          {filteredShipments.length === 0 ? (
-            <div style={{ padding: '24px', color: textColor, opacity: 0.7 }}>No shipment documents yet. Documents uploaded when creating or previewing a shipment will appear here.</div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9fafb' }}>
-                  <th style={{ textAlign: 'left', padding: '12px 24px', fontSize: '12px', fontWeight: 500, color: textSecondary, textTransform: 'uppercase' }}>Name</th>
-                  <th style={{ textAlign: 'left', padding: '12px 24px', fontSize: '12px', fontWeight: 500, color: textSecondary, textTransform: 'uppercase' }}>Uploaded</th>
-                  <th style={{ textAlign: 'right', padding: '12px 24px', fontSize: '12px', fontWeight: 500, color: textSecondary, textTransform: 'uppercase' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredShipments.map((item) => (
-                  <tr key={'s-' + item.id} style={{ borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}` }}>
-                    <td style={{ padding: '12px 24px', color: isDarkMode ? '#e5e7eb' : '#111', fontWeight: 500 }}>{item.name}</td>
-                    <td style={{ padding: '12px 24px', color: textSecondary }}>{formatDate(item.saved_at)}</td>
-                    <td style={{ padding: '12px 24px', textAlign: 'right' }}>
-                      <div ref={(openMenuKey === ('shipment:' + item.id) || confirmDeleteKey === ('shipment:' + item.id)) ? menuRef : null} style={{ position: 'relative', display: 'inline-block' }}>
-                        <button
-                          type="button"
-                          onClick={() => { setOpenMenuKey((k) => (k === 'shipment:' + item.id ? null : 'shipment:' + item.id)); setConfirmDeleteKey(null) }}
-                          aria-label="Actions"
-                          style={{
-                            padding: '4px 8px',
-                            backgroundColor: openMenuKey === 'shipment:' + item.id ? (isDarkMode ? '#3a3a3a' : '#eee') : 'transparent',
-                            color: textSecondary,
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '18px',
-                            lineHeight: 1
-                          }}
-                          onMouseEnter={(e) => { if (openMenuKey !== 'shipment:' + item.id) { e.target.style.color = textColor; e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#eee' } }}
-                          onMouseLeave={(e) => { if (openMenuKey !== 'shipment:' + item.id) { e.target.style.color = textSecondary; e.target.style.backgroundColor = 'transparent' } }}
-                        >
-                          ⋮
-                        </button>
-                        {openMenuKey === 'shipment:' + item.id && !confirmDeleteKey && (
-                          <div role="menu" style={menuStyle}>
-                            <button
-                              role="menuitem"
-                              type="button"
-                              style={menuItemStyle}
-                              onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }}
-                              onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }}
-                              onClick={() => { viewShipment(item.id); setOpenMenuKey(null) }}
-                            >
-                              View
-                            </button>
-                            <button
-                              role="menuitem"
-                              type="button"
-                              style={menuItemStyle}
-                              onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }}
-                              onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }}
-                              onClick={() => { setOpenMenuKey(null); setConfirmDeleteKey('shipment:' + item.id) }}
-                            >
-                              Delete
-                            </button>
-            </div>
-          )}
-                        {confirmDeleteKey === 'shipment:' + item.id && (
-                          <div role="dialog" aria-label="Confirm delete" style={{ ...menuStyle, minWidth: '200px', padding: '12px 14px' }}>
-                            <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: textColor }}>Delete &quot;{item.name}&quot;?</p>
-                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteKey(null)}
-                                style={{
-                                  padding: '6px 12px',
-                                  fontSize: '13px',
-                                  borderRadius: '6px',
-                                  border: `1px solid ${borderColorLight}`,
-                                  background: bgPrimary,
-                                  color: textColor,
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteShipment(item.id, item.name)}
-                                style={{
-                                  padding: '6px 12px',
-                                  fontSize: '13px',
-                                  borderRadius: '6px',
-                                  border: 'none',
-                                  background: isDarkMode ? '#dc2626' : '#ef4444',
-                                  color: '#fff',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                Delete
-                              </button>
-                            </div>
-        </div>
-      )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        )}
       </div>
-
-      {/* In-page viewer modal – same style as Shipment Verification document preview */}
-      {viewingFile && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 9999,
-            backgroundColor: isDarkMode ? 'rgba(0,0,0,0.9)' : 'rgba(0,0,0,0.85)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '24px'
-          }}
-        >
-          {(viewingFile.isExcel && viewingFile.excelHtml) && (
-            <style>{`
-              .file-preview-container .excel-preview table { width: 100%; border-collapse: collapse; font-size: 13px; }
-              .file-preview-container .excel-preview td, .file-preview-container .excel-preview th { border: 1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}; padding: 8px; text-align: left; }
-              .file-preview-container .excel-preview th { background-color: ${isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5'}; font-weight: 600; }
-              .file-preview-container .excel-preview tr:nth-child(even) { background-color: ${isDarkMode ? 'rgba(255, 255, 255, 0.02)' : '#f9f9f9'}; }
-            `}</style>
-          )}
-          <div
-            className="file-preview-container"
-            style={{
-              width: '100%',
-              maxWidth: '900px',
-              maxHeight: '90vh',
-              display: 'flex',
-              flexDirection: 'column',
-              border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
-              borderRadius: '8px',
-              overflow: 'hidden',
-              backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f9f9f9'
-            }}
-          >
-            {/* Filename header – same as Shipment Verification */}
-      <div style={{ 
-              padding: '12px 16px',
-              borderBottom: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
-              backgroundColor: bgPrimary,
-              fontWeight: 600,
-              fontSize: '14px',
-              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px'
-            }}>
-              <span>{viewingFile.name}</span>
-              <button
-                type="button"
-                onClick={closeViewer}
-                style={{
-                  padding: '6px 10px',
-                  border: `1px solid ${borderColorLight}`,
-                  borderRadius: '6px',
-                  background: bgPrimary,
-                  color: isDarkMode ? '#fff' : '#333',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '13px'
-                }}
-              >
-                <X size={16} /> Close
-              </button>
-            </div>
-            <div style={{ flex: 1, overflow: 'auto', padding: viewingFile.isPdf ? 0 : '16px' }}>
-              {viewingFile.isPdf ? (
-                <>
-                  {/* Toolbar – same as Shipment Verification */}
-                  <div style={{
-                    padding: '8px 16px',
-                    borderBottom: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#eee'}`,
-                    backgroundColor: bgSecondary,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px',
-                    flexWrap: 'wrap'
-                  }}>
-                    <span style={{ fontSize: '13px', color: textSecondary }}>
-                      {pdfNumPages != null ? `${pdfNumPages} page${pdfNumPages !== 1 ? 's' : ''}` : 'Loading…'}
-                    </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <button
-                        type="button"
-                        aria-label="Zoom out"
-                        onClick={() => setPdfZoom(z => Math.max(50, z - 25))}
-                        style={{
-                          width: '32px',
-                          height: '28px',
-                          padding: 0,
-                          border: `1px solid ${borderColorLight}`,
-                          borderRadius: '6px',
-                          background: bgPrimary,
-                          color: isDarkMode ? '#fff' : '#333',
-                          fontSize: '18px',
-                          lineHeight: 1,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        −
-                      </button>
-                      <span style={{
-                        minWidth: '52px',
-                        fontSize: '13px',
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        textAlign: 'center'
-                      }}>
-                        {pdfZoom}%
-                      </span>
-                      <button
-                        type="button"
-                        aria-label="Zoom in"
-                        onClick={() => setPdfZoom(z => Math.min(200, z + 25))}
-                        style={{
-                          width: '32px',
-                          height: '28px',
-                          padding: 0,
-                          border: `1px solid ${borderColorLight}`,
-                          borderRadius: '6px',
-                          background: bgPrimary,
-                          color: isDarkMode ? '#fff' : '#333',
-                          fontSize: '18px',
-                          lineHeight: 1,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        +
-                      </button>
-                    </div>
-                    <a
-                      href={viewingFile.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        fontSize: '13px',
-                        color: `rgba(${themeColorRgb}, 1)`,
-                        textDecoration: 'none',
-                        fontWeight: 500
-                      }}
-                      onClick={(e) => {
-                        e.preventDefault()
-                        window.open(viewingFile.url, '_blank', 'noopener')
-                      }}
-                    >
-                      Open in new tab
-                    </a>
-                  </div>
-                  {/* PDF viewer area – same as Shipment Verification */}
-                  <div
-                    ref={pdfViewerRef}
-                    style={{
-                      flex: 1,
-                      height: 'calc(90vh - 120px)',
-                      minHeight: '400px',
-                      overflow: 'auto',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      padding: '16px 0',
-                      backgroundColor: isDarkMode ? '#525252' : '#888',
-                      userSelect: 'text'
-                    }}
-                  >
-                    <Document
-                      file={viewingFile.url}
-                      onLoadSuccess={({ numPages }) => setPdfNumPages(numPages)}
-                      loading={
-                        <div style={{
-                          padding: '40px',
-                          color: isDarkMode ? '#fff' : '#333',
-                          textAlign: 'center'
-                        }}>
-                          Loading document…
-                        </div>
-                      }
-                      error={
-                        <div style={{
-                          padding: '40px',
-                          color: isDarkMode ? '#ff6b6b' : '#c62828',
-                          textAlign: 'center'
-                        }}>
-                          Failed to load PDF. Use &quot;Open in new tab&quot; to view.
-                        </div>
-                      }
-                    >
-                      {Array.from(new Array(pdfNumPages || 0), (_, i) => {
-                        const baseWidth = Math.min(pdfViewerWidth - 32, 800)
-                        const scaledWidth = baseWidth * (pdfZoom / 100)
-                        return (
-                          <Page
-                            key={i}
-                            pageNumber={i + 1}
-                            width={scaledWidth}
-                            renderTextLayer={true}
-                            renderAnnotationLayer={true}
-                            style={{
-                              marginBottom: '16px',
-                              boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
-                            }}
-                          />
-                        )
-                      })}
-                    </Document>
-                  </div>
-                </>
-              ) : viewingFile.isExcel && viewingFile.excelHtml ? (
-                <div
-                  dangerouslySetInnerHTML={{ __html: viewingFile.excelHtml }}
-                  style={{
-                    backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
-                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                  }}
-                  className="excel-preview"
-                />
-              ) : (
-                <div
-                  style={{
-                    width: '100%',
-                    backgroundColor: bgPrimary,
-        border: `1px solid ${borderColor}`,
-        borderRadius: '8px',
-                    overflow: 'auto',
-                    padding: '16px'
-                  }}
-                >
-                  <pre
-                    style={{
-                      margin: 0,
-                      fontSize: '13px',
-                      fontFamily: 'ui-monospace, monospace',
-                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-all'
-                    }}
-                  >
-                    {viewingFile.csvText || ''}
-                  </pre>
-      </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -1176,35 +409,29 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
 // Settings tab: tax by state, transaction fee rates, employee rates & weekly hours
 function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 255', isDarkMode: isDarkModeProp }) {
   const { show: showToast } = useToast()
-  const [settings, setSettings] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const local = getAccountingSettingsFromLocal()
+  const defaultEdit = { default_sales_tax_pct: '', transaction_fee_rates: {}, sales_tax_by_state: {} }
+  const defaultPos = { return_transaction_fee_take_loss: false, transaction_fee_mode: 'additional', transaction_fee_charge_cash: false, num_registers: 1, register_type: 'one_screen', return_tip_refund: false, require_signature_for_return: false }
+  const [settings, setSettings] = useState(local?.settingsRaw ?? null)
+  const [settingsLoading, setSettingsLoading] = useState(!local?.accounting)
+  const [posSettingsLoading, setPosSettingsLoading] = useState(!local?.pos)
+  const [displaySettingsLoading, setDisplaySettingsLoading] = useState(!local?.display)
+  const [employeesLoading, setEmployeesLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [edit, setEdit] = useState({
-    default_sales_tax_pct: '',
-    transaction_fee_rates: {},
-    sales_tax_by_state: {}
-  })
+  const [edit, setEdit] = useState(local?.accounting && typeof local.accounting.default_sales_tax_pct !== 'undefined' ? { ...defaultEdit, ...local.accounting } : defaultEdit)
   const [employees, setEmployees] = useState([])
   const [laborThisWeek, setLaborThisWeek] = useState({ entries: [] })
   const [employeeRateSaving, setEmployeeRateSaving] = useState(null)
   const [employeeRateEdits, setEmployeeRateEdits] = useState({})
-  const [posSettings, setPosSettings] = useState({
-    return_transaction_fee_take_loss: false,
-    transaction_fee_mode: 'additional',
-    transaction_fee_charge_cash: false,
-    num_registers: 1,
-    register_type: 'one_screen',
-    return_tip_refund: false,
-    require_signature_for_return: false
-  })
+  const [posSettings, setPosSettings] = useState(local?.pos && typeof local.pos.transaction_fee_mode === 'string' ? { ...defaultPos, ...local.pos } : defaultPos)
   const [savingPosFee, setSavingPosFee] = useState(false)
-  const [tipAllocation, setTipAllocation] = useState('logged_in_employee') // 'logged_in_employee' | 'split_all'
-  const [tipRefundFrom, setTipRefundFrom] = useState('store') // 'employee' | 'store'
-  const [tipEnabled, setTipEnabled] = useState(false)
-  const [tipAfterPayment, setTipAfterPayment] = useState(false)
-  const [tipSuggestions, setTipSuggestions] = useState([15, 18, 20])
-  const [tipCustomInCheckout, setTipCustomInCheckout] = useState(false)
-  const [requireSignature, setRequireSignature] = useState(false) // checkout signature
+  const [tipAllocation, setTipAllocation] = useState(local?.display?.tipAllocation === 'split_all' ? 'split_all' : 'logged_in_employee') // 'logged_in_employee' | 'split_all'
+  const [tipRefundFrom, setTipRefundFrom] = useState(local?.display?.tipRefundFrom === 'employee' ? 'employee' : 'store') // 'employee' | 'store'
+  const [tipEnabled, setTipEnabled] = useState(!!local?.display?.tipEnabled)
+  const [tipAfterPayment, setTipAfterPayment] = useState(!!local?.display?.tipAfterPayment)
+  const [tipSuggestions, setTipSuggestions] = useState(Array.isArray(local?.display?.tipSuggestions) && local?.display?.tipSuggestions.length ? local?.display?.tipSuggestions.slice(0, 3) : [15, 18, 20])
+  const [tipCustomInCheckout, setTipCustomInCheckout] = useState(!!local?.display?.tipCustomInCheckout)
+  const [requireSignature, setRequireSignature] = useState(!!local?.display?.requireSignature)
   const [savingTipAllocation, setSavingTipAllocation] = useState(false)
   const isDarkMode = isDarkModeProp ?? document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
@@ -1212,38 +439,65 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
 
   useEffect(() => {
-    loadSettings()
-    loadEmployeesAndLabor()
-    loadPosSettings()
-    loadDisplaySettings()
+    Promise.all([
+      loadSettings(),
+      loadEmployeesAndLabor(),
+      loadPosSettings(),
+      loadDisplaySettings()
+    ]).catch(() => {})
   }, [])
 
+  // Always persist accounting settings to localStorage on any change (user edit or API load)
+  useEffect(() => {
+    persistAccountingSettingsLocal({
+      accounting: edit,
+      settingsRaw: settings,
+      pos: posSettings,
+      display: {
+        tipAllocation,
+        tipRefundFrom,
+        tipEnabled,
+        tipAfterPayment,
+        tipSuggestions: Array.isArray(tipSuggestions) ? tipSuggestions.slice(0, 3) : [15, 18, 20],
+        tipCustomInCheckout,
+        requireSignature
+      }
+    })
+  }, [edit, settings, posSettings, tipAllocation, tipRefundFrom, tipEnabled, tipAfterPayment, tipSuggestions, tipCustomInCheckout, requireSignature])
+
   const loadDisplaySettings = async () => {
+    setDisplaySettingsLoading(true)
     try {
-      const res = await fetch('/api/customer-display/settings', { headers: getAuthHeaders() })
+      const res = await cachedFetch('/api/customer-display/settings', { headers: getAuthHeaders() })
       const json = await res.json()
       if (json.success && json.data) {
         const d = json.data
-        setTipAllocation(d.tip_allocation === 'split_all' ? 'split_all' : 'logged_in_employee')
-        setTipRefundFrom(d.tip_refund_from === 'employee' ? 'employee' : 'store')
+        const tipAlloc = d.tip_allocation === 'split_all' ? 'split_all' : 'logged_in_employee'
+        const tipRefund = d.tip_refund_from === 'employee' ? 'employee' : 'store'
+        const tips = Array.isArray(d.tip_suggestions) ? d.tip_suggestions.slice(0, 3) : [15, 18, 20]
+        setTipAllocation(tipAlloc)
+        setTipRefundFrom(tipRefund)
         setTipEnabled(d.tip_enabled === 1 || d.tip_enabled === true)
         setTipAfterPayment(d.tip_after_payment === 1 || d.tip_after_payment === true)
-        setTipSuggestions(Array.isArray(d.tip_suggestions) ? d.tip_suggestions.slice(0, 3) : [15, 18, 20])
+        setTipSuggestions(tips)
         setTipCustomInCheckout(d.tip_custom_in_checkout === 1 || d.tip_custom_in_checkout === true)
         setRequireSignature(d.signature_required === 1 || d.signature_required === true)
       }
     } catch (err) {
       console.warn('Error loading display/tip settings:', err)
+    } finally {
+      setDisplaySettingsLoading(false)
     }
   }
 
   const loadPosSettings = async () => {
+    setPosSettingsLoading(true)
     try {
-      const res = await fetch('/api/pos-settings', { headers: getAuthHeaders() })
+      const res = await cachedFetch('/api/pos-settings', { headers: getAuthHeaders() })
       const json = await res.json()
       if (json.success && json.settings) {
         const s = json.settings
-        setPosSettings({
+        const next = {
           return_transaction_fee_take_loss: !!s.return_transaction_fee_take_loss,
           transaction_fee_mode: ['additional', 'included', 'none'].includes(s.transaction_fee_mode) ? s.transaction_fee_mode : 'additional',
           transaction_fee_charge_cash: !!s.transaction_fee_charge_cash,
@@ -1251,10 +505,13 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
           register_type: s.register_type || 'one_screen',
           return_tip_refund: !!s.return_tip_refund,
           require_signature_for_return: !!s.require_signature_for_return
-        })
+        }
+        setPosSettings(next)
       }
     } catch (err) {
       console.warn('Error loading POS settings:', err)
+    } finally {
+      setPosSettingsLoading(false)
     }
   }
 
@@ -1346,27 +603,29 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
   }
 
   const loadSettings = async () => {
+    setSettingsLoading(true)
     try {
-      setLoading(true)
       const res = await cachedFetch('/api/accounting/settings', { headers: getAuthHeaders() })
       const json = await res.json()
       if (json.success && json.data) {
         const d = json.data
-        setSettings(d)
-        setEdit({
+        const nextEdit = {
           default_sales_tax_pct: String(d.default_sales_tax_pct ?? 8),
           transaction_fee_rates: { ...(d.transaction_fee_rates || {}) },
           sales_tax_by_state: d.sales_tax_by_state && typeof d.sales_tax_by_state === 'object' ? { ...d.sales_tax_by_state } : {}
-        })
+        }
+        setSettings(d)
+        setEdit(nextEdit)
       }
     } catch (err) {
       console.error('Error loading settings:', err)
     } finally {
-      setLoading(false)
+      setSettingsLoading(false)
     }
   }
 
   const loadEmployeesAndLabor = async () => {
+    setEmployeesLoading(true)
     try {
       const now = new Date()
       const day = now.getDay()
@@ -1393,6 +652,8 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
       }
     } catch (err) {
       console.warn('Error loading employees/labor:', err)
+    } finally {
+      setEmployeesLoading(false)
     }
   }
 
@@ -1406,7 +667,14 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
       })
       const json = await res.json()
       if (json.success) {
-        if (json.data) setSettings(json.data)
+        if (json.data) {
+          setSettings(json.data)
+          setEdit({
+            default_sales_tax_pct: String(json.data.default_sales_tax_pct ?? 8),
+            transaction_fee_rates: { ...(json.data.transaction_fee_rates || {}) },
+            sales_tax_by_state: json.data.sales_tax_by_state && typeof json.data.sales_tax_by_state === 'object' ? { ...json.data.sales_tax_by_state } : {}
+          })
+        }
         showToast('Settings saved.', 'success')
         return true
       }
@@ -1452,14 +720,12 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
     }))
   }
 
-  if (loading) return <div style={{ color: textColor, padding: '40px', textAlign: 'center' }}>Loading settings...</div>
-
   const rates = edit.transaction_fee_rates || {}
   const feeMethods = ['credit_card', 'debit_card', 'mobile_payment', 'cash', 'check', 'store_credit']
   const cardStyle = { padding: '20px', backgroundColor: cardBg, border: `1px solid ${borderColor}`, borderRadius: '12px' }
 
   return (
-    <div style={{ maxWidth: '720px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div style={{ maxWidth: '720px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Tax by state */}
       <div style={cardStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
@@ -1469,21 +735,27 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
         <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginBottom: '12px' }}>
           Default tax is used when no state-specific rate is set. Add state codes (e.g. CA, NY) and tax % for each.
         </p>
-        <FormField>
-          <FormLabel isDarkMode={isDarkMode}>Default sales tax (%)</FormLabel>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={0.01}
-            value={edit.default_sales_tax_pct}
-            onChange={e => setEdit(prev => ({ ...prev, default_sales_tax_pct: e.target.value }))}
-            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-            style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '120px' }}
-          />
-        </FormField>
-        <div style={{ marginBottom: '8px', fontWeight: 600, fontSize: '13px', color: textColor }}>State overrides</div>
-        {Object.entries(edit.sales_tax_by_state || {}).map(([stateCode, pct]) => (
+        <div className={settingsLoading ? 'settings-field-loading' : ''} style={{ opacity: settingsLoading ? 0.7 : 1 }}>
+          <FormField>
+            <FormLabel isDarkMode={isDarkMode}>Default sales tax (%)</FormLabel>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              value={edit.default_sales_tax_pct}
+              placeholder={settingsLoading ? 'Loading…' : ''}
+              onChange={e => setEdit(prev => ({ ...prev, default_sales_tax_pct: e.target.value }))}
+              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+              style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '120px' }}
+              disabled={settingsLoading}
+            />
+          </FormField>
+          <div style={{ marginBottom: '8px', fontWeight: 600, fontSize: '13px', color: textColor }}>State overrides</div>
+          {settingsLoading && Object.keys(edit.sales_tax_by_state || {}).length === 0 ? (
+            <div style={{ padding: '8px 0', color: textColor, opacity: 0.6, fontSize: '13px' }}>Loading…</div>
+          ) : null}
+          {Object.entries(edit.sales_tax_by_state || {}).map(([stateCode, pct]) => (
           <div key={stateCode} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
             <input
               type="text"
@@ -1513,39 +785,39 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
             >
               Remove
             </button>
-        </div>
+          </div>
         ))}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
-          <button
-            type="button"
-            onClick={() => {
-              const code = prompt('State code (2 letters, e.g. CA)')
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
+            <button
+              type="button"
+              disabled={settingsLoading}
+              onClick={() => {
+                const code = prompt('State code (2 letters, e.g. CA)')
               if (code && code.trim().length === 2) {
                 const upper = code.trim().toUpperCase()
                 setEdit(prev => ({ ...prev, sales_tax_by_state: { ...prev.sales_tax_by_state, [upper]: 0 } }))
               }
             }}
-            style={{ padding: '8px 14px', border: `1px solid ${borderColor}`, borderRadius: '8px', background: 'transparent', color: textColor, cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
-          >
-            + Add state
-          </button>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={async () => {
-              const ok = await saveAccountingSettings({
-                default_sales_tax_pct: parseFloat(edit.default_sales_tax_pct) || 0,
-                sales_tax_by_state: edit.sales_tax_by_state || {}
-              })
-              if (ok) loadSettings()
-            }}
-            style={{
-              padding: '8px 16px', border: 'none', borderRadius: '8px', background: `rgba(${themeColorRgb}, 0.9)`, color: '#fff',
-              cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600
-            }}
-          >
-            {saving ? 'Saving...' : 'Save tax settings'}
-          </button>
+              style={{ padding: '8px 14px', marginRight: 'auto', border: `1px solid ${borderColor}`, borderRadius: '8px', background: 'transparent', color: textColor, cursor: settingsLoading ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 500, opacity: settingsLoading ? 0.6 : 1 }}
+            >
+              + Add state
+            </button>
+            <Button
+              variant="primary"
+              disabled={saving || settingsLoading}
+              onClick={async () => {
+                const ok = await saveAccountingSettings({
+                  default_sales_tax_pct: parseFloat(edit.default_sales_tax_pct) || 0,
+                  sales_tax_by_state: edit.sales_tax_by_state || {}
+                })
+                if (ok) loadSettings()
+              }}
+              themeColorRgb={themeColorRgb}
+              isDarkMode={isDarkMode}
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -1559,7 +831,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
         <FormTitle isDarkMode={isDarkMode} style={{ marginTop: '4px', marginBottom: '8px', fontSize: '14px', fontWeight: 600 }}>
           Transaction fee settings
         </FormTitle>
-        <div style={{ marginTop: '2px', marginBottom: '16px', borderLeft: `3px solid ${borderColor}`, paddingLeft: '12px' }}>
+        <div className={posSettingsLoading ? 'settings-field-loading' : ''} style={{ marginTop: '2px', marginBottom: '16px', borderLeft: `3px solid ${borderColor}`, paddingLeft: '12px', opacity: posSettingsLoading ? 0.7 : 1, pointerEvents: posSettingsLoading ? 'none' : 'auto' }}>
           <div style={{ fontSize: '13px', fontWeight: 600, color: textColor, opacity: 0.85, marginBottom: '8px' }}>Returns</div>
           <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
             <input
@@ -1615,17 +887,17 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
             </label>
           )}
         </div>
-        <button
-          type="button"
-          disabled={savingPosFee}
-          onClick={savePosTransactionFeeSettings}
-          style={{
-            padding: '8px 16px', marginBottom: '16px', border: 'none', borderRadius: '8px', background: `rgba(${themeColorRgb}, 0.9)`, color: '#fff',
-            cursor: savingPosFee ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600
-          }}
-        >
-          {savingPosFee ? 'Saving...' : 'Save transaction fee settings'}
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+          <Button
+            variant="primary"
+            disabled={savingPosFee}
+            onClick={savePosTransactionFeeSettings}
+            themeColorRgb={themeColorRgb}
+            isDarkMode={isDarkMode}
+          >
+            {savingPosFee ? 'Saving...' : 'Save'}
+          </Button>
+        </div>
 
         <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 600 }}>
           Fee rates by payment method
@@ -1633,6 +905,10 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
         <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginBottom: '12px' }}>
           Fee rate per payment method (as decimal, e.g. 0.029 = 2.9%). Cash/check/store credit typically 0.
         </p>
+        <div className={settingsLoading ? 'settings-field-loading' : ''} style={{ opacity: settingsLoading ? 0.7 : 1, pointerEvents: settingsLoading ? 'none' : 'auto' }}>
+          {settingsLoading ? (
+            <div style={{ padding: '12px 0', color: textColor, opacity: 0.6, fontSize: '13px' }}>Loading…</div>
+          ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
             {feeMethods.map(method => (
               <div key={method} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1650,20 +926,22 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
               </div>
             ))}
           </div>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={async () => {
-            const ok = await saveAccountingSettings({ transaction_fee_rates: edit.transaction_fee_rates })
-            if (ok) loadSettings()
-          }}
-          style={{
-            padding: '8px 16px', marginTop: '12px', border: 'none', borderRadius: '8px', background: `rgba(${themeColorRgb}, 0.9)`, color: '#fff',
-            cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600
-          }}
-        >
-          {saving ? 'Saving...' : 'Save transaction fees'}
-        </button>
+          )}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+          <Button
+            variant="primary"
+            disabled={saving || settingsLoading}
+            onClick={async () => {
+              const ok = await saveAccountingSettings({ transaction_fee_rates: edit.transaction_fee_rates })
+              if (ok) loadSettings()
+            }}
+            themeColorRgb={themeColorRgb}
+            isDarkMode={isDarkMode}
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </Button>
+        </div>
         </div>
 
       {/* Tips settings */}
@@ -1673,7 +951,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
           <span style={{ fontWeight: 600, fontSize: '15px', color: textColor }}>Tips settings</span>
         </div>
 
-        <div style={{ borderLeft: `3px solid ${borderColor}`, paddingLeft: '12px', marginBottom: '16px' }}>
+        <div className={(displaySettingsLoading || posSettingsLoading) ? 'settings-field-loading' : ''} style={{ borderLeft: `3px solid ${borderColor}`, paddingLeft: '12px', marginBottom: '16px', opacity: (displaySettingsLoading || posSettingsLoading) ? 0.7 : 1, pointerEvents: (displaySettingsLoading || posSettingsLoading) ? 'none' : 'auto' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
             <input
               type="checkbox"
@@ -1766,17 +1044,17 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
             <span style={{ fontSize: '14px', fontWeight: 500, color: textColor }}>Require signature</span>
           </label>
         </div>
-        <button
-          type="button"
-          disabled={savingTipAllocation}
-          onClick={saveTipsSettings}
-          style={{
-            padding: '8px 16px', border: 'none', borderRadius: '8px', background: `rgba(${themeColorRgb}, 0.9)`, color: '#fff',
-            cursor: savingTipAllocation ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600
-          }}
-        >
-          {savingTipAllocation ? 'Saving...' : 'Save tips settings'}
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+          <Button
+            variant="primary"
+            disabled={savingTipAllocation}
+            onClick={saveTipsSettings}
+            themeColorRgb={themeColorRgb}
+            isDarkMode={isDarkMode}
+          >
+            {savingTipAllocation ? 'Saving...' : 'Save'}
+          </Button>
+        </div>
       </div>
 
       {/* Employee rates & weekly hours */}
@@ -1788,7 +1066,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
         <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginBottom: '12px' }}>
           View and edit hourly rates. Hours shown are for the current week (Mon–Sun).
         </p>
-        <div style={{ overflowX: 'auto' }}>
+        <div className={employeesLoading ? 'settings-field-loading' : ''} style={{ overflowX: 'auto', opacity: employeesLoading ? 0.7 : 1, pointerEvents: employeesLoading ? 'none' : 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
             <thead>
               <tr style={{ borderBottom: `2px solid ${borderColor}` }}>
@@ -1799,7 +1077,11 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
               </tr>
             </thead>
             <tbody>
-              {employees.map(emp => {
+              {employeesLoading && employees.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ padding: '24px', textAlign: 'center', color: textColor, opacity: 0.7, fontSize: '13px' }}>Loading…</td>
+                </tr>
+              ) : employees.map(emp => {
                 const laborEntry = laborThisWeek.entries.find(e => e.employee_id === emp.employee_id)
                 const hours = laborEntry?.hours ?? 0
                 const rateEdit = employeeRateEdits[emp.employee_id]
@@ -1843,7 +1125,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
             </tbody>
           </table>
         </div>
-        {employees.length === 0 && (
+        {employees.length === 0 && !employeesLoading && (
           <div style={{ padding: '16px', textAlign: 'center', color: textColor, opacity: 0.8, fontSize: '14px' }}>
             No employees. Add employees in Admin to set rates.
           </div>
@@ -2000,18 +1282,14 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
     setFilters({})
   }
 
-  if (loading) {
-    return <LoadingSpinner size="lg" text="Loading accounts..." />
-  }
-
   return (
-    <div>
-      <div style={{ marginBottom: '24px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ marginBottom: '24px', flexShrink: 0 }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Chart of Accounts</h1>
         <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Your chart of accounts lists all ledger accounts (assets, liabilities, equity, revenue, expenses). Organize accounts, track balances, and run reports from here.</p>
       </div>
 
-      <div style={{ marginBottom: '20px' }}>
+      <div style={{ marginBottom: '20px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center' }}>
             <input
@@ -2076,37 +1354,47 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
         </div>
       </div>
 
-      <AccountFilters
-        filters={filters}
-        onFilterChange={setFilters}
-        onClearFilters={handleClearFilters}
-      />
+      <div style={{ flexShrink: 0 }}>
+        <AccountFilters
+          filters={filters}
+          onFilterChange={setFilters}
+          onClearFilters={handleClearFilters}
+        />
+      </div>
 
       <div
         style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
           backgroundColor: _isDark ? '#2a2a2a' : 'white',
-        borderRadius: '8px',
+          borderRadius: '8px',
           boxShadow: _isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-        overflow: 'hidden'
+          border: _isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.06)',
+          overflow: 'hidden'
         }}
       >
         <div
           style={{
-          padding: '16px 24px',
+            padding: '16px 24px',
             borderBottom: '1px solid ' + (_isDark ? '#3a3a3a' : '#e5e7eb'),
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: '16px'
+            gap: '16px',
+            flexShrink: 0
           }}
         >
           <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>
             Showing {filteredAccounts.length} of {accounts.length} accounts
           </p>
         </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
           <AccountTable
             accounts={filteredAccounts}
+            loading={loading}
             onEdit={(account) => {
               setSelectedAccount(account)
               setIsEditModalOpen(true)
@@ -2119,6 +1407,7 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
               setActiveTab('account-ledger')
             }}
           />
+        </div>
       </div>
 
       {/* Create Account Modal */}
@@ -2311,18 +1600,14 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
     setFilters({ ...filters, page: newPage })
   }
 
-  if (loading && transactions.length === 0) {
-    return <LoadingSpinner size="lg" text="Loading transactions..." />
-  }
-
   return (
-    <div>
-      <div style={{ marginBottom: '24px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ marginBottom: '24px', flexShrink: 0 }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Transactions</h1>
         <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Record and manage journal entries</p>
         </div>
 
-      <div style={{ marginBottom: '20px' }}>
+      <div style={{ marginBottom: '20px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center' }}>
             <input
@@ -2387,29 +1672,37 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
         </div>
       </div>
 
-      <TransactionFilters
-        filters={filters}
-        onFilterChange={setFilters}
-        onClearFilters={handleClearFilters}
-      />
+      <div style={{ flexShrink: 0 }}>
+        <TransactionFilters
+          filters={filters}
+          onFilterChange={setFilters}
+          onClearFilters={handleClearFilters}
+        />
+      </div>
 
       <div
         style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
           backgroundColor: _isDark ? '#2a2a2a' : 'white',
-        borderRadius: '8px', 
+          borderRadius: '8px', 
           boxShadow: _isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+          border: _isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.06)',
           overflow: 'hidden'
         }}
       >
         <div
           style={{
-          padding: '16px 24px', 
+            padding: '16px 24px', 
             borderBottom: '1px solid ' + (_isDark ? '#3a3a3a' : '#e5e7eb'),
-          display: 'flex', 
-          justifyContent: 'space-between', 
+            display: 'flex', 
+            justifyContent: 'space-between', 
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: '16px'
+            gap: '16px',
+            flexShrink: 0
           }}
         >
           <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>
@@ -2442,8 +1735,10 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
           </div>
         </div>
         
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
         <TransactionTable
           transactions={transactions}
+          loading={loading}
           onView={(transaction) => {
             setSelectedTransaction(transaction)
             setIsViewModalOpen(true)
@@ -2457,6 +1752,7 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
           onUnpost={handleUnpostTransaction}
           onVoid={handleVoidTransaction}
         />
+        </div>
       </div>
 
       {/* Create Transaction Modal */}
@@ -2614,20 +1910,17 @@ function InvoicesTab({ dateRange, formatCurrency, getAuthHeaders }) {
     }
   }
 
-  if (loading) {
-    return <div style={{ color: textColor, padding: '20px' }}>Loading invoices...</div>
-  }
-
   return (
-    <div>
-      <div style={{ marginBottom: '24px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ marginBottom: '24px', flexShrink: 0 }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Invoices</h1>
         <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Sales you&apos;ve sent to customers for the selected date range. Track amounts owed and payment status.</p>
         </div>
-        <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9', boxShadow: isDarkMode ? '0 1px 0 #3a3a3a' : '0 1px 0 #e0e0e0' }}>
+              <tr>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Invoice #</th>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Date</th>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Customer</th>
@@ -2637,7 +1930,13 @@ function InvoicesTab({ dateRange, formatCurrency, getAuthHeaders }) {
               </tr>
             </thead>
             <tbody>
-            {invoices.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
+                  Loading…
+                </td>
+              </tr>
+            ) : invoices.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
                   No invoices found for this period.
@@ -2667,6 +1966,7 @@ function InvoicesTab({ dateRange, formatCurrency, getAuthHeaders }) {
             )}
             </tbody>
           </table>
+          </div>
         </div>
     </div>
   )
@@ -2871,64 +2171,75 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
   const totalCredits = entries.reduce((sum, e) => sum + (parseFloat(e.credit_amount) || 0), 0)
 
   return (
-    <div>
-      <div style={{ marginBottom: '24px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div style={{ flexShrink: 0, marginBottom: '24px' }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Ledger</h1>
         <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>View all posted accounting transactions</p>
       </div>
 
-      <GeneralLedgerFilters
-        filters={filters}
-        accounts={accounts}
-        onFilterChange={setFilters}
-        onClearFilters={handleClearFilters}
-        onExport={handleExport}
-        onExportExcel={handleExportExcel}
-        onExportPdf={handleExportPdf}
-        loading={loading}
-      />
+      <div style={{ flexShrink: 0 }}>
+        <GeneralLedgerFilters
+          filters={filters}
+          accounts={accounts}
+          onFilterChange={setFilters}
+          onClearFilters={handleClearFilters}
+          onExport={handleExport}
+          onExportExcel={handleExportExcel}
+          onExportPdf={handleExportPdf}
+          loading={loading}
+        />
+      </div>
 
-      {loading ? (
-        <LoadingSpinner size="lg" text="Loading ledger entries..." />
-      ) : (
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          backgroundColor: _isDark ? '#2a2a2a' : 'white',
+          borderRadius: '8px',
+          boxShadow: _isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+          border: _isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.06)'
+        }}
+      >
         <div
           style={{
-            backgroundColor: _isDark ? '#2a2a2a' : 'white',
-            borderRadius: '8px',
-            boxShadow: _isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-            overflow: 'hidden'
+            padding: '16px 24px',
+            borderBottom: '1px solid ' + (_isDark ? '#3a3a3a' : '#e5e7eb'),
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '16px',
+            flexShrink: 0
           }}
         >
-          <div
-            style={{
-              padding: '16px 24px',
-              borderBottom: '1px solid ' + (_isDark ? '#3a3a3a' : '#e5e7eb'),
-            display: 'flex', 
-            justifyContent: 'space-between', 
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '16px'
-            }}
-          >
-            <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>
-              Showing {entries.length} entries
-              {filters.account_id ? ` for ${getSelectedAccountName()}` : ''}
-              {filters.start_date && filters.end_date && ` · ${new Date(filters.start_date).toLocaleDateString()} – ${new Date(filters.end_date).toLocaleDateString()}`}
-            </p>
-            {entries.length > 0 && (
-              <span style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280' }}>
-                Debits: ${totalDebits.toFixed(2)} · Credits: ${totalCredits.toFixed(2)}
-                </span>
-            )}
-          </div>
+          <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>
+            {loading ? 'Loading...' : `Showing ${entries.length} entries`}
+            {!loading && filters.account_id ? ` for ${getSelectedAccountName()}` : ''}
+            {!loading && filters.start_date && filters.end_date && ` · ${new Date(filters.start_date).toLocaleDateString()} – ${new Date(filters.end_date).toLocaleDateString()}`}
+          </p>
+          {!loading && entries.length > 0 && (
+            <span style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280' }}>
+              Debits: ${totalDebits.toFixed(2)} · Credits: ${totalCredits.toFixed(2)}
+            </span>
+          )}
+        </div>
 
+        {loading ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px' }}>
+            <LoadingSpinner size="lg" text="Loading ledger entries..." />
+          </div>
+        ) : (
           <GeneralLedgerTable
             entries={entries}
             showRunningBalance={false}
             onViewTransaction={handleViewTransaction}
+            fixedHeader
           />
-        </div>
-      )}
+        )}
+      </div>
 
       {/* View Transaction Modal */}
       <Modal
@@ -3434,79 +2745,83 @@ function FinancialStatementsTab({ dateRange, formatCurrency, getAuthHeaders, set
   }
 
   return (
-    <div>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Financial Statements</h1>
-        <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Profit & Loss, Balance Sheet, Cash Flow, Trial Balance</p>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div style={{ flexShrink: 0 }}>
+        <div style={{ marginBottom: '24px' }}>
+          <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Financial Statements</h1>
+          <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Profit & Loss, Balance Sheet, Cash Flow, Trial Balance</p>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+          <CustomDropdown
+            value={reportType}
+            onChange={(e) => setReportType(e.target.value)}
+            options={[
+              { value: 'profit-loss', label: 'Income Statement' },
+              { value: 'balance-sheet', label: 'Balance Sheet' },
+              { value: 'cash-flow', label: 'Cash Flow Statement' },
+              { value: 'trial-balance', label: 'Trial Balance' }
+            ]}
+            placeholder="Report type"
+            isDarkMode={isDarkMode}
+            themeColorRgb={themeColorRgb || '132, 0, 255'}
+            triggerVariant="button"
+            triggerFullWidth
+            style={{ marginBottom: 0, flex: 1, minWidth: 0 }}
+          />
+          <Button
+            type="button"
+            onClick={() => generateReportRef.current?.generateReport()}
+            disabled={generateButtonState.loading || generateButtonState.disabled}
+            themeColorRgb={themeColorRgb}
+            isDarkMode={isDarkMode}
+          >
+            {generateButtonState.loading ? 'Generating...' : 'Generate Report'}
+          </Button>
+          <CustomDropdown
+            value={exportChoice}
+            onChange={handleExportSelect}
+            options={exportOptions}
+            placeholder="Export"
+            isDarkMode={isDarkMode}
+            themeColorRgb={themeColorRgb || '132, 0, 255'}
+            triggerVariant="button"
+            disabled={!generateButtonState.hasReportData}
+            style={{ marginBottom: 0, width: 'auto' }}
+          />
+          <Button
+            type="button"
+            onClick={handleSaveToDirectory}
+            disabled={!generateButtonState.hasReportData || saving}
+            themeColorRgb={themeColorRgb}
+            isDarkMode={isDarkMode}
+          >
+            {saving ? 'Saving...' : 'Save to directory'}
+          </Button>
+        </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
-        <CustomDropdown
-          value={reportType}
-          onChange={(e) => setReportType(e.target.value)}
-          options={[
-            { value: 'profit-loss', label: 'Income Statement' },
-            { value: 'balance-sheet', label: 'Balance Sheet' },
-            { value: 'cash-flow', label: 'Cash Flow Statement' },
-            { value: 'trial-balance', label: 'Trial Balance' }
-          ]}
-          placeholder="Report type"
-          isDarkMode={isDarkMode}
-          themeColorRgb={themeColorRgb || '132, 0, 255'}
-          triggerVariant="button"
-          triggerFullWidth
-          style={{ marginBottom: 0, flex: 1, minWidth: 0 }}
-        />
-        <Button
-          type="button"
-          onClick={() => generateReportRef.current?.generateReport()}
-          disabled={generateButtonState.loading || generateButtonState.disabled}
-          themeColorRgb={themeColorRgb}
-          isDarkMode={isDarkMode}
-        >
-          {generateButtonState.loading ? 'Generating...' : 'Generate Report'}
-        </Button>
-        <CustomDropdown
-          value={exportChoice}
-          onChange={handleExportSelect}
-          options={exportOptions}
-          placeholder="Export"
-          isDarkMode={isDarkMode}
-          themeColorRgb={themeColorRgb || '132, 0, 255'}
-          triggerVariant="button"
-          disabled={!generateButtonState.hasReportData}
-          style={{ marginBottom: 0, width: 'auto' }}
-        />
-        <Button
-          type="button"
-          onClick={handleSaveToDirectory}
-          disabled={!generateButtonState.hasReportData || saving}
-          themeColorRgb={themeColorRgb}
-          isDarkMode={isDarkMode}
-        >
-          {saving ? 'Saving...' : 'Save to directory'}
-        </Button>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {reportType === 'trial-balance' && (
+          <TrialBalanceTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} directoryRefreshRef={directoryRefreshRef} setSaving={setSaving} splitLayout />
+        )}
+        {reportType === 'profit-loss' && (
+          <ProfitLossTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} directoryRefreshRef={directoryRefreshRef} setSaving={setSaving} splitLayout />
+        )}
+        {reportType === 'balance-sheet' && (
+          <BalanceSheetTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} directoryRefreshRef={directoryRefreshRef} setSaving={setSaving} splitLayout />
+        )}
+        {reportType === 'cash-flow' && (
+          <CashFlowTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} directoryRefreshRef={directoryRefreshRef} setSaving={setSaving} splitLayout />
+        )}
       </div>
-
-      {reportType === 'trial-balance' && (
-        <TrialBalanceTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} directoryRefreshRef={directoryRefreshRef} setSaving={setSaving} />
-      )}
-      {reportType === 'profit-loss' && (
-        <ProfitLossTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} directoryRefreshRef={directoryRefreshRef} setSaving={setSaving} />
-      )}
-      {reportType === 'balance-sheet' && (
-        <BalanceSheetTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} directoryRefreshRef={directoryRefreshRef} setSaving={setSaving} />
-      )}
-      {reportType === 'cash-flow' && (
-        <CashFlowTab ref={generateReportRef} onGenerateStateChange={setGenerateButtonState} dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} setActiveTab={setActiveTab} hideTitle themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} directoryRefreshRef={directoryRefreshRef} setSaving={setSaving} />
-      )}
     </div>
   )
 }
 
 // Trial Balance Tab (Financial Statements dropdown)
 const TrialBalanceTab = forwardRef(function TrialBalanceTab(
-  { dateRange, formatCurrency, getAuthHeaders, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange, directoryRefreshRef, setSaving },
+  { dateRange, formatCurrency, getAuthHeaders, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange, directoryRefreshRef, setSaving, splitLayout = false },
   ref
 ) {
   const { show: showToast } = useToast()
@@ -3773,8 +3088,8 @@ const TrialBalanceTab = forwardRef(function TrialBalanceTab(
     transition: 'all 0.2s ease'
   }
 
-  return (
-    <div>
+  const filtersSection = (
+    <>
       {!hideTitle && (
         <div style={{ marginBottom: '24px' }}>
           <h3 style={{ ...formTitleStyle(_isDark), marginBottom: '8px', fontSize: '24px' }}>Trial Balance</h3>
@@ -3797,22 +3112,27 @@ const TrialBalanceTab = forwardRef(function TrialBalanceTab(
                 const container = e.target.closest('div')
                 if (container) container.style.borderColor = `rgba(${rgb}, 0.5)`
               }}
-            onBlur={(e) => {
-              const container = e.target.closest('div')
-              if (container) container.style.borderColor = _isDark ? '#333' : '#ddd'
-            }}
-          />
+              onBlur={(e) => {
+                const container = e.target.closest('div')
+                if (container) container.style.borderColor = _isDark ? '#333' : '#ddd'
+              }}
+            />
+          </div>
         </div>
       </div>
       <div style={quickSelectStyle}>
-          <button type="button" onClick={() => setPresetDate('today')} style={quickSelectButtonStyle}>Today</button>
-          <button type="button" onClick={() => setPresetDate('end_of_month')} style={quickSelectButtonStyle}>End of Month</button>
-          <button type="button" onClick={() => setPresetDate('end_of_last_month')} style={quickSelectButtonStyle}>End of Last Month</button>
-          <button type="button" onClick={() => setPresetDate('end_of_quarter')} style={quickSelectButtonStyle}>End of Quarter</button>
-          <button type="button" onClick={() => setPresetDate('end_of_year')} style={quickSelectButtonStyle}>End of Year</button>
-          <button type="button" onClick={() => setPresetDate('end_of_last_year')} style={quickSelectButtonStyle}>End of Last Year</button>
-        </div>
+        <button type="button" onClick={() => setPresetDate('today')} style={quickSelectButtonStyle}>Today</button>
+        <button type="button" onClick={() => setPresetDate('end_of_month')} style={quickSelectButtonStyle}>End of Month</button>
+        <button type="button" onClick={() => setPresetDate('end_of_last_month')} style={quickSelectButtonStyle}>End of Last Month</button>
+        <button type="button" onClick={() => setPresetDate('end_of_quarter')} style={quickSelectButtonStyle}>End of Quarter</button>
+        <button type="button" onClick={() => setPresetDate('end_of_year')} style={quickSelectButtonStyle}>End of Year</button>
+        <button type="button" onClick={() => setPresetDate('end_of_last_year')} style={quickSelectButtonStyle}>End of Last Year</button>
       </div>
+    </>
+  )
+
+  const reportSection = (
+    <>
       {loading && <LoadingSpinner size="lg" text="Generating report..." />}
       {!loading && reportData && (
         <div className="accounting-report-print-area">
@@ -3840,13 +3160,29 @@ const TrialBalanceTab = forwardRef(function TrialBalanceTab(
           </p>
         </div>
       )}
+    </>
+  )
+
+  if (splitLayout) {
+    return (
+      <>
+        <div style={{ flexShrink: 0 }}>{filtersSection}</div>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{reportSection}</div>
+      </>
+    )
+  }
+
+  return (
+    <div>
+      {filtersSection}
+      {reportSection}
     </div>
   )
 })
 
 // Income Statement Tab
 const ProfitLossTab = forwardRef(function ProfitLossTab(
-  { dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange, directoryRefreshRef, setSaving },
+  { dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange, directoryRefreshRef, setSaving, splitLayout = false },
   ref
 ) {
   const { show: showToast } = useToast()
@@ -4109,26 +3445,23 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
     saveToDirectory: handleSaveToDirectory
   }), [handleGenerateReport, handleExport, handleExportExcel, handleSaveToDirectory])
 
-  return (
-    <div>
+  const filtersSection = (
+    <>
       {!hideTitle && (
-      <div style={{ marginBottom: '24px' }}>
-          <h3 style={{ ...formTitleStyle(_isDark), marginBottom: '8px', fontSize: '24px' }}>
-            Income Statement
-        </h3>
-        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
-          Income statement showing revenue, expenses, and net income
-        </p>
-      </div>
+        <div style={{ marginBottom: '24px' }}>
+          <h3 style={{ ...formTitleStyle(_isDark), marginBottom: '8px', fontSize: '24px' }}>Income Statement</h3>
+          <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+            Income statement showing revenue, expenses, and net income
+          </p>
+        </div>
       )}
+      <ProfitLossFilters filters={filters} onFilterChange={setFilters} />
+    </>
+  )
 
-      <ProfitLossFilters
-        filters={filters}
-        onFilterChange={setFilters}
-      />
-
+  const reportSection = (
+    <>
       {loading && <LoadingSpinner size="lg" text="Generating report..." />}
-
       {!loading && reportData && (
         <div className="accounting-report-print-area">
           {comparativeData ? (
@@ -4138,18 +3471,15 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
                 currentLabel={getPeriodLabel()}
                 priorLabel={getPriorPeriodLabel()}
               />
-              
               <div style={{ marginBottom: '24px' }}>
-                <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px', color: textColor }}>
-                    Current Period Detail
-                  </h3>
-                  <ProfitLossTable
-                    data={reportData}
-                    showPercentages={true}
-                    onAccountClick={handleAccountClick}
+                <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px', color: textColor }}>Current Period Detail</h3>
+                <ProfitLossTable
+                  data={reportData}
+                  showPercentages={true}
+                  onAccountClick={handleAccountClick}
                   periodLabel={getPeriodLabel() + (comparativeData ? ` — Compared to: ${getPriorPeriodLabel()}` : '')}
-                  />
-                </div>
+                />
+              </div>
               <div style={{ width: '100%' }}>
                 <ProfitLossChart data={reportData} />
               </div>
@@ -4165,33 +3495,42 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
                 />
               </div>
               <div style={{ width: '100%' }}>
-              <ProfitLossChart data={reportData} />
-            </div>
-        </>
+                <ProfitLossChart data={reportData} />
+              </div>
+            </>
           )}
         </div>
       )}
-
       {!loading && !reportData && (
-        <div style={{ 
-          backgroundColor: cardBg, 
-          borderRadius: '8px', 
-          border: `1px solid ${borderColor}`,
-          padding: '48px', 
-          textAlign: 'center' 
-        }}>
+        <div style={{ backgroundColor: cardBg, borderRadius: '8px', border: `1px solid ${borderColor}`, padding: '48px', textAlign: 'center' }}>
           <p style={{ color: textColor, opacity: 0.7 }}>
             Select a date range above and click "Generate Report" to view your Income Statement
           </p>
         </div>
       )}
+    </>
+  )
+
+  if (splitLayout) {
+    return (
+      <>
+        <div style={{ flexShrink: 0 }}>{filtersSection}</div>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{reportSection}</div>
+      </>
+    )
+  }
+
+  return (
+    <div>
+      {filtersSection}
+      {reportSection}
     </div>
   )
 })
 
 // Balance Sheet Tab
 const BalanceSheetTab = forwardRef(function BalanceSheetTab(
-  { dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange, directoryRefreshRef, setSaving },
+  { dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange, directoryRefreshRef, setSaving, splitLayout = false },
   ref
 ) {
   const { show: showToast } = useToast()
@@ -4456,21 +3795,23 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
     saveToDirectory: handleSaveToDirectory
   }), [handleGenerateReport, handleExport, handleExportExcel, handleSaveToDirectory])
 
-  return (
-    <div>
+  const filtersSection = (
+    <>
       {!hideTitle && (
-      <div style={{ marginBottom: '24px' }}>
+        <div style={{ marginBottom: '24px' }}>
           <h3 style={{ ...formTitleStyle(isDarkMode), marginBottom: '8px', fontSize: '24px' }}>Balance Sheet</h3>
-        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+          <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
             Statement of financial position showing assets, liabilities, and equity.
             Inventory (Current Assets) is calculated from actual store stock (quantity × cost).
-        </p>
-      </div>
+          </p>
+        </div>
       )}
-      <BalanceSheetFilters
-        filters={filters}
-        onFilterChange={setFilters}
-      />
+      <BalanceSheetFilters filters={filters} onFilterChange={setFilters} />
+    </>
+  )
+
+  const reportSection = (
+    <>
       {loading && <LoadingSpinner size="lg" text="Generating report..." />}
       {!loading && reportData && (
         <div className="accounting-report-print-area">
@@ -4484,7 +3825,7 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
               <div style={{ marginBottom: '24px' }}>
                 <h3 style={{ ...formTitleStyle(isDarkMode), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
                 <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} dateLabel={`As of ${getAsOfLabel()} — Compared to: ${getPriorLabel()}`} />
-                </div>
+              </div>
               <div style={{ width: '100%' }}>
                 <BalanceSheetChart data={reportData} />
               </div>
@@ -4495,9 +3836,9 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
                 <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} dateLabel={`As of ${getAsOfLabel()}`} />
               </div>
               <div style={{ width: '100%' }}>
-              <BalanceSheetChart data={reportData} />
-            </div>
-        </>
+                <BalanceSheetChart data={reportData} />
+              </div>
+            </>
           )}
         </div>
       )}
@@ -4508,13 +3849,29 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
           </p>
         </div>
       )}
+    </>
+  )
+
+  if (splitLayout) {
+    return (
+      <>
+        <div style={{ flexShrink: 0 }}>{filtersSection}</div>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{reportSection}</div>
+      </>
+    )
+  }
+
+  return (
+    <div>
+      {filtersSection}
+      {reportSection}
     </div>
   )
 })
 
 // Cash Flow Tab
 const CashFlowTab = forwardRef(function CashFlowTab(
-  { dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange, directoryRefreshRef, setSaving },
+  { dateRange, formatCurrency, getAuthHeaders, setActiveTab, hideTitle = false, themeColorRgb, isDarkMode, onGenerateStateChange, directoryRefreshRef, setSaving, splitLayout = false },
   ref
 ) {
   const { show: showToast } = useToast()
@@ -4735,17 +4092,22 @@ const CashFlowTab = forwardRef(function CashFlowTab(
     saveToDirectory: handleSaveToDirectory
   }), [handleGenerateReport, handleExport, handleExportExcel, handleSaveToDirectory])
 
-  return (
-    <div>
+  const filtersSection = (
+    <>
       {!hideTitle && (
-      <div style={{ marginBottom: '24px' }}>
-          <h3 style={{ ...formTitleStyle(isDarkMode), marginBottom: '8px', fontSize: '24px' }}>Cash Flow Statement</h3>
-        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
-          Statement of cash flows showing operating, investing, and financing activities
-        </p>
-      </div>
+        <div style={{ marginBottom: '24px' }}>
+          <h3 style={{ ...formTitleStyle(_isDark), marginBottom: '8px', fontSize: '24px' }}>Cash Flow Statement</h3>
+          <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+            Statement of cash flows showing operating, investing, and financing activities
+          </p>
+        </div>
       )}
       <CashFlowFilters filters={filters} onFilterChange={setFilters} />
+    </>
+  )
+
+  const reportSection = (
+    <>
       {loading && <LoadingSpinner size="lg" text="Generating report..." />}
       {!loading && reportData && (
         <div className="accounting-report-print-area">
@@ -4753,9 +4115,9 @@ const CashFlowTab = forwardRef(function CashFlowTab(
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <ComparativeCashFlowTable data={comparativeData} currentLabel={getPeriodLabel()} priorLabel={getPriorLabel()} />
               <div style={{ marginBottom: '24px' }}>
-                <h3 style={{ ...formTitleStyle(isDarkMode), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
+                <h3 style={{ ...formTitleStyle(_isDark), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
                 <CashFlowTable data={reportData} onAccountClick={handleAccountClick} periodLabel={`${getPeriodLabel()} — Compared to: ${getPriorLabel()}`} />
-                </div>
+              </div>
               <div style={{ width: '100%' }}>
                 <CashFlowChart data={reportData} />
               </div>
@@ -4766,9 +4128,9 @@ const CashFlowTab = forwardRef(function CashFlowTab(
                 <CashFlowTable data={reportData} onAccountClick={handleAccountClick} periodLabel={getPeriodLabel()} />
               </div>
               <div style={{ width: '100%' }}>
-              <CashFlowChart data={reportData} />
-            </div>
-        </>
+                <CashFlowChart data={reportData} />
+              </div>
+            </>
           )}
         </div>
       )}
@@ -4777,6 +4139,22 @@ const CashFlowTab = forwardRef(function CashFlowTab(
           <p style={{ color: textColor, opacity: 0.7 }}>Select a date range above and click "Generate Report" to view your Cash Flow Statement</p>
         </div>
       )}
+    </>
+  )
+
+  if (splitLayout) {
+    return (
+      <>
+        <div style={{ flexShrink: 0 }}>{filtersSection}</div>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{reportSection}</div>
+      </>
+    )
+  }
+
+  return (
+    <div>
+      {filtersSection}
+      {reportSection}
     </div>
   )
 })
@@ -4812,20 +4190,17 @@ function BillsTab({ dateRange, formatCurrency, getAuthHeaders }) {
     }
   }
 
-  if (loading) {
-    return <div style={{ color: textColor, padding: '20px' }}>Loading bills...</div>
-  }
-
   return (
-    <div>
-      <div style={{ marginBottom: '24px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ marginBottom: '24px', flexShrink: 0 }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Bills</h1>
         <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Amounts you owe to vendors for the selected date range. Track due dates and payment status.</p>
         </div>
-        <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9', boxShadow: isDarkMode ? '0 1px 0 #3a3a3a' : '0 1px 0 #e0e0e0' }}>
+              <tr>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Bill #</th>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Date</th>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Vendor</th>
@@ -4835,7 +4210,13 @@ function BillsTab({ dateRange, formatCurrency, getAuthHeaders }) {
               </tr>
             </thead>
             <tbody>
-            {bills.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
+                  Loading…
+                </td>
+              </tr>
+            ) : bills.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
                   No bills found for this period.
@@ -4865,6 +4246,7 @@ function BillsTab({ dateRange, formatCurrency, getAuthHeaders }) {
             )}
             </tbody>
           </table>
+          </div>
         </div>
     </div>
   )
@@ -4907,20 +4289,17 @@ function CustomersTab({ formatCurrency, getAuthHeaders }) {
     }
   }
 
-  if (loading) {
-    return <div style={{ color: textColor, padding: '20px' }}>Loading customers...</div>
-  }
-
   return (
-    <div>
-      <div style={{ marginBottom: '24px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ marginBottom: '24px', flexShrink: 0 }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Customers</h1>
         <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Same list as the main Customers page. Use for accounting context and linking to invoices.</p>
         </div>
-        <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9', boxShadow: isDarkMode ? '0 1px 0 #3a3a3a' : '0 1px 0 #e0e0e0' }}>
+              <tr>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Customer #</th>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Name</th>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Email</th>
@@ -4929,7 +4308,13 @@ function CustomersTab({ formatCurrency, getAuthHeaders }) {
               </tr>
             </thead>
             <tbody>
-            {customers.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
+                  Loading…
+                </td>
+              </tr>
+            ) : customers.length === 0 ? (
               <tr>
                 <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
                   No customers found. Add customers from the main Customers section.
@@ -4948,6 +4333,7 @@ function CustomersTab({ formatCurrency, getAuthHeaders }) {
             )}
             </tbody>
           </table>
+          </div>
         </div>
     </div>
   )
@@ -4981,20 +4367,17 @@ function VendorsTab({ formatCurrency, getAuthHeaders }) {
     }
   }
 
-  if (loading) {
-    return <div style={{ color: textColor, padding: '20px' }}>Loading vendors...</div>
-  }
-
   return (
-    <div>
-      <div style={{ marginBottom: '24px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ marginBottom: '24px', flexShrink: 0 }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Vendors</h1>
         <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Suppliers you purchase from. Track contact info and balances. Bills are linked to vendors.</p>
         </div>
-        <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9', boxShadow: isDarkMode ? '0 1px 0 #3a3a3a' : '0 1px 0 #e0e0e0' }}>
+              <tr>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Vendor #</th>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Name</th>
                 <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Email</th>
@@ -5002,7 +4385,13 @@ function VendorsTab({ formatCurrency, getAuthHeaders }) {
               </tr>
             </thead>
             <tbody>
-            {vendors.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan={4} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
+                  Loading…
+                </td>
+              </tr>
+            ) : vendors.length === 0 ? (
               <tr>
                 <td colSpan={4} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
                   No vendors found.
@@ -5020,6 +4409,7 @@ function VendorsTab({ formatCurrency, getAuthHeaders }) {
             )}
             </tbody>
           </table>
+          </div>
         </div>
     </div>
   )

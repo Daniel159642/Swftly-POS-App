@@ -18,7 +18,8 @@ import Profile from './pages/Profile'
 import ShipmentVerification from './pages/ShipmentVerification'
 import StatisticsPage from './pages/Statistics'
 import SettingsPage from './pages/Settings'
-import Accounting from './pages/Accounting'
+import { lazy, Suspense } from 'react'
+const Accounting = lazy(() => import('./pages/Accounting'))
 import CashRegister from './pages/CashRegister'
 import Customers from './pages/Customers'
 import OfflineBanner from './components/OfflineBanner'
@@ -200,7 +201,9 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
       <Route path="/accounting" element={
         <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
           <Layout employee={employee} onLogout={onLogout}>
-            <Accounting />
+            <Suspense fallback={<div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary, #666)' }}>Loading…</div>}>
+              <Accounting />
+            </Suspense>
           </Layout>
         </ProtectedRoute>
       } />
@@ -259,14 +262,20 @@ function Layout({ children, employee, onLogout }) {
 
   useEffect(() => {
     if (!navigator.onLine) return
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('sessionToken') : null
     cachedFetch('/api/inventory?limit=50&offset=0').then(() => {}).catch(() => {})
     cachedFetch('/api/inventory?item_type=product&include_variants=1').then(() => {}).catch(() => {})
     cachedFetch('/api/vendors').then(() => {}).catch(() => {})
     cachedFetch('/api/categories').then(() => {}).catch(() => {})
     cachedFetch('/api/pos-bootstrap').then(() => {}).catch(() => {})
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('sessionToken') : null
+    cachedFetch('/api/settings-bootstrap', { headers: { 'X-Session-Token': token || '' } }).then(() => {}).catch(() => {})
+    cachedFetch('/api/receipt-settings').then(() => {}).catch(() => {})
+    cachedFetch('/api/pos-settings').then(() => {}).catch(() => {})
+    cachedFetch('/api/store-location-settings').then(() => {}).catch(() => {})
     if (token) {
       cachedFetch('/api/order-delivery-settings', { headers: { 'X-Session-Token': token } }).then(() => {}).catch(() => {})
+      cachedFetch(`/api/register/session?session_token=${token}`).then(() => {}).catch(() => {})
+      cachedFetch(`/api/register/session?status=open&session_token=${token}`).then(() => {}).catch(() => {})
     }
   }, [])
 
@@ -277,23 +286,36 @@ function Layout({ children, employee, onLogout }) {
     getCurrentWindow().startDragging()
   }
 
+  const headerHeight = 52
+  const contentTop = showBanner ? 88 : headerHeight
+
   return (
-    <div style={{ minHeight: '100vh', paddingTop: showBanner ? 88 : 52, backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
-      <OfflineBanner />
+    <div
+      style={{
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        backgroundColor: 'var(--bg-secondary, #f5f5f5)'
+      }}
+    >
       <div
         style={{
           position: 'fixed',
           top: 0,
           left: 0,
           right: 0,
+          width: '100%',
           zIndex: 1000,
+          flexShrink: 0,
           backgroundColor: 'var(--bg-primary, #fff)',
           borderBottom: '3px solid var(--border-color, #ddd)',
           padding: '12px 20px',
           paddingLeft: isTauri ? 72 : 20,
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'center'
+          alignItems: 'center',
+          transform: 'translateZ(0)'
         }}
       >
         <div
@@ -368,7 +390,20 @@ function Layout({ children, employee, onLogout }) {
           </button>
         </div>
       </div>
-      {children}
+      <OfflineBanner />
+      <main
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overscrollBehavior: 'none',
+          WebkitOverflowScrolling: 'touch',
+          paddingTop: contentTop,
+          backgroundColor: 'var(--bg-secondary, #f5f5f5)'
+        }}
+      >
+        {children}
+      </main>
     </div>
   )
 }

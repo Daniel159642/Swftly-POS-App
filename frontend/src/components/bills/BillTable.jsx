@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 
-function BillTable({ bills = [], onView, onEdit, onDelete, onVoid, onPayBill }) {
+function BillTable({ bills = [], loading = false, onView, onEdit, onDelete, onVoid, onPayBill }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const [expandedIds, setExpandedIds] = useState(new Set())
 
@@ -40,14 +40,6 @@ function BillTable({ bills = [], onView, onEdit, onDelete, onVoid, onPayBill }) 
     })
   }
 
-  if (!bills || bills.length === 0) {
-    return (
-      <div style={{ textAlign: 'center', padding: '48px 16px', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>
-        No bills found
-      </div>
-    )
-  }
-
   const thStyle = {
     padding: '12px 24px',
     fontSize: '12px',
@@ -81,7 +73,19 @@ function BillTable({ bills = [], onView, onEdit, onDelete, onVoid, onPayBill }) 
           </tr>
         </thead>
         <tbody>
-          {bills.map((item) => {
+          {loading ? (
+            <tr>
+              <td colSpan={8} style={{ padding: '48px 24px', textAlign: 'center', color: isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '14px' }}>
+                Loading…
+              </td>
+            </tr>
+          ) : !bills || bills.length === 0 ? (
+            <tr>
+              <td colSpan={8} style={{ padding: '48px 24px', textAlign: 'center', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>
+                No bills found
+              </td>
+            </tr>
+          ) : bills.map((item) => {
             const b = item.bill || item
             const lines = item.lines || []
             const vendor = item.vendor

@@ -6,7 +6,6 @@ import VendorFilters from '../components/vendors/VendorFilters'
 import VendorDetailModal from '../components/vendors/VendorDetailModal'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
-import LoadingSpinner from '../components/common/LoadingSpinner'
 import { useToast } from '../contexts/ToastContext'
 
 function Vendors() {
@@ -114,14 +113,6 @@ function Vendors() {
   const totalPages = pagination.total_pages || 1
   const total = pagination.total || 0
 
-  if (loading && vendors.length === 0) {
-    return (
-      <div style={{ padding: '32px' }}>
-        <LoadingSpinner size="lg" text="Loading vendors..." />
-      </div>
-    )
-  }
-
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
@@ -169,22 +160,17 @@ function Vendors() {
           </div>
         </div>
 
-        {loading ? (
-          <div style={{ padding: '48px' }}>
-            <LoadingSpinner size="md" text="Loading..." />
-          </div>
-        ) : (
-          <VendorTable
-            vendors={vendors}
-            onView={handleViewVendor}
-            onEdit={(v) => {
-              setSelectedVendor(v)
-              setIsEditModalOpen(true)
-            }}
-            onDelete={handleDeleteVendor}
-            onToggleStatus={handleToggleStatus}
-          />
-        )}
+        <VendorTable
+          vendors={vendors}
+          loading={loading}
+          onView={handleViewVendor}
+          onEdit={(v) => {
+            setSelectedVendor(v)
+            setIsEditModalOpen(true)
+          }}
+          onDelete={handleDeleteVendor}
+          onToggleStatus={handleToggleStatus}
+        />
       </div>
 
       <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Create New Vendor" size="xl">

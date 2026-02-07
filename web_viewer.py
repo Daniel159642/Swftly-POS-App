@@ -4950,6 +4950,65 @@ def api_dashboard_statistics():
             today_returns_count = 0
             today_returns_amount = 0
         
+        # Discount given (total and by period)
+        discount_all_time = 0.0
+        discount_today = 0.0
+        discount_week = 0.0
+        discount_month = 0.0
+        try:
+            if is_postgres:
+                cursor.execute("""
+                    SELECT COALESCE(SUM(discount), 0) as total FROM orders
+                    WHERE (order_status != 'voided' OR order_status IS NULL)
+                """)
+                r = cursor.fetchone()
+                discount_all_time = float(r.get('total', 0) or 0) if isinstance(r, dict) else float(r[0] or 0)
+                cursor.execute("""
+                    SELECT COALESCE(SUM(discount), 0) as total FROM orders
+                    WHERE order_date::date = CURRENT_DATE AND (order_status != 'voided' OR order_status IS NULL)
+                """)
+                r = cursor.fetchone()
+                discount_today = float(r.get('total', 0) or 0) if isinstance(r, dict) else float(r[0] or 0)
+                cursor.execute("""
+                    SELECT COALESCE(SUM(discount), 0) as total FROM orders
+                    WHERE order_date >= CURRENT_DATE - INTERVAL '7 days' AND (order_status != 'voided' OR order_status IS NULL)
+                """)
+                r = cursor.fetchone()
+                discount_week = float(r.get('total', 0) or 0) if isinstance(r, dict) else float(r[0] or 0)
+                cursor.execute("""
+                    SELECT COALESCE(SUM(discount), 0) as total FROM orders
+                    WHERE order_date >= DATE_TRUNC('month', CURRENT_DATE) AND (order_status != 'voided' OR order_status IS NULL)
+                """)
+                r = cursor.fetchone()
+                discount_month = float(r.get('total', 0) or 0) if isinstance(r, dict) else float(r[0] or 0)
+            else:
+                cursor.execute("SELECT COALESCE(SUM(discount), 0) as total FROM orders WHERE (order_status != 'voided' OR order_status IS NULL)")
+                r = cursor.fetchone()
+                discount_all_time = float(r[0] or 0) if r and len(r) else 0.0
+                cursor.execute("SELECT COALESCE(SUM(discount), 0) as total FROM orders WHERE DATE(order_date) = DATE('now') AND (order_status != 'voided' OR order_status IS NULL)")
+                r = cursor.fetchone()
+                discount_today = float(r[0] or 0) if r and len(r) else 0.0
+                cursor.execute("SELECT COALESCE(SUM(discount), 0) as total FROM orders WHERE order_date >= datetime('now', '-7 days') AND (order_status != 'voided' OR order_status IS NULL)")
+                r = cursor.fetchone()
+                discount_week = float(r[0] or 0) if r and len(r) else 0.0
+                cursor.execute("SELECT COALESCE(SUM(discount), 0) as total FROM orders WHERE order_date >= datetime('now', 'start of month') AND (order_status != 'voided' OR order_status IS NULL)")
+                r = cursor.fetchone()
+                discount_month = float(r[0] or 0) if r and len(r) else 0.0
+        except Exception as e:
+            print(f"Error getting discount stats: {e}")
+        # Customers and rewards program
+        customers_total = 0
+        customers_in_rewards = 0
+        try:
+            cursor.execute("SELECT COUNT(*) as c FROM customers")
+            r = cursor.fetchone()
+            customers_total = int(r.get('c', 0) or r[0] or 0) if r else 0
+            cursor.execute("SELECT COUNT(*) as c FROM customers WHERE COALESCE(loyalty_points, 0) > 0")
+            r = cursor.fetchone()
+            customers_in_rewards = int(r.get('c', 0) or r[0] or 0) if r else 0
+        except Exception as e:
+            print(f"Error getting customer/rewards stats: {e}")
+        
         # Don't close connection here - it's a global connection that should stay open
         # conn.close()  # Commented out to keep connection alive
         
@@ -4963,6 +5022,14 @@ def api_dashboard_statistics():
                     'today': int(today_returns_count) if today_returns_count is not None else 0,
                     'today_amount': float(today_returns_amount) if today_returns_amount is not None else 0.0
                 },
+                'discount': {
+                    'all_time': float(discount_all_time) if discount_all_time is not None else 0.0,
+                    'today': float(discount_today) if discount_today is not None else 0.0,
+                    'week': float(discount_week) if discount_week is not None else 0.0,
+                    'month': float(discount_month) if discount_month is not None else 0.0
+                },
+                'customers_total': int(customers_total) if customers_total is not None else 0,
+                'customers_in_rewards': int(customers_in_rewards) if customers_in_rewards is not None else 0,
                 'revenue': {
                     'all_time': float(all_time_revenue) if all_time_revenue is not None else 0.0,
                     'today': float(today_revenue) if today_revenue is not None else 0.0,
@@ -9433,7 +9500,7 @@ if _ACCOUNTING_BACKEND_AVAILABLE:
         try:
             saved_reports = []
             if os.path.isdir(ACCOUNTING_REPORTS_DIR):
-                for fn in sorted(os.listdir(ACCOUNTING_REPORTS_DIR), reverse=True):
+                for fn in sorted(os.listdir(ACCOUNTING_REPORTS_DIR), reverse=True)[:500]:
                     fp = os.path.join(ACCOUNTING_REPORTS_DIR, fn)
                     if os.path.isfile(fp):
                         try:
@@ -9453,6 +9520,7 @@ if _ACCOUNTING_BACKEND_AVAILABLE:
                     FROM pending_shipments
                     WHERE file_path IS NOT NULL AND file_path != ''
                     ORDER BY upload_timestamp DESC NULLS LAST
+                    LIMIT 500
                 """)
                 rows = cur.fetchall()
                 for r in rows:

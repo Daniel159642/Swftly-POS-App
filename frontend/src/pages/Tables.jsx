@@ -28,7 +28,7 @@ import {
 
 // Define table categories (all tables assigned; no "Other" tab)
 const TABLE_CATEGORIES = {
-  'Inventory & Products': [
+  'Inventory': [
     'inventory',
     'vendors',
     'categories',
@@ -41,7 +41,7 @@ const TABLE_CATEGORIES = {
     'stores',
     'store_location_settings'
   ],
-  'Orders & Sales': [
+  'Orders': [
     'orders',
     'order_items',
     'payment_transactions',
@@ -78,7 +78,7 @@ const TABLE_CATEGORIES = {
     'pending_shipment_items',
     'shipment_verification_settings'
   ],
-  'Employees & Scheduling': [
+  'Management': [
     'employees',
     'employee_availability',
     'scheduled_shifts',
@@ -116,7 +116,7 @@ const TABLE_CATEGORIES = {
     'sms_settings',
     'sms_templates'
   ],
-  'Security & Permissions': [
+  'Security': [
     'roles',
     'permissions',
     'role_permissions',
@@ -124,6 +124,71 @@ const TABLE_CATEGORIES = {
     'audit_log',
     'users'
   ]
+}
+
+const TABLES_LAST_SELECTED_KEY = 'pos_tables_last_selected'
+
+function formatTableName(tableName) {
+  const specialNames = {
+    'employee_availability_unified': 'Employee Availability',
+    'scheduled_shifts_unified': 'Scheduled Shifts',
+    'calendar_events_unified': 'Calendar Events',
+    'payment_methods': 'Payment Methods',
+    'employee_tips': 'Employee Tips',
+    'shipment_issues': 'Shipment Issues',
+    'shipment_scan_log': 'Shipment Scan Log',
+    'verification_sessions': 'Verification Sessions',
+    'customer_display_settings': 'Customer Display Settings',
+    'customer_display_sessions': 'Customer Display Sessions',
+    'receipt_preferences': 'Receipt Preferences'
+  }
+  if (specialNames[tableName]) return specialNames[tableName]
+  if (tableName.includes('_') || tableName === tableName.toLowerCase()) {
+    return tableName
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+  }
+  return tableName
+    .split(/(?=[A-Z])|_/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+/** Sidebar and table buttons come from this static list only; only row data is loaded from API. */
+function getStaticCategories() {
+  const organizedCategories = {}
+  Object.entries(TABLE_CATEGORIES).forEach(([categoryName, tableNames]) => {
+    organizedCategories[categoryName] = tableNames.map(tableName => ({
+      id: tableName,
+      label: formatTableName(tableName)
+    }))
+  })
+  return organizedCategories
+}
+
+const STATIC_CATEGORIES = getStaticCategories()
+const CATEGORY_IDS = Object.keys(STATIC_CATEGORIES)
+
+function getInitialCategoryAndTab() {
+  try {
+    const last = localStorage.getItem(TABLES_LAST_SELECTED_KEY)
+    const parsed = last ? JSON.parse(last) : null
+    if (parsed?.category && STATIC_CATEGORIES[parsed.category]) {
+      const tables = STATIC_CATEGORIES[parsed.category]
+      if (parsed?.tableId && tables.some(t => t.id === parsed.tableId)) {
+        return { category: parsed.category, tableId: parsed.tableId }
+      }
+      return { category: parsed.category, tableId: tables[0].id }
+    }
+  } catch (_) {}
+  const firstCategory = CATEGORY_IDS[0]
+  const firstTable = STATIC_CATEGORIES[firstCategory]?.[0]
+  return {
+    category: firstCategory,
+    tableId: firstTable ? firstTable.id : null
+  }
 }
 
 function Tables() {
@@ -137,13 +202,11 @@ function Tables() {
   
   const themeColorRgb = hexToRgb(themeColor)
   
-  const [allTables, setAllTables] = useState([])
-  const [categories, setCategories] = useState([])
-  const [activeCategory, setActiveCategory] = useState(null)
-  const [activeTab, setActiveTab] = useState(null)
+  const [categories] = useState(STATIC_CATEGORIES)
+  const [activeCategory, setActiveCategory] = useState(() => getInitialCategoryAndTab().category)
+  const [activeTab, setActiveTab] = useState(() => getInitialCategoryAndTab().tableId)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [loadingTables, setLoadingTables] = useState(true)
   const [error, setError] = useState(null)
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set())
   const [editorOpen, setEditorOpen] = useState(false)
@@ -193,10 +256,6 @@ function Tables() {
   }, [themeMode])
 
   useEffect(() => {
-    loadTables()
-  }, [])
-
-  useEffect(() => {
     if (activeTab) {
       loadData()
     }
@@ -216,94 +275,13 @@ function Tables() {
     }
   }, [])
 
-  const loadTables = async () => {
-    setLoadingTables(true)
-    try {
-      const response = await fetch('/api/tables/list')
-      const result = await response.json()
-      if (result.tables && result.tables.length > 0) {
-        setAllTables(result.tables)
-        
-        // Organize tables into categories
-        const organizedCategories = {}
-        
-        // Categorize known tables
-        Object.entries(TABLE_CATEGORIES).forEach(([categoryName, tableNames]) => {
-          const categoryTables = tableNames
-            .filter(tableName => result.tables.includes(tableName))
-            .map(tableName => ({
-              id: tableName,
-              label: formatTableName(tableName)
-            }))
-          
-          if (categoryTables.length > 0) {
-            organizedCategories[categoryName] = categoryTables
-          }
-        })
-        
-        // Tables not in TABLE_CATEGORIES are omitted (no "Other" tab)
-        
-        // Convert to array format for Tabs component
-        const categoryTabs = Object.keys(organizedCategories).map(categoryName => ({
-          id: categoryName,
-          label: categoryName
-        }))
-        
-        setCategories(organizedCategories)
-        
-        // Set first category and first table as active
-        if (categoryTabs.length > 0) {
-          const firstCategory = categoryTabs[0].id
-          setActiveCategory(firstCategory)
-          const firstTable = organizedCategories[firstCategory][0]
-          if (firstTable) {
-            setActiveTab(firstTable.id)
-          }
-        }
-      }
-    } catch (err) {
-      setError('Error loading tables')
-      console.error(err)
-    } finally {
-      setLoadingTables(false)
+  useEffect(() => {
+    if (activeCategory && activeTab) {
+      try {
+        localStorage.setItem(TABLES_LAST_SELECTED_KEY, JSON.stringify({ category: activeCategory, tableId: activeTab }))
+      } catch (_) {}
     }
-  }
-
-  const formatTableName = (tableName) => {
-    // Handle special formatting for unified tables
-    const specialNames = {
-      'employee_availability_unified': 'Employee Availability',
-      'scheduled_shifts_unified': 'Scheduled Shifts',
-      'calendar_events_unified': 'Calendar Events',
-      'payment_methods': 'Payment Methods',
-      'employee_tips': 'Employee Tips',
-      'shipment_issues': 'Shipment Issues',
-      'shipment_scan_log': 'Shipment Scan Log',
-      'verification_sessions': 'Verification Sessions',
-      'customer_display_settings': 'Customer Display Settings',
-      'customer_display_sessions': 'Customer Display Sessions',
-      'receipt_preferences': 'Receipt Preferences'
-    }
-    
-    if (specialNames[tableName]) {
-      return specialNames[tableName]
-    }
-    
-    // Handle CamelCase tables
-    if (tableName.includes('_') || tableName === tableName.toLowerCase()) {
-      return tableName
-        .split('_')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
-    } else {
-      // Handle CamelCase (e.g., Schedule_Periods)
-      return tableName
-        .split(/(?=[A-Z])|_/)
-        .filter(Boolean)
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
-    }
-  }
+  }, [activeCategory, activeTab])
 
   const loadData = async () => {
     if (!activeTab) return
@@ -488,48 +466,27 @@ function Tables() {
   }
 
 
-  if (!loadingTables && Object.keys(categories).length === 0) {
-    return (
-      <div style={{ 
-        display: 'flex',
-        minHeight: '100vh',
-        width: '100%',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}>
-        <div style={{ padding: '40px', textAlign: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999' }}>
-          No tables found in database
-        </div>
-      </div>
-    )
-  }
 
-  // Category icons mapping
+  // Category icons mapping (labels changed; keep same icons)
   const categoryIcons = {
-    'Inventory & Products': Package,
-    'Orders & Sales': ShoppingCart,
+    'Inventory': Package,
+    'Orders': ShoppingCart,
     'Shipments': Truck,
-    'Employees & Scheduling': Users,
+    'Management': Users,
     'Accounting': Calculator,
     'Notifications': Bell,
-    'Security & Permissions': Shield
+    'Security': Shield
   }
 
-  // Use static category list so nav tab list is visible immediately (no wait for API)
-  const staticCategoryTabs = Object.keys(TABLE_CATEGORIES).map(categoryName => ({
-    id: categoryName,
-    label: categoryName
-  }))
-  const categoryTabs = loadingTables
-    ? staticCategoryTabs
-    : Object.keys(categories).map(categoryName => ({ id: categoryName, label: categoryName }))
+  const categoryTabs = Object.keys(categories).map(categoryName => ({ id: categoryName, label: categoryName }))
 
   const currentCategoryTables = activeCategory ? (categories[activeCategory] || []) : []
 
   return (
     <div style={{ 
       display: 'flex',
-      minHeight: '100vh',
+      height: '100%',
+      minHeight: 0,
       width: '100%'
     }}>
       {/* Sidebar Navigation - 1/4 of page */}
@@ -733,14 +690,18 @@ function Tables() {
           marginLeft: isInitialMount ? '25%' : (sidebarMinimized ? '60px' : '25%'),
           width: isInitialMount ? '75%' : (sidebarMinimized ? 'calc(100% - 60px)' : '75%'),
           flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
           padding: '48px 64px 64px 64px',
           backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
           maxWidth: isInitialMount ? '1200px' : (sidebarMinimized ? 'none' : '1200px'),
           transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
         }}
       >
-        {(loadingTables || (activeCategory && currentCategoryTables.length > 0)) && (
-          <div style={{ marginBottom: '24px', borderBottom: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd', paddingBottom: '16px' }}>
+        {activeCategory && currentCategoryTables.length > 0 && (
+          <div style={{ flexShrink: 0, marginBottom: '24px', borderBottom: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd', paddingBottom: '16px' }}>
             <div style={{ position: 'relative' }}>
               <div 
                 className="table-buttons-scroll"
@@ -754,11 +715,7 @@ function Tables() {
                   msOverflowStyle: 'none'
                 }}
               >
-                {loadingTables ? (
-                  Array.from({ length: 5 }, (_, i) => (
-                    <div key={i} style={{ height: '28px', width: `${80 + (i % 3) * 20}px`, borderRadius: '8px', backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : '#e8e8e8', flexShrink: 0 }} />
-                  ))
-                ) : currentCategoryTables.map(table => {
+                {currentCategoryTables.map(table => {
                 const isActive = activeTab === table.id
                 
                 return (
@@ -817,80 +774,158 @@ function Tables() {
           </div>
         )}
       
-      <div style={{ overflowX: 'auto' }}>
-        {error && <div style={{ padding: '40px', textAlign: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999' }}>{error}</div>}
-        {(loadingTables || loading) && (
-          <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }} aria-busy="true" aria-label="Loading table data">
-            {Array.from({ length: 10 }, (_, i) => (
-              <div key={i} style={{ height: '40px', borderRadius: '6px', backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : '#f0f0f0', width: i % 2 === 0 ? '100%' : `${90 - (i % 3) * 5}%` }} />
-            ))}
+        {/* Toolbar: always visible when a table is selected */}
+        {activeTab && (
+          <div style={{ flexShrink: 0, marginBottom: '12px' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px'
+            }}>
+              <div style={{ color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontSize: '13px' }}>
+                {selectedRowIds.size > 0 ? `${selectedRowIds.size} selected` : 'Select rows to delete'}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  onClick={() => editorOpen ? handleCloseEditor() : handleOpenEditor()}
+                  disabled={!data || !data.data || data.data.length === 0}
+                  style={{
+                    padding: '8px 12px',
+                    backgroundColor: editorOpen ? (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#e0e0e0') : (isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)'),
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
+                    borderRadius: '6px',
+                    cursor: (!data || !data.data || data.data.length === 0) ? 'not-allowed' : 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    opacity: (!data || !data.data || data.data.length === 0) ? 0.7 : 1
+                  }}
+                >
+                  <Pencil size={14} />
+                  {editorOpen ? 'Close Editor' : 'Open Editor'}
+                </button>
+                <button
+                  onClick={handleDeleteSelected}
+                  disabled={selectedRowIds.size === 0}
+                  style={{
+                    padding: '8px 12px',
+                    backgroundColor: selectedRowIds.size === 0 ? (isDarkMode ? 'rgba(255,255,255,0.12)' : '#eee') : '#e53935',
+                    color: selectedRowIds.size === 0 ? (isDarkMode ? 'rgba(255,255,255,0.5)' : '#999') : '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: selectedRowIds.size === 0 ? 'not-allowed' : 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 600
+                  }}
+                >
+                  Delete selected
+                </button>
+              </div>
+            </div>
           </div>
         )}
-        {!loadingTables && !loading && !error && data && (
+
+      {/* Only this area scrolls: table rows (and loading/error/empty) */}
+      <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto' }}>
+        {error && <div style={{ padding: '40px', textAlign: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999' }}>{error}</div>}
+        {loading && (
+          /* Table shell with headers + loading row only (like Orders page) */
+          <div
+            style={{
+              backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+              borderRadius: '4px',
+              overflowX: 'auto',
+              boxShadow: isDarkMode ? '0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.1)',
+              width: '100%'
+            }}
+            aria-busy="true"
+            aria-label="Loading table data"
+          >
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 'max-content' }}>
+              <thead>
+                <tr style={{ backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa' }}>
+                  <th
+                    style={{
+                      padding: '12px',
+                      textAlign: 'center',
+                      fontWeight: 600,
+                      borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #dee2e6',
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#495057',
+                      fontSize: '13px',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      width: '48px',
+                      position: 'sticky',
+                      top: 0,
+                      zIndex: 1,
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa',
+                      boxShadow: isDarkMode ? '0 1px 0 0 var(--border-color, #404040)' : '0 1px 0 0 #dee2e6'
+                    }}
+                  >
+                    <input type="checkbox" disabled aria-hidden="true" style={{ cursor: 'default', opacity: 0.5 }} />
+                  </th>
+                  {Array.from({ length: 5 }, (_, i) => (
+                    <th
+                      key={i}
+                      style={{
+                        padding: '12px',
+                        textAlign: 'left',
+                        fontWeight: 600,
+                        borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #dee2e6',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#495057',
+                        fontSize: '13px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1,
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa',
+                        boxShadow: isDarkMode ? '0 1px 0 0 var(--border-color, #404040)' : '0 1px 0 0 #dee2e6'
+                      }}
+                    >
+                      —
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td
+                    colSpan={6}
+                    style={{
+                      textAlign: 'center',
+                      padding: '40px 20px',
+                      color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
+                      fontSize: '14px',
+                      borderBottom: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #eee'
+                    }}
+                  >
+                    Loading…
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+        {!loading && !error && data && (
           data.data && data.data.length > 0 ? (
             <>
-              <div>
-              <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                  marginBottom: '12px'
-                }}>
-                  <div style={{ color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontSize: '13px' }}>
-                    {selectedRowIds.size > 0 ? `${selectedRowIds.size} selected` : 'Select rows to delete'}
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <button
-                      onClick={() => editorOpen ? handleCloseEditor() : handleOpenEditor()}
-                      style={{
-                        padding: '8px 12px',
-                        backgroundColor: editorOpen ? (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#e0e0e0') : (isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)'),
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                        border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #ddd',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <Pencil size={14} />
-                      {editorOpen ? 'Close Editor' : 'Open Editor'}
-                    </button>
-                    <button
-                      onClick={handleDeleteSelected}
-                      disabled={selectedRowIds.size === 0}
-                      style={{
-                        padding: '8px 12px',
-                        backgroundColor: selectedRowIds.size === 0 ? (isDarkMode ? 'rgba(255,255,255,0.12)' : '#eee') : '#e53935',
-                        color: selectedRowIds.size === 0 ? (isDarkMode ? 'rgba(255,255,255,0.5)' : '#999') : '#fff',
-                        border: 'none',
-                        borderRadius: '6px',
-                        cursor: selectedRowIds.size === 0 ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 600
-                      }}
-                    >
-                      Delete selected
-                    </button>
-                  </div>
-                </div>
-
-                <Table
-                  columns={data.columns}
-                  data={data.data}
-                  enableRowSelection
-                  getRowId={getRowId}
-                  selectedRowIds={selectedRowIds}
-                  onSelectedRowIdsChange={setSelectedRowIds}
-                  onRowClick={editorOpen ? handleEditorRowClick : undefined}
-                  highlightedRowId={editorOpen ? editorSelectedRowId : null}
-                  themeColorRgb={themeColorRgb}
-                />
-              </div>
+              <Table
+                columns={data.columns}
+                data={data.data}
+                enableRowSelection
+                getRowId={getRowId}
+                selectedRowIds={selectedRowIds}
+                onSelectedRowIdsChange={setSelectedRowIds}
+                onRowClick={editorOpen ? handleEditorRowClick : undefined}
+                highlightedRowId={editorOpen ? editorSelectedRowId : null}
+                themeColorRgb={themeColorRgb}
+                stickyHeader
+              />
 
               {/* Floating draggable Row Editor modal */}
               {editorOpen && (

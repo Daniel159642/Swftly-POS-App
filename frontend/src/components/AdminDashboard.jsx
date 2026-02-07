@@ -42,7 +42,8 @@ function AdminDashboard() {
   const [employees, setEmployees] = useState([]);
   const [roles, setRoles] = useState([]);
   const [schedules, setSchedules] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [employeesLoading, setEmployeesLoading] = useState(true);
+  const [schedulesLoading, setSchedulesLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('employees');
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -51,10 +52,29 @@ function AdminDashboard() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
+  // Load employees and roles in parallel on mount; defer schedules until Schedules tab
   useEffect(() => {
-    loadEmployees();
-    loadRoles();
-    loadSchedules();
+    let cancelled = false;
+    const run = async () => {
+      setEmployeesLoading(true);
+      try {
+        const [empRes, rolesRes] = await Promise.all([
+          fetch('/api/employees'),
+          fetch('/api/roles')
+        ]);
+        if (cancelled) return;
+        const empData = await empRes.json();
+        const rolesData = await rolesRes.json();
+        setEmployees(empData.data || []);
+        setRoles(rolesData.roles || []);
+      } catch (err) {
+        if (!cancelled) setError('Failed to load employees');
+      } finally {
+        if (!cancelled) setEmployeesLoading(false);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -64,6 +84,7 @@ function AdminDashboard() {
   }, [activeTab]);
 
   const loadEmployees = async () => {
+    setEmployeesLoading(true);
     try {
       const response = await fetch('/api/employees');
       const data = await response.json();
@@ -71,38 +92,29 @@ function AdminDashboard() {
     } catch (err) {
       setError('Failed to load employees');
     } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadRoles = async () => {
-    try {
-      const response = await fetch('/api/roles');
-      const data = await response.json();
-      setRoles(data.roles || []);
-    } catch (err) {
-      console.error('Failed to load roles:', err);
+      setEmployeesLoading(false);
     }
   };
 
   const loadSchedules = async () => {
+    setSchedulesLoading(true);
+    setError(null);
     try {
-      // Calculate date range (current week + 2 weeks ahead)
       const today = new Date();
       const startDate = new Date(today);
-      startDate.setDate(today.getDate() - 7); // Start from a week ago
+      startDate.setDate(today.getDate() - 7);
       const endDate = new Date(today);
-      endDate.setDate(today.getDate() + 14); // 2 weeks ahead
-
+      endDate.setDate(today.getDate() + 14);
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = endDate.toISOString().split('T')[0];
-
       const response = await fetch(`/api/employee_schedule?start_date=${startDateStr}&end_date=${endDateStr}`);
       const data = await response.json();
       setSchedules(data.data || []);
     } catch (err) {
       console.error('Failed to load schedules:', err);
       setError('Failed to load schedules');
+    } finally {
+      setSchedulesLoading(false);
     }
   };
 
@@ -181,31 +193,23 @@ function AdminDashboard() {
     );
   }
 
-  if (loading) {
-    return (
-      <div style={{ padding: '40px', textAlign: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999' }}>
-        Loading...
-      </div>
-    );
-  }
-
   return (
-    <div style={{ padding: '0', maxWidth: '100%' }}>
-      <h1 style={{ 
-        fontSize: '24px', 
-        margin: '0 0 16px 0',
-        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-      }}>
-        Admin Dashboard
-      </h1>
-
+    <div style={{ 
+      padding: '0', 
+      maxWidth: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      overflow: 'hidden'
+    }}>
       {/* Tabs and Add Employee inline (Inventory category tab + Create style) */}
       <div style={{ 
         display: 'flex', 
         flexWrap: 'nowrap',
         gap: '8px', 
         marginBottom: '20px', 
-        alignItems: 'center'
+        alignItems: 'center',
+        flexShrink: 0
       }}>
         <button
           onClick={() => setActiveTab('employees')}
@@ -314,7 +318,8 @@ function AdminDashboard() {
             color: isDarkMode ? '#ef5350' : '#c33',
             marginBottom: '16px',
             fontSize: '14px',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            flexShrink: 0
           }}
         >
           {error}
@@ -332,7 +337,8 @@ function AdminDashboard() {
             color: isDarkMode ? '#81c784' : '#3c3',
             marginBottom: '16px',
             fontSize: '14px',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            flexShrink: 0
           }}
         >
           {success}
@@ -340,10 +346,11 @@ function AdminDashboard() {
       )}
 
       {activeTab === 'employees' && (
-        <div style={{ overflowX: 'auto', marginTop: '20px' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', marginTop: '4px' }}>
           <Table
+            stickyHeader
             columns={['employee_id', 'name', 'username', 'email', 'position', 'role', 'status', 'actions']}
-            data={employees.map((emp) => ({
+            data={employeesLoading ? [] : employees.map((emp) => ({
               ...emp,
               name: `${emp.first_name || ''} ${emp.last_name || ''}`.trim(),
               username: emp.username || emp.employee_code || 'N/A',
@@ -375,11 +382,21 @@ function AdminDashboard() {
               return items;
             }}
           />
+          {employeesLoading && (
+            <div style={{
+              textAlign: 'center',
+              padding: '24px 16px',
+              color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
+              fontSize: '14px'
+            }}>
+              Loading…
+            </div>
+          )}
         </div>
       )}
 
       {activeTab === 'schedules' && (
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <table style={{
             width: '100%',
             borderCollapse: 'collapse',
@@ -392,7 +409,11 @@ function AdminDashboard() {
                 backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5',
                 borderBottom: isDarkMode ? '2px solid var(--border-color, #404040)' : '2px solid #ddd'
               }}>
-                <th style={{ 
+                <th style={{
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 1,
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5', 
                   padding: '12px 16px', 
                   textAlign: 'left', 
                   fontWeight: 600,
@@ -400,6 +421,7 @@ function AdminDashboard() {
                   color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
                 }}>Employee</th>
                 <th style={{ 
+                  position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5',
                   padding: '12px 16px', 
                   textAlign: 'left', 
                   fontWeight: 600,
@@ -407,6 +429,7 @@ function AdminDashboard() {
                   color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
                 }}>Date</th>
                 <th style={{ 
+                  position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5',
                   padding: '12px 16px', 
                   textAlign: 'left', 
                   fontWeight: 600,
@@ -414,6 +437,7 @@ function AdminDashboard() {
                   color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
                 }}>Start Time</th>
                 <th style={{ 
+                  position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5',
                   padding: '12px 16px', 
                   textAlign: 'left', 
                   fontWeight: 600,
@@ -421,6 +445,7 @@ function AdminDashboard() {
                   color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
                 }}>End Time</th>
                 <th style={{ 
+                  position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5',
                   padding: '12px 16px', 
                   textAlign: 'left', 
                   fontWeight: 600,
@@ -428,6 +453,7 @@ function AdminDashboard() {
                   color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
                 }}>Hours</th>
                 <th style={{ 
+                  position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f5f5f5',
                   padding: '12px 16px', 
                   textAlign: 'left', 
                   fontWeight: 600,
@@ -437,7 +463,18 @@ function AdminDashboard() {
               </tr>
             </thead>
             <tbody>
-              {schedules.length === 0 ? (
+              {schedulesLoading ? (
+                <tr>
+                  <td colSpan="6" style={{ 
+                    textAlign: 'center', 
+                    padding: '40px 20px',
+                    color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
+                    fontSize: '14px'
+                  }}>
+                    Loading…
+                  </td>
+                </tr>
+              ) : schedules.length === 0 ? (
                 <tr>
                   <td colSpan="6" style={{ 
                     textAlign: 'center', 

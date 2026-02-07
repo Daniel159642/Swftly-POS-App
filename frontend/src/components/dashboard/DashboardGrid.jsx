@@ -3,6 +3,7 @@ import GridLayout, { useContainerWidth } from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { useTheme } from '../../contexts/ThemeContext'
+import { Plus } from 'lucide-react'
 import WidgetCard from './WidgetCard'
 
 export default function DashboardGrid({
@@ -14,6 +15,7 @@ export default function DashboardGrid({
   onLayoutChange,
   onRemoveWidget,
   onWidgetChartTypeChange,
+  onWidgetTimeRangeChange,
   onOpenWidgetLibrary
 }) {
   const { themeColor } = useTheme()
@@ -32,40 +34,21 @@ export default function DashboardGrid({
 
   if (loading) {
     return (
-      <div style={{ padding: '48px', textAlign: 'center', color: textColor }}>
+      <div style={{ padding: '48px', textAlign: 'center', color: textColor, minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: gridBg }}>
         Loading dashboard…
       </div>
     )
   }
   if (error) {
     return (
-      <div style={{ padding: '48px', textAlign: 'center', color: '#c00' }}>
+      <div style={{ padding: '48px', textAlign: 'center', color: '#c00', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: gridBg }}>
         {error}
       </div>
     )
   }
 
   return (
-    <div style={{ padding: '24px', minHeight: '100%', backgroundColor: gridBg, width: '100%' }} ref={containerRef}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-        <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: textColor }}>Statistics Dashboard</h1>
-        <button
-          type="button"
-          onClick={onOpenWidgetLibrary}
-          style={{
-            padding: '10px 20px',
-            borderRadius: '10px',
-            border: 'none',
-            backgroundColor: themeColor,
-            color: '#fff',
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontSize: '14px'
-          }}
-        >
-          Add widget
-        </button>
-      </div>
+    <div style={{ padding: '24px', minHeight: '100vh', height: '100%', backgroundColor: gridBg, width: '100%', boxSizing: 'border-box' }} ref={containerRef}>
       <GridLayout
         className="layout"
         width={width}
@@ -79,35 +62,45 @@ export default function DashboardGrid({
           if (!w) return <div key={item.i} />
           return (
             <div key={item.i} style={{ overflow: 'hidden' }}>
-              <div
-                className="widget-drag-handle"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: '28px',
-                  zIndex: 1,
-                  cursor: 'grab',
-                  background: 'linear-gradient(180deg, rgba(128,128,128,0.15) 0%, transparent 100%)',
-                  borderRadius: '12px 12px 0 0'
-                }}
-              />
-              <div style={{ paddingTop: '28px', height: '100%', boxSizing: 'border-box' }}>
-                <WidgetCard
-                  widgetId={w.widgetId}
-                  chartType={w.chartType}
-                  size={w.size}
-                  stats={stats}
+              <WidgetCard
+                widgetId={w.widgetId}
+                chartType={w.chartType}
+                size={w.size}
+                stats={stats}
                 onChartTypeChange={ct => onWidgetChartTypeChange(w.id, ct)}
                 onRemove={() => onRemoveWidget(w.id)}
-                  isDarkMode={isDarkMode}
-                />
-              </div>
+                isDarkMode={isDarkMode}
+                dragHandleClassName="widget-drag-handle"
+                timeRange={w.timeRange}
+                onTimeRangeChange={tr => onWidgetTimeRangeChange?.(w.id, tr)}
+              />
             </div>
           )
         })}
       </GridLayout>
+      <button
+        type="button"
+        onClick={onOpenWidgetLibrary}
+        title="Add widget"
+        style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          width: '56px',
+          height: '56px',
+          borderRadius: '50%',
+          border: 'none',
+          backgroundColor: themeColor,
+          color: '#fff',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+        }}
+      >
+        <Plus size={24} />
+      </button>
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 
-function AccountTable({ accounts, onEdit, onDelete, onToggleStatus, onViewBalance, onViewLedger }) {
+function AccountTable({ accounts, loading = false, onEdit, onDelete, onToggleStatus, onViewBalance, onViewLedger }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const [openMenuId, setOpenMenuId] = useState(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
@@ -43,14 +43,6 @@ function AccountTable({ accounts, onEdit, onDelete, onToggleStatus, onViewBalanc
       COGS: '#eab308',
     }
     return colors[type] || (isDarkMode ? '#9ca3af' : '#6b7280')
-  }
-
-  if (accounts.length === 0) {
-    return (
-      <div style={{ textAlign: 'center', padding: '48px 16px', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>
-        No accounts found
-      </div>
-    )
   }
 
   const thStyle = {
@@ -99,9 +91,9 @@ function AccountTable({ accounts, onEdit, onDelete, onToggleStatus, onViewBalanc
   }
 
   return (
-    <div style={{ overflowX: 'auto' }}>
+    <div style={{ overflowX: 'auto', minWidth: 0 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
+        <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9fafb', boxShadow: isDarkMode ? '0 1px 0 #3a3a3a' : '0 1px 0 #e5e7eb' }}>
           <tr>
             <th style={thStyle}>Account Number</th>
             <th style={thStyle}>Account Name</th>
@@ -112,7 +104,19 @@ function AccountTable({ accounts, onEdit, onDelete, onToggleStatus, onViewBalanc
           </tr>
         </thead>
         <tbody>
-          {accounts.map((account) => (
+          {loading ? (
+            <tr>
+              <td colSpan={6} style={{ padding: '48px 24px', textAlign: 'center', color: isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '14px' }}>
+                Loading…
+              </td>
+            </tr>
+          ) : !accounts || accounts.length === 0 ? (
+            <tr>
+              <td colSpan={6} style={{ padding: '48px 24px', textAlign: 'center', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>
+                No accounts found
+              </td>
+            </tr>
+          ) : accounts.map((account) => (
             <React.Fragment key={account.id}>
               <tr
                 style={{

@@ -264,9 +264,26 @@ export default function Customers() {
     boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
   }
 
+  const pageBg = isDark() ? 'var(--bg-primary)' : '#ffffff'
+  const theadBg = isDark() ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa'
+  const theadColor = isDark() ? 'var(--text-primary, #fff)' : '#495057'
+
   return (
-    <div style={{ padding: '40px', maxWidth: '1400px', margin: '0 auto', backgroundColor: '#ffffff', minHeight: '100vh' }}>
-      <div style={{ marginBottom: '20px' }}>
+    <div
+      style={{
+        padding: '40px',
+        maxWidth: '1400px',
+        margin: '0 auto',
+        backgroundColor: pageBg,
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        minHeight: 0,
+        overflow: 'hidden'
+      }}
+    >
+      <div style={{ flexShrink: 0, marginBottom: '20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center' }}>
             <input
@@ -329,16 +346,17 @@ export default function Customers() {
         </div>
       </div>
 
-      <div ref={tableContainerRef} style={{ backgroundColor: '#fff', borderRadius: '4px', overflowX: 'auto', overflowY: 'visible', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', width: '100%' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <div ref={tableContainerRef} style={{ backgroundColor: pageBg, borderRadius: '4px', boxShadow: isDark() ? '0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.1)', width: '100%', flex: 1, minHeight: 0, overflow: 'auto' }}>
         {loading ? (
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 'max-content' }} aria-busy="true" aria-label="Loading customers">
             <thead>
-              <tr style={{ backgroundColor: '#f8f9fa' }}>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Name</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Email</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Phone</th>
-                <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Points</th>
-                <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '56px' }}>Actions</th>
+              <tr style={{ backgroundColor: theadBg }}>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Name</th>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Email</th>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Phone</th>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Points</th>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '56px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -360,12 +378,12 @@ export default function Customers() {
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 'max-content' }}>
             <thead>
-              <tr style={{ backgroundColor: '#f8f9fa' }}>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Name</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Email</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Phone</th>
-                <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Points</th>
-                <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: '#495057', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '56px' }}>Actions</th>
+              <tr style={{ backgroundColor: theadBg }}>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Name</th>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Email</th>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Phone</th>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Points</th>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '56px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -470,7 +488,7 @@ export default function Customers() {
             </tbody>
           </table>
         )}
-      </div>
+        </div>
       {customersTotal > PAGE_SIZE && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '13px', color: '#6b7280' }}>
@@ -510,6 +528,7 @@ export default function Customers() {
           </button>
         </div>
       )}
+      </div>
 
       {/* Actions dropdown (portal so it isn't clipped by table overflow) */}
       {actionsOpenFor && dropdownAnchor && (() => {

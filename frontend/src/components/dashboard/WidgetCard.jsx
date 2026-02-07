@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts'
 import { useTheme } from '../../contexts/ThemeContext'
-import { getWidgetById, getDataByKey, CHART_TYPES, WIDGET_SIZES } from './widgetRegistry'
-import { ChevronDown, X } from 'lucide-react'
+import { getWidgetById, getDataByKey, CHART_TYPES, TIME_RANGES } from './widgetRegistry'
+import { ChevronDown, X, Clock } from 'lucide-react'
 
 const COLORS = ['#6ba3f0', '#5a9bd5', '#4a8bc2', '#3a7baf', '#2a6b9c', '#1a5b89']
 
@@ -13,13 +14,23 @@ function formatCurrency(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value ?? 0)
 }
 
-export default function WidgetCard({ widgetId, chartType, size, stats, onChartTypeChange, onRemove, isDarkMode }) {
+export default function WidgetCard({ widgetId, chartType, size, stats, onChartTypeChange, onRemove, isDarkMode, dragHandleClassName, timeRange, onTimeRangeChange }) {
   const { themeColor } = useTheme()
   const [chartMenuOpen, setChartMenuOpen] = useState(false)
+  const [timeRangeMenuOpen, setTimeRangeMenuOpen] = useState(false)
+  const [timeRangeMenuPosition, setTimeRangeMenuPosition] = useState({ top: 0, left: 0 })
+  const [chartMenuPosition, setChartMenuPosition] = useState({ top: 0, left: 0 })
+  const clockButtonRef = useRef(null)
+  const chartButtonRef = useRef(null)
   const def = getWidgetById(widgetId)
   if (!def) return null
 
-  const data = getDataByKey(stats, def.dataKey)
+  const effectiveTimeRange = timeRange ?? def.defaultTimeRange ?? 'all'
+  const effectiveDataKey = (def.timeKeyMap && effectiveTimeRange) ? (def.timeKeyMap[effectiveTimeRange] ?? def.dataKey) : def.dataKey
+  const data = getDataByKey(stats, effectiveDataKey)
+  const timeRangeOption = def.timeKeyMap ? TIME_RANGES.find(r => r.id === effectiveTimeRange) : null
+  const effectiveTimeRangeLabel = timeRangeOption ? timeRangeOption.label : (effectiveTimeRange || 'All time')
+  const headerTitle = def.timeKeyMap ? `${def.label} · ${effectiveTimeRangeLabel}` : def.label
   const supportedCharts = (def.supportedCharts || ['number']).filter(t => CHART_TYPES.some(c => c.id === t))
   const currentChart = supportedCharts.includes(chartType) ? chartType : (def.defaultChart || 'number')
   const textColor = isDarkMode ? '#fff' : '#1a1a1a'
@@ -77,7 +88,7 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
       )
     }
 
-    // Chart data: weekly_revenue / monthly_revenue are { date, day/month, revenue }; order_status_breakdown is { [status]: count }; top_products is array of { product_name, quantity, revenue }
+    // Chart data: weekly_revenue / monthly_revenue are { date, day/month, revenue }; order_status_breakdown is { [status]: count }; top_products is array of { product_name, quantity, revenue }; scalars become single-point chart
     let chartData = []
     let dataKey = 'value'
     let nameKey = 'name'
@@ -92,6 +103,10 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
       }
     } else if (data && typeof data === 'object' && !Array.isArray(data)) {
       chartData = Object.entries(data).map(([k, v]) => ({ name: k, value: Number(v) }))
+    } else if (data !== undefined && data !== null && typeof data === 'number') {
+      chartData = [{ name: def.label || 'Value', value: data }]
+    } else if (data !== undefined && data !== null && typeof data !== 'object') {
+      chartData = [{ name: def.label || 'Value', value: Number(data) }]
     }
 
     if (chartData.length === 0) {
@@ -99,6 +114,9 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
     }
 
     const chartHeight = size === 'large' ? 220 : size === 'medium' ? 160 : 120
+    const isCurrency = def.format === 'currency'
+    const formatTooltip = v => (isCurrency ? formatCurrency(v) : String(v))
+    const yAxisFormatter = v => (isCurrency ? (v >= 1000 ? `$${v / 1000}k` : `$${v}`) : String(v))
 
     if (currentChart === 'line') {
       return (
@@ -106,8 +124,8 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
           <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={borderColor} />
             <XAxis dataKey="name" tick={{ fontSize: 10, fill: mutedColor }} />
-            <YAxis tick={{ fontSize: 10, fill: mutedColor }} tickFormatter={v => (v >= 1000 ? `$${v / 1000}k` : `$${v}`)} />
-            <Tooltip formatter={v => [formatCurrency(v), '']} contentStyle={{ backgroundColor: cardBg, border: `1px solid ${borderColor}` }} />
+            <YAxis tick={{ fontSize: 10, fill: mutedColor }} tickFormatter={yAxisFormatter} />
+            <Tooltip formatter={v => [formatTooltip(v), '']} contentStyle={{ backgroundColor: cardBg, border: `1px solid ${borderColor}` }} />
             <Line type="monotone" dataKey="value" stroke={themeColor} strokeWidth={2} dot={{ r: 3 }} />
           </LineChart>
         </ResponsiveContainer>
@@ -119,8 +137,8 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
           <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={borderColor} />
             <XAxis dataKey="name" tick={{ fontSize: 10, fill: mutedColor }} />
-            <YAxis tick={{ fontSize: 10, fill: mutedColor }} tickFormatter={v => (v >= 1000 ? `$${v / 1000}k` : `$${v}`)} />
-            <Tooltip formatter={v => [formatCurrency(v), '']} contentStyle={{ backgroundColor: cardBg, border: `1px solid ${borderColor}` }} />
+            <YAxis tick={{ fontSize: 10, fill: mutedColor }} tickFormatter={yAxisFormatter} />
+            <Tooltip formatter={v => [formatTooltip(v), '']} contentStyle={{ backgroundColor: cardBg, border: `1px solid ${borderColor}` }} />
             <Bar dataKey="value" fill={themeColor} radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
@@ -132,8 +150,8 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
           <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={borderColor} />
             <XAxis dataKey="name" tick={{ fontSize: 10, fill: mutedColor }} />
-            <YAxis tick={{ fontSize: 10, fill: mutedColor }} tickFormatter={v => (v >= 1000 ? `$${v / 1000}k` : `$${v}`)} />
-            <Tooltip formatter={v => [formatCurrency(v), '']} contentStyle={{ backgroundColor: cardBg, border: `1px solid ${borderColor}` }} />
+            <YAxis tick={{ fontSize: 10, fill: mutedColor }} tickFormatter={yAxisFormatter} />
+            <Tooltip formatter={v => [formatTooltip(v), '']} contentStyle={{ backgroundColor: cardBg, border: `1px solid ${borderColor}` }} />
             <Area type="monotone" dataKey="value" stroke={themeColor} fill={themeColor} fillOpacity={0.3} />
           </AreaChart>
         </ResponsiveContainer>
@@ -156,7 +174,7 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
             >
               {chartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
             </Pie>
-            <Tooltip formatter={v => [formatCurrency(v), '']} contentStyle={{ backgroundColor: cardBg, border: `1px solid ${borderColor}` }} />
+            <Tooltip formatter={v => [formatTooltip(v), '']} contentStyle={{ backgroundColor: cardBg, border: `1px solid ${borderColor}` }} />
           </PieChart>
         </ResponsiveContainer>
       )
@@ -178,14 +196,36 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
         boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.2)' : '0 2px 8px rgba(0,0,0,0.06)'
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: `1px solid ${borderColor}`, flexShrink: 0 }}>
-        <span style={{ fontSize: '13px', fontWeight: 600, color: textColor }}>{def.label}</span>
+      <div
+        className={dragHandleClassName || undefined}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          borderBottom: `1px solid ${borderColor}`,
+          flexShrink: 0,
+          ...(dragHandleClassName ? { cursor: 'grab' } : {})
+        }}
+      >
+        <span style={{ fontSize: '13px', fontWeight: 600, color: textColor }}>{headerTitle}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           {supportedCharts.length > 1 && (
             <div style={{ position: 'relative' }}>
               <button
+                ref={chartButtonRef}
                 type="button"
-                onClick={() => setChartMenuOpen(!chartMenuOpen)}
+                onMouseDown={e => dragHandleClassName && e.stopPropagation()}
+                onClick={() => {
+                  setChartMenuOpen(prev => {
+                    if (!prev && chartButtonRef.current) {
+                      const rect = chartButtonRef.current.getBoundingClientRect()
+                      setChartMenuPosition({ top: rect.bottom + 4, left: rect.left })
+                    }
+                    return !prev
+                  })
+                  setTimeRangeMenuOpen(false)
+                }}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -199,22 +239,22 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
               >
                 <ChevronDown size={16} />
               </button>
-              {chartMenuOpen && (
+              {chartMenuOpen && createPortal(
                 <>
-                  <div style={{ position: 'fixed', inset: 0, zIndex: 10 }} onClick={() => setChartMenuOpen(false)} />
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setChartMenuOpen(false)} onMouseDown={e => e.stopPropagation()} />
                   <div
+                    onMouseDown={e => e.stopPropagation()}
                     style={{
-                      position: 'absolute',
-                      top: '100%',
-                      right: 0,
-                      marginTop: '4px',
+                      position: 'fixed',
+                      top: chartMenuPosition.top,
+                      left: chartMenuPosition.left,
                       backgroundColor: cardBg,
                       border: `1px solid ${borderColor}`,
                       borderRadius: '8px',
                       boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                      zIndex: 11,
-                      minWidth: '140px',
-                      padding: '4px 0'
+                      zIndex: 9999,
+                      width: 'max-content',
+                      padding: '2px 0'
                     }}
                   >
                     {supportedCharts.map(cid => {
@@ -226,7 +266,7 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
                           onClick={() => { onChartTypeChange(cid); setChartMenuOpen(false) }}
                           style={{
                             width: '100%',
-                            padding: '8px 12px',
+                            padding: '4px 10px',
                             textAlign: 'left',
                             border: 'none',
                             background: currentChart === cid ? (isDarkMode ? '#333' : '#f0f0f0') : 'transparent',
@@ -240,12 +280,85 @@ export default function WidgetCard({ widgetId, chartType, size, stats, onChartTy
                       )
                     })}
                   </div>
-                </>
+                </>,
+                document.body
+              )}
+            </div>
+          )}
+          {def.timeKeyMap && (
+            <div style={{ position: 'relative' }}>
+              <button
+                ref={clockButtonRef}
+                type="button"
+                onMouseDown={e => dragHandleClassName && e.stopPropagation()}
+                onClick={() => {
+                  setTimeRangeMenuOpen(prev => {
+                    if (!prev && clockButtonRef.current) {
+                      const rect = clockButtonRef.current.getBoundingClientRect()
+                      setTimeRangeMenuPosition({ top: rect.bottom + 4, left: rect.left })
+                    }
+                    return !prev
+                  })
+                  setChartMenuOpen(false)
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: '4px',
+                  cursor: 'pointer',
+                  color: mutedColor,
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+                title="Time range"
+              >
+                <Clock size={16} />
+              </button>
+              {timeRangeMenuOpen && createPortal(
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setTimeRangeMenuOpen(false)} onMouseDown={e => e.stopPropagation()} />
+                  <div
+                    onMouseDown={e => e.stopPropagation()}
+                    style={{
+                      position: 'fixed',
+                      top: timeRangeMenuPosition.top,
+                      left: timeRangeMenuPosition.left,
+                      backgroundColor: cardBg,
+                      border: `1px solid ${borderColor}`,
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                      zIndex: 9999,
+                      width: 'max-content',
+                      padding: '2px 0'
+                    }}
+                  >
+                    {TIME_RANGES.map(tr => (
+                      <button
+                        key={tr.id}
+                        type="button"
+                        onClick={() => { onTimeRangeChange?.(tr.id); setTimeRangeMenuOpen(false) }}
+                        style={{
+                          width: '100%',
+                          padding: '4px 10px',
+                          textAlign: 'left',
+                          border: 'none',
+                          background: effectiveTimeRange === tr.id ? (isDarkMode ? '#333' : '#f0f0f0') : 'transparent',
+                          color: textColor,
+                          cursor: 'pointer',
+                          fontSize: '13px'
+                        }}
+                      >
+                        {tr.label}
+                      </button>
+                    ))}
+                  </div>
+                </>,
+                document.body
               )}
             </div>
           )}
           {onRemove && (
-            <button type="button" onClick={onRemove} style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', color: mutedColor }} title="Remove widget">
+            <button type="button" onMouseDown={e => dragHandleClassName && e.stopPropagation()} onClick={onRemove} style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', color: mutedColor }} title="Remove widget">
               <X size={16} />
             </button>
           )}

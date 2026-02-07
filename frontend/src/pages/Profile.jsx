@@ -1,7 +1,11 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePermissions } from '../contexts/PermissionContext'
 import { useTheme } from '../contexts/ThemeContext'
 import AdminDashboard from '../components/AdminDashboard'
+import FullCalendar from '@fullcalendar/react'
+import dayGridPlugin from '@fullcalendar/daygrid'
+import timeGridPlugin from '@fullcalendar/timegrid'
+import interactionPlugin from '@fullcalendar/interaction'
 import { 
   User, 
   Settings as SettingsIcon, 
@@ -18,7 +22,6 @@ function Profile({ employeeId, employeeName }) {
   const { hasPermission, employee } = usePermissions()
   const { themeColor, setThemeColor, themeMode, setThemeMode } = useTheme()
   const [activeTab, setActiveTab] = useState('profile')
-  const [scheduleTab, setScheduleTab] = useState('schedule') // 'schedule' or 'availability'
   const [sidebarMinimized, setSidebarMinimized] = useState(false)
   const [hoveringProfile, setHoveringProfile] = useState(false)
   const [showTooltip, setShowTooltip] = useState(false)
@@ -39,9 +42,11 @@ function Profile({ employeeId, employeeName }) {
   
   const themeColorRgb = hexToRgb(themeColor)
   const [loading, setLoading] = useState(true)
+  const [scheduleLoading, setScheduleLoading] = useState(false)
   const [weekSchedules, setWeekSchedules] = useState([])
   const [weekOffset, setWeekOffset] = useState(0) // 0 = this week, 1 = next week, -1 = last week
   const [hoursStats, setHoursStats] = useState({ thisWeek: 0, thisMonth: 0 })
+  const previousEmployeeIdRef = useRef(null)
   
   // Determine if dark mode is active
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -82,7 +87,6 @@ function Profile({ employeeId, employeeName }) {
   const [unavailableEndTime, setUnavailableEndTime] = useState('')
   const [startTimeFocused, setStartTimeFocused] = useState(false)
   const [endTimeFocused, setEndTimeFocused] = useState(false)
-  const [editingAvailability, setEditingAvailability] = useState(false)
   const [appSettings, setAppSettings] = useState({
     theme: 'light',
     notifications: true,
@@ -97,14 +101,21 @@ function Profile({ employeeId, employeeName }) {
   const [clockStatus, setClockStatus] = useState(null)
   const [clockLoading, setClockLoading] = useState(false)
   const [clockMessage, setClockMessage] = useState(null)
-
   const hasAdminAccess = hasPermission('manage_permissions') || hasPermission('add_employee') || employee?.position?.toLowerCase() === 'admin'
 
   useEffect(() => {
-    if (employeeId) {
-      loadProfileData(weekOffset)
+    if (!employeeId) return
+    const isWeekChangeOnly = previousEmployeeIdRef.current === employeeId
+    previousEmployeeIdRef.current = employeeId
+    if (isWeekChangeOnly) {
+      loadProfileData(weekOffset, { scheduleOnly: true })
+    } else {
+      setLoading(true)
       loadAppSettings()
-      loadClockStatus()
+      Promise.all([
+        loadProfileData(weekOffset),
+        loadClockStatus()
+      ]).finally(() => setLoading(false))
     }
   }, [employeeId, weekOffset])
 
@@ -118,105 +129,100 @@ function Profile({ employeeId, employeeName }) {
     }
   }, [employeeId])
 
-  const loadProfileData = async (weekOffsetParam = 0) => {
-    setLoading(true)
+  const loadProfileData = async (weekOffsetParam = 0, options = {}) => {
+    const { scheduleOnly = false } = options
+    if (scheduleOnly) {
+      setScheduleLoading(true)
+    }
+    const today = new Date()
+    const startOfWeek = new Date(today)
+    startOfWeek.setDate(today.getDate() - today.getDay() + (weekOffsetParam * 7))
+    startOfWeek.setHours(0, 0, 0, 0)
+    const endOfWeek = new Date(startOfWeek)
+    endOfWeek.setDate(startOfWeek.getDate() + 6)
+    endOfWeek.setHours(23, 59, 59, 999)
+    const fetchStartDate = new Date(startOfWeek)
+    fetchStartDate.setDate(startOfWeek.getDate() - 28) // 4 weeks back
+    const fetchEndDate = new Date(startOfWeek)
+    fetchEndDate.setDate(startOfWeek.getDate() + 56)   // 8 weeks forward
+    const fetchStartDateStr = fetchStartDate.toISOString().split('T')[0]
+    const fetchEndDateStr = fetchEndDate.toISOString().split('T')[0]
+
     try {
-      const today = new Date()
-      const startOfWeek = new Date(today)
-      startOfWeek.setDate(today.getDate() - today.getDay() + (weekOffsetParam * 7))
-      startOfWeek.setHours(0, 0, 0, 0)
-      const endOfWeek = new Date(startOfWeek)
-      endOfWeek.setDate(startOfWeek.getDate() + 6)
-      endOfWeek.setHours(23, 59, 59, 999)
-      
-      const startDate = startOfWeek.toISOString().split('T')[0]
-      // Fetch a wider range (2 months back, 3 months forward) to support week navigation
-      const fetchStartDate = new Date(startOfWeek)
-      fetchStartDate.setDate(startOfWeek.getDate() - 60) // 2 months back
-      const fetchEndDate = new Date(startOfWeek)
-      fetchEndDate.setDate(startOfWeek.getDate() + 90) // 3 months forward
-      
-      const fetchStartDateStr = fetchStartDate.toISOString().split('T')[0]
-      const fetchEndDateStr = fetchEndDate.toISOString().split('T')[0]
+      if (scheduleOnly) {
+        const scheduleRes = await fetch(`/api/employee_schedule?employee_id=${employeeId}&start_date=${fetchStartDateStr}&end_date=${fetchEndDateStr}`)
+        const scheduleData = await scheduleRes.json()
+        const allSchedules = scheduleData.data || []
+        const weekScheds = allSchedules
+          .filter(s => {
+            const dateField = s.schedule_date || s.shift_date
+            if (!dateField) return false
+            const sDate = new Date(dateField)
+            return !isNaN(sDate.getTime()) && sDate >= startOfWeek && sDate <= endOfWeek
+          })
+          .sort((a, b) => new Date(a.schedule_date || a.shift_date || 0) - new Date(b.schedule_date || b.shift_date || 0))
+        setWeekSchedules(weekScheds)
+        return
+      }
 
-      // Get schedules for a wider range
-      const scheduleRes = await fetch(`/api/employee_schedule?employee_id=${employeeId}&start_date=${fetchStartDateStr}&end_date=${fetchEndDateStr}`)
-      const scheduleData = await scheduleRes.json()
+      // Full load: fetch schedule and availability in parallel
+      const [scheduleRes, availRes] = await Promise.all([
+        fetch(`/api/employee_schedule?employee_id=${employeeId}&start_date=${fetchStartDateStr}&end_date=${fetchEndDateStr}`),
+        fetch(`/api/employee_availability?employee_id=${employeeId}`)
+      ])
+      const [scheduleData, availData] = await Promise.all([scheduleRes.json(), availRes.json()])
       const allSchedules = scheduleData.data || []
-      
 
-      // Get this week's schedules
       const weekScheds = allSchedules
         .filter(s => {
           const dateField = s.schedule_date || s.shift_date
           if (!dateField) return false
           const sDate = new Date(dateField)
-          if (isNaN(sDate.getTime())) return false
-          return sDate >= startOfWeek && sDate <= endOfWeek
+          return !isNaN(sDate.getTime()) && sDate >= startOfWeek && sDate <= endOfWeek
         })
-        .sort((a, b) => {
-          const dateA = new Date(a.schedule_date || a.shift_date || 0)
-          const dateB = new Date(b.schedule_date || b.shift_date || 0)
-          return dateA - dateB
-        })
+        .sort((a, b) => new Date(a.schedule_date || a.shift_date || 0) - new Date(b.schedule_date || b.shift_date || 0))
       setWeekSchedules(weekScheds)
-      
 
-      // Calculate hours
       const thisWeekHours = allSchedules
         .filter(s => {
           const dateField = s.schedule_date || s.shift_date
-          if (!dateField) return false
+          if (!dateField || !s.hours_worked) return false
           const sDate = new Date(dateField)
-          if (isNaN(sDate.getTime())) return false
-          return sDate >= startOfWeek && sDate <= endOfWeek && s.hours_worked
+          return !isNaN(sDate.getTime()) && sDate >= startOfWeek && sDate <= endOfWeek
         })
         .reduce((sum, s) => sum + (s.hours_worked || 0), 0)
-      
       const thisMonthHours = allSchedules
         .filter(s => {
           const dateField = s.schedule_date || s.shift_date
-          if (!dateField) return false
+          if (!dateField || !s.hours_worked) return false
           const sDate = new Date(dateField)
-          if (isNaN(sDate.getTime())) return false
-          return sDate.getMonth() === today.getMonth() && 
-                 sDate.getFullYear() === today.getFullYear() && 
-                 s.hours_worked
+          return !isNaN(sDate.getTime()) && sDate.getMonth() === today.getMonth() && sDate.getFullYear() === today.getFullYear()
         })
         .reduce((sum, s) => sum + (s.hours_worked || 0), 0)
-
       setHoursStats({ thisWeek: thisWeekHours, thisMonth: thisMonthHours })
 
-      // Load availability
-      try {
-        const availRes = await fetch(`/api/employee_availability?employee_id=${employeeId}`)
-        if (availRes.ok) {
-          const availData = await availRes.json()
-          if (availData.data) {
-            const loaded = {}
-            const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-            days.forEach(day => {
-              if (availData.data[day]) {
-                try {
-                  const parsed = JSON.parse(availData.data[day])
-                  loaded[day] = parsed
-                } catch {
-                  loaded[day] = { available: true, start: '09:00', end: '17:00' }
-                }
-              } else {
-                loaded[day] = { available: true, start: '09:00', end: '17:00' }
-              }
-            })
-            setAvailability(loaded)
+      if (availData?.data) {
+        const loaded = {}
+        const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        days.forEach(day => {
+          if (availData.data[day]) {
+            try {
+              loaded[day] = JSON.parse(availData.data[day])
+            } catch {
+              loaded[day] = { available: true, start: '09:00', end: '17:00' }
+            }
+          } else {
+            loaded[day] = { available: true, start: '09:00', end: '17:00' }
           }
-        }
-      } catch (err) {
-        console.error('Error loading availability:', err)
+        })
+        setAvailability(loaded)
       }
     } catch (err) {
       console.error('Error loading profile data:', err)
     } finally {
-      setLoading(false)
+      if (scheduleOnly) {
+        setScheduleLoading(false)
+      }
     }
   }
 
@@ -564,20 +570,6 @@ function Profile({ employeeId, employeeName }) {
     }))
   }
 
-  if (loading) {
-    return (
-      <div style={{ 
-        padding: '60px', 
-        textAlign: 'center', 
-        color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', 
-        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-        fontSize: '16px'
-      }}>
-        Loading...
-      </div>
-    )
-  }
-
   const profileSections = [
     { id: 'profile', label: 'My Hours', icon: Clock },
     { id: 'settings', label: 'App Settings', icon: SettingsIcon },
@@ -589,8 +581,10 @@ function Profile({ employeeId, employeeName }) {
   return (
     <div style={{ 
       display: 'flex',
-      minHeight: '100vh',
-      width: '100%'
+      height: (activeTab === 'admin' && hasAdminAccess) || activeTab === 'settings' ? '100%' : '100vh',
+      minHeight: 0,
+      width: '100%',
+      overflow: 'hidden'
     }}>
       {/* Sidebar Navigation - 1/4 of page */}
       <div style={{
@@ -782,65 +776,67 @@ function Profile({ employeeId, employeeName }) {
         </div>
       </div>
 
-      {/* Main Content Area - 3/4 of page */}
+      {/* Main Content Area - 3/4 of page (like Tables: no page scroll; only inner content scrolls) */}
       <div style={{
         marginLeft: sidebarMinimized ? '60px' : '25%',
         width: sidebarMinimized ? 'calc(100% - 60px)' : '75%',
         flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
         padding: '48px 64px 64px 64px',
         backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
         maxWidth: sidebarMinimized ? 'none' : '1200px',
         transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
       }}>
-        {/* Tab Content */}
+        {/* Tab Content - each tab fills space; profile/settings scroll here, admin scrolls inside dashboard */}
       {activeTab === 'profile' && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         <>
-          {/* Clock In/Out Button */}
+          {/* Time Clock - no container, compact */}
           <div style={{
-            marginBottom: '24px',
-            padding: '20px',
-            border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-            borderRadius: '12px',
-            backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-            boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
+            marginBottom: '20px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px'
           }}>
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '16px'
-            }}>
-              <div style={{ flex: 1, minWidth: '200px' }}>
-                <div style={{
-                  fontSize: '16px',
-                  fontWeight: 600,
-                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-                  marginBottom: '8px'
-                }}>
-                  Time Clock
+            <div style={{ flex: 1, minWidth: '140px' }}>
+              <div style={{
+                fontSize: '13px',
+                fontWeight: 600,
+                color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                marginBottom: '4px'
+              }}>
+                Time Clock
+              </div>
+              {loading && clockStatus == null ? (
+                <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', fontStyle: 'italic' }}>
+                  Loading…
                 </div>
-                {clockStatus?.clocked_in ? (
-                  <div style={{
-                    fontSize: '14px',
-                    color: isDarkMode ? 'var(--text-secondary, #999)' : '#666'
-                  }}>
-                    Clocked in since {clockStatus.clock_in_time ? new Date(clockStatus.clock_in_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''}
-                  </div>
-                ) : (
-                  <div style={{
-                    fontSize: '14px',
-                    color: isDarkMode ? 'var(--text-secondary, #999)' : '#666'
-                  }}>
-                    Currently clocked out
-                  </div>
-                )}
-                {clockMessage && (
-                  <div style={{
-                    marginTop: '8px',
-                    padding: '8px 12px',
-                    borderRadius: '6px',
-                    fontSize: '13px',
+              ) : clockStatus?.clocked_in ? (
+                <div style={{
+                  fontSize: '12px',
+                  color: isDarkMode ? 'var(--text-secondary, #999)' : '#666'
+                }}>
+                  Clocked in since {clockStatus.clock_in_time ? new Date(clockStatus.clock_in_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''}
+                </div>
+              ) : (
+                <div style={{
+                  fontSize: '12px',
+                  color: isDarkMode ? 'var(--text-secondary, #999)' : '#666'
+                }}>
+                  Currently clocked out
+                </div>
+              )}
+              {clockMessage && (
+                <div style={{
+                  marginTop: '6px',
+                  padding: '6px 10px',
+                  borderRadius: '4px',
+                  fontSize: '12px',
                     backgroundColor: clockMessage.type === 'success' 
                       ? (isDarkMode ? 'rgba(76, 175, 80, 0.2)' : 'rgba(76, 175, 80, 0.1)')
                       : clockMessage.type === 'info'
@@ -882,10 +878,10 @@ function Profile({ employeeId, employeeName }) {
               </div>
               <button
                 onClick={clockStatus?.clocked_in ? handleClockOut : handleClockIn}
-                disabled={clockLoading}
+                disabled={clockLoading || (loading && clockStatus == null)}
                 style={{
-                  padding: '12px 24px',
-                  fontSize: '16px',
+                  padding: '8px 16px',
+                  fontSize: '13px',
                   fontWeight: 600,
                   color: '#fff',
                   backgroundColor: clockStatus?.clocked_in 
@@ -917,159 +913,37 @@ function Profile({ employeeId, employeeName }) {
               >
                 {clockLoading ? 'Processing...' : (clockStatus?.clocked_in ? 'Clock Out' : 'Clock In')}
               </button>
+          </div>
+
+          {/* Hours summary - no containers, compact inline */}
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '24px',
+            marginBottom: '28px',
+            alignItems: 'baseline'
+          }}>
+            <div>
+              <div style={{ fontSize: '11px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                This Week
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>
+                {loading ? '…' : `${hoursStats.thisWeek.toFixed(1)}h`}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '11px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                This Month
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>
+                {loading ? '…' : `${hoursStats.thisMonth.toFixed(1)}h`}
+              </div>
             </div>
           </div>
 
-          {/* Hours Summary */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-        gap: '20px',
-        marginBottom: '32px'
-      }}>
-        <div style={{
-          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-          borderRadius: '12px',
-          padding: '28px',
-          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-          boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-          transition: 'transform 0.2s, box-shadow 0.2s'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'translateY(-2px)'
-          e.currentTarget.style.boxShadow = isDarkMode ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.12)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'translateY(0)'
-          e.currentTarget.style.boxShadow = isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
-        }}
-        >
-          <div style={{ 
-            fontSize: '13px', 
-            color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', 
-            marginBottom: '12px',
-            fontWeight: 500,
-            textTransform: 'uppercase',
-            letterSpacing: '0.5px',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-          }}>
-            This Week
-          </div>
-          <div style={{ 
-            fontSize: '42px', 
-            fontWeight: 700,
-            color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-            lineHeight: '1.2'
-          }}>
-            {hoursStats.thisWeek.toFixed(1)}h
-          </div>
-        </div>
-
-        <div style={{
-          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-          borderRadius: '12px',
-          padding: '28px',
-          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-          boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-          transition: 'transform 0.2s, box-shadow 0.2s'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'translateY(-2px)'
-          e.currentTarget.style.boxShadow = isDarkMode ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.12)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'translateY(0)'
-          e.currentTarget.style.boxShadow = isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
-        }}
-        >
-          <div style={{ 
-            fontSize: '13px', 
-            color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', 
-            marginBottom: '12px',
-            fontWeight: 500,
-            textTransform: 'uppercase',
-            letterSpacing: '0.5px',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-          }}>
-            This Month
-          </div>
-          <div style={{ 
-            fontSize: '42px', 
-            fontWeight: 700,
-            color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-            lineHeight: '1.2'
-          }}>
-            {hoursStats.thisMonth.toFixed(1)}h
-          </div>
-        </div>
-      </div>
-
-      {/* Schedule & Availability - same style as This Week / This Month cards */}
-        <div style={{
-          marginBottom: '32px',
-          border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-          borderRadius: '12px',
-          overflow: 'hidden',
-          padding: '0',
-          backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-          boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-          transition: 'transform 0.2s, box-shadow 0.2s',
-          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-        }}>
-        {/* Content: tab buttons + body - single fixed-height area */}
-        <div style={{ padding: '28px', height: '520px', overflowY: 'auto', boxSizing: 'border-box' }}>
-          {/* Tab buttons - same style as Add Date button, full width */}
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexShrink: 0, width: '100%' }}>
-            <button
-              type="button"
-              onClick={() => setScheduleTab('schedule')}
-              style={{
-                flex: 1,
-                padding: '10px 20px',
-                backgroundColor: scheduleTab === 'schedule' ? `rgba(${themeColorRgb}, 0.7)` : `rgba(${themeColorRgb}, 0.25)`,
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                color: '#fff',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 600,
-                fontSize: '14px',
-                boxShadow: scheduleTab === 'schedule' ? `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)` : `0 2px 8px rgba(${themeColorRgb}, 0.15)`,
-                transition: 'all 0.3s ease',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-              }}
-            >
-              Schedule
-            </button>
-            <button
-              type="button"
-              onClick={() => setScheduleTab('availability')}
-              style={{
-                flex: 1,
-                padding: '10px 20px',
-                backgroundColor: scheduleTab === 'availability' ? `rgba(${themeColorRgb}, 0.7)` : `rgba(${themeColorRgb}, 0.25)`,
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                color: '#fff',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 600,
-                fontSize: '14px',
-                boxShadow: scheduleTab === 'availability' ? `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)` : `0 2px 8px rgba(${themeColorRgb}, 0.15)`,
-                transition: 'all 0.3s ease',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-              }}
-            >
-              Availability
-            </button>
-          </div>
-
-        {/* Schedule tab: title with arrows on same line, left and right */}
-        {scheduleTab === 'schedule' && (
+      {/* Schedule & Availability - directly on page, no container/tabs */}
+        <div style={{ marginBottom: '32px' }}>
+          {/* This Week's Schedule - week view 6am–10pm */}
           <div>
             <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button type="button" onClick={() => setWeekOffset(prev => prev - 1)} style={{ padding: '2px 6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a', flexShrink: 0 }}>←</button>
@@ -1078,173 +952,159 @@ function Profile({ employeeId, employeeName }) {
               </h2>
               <button type="button" onClick={() => setWeekOffset(prev => prev + 1)} style={{ padding: '2px 6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a', flexShrink: 0 }}>→</button>
             </div>
-        {(() => {
-          // Organize schedules by date in the week
-          const today = new Date()
-          const startOfWeek = new Date(today)
-          startOfWeek.setDate(today.getDate() - today.getDay() + (weekOffset * 7))
-          startOfWeek.setHours(0, 0, 0, 0)
-          
-          // Create a map of schedules by date (YYYY-MM-DD format)
-          const scheduleByDate = {}
-          weekSchedules.forEach(schedule => {
-            const dateField = schedule.schedule_date || schedule.shift_date
-            if (dateField) {
-              const sDate = new Date(dateField)
-              if (!isNaN(sDate.getTime())) {
-                const dateKey = sDate.toISOString().split('T')[0] // YYYY-MM-DD
-                scheduleByDate[dateKey] = schedule
-              }
-            }
-          })
-          
-          const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-          
-          // Generate dates for each day of the week
-          const weekDays = []
-          for (let i = 0; i < 7; i++) {
-            const dayDate = new Date(startOfWeek)
-            dayDate.setDate(startOfWeek.getDate() + i)
-            const dateKey = dayDate.toISOString().split('T')[0]
-            weekDays.push({
-              date: dayDate,
-              dateKey: dateKey,
-              schedule: scheduleByDate[dateKey] || null
-            })
-          }
-          
-          return (
-            <div style={{
-              border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-              borderRadius: '8px',
-              overflow: 'hidden',
-              backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'
-            }}>
-              {/* Header */}
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(7, 1fr)',
-                borderBottom: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'
-              }}>
-                {weekDays.map((dayInfo, index) => {
-                  const isToday = dayInfo.date.toDateString() === new Date().toDateString()
-                  const dayName = dayInfo.date.toLocaleDateString('en-US', { weekday: 'short' })
-                  
-                  return (
-                    <div 
-                      key={dayInfo.dateKey}
+            {(() => {
+              const today = new Date()
+              const startOfWeek = new Date(today)
+              startOfWeek.setDate(today.getDate() - today.getDay() + (weekOffset * 7))
+              startOfWeek.setHours(0, 0, 0, 0)
+              const initialDateStr = startOfWeek.toISOString().split('T')[0]
+              const scheduleEvents = (weekSchedules || []).map((s, i) => {
+                const dateField = s.schedule_date || s.shift_date
+                if (!dateField || !s.start_time || !s.end_time) return null
+                const dateKey = new Date(dateField).toISOString().split('T')[0]
+                const startTime = String(s.start_time).length === 5 ? s.start_time + ':00' : s.start_time
+                const endTime = String(s.end_time).length === 5 ? s.end_time + ':00' : s.end_time
+                return {
+                  id: s.id != null ? String(s.id) : `s-${dateKey}-${i}`,
+                  title: 'Shift',
+                  start: `${dateKey}T${startTime}`,
+                  end: `${dateKey}T${endTime}`
+                }
+              }).filter(Boolean)
+              const slotMin = '00:00:00'
+              const slotMax = '24:00:00'
+              return (
+                <div style={{ position: 'relative' }}>
+                  {(loading || scheduleLoading) && (
+                    <div
                       style={{
-                        padding: '12px 8px',
-                        borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none',
-                        textAlign: 'center',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#555',
-                        backgroundColor: isToday ? (isDarkMode ? `rgba(${themeColorRgb}, 0.2)` : `rgba(${themeColorRgb}, 0.1)`) : 'transparent'
-                      }}
-                    >
-                      {dayName}
-                      <div style={{ fontSize: '11px', fontWeight: 400, marginTop: '4px', opacity: 0.7 }}>
-                        {dayInfo.date.getDate()}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-              
-              {/* Schedule Content - same height as Availability schedule grid (120px) */}
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(7, 1fr)',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                height: '120px'
-              }}>
-                {weekDays.map((dayInfo, index) => {
-                  const schedule = dayInfo.schedule
-                  const hasSchedule = schedule && schedule.start_time && schedule.end_time
-                  
-                  return (
-                    <div 
-                      key={dayInfo.dateKey}
-                      style={{
-                        padding: '20px 8px',
-                        borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none',
-                        textAlign: 'center',
-                        height: '120px',
+                        position: 'absolute',
+                        inset: 0,
+                        borderRadius: '8px',
+                        backgroundColor: isDarkMode ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)',
                         display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'center',
                         alignItems: 'center',
-                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'
+                        justifyContent: 'center',
+                        zIndex: 10,
+                        fontSize: '14px',
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
                       }}
                     >
-                      {hasSchedule ? (
-                        <>
-                          <div style={{ 
-                            fontSize: '14px', 
-                            fontWeight: 600, 
-                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-                            marginBottom: '4px'
-                          }}>
-                            {formatTime(schedule.start_time)}
-                          </div>
-                          <div style={{ 
-                            fontSize: '12px', 
-                            color: isDarkMode ? 'var(--text-secondary, #999)' : '#666',
-                            marginBottom: '4px'
-                          }}>
-                            to
-                          </div>
-                          <div style={{ 
-                            fontSize: '14px', 
-                            fontWeight: 600, 
-                            color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a'
-                          }}>
-                            {formatTime(schedule.end_time)}
-                          </div>
-                        </>
-                      ) : (
-                        <div style={{ 
-                          fontSize: '13px', 
-                          color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
-                          fontStyle: 'italic'
-                        }}>
-                          Off
-                        </div>
-                      )}
+                      Loading…
                     </div>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        })()}
+                  )}
+                  <div className="fc fc-theme-standard" style={{ border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0', borderRadius: '8px', overflow: 'hidden', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff', minHeight: '320px' }}>
+                    <FullCalendar
+                      key={`schedule-${weekOffset}-${initialDateStr}`}
+                      plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+                      initialView="timeGridWeek"
+                      initialDate={initialDateStr}
+                      slotMinTime={slotMin}
+                      slotMaxTime={slotMax}
+                      events={scheduleEvents}
+                      headerToolbar={false}
+                      height="auto"
+                      contentHeight={320}
+                      dayMaxEvents={false}
+                      nowIndicator={true}
+                      slotDuration="00:30:00"
+                      allDaySlot={false}
+                      eventDisplay="block"
+                      themeSystem="standard"
+                      buttonText={{ today: 'Today', month: 'Month', week: 'Week', day: 'Day' }}
+                    />
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
 
-            {/* Below schedule: Add Date + Unavailable dates (same on both tabs) */}
-            <div style={{ marginTop: '24px' }}>
-              <button
-                onClick={() => setShowAddDate(!showAddDate)}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  color: '#fff',
-                  border: '1px solid rgba(255, 255, 255, 0.2)',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  fontSize: '14px',
-                  boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                  transition: 'all 0.3s ease',
-                  marginBottom: '20px'
-                }}
-              >
-                + Add Date
-              </button>
-              {showAddDate && (
+          {/* My Availability - same form style as Store Hours (Settings > Store Information) */}
+          <FormField style={{ marginTop: '32px', marginBottom: '8px' }}>
+            <div style={{ marginBottom: '16px', fontSize: '15px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+              My Availability
+            </div>
+            {(() => {
+              const dayOrder = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+              const dayLabels = { sunday: 'Sunday', monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday' }
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {dayOrder.map((hoursKey) => {
+                    const dayHours = availability[hoursKey]
+                    const isAvailable = dayHours?.available
+                    return (
+                      <div
+                        key={hoursKey}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                          flexWrap: 'wrap'
+                        }}
+                      >
+                        <span style={{ width: '90px', flexShrink: 0, fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                          {dayLabels[hoursKey]}
+                        </span>
+                        {isAvailable ? (
+                          <>
+                            <input
+                              type="time"
+                              value={dayHours?.start || '09:00'}
+                              onChange={(e) => handleAvailabilityChange(hoursKey, 'start', e.target.value)}
+                              style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box' }}
+                              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                            />
+                            <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>–</span>
+                            <input
+                              type="time"
+                              value={dayHours?.end || '17:00'}
+                              onChange={(e) => handleAvailabilityChange(hoursKey, 'end', e.target.value)}
+                              style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box' }}
+                              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', cursor: 'default' }}>
+                              Unavailable
+                            </div>
+                            <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>–</span>
+                            <div style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', cursor: 'default' }}>
+                              Unavailable
+                            </div>
+                          </>
+                        )}
+                        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none', fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                          <input
+                            type="checkbox"
+                            checked={isAvailable || false}
+                            onChange={(e) => handleAvailabilityChange(hoursKey, 'available', e.target.checked)}
+                            style={{ marginRight: '6px', cursor: 'pointer', width: '16px', height: '16px', accentColor: isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a' }}
+                          />
+                          Available
+                        </label>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+          </FormField>
+
+          {/* Add Date + Unavailable dates - below My Availability */}
+          <div style={{ marginTop: '32px' }}>
+            <button
+              type="button"
+              className="button-26 button-26--header"
+              role="button"
+              onClick={() => setShowAddDate(!showAddDate)}
+              style={{ cursor: 'pointer', marginBottom: '20px' }}
+            >
+              <div className="button-26__content">
+                <span className="button-26__text text">+ Add Date</span>
+              </div>
+            </button>
+            {showAddDate && (
                 <div style={{
                   padding: '24px',
                   border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
@@ -1311,440 +1171,29 @@ function Profile({ employeeId, employeeName }) {
                 <div style={{ color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', fontSize: '14px', textAlign: 'center', padding: '40px 20px', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif' }}>No unavailable dates added</div>
               )}
             </div>
-          </div>
-        )}
 
-        {/* Availability Tab Content */}
-        {scheduleTab === 'availability' && (
-          <div>
-            <div style={{ marginBottom: '12px' }}>
-              <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', textAlign: 'center' }}>
-                My Availability
-              </h2>
-            </div>
-        {/* Weekly Availability - grid first, then Add Date + Unavailable below */}
-        <div style={{ marginBottom: '24px' }}>
-          {(() => {
-            const today = new Date()
-            const startOfWeek = new Date(today)
-            startOfWeek.setDate(today.getDate() - today.getDay())
-            startOfWeek.setHours(0, 0, 0, 0)
-            const dayNameToAvailabilityKey = { 'sunday': 'sunday', 'monday': 'monday', 'tuesday': 'tuesday', 'wednesday': 'wednesday', 'thursday': 'thursday', 'friday': 'friday', 'saturday': 'saturday' }
-            const weekDays = []
-            for (let i = 0; i < 7; i++) {
-              const dayDate = new Date(startOfWeek)
-              dayDate.setDate(startOfWeek.getDate() + i)
-              const dayName = dayDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
-              weekDays.push({ date: dayDate, availabilityKey: dayNameToAvailabilityKey[dayName] || dayName, dayName })
-            }
-            return (
-              <div style={{ border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0', borderRadius: '8px', overflow: 'hidden', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', backgroundColor: isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5' }}>
-                  {weekDays.map((dayInfo, index) => {
-                    const isToday = dayInfo.date.toDateString() === new Date().toDateString()
-                    const dayName = dayInfo.date.toLocaleDateString('en-US', { weekday: 'short' })
-                    return (
-                      <div key={dayInfo.availabilityKey} style={{ padding: '12px 8px', borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none', textAlign: 'center', fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#555', backgroundColor: isToday ? (isDarkMode ? `rgba(${themeColorRgb}, 0.2)` : `rgba(${themeColorRgb}, 0.1)`) : 'transparent' }}>
-                        {dayName}
-                        <div style={{ fontSize: '11px', fontWeight: 400, marginTop: '4px', opacity: 0.7 }}>{dayInfo.date.getDate()}</div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', height: editingAvailability ? 'auto' : '120px', minHeight: editingAvailability ? undefined : '120px' }}>
-                  {weekDays.map((dayInfo, index) => {
-                    const dayAvailability = availability[dayInfo.availabilityKey]
-                    const isAvailable = dayAvailability?.available
-                    return (
-                      <div key={dayInfo.availabilityKey} style={{ padding: editingAvailability ? '12px 8px' : '20px 8px', borderRight: index < 6 ? (isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0') : 'none', textAlign: 'center', height: editingAvailability ? 'auto' : '120px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: editingAvailability ? '8px' : '0', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa' }}>
-                        {editingAvailability ? (
-                          <> <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none', fontSize: '12px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}><input type="checkbox" checked={isAvailable || false} onChange={(e) => handleAvailabilityChange(dayInfo.availabilityKey, 'available', e.target.checked)} style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a' }} /><span>Available</span></label>
-                            {isAvailable && (<> <input type="time" value={dayAvailability?.start || '09:00'} onChange={(e) => handleAvailabilityChange(dayInfo.availabilityKey, 'start', e.target.value)} style={{ width: '100%', padding: '6px 8px', border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc', borderRadius: '4px', fontSize: '12px', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', transition: 'border-color 0.2s' }} onFocus={(e) => e.target.style.borderColor = isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a'} onBlur={(e) => e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ccc'} /><div style={{ fontSize: '11px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>to</div><input type="time" value={dayAvailability?.end || '17:00'} onChange={(e) => handleAvailabilityChange(dayInfo.availabilityKey, 'end', e.target.value)} style={{ width: '100%', padding: '6px 8px', border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ccc', borderRadius: '4px', fontSize: '12px', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif', backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', transition: 'border-color 0.2s' }} onFocus={(e) => e.target.style.borderColor = isDarkMode ? 'var(--theme-color, #8400ff)' : '#1a1a1a'} onBlur={(e) => e.target.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ccc'} /> </>)} </> ) : (
-                          <> {isAvailable ? (<> <div style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a', marginBottom: '4px' }}>{formatTime(dayAvailability.start || '09:00')}</div><div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginBottom: '4px' }}>to</div><div style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>{formatTime(dayAvailability.end || '17:00')}</div> </>) : <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', fontStyle: 'italic' }}>Off</div>} </> )}
-                        </div>
-                    )
-                  })}
-                </div>
+          {/* Save Availability - at bottom of page */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '32px' }}>
+            <button
+              type="button"
+              className="button-26 button-26--header"
+              role="button"
+              onClick={handleSaveAvailability}
+              style={{ cursor: 'pointer' }}
+            >
+              <div className="button-26__content">
+                <span className="button-26__text text">Save Availability</span>
               </div>
-            )
-          })()}
-        </div>
-        <div style={{ 
-            display: 'flex',
-            justifyContent: 'flex-start',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '20px',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-          }}>
-            <button
-              onClick={() => setShowAddDate(!showAddDate)}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                color: '#fff',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 600,
-                fontSize: '14px',
-                boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                transition: 'all 0.3s ease'
-              }}
-            >
-              + Add Date
-            </button>
-            {editingAvailability && (
-              <button
-                onClick={() => {
-                  handleSaveAvailability()
-                  setEditingAvailability(false)
-                }}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  color: '#fff',
-                  border: '1px solid rgba(255, 255, 255, 0.2)',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  fontSize: '14px',
-                  boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                  transition: 'all 0.3s ease'
-                }}
-              >
-                Save All
-              </button>
-            )}
-            <button
-              onClick={() => setEditingAvailability(!editingAvailability)}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: editingAvailability 
-                  ? `rgba(${themeColorRgb}, 0.2)`
-                  : `rgba(${themeColorRgb}, 0.7)`,
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                color: '#fff',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 600,
-                fontSize: '14px',
-                boxShadow: editingAvailability 
-                  ? `0 2px 8px rgba(${themeColorRgb}, 0.1)`
-                  : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                transition: 'all 0.3s ease'
-              }}
-            >
-              {editingAvailability ? 'Cancel' : 'Edit'}
             </button>
           </div>
-
-        {/* Unavailable Dates - below Add Date on both tabs */}
-        <div>
-
-          {showAddDate && (
-            <div style={{
-              padding: '24px',
-              border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0',
-              borderRadius: '8px',
-              marginBottom: '20px',
-              backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-            }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <FormField style={{ marginBottom: '12px' }}>
-                  <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Start Date</FormLabel>
-                  <input
-                    type="date"
-                    value={newDate}
-                    onChange={(e) => setNewDate(e.target.value)}
-                    style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                </FormField>
-                
-                <FormField style={{ marginBottom: '12px' }}>
-                  <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>End Date (optional - leave blank for single day)</FormLabel>
-                  <input
-                    type="date"
-                    value={newEndDate}
-                    onChange={(e) => setNewEndDate(e.target.value)}
-                    min={newDate}
-                    style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                </FormField>
-                
-                <FormField style={{ marginBottom: '12px' }}>
-                  <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Can't work from:</FormLabel>
-                  <div 
-                    style={{ position: 'relative', cursor: 'text' }}
-                    onClick={(e) => {
-                      const input = e.currentTarget.querySelector('input')
-                      if (input) input.focus()
-                    }}
-                  >
-                    <input
-                      type="time"
-                      value={unavailableStartTime}
-                      onChange={(e) => setUnavailableStartTime(e.target.value)}
-                      onFocus={(e) => {
-                        setStartTimeFocused(true)
-                        getInputFocusHandlers(themeColorRgb, isDarkMode).onFocus(e)
-                      }}
-                      onBlur={(e) => {
-                        setStartTimeFocused(false)
-                        getInputFocusHandlers(themeColorRgb, isDarkMode).onBlur(e)
-                      }}
-                      style={{
-                        ...inputBaseStyle(isDarkMode, themeColorRgb),
-                        color: (unavailableStartTime || startTimeFocused) ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333') : 'transparent'
-                      }}
-                    />
-                    {!unavailableStartTime && !startTimeFocused && (
-                      <div style={{
-                        position: 'absolute',
-                        left: '14px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        pointerEvents: 'none',
-                        fontSize: '14px',
-                        color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
-                        fontStyle: 'italic'
-                      }}>
-                        All day
-                      </div>
-                    )}
-                  </div>
-                </FormField>
-                
-                <FormField style={{ marginBottom: '12px' }}>
-                  <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Can't work until:</FormLabel>
-                  <div 
-                    style={{ position: 'relative', cursor: 'text' }}
-                    onClick={(e) => {
-                      const input = e.currentTarget.querySelector('input')
-                      if (input) input.focus()
-                    }}
-                  >
-                    <input
-                      type="time"
-                      value={unavailableEndTime}
-                      onChange={(e) => setUnavailableEndTime(e.target.value)}
-                      onFocus={(e) => {
-                        setEndTimeFocused(true)
-                        getInputFocusHandlers(themeColorRgb, isDarkMode).onFocus(e)
-                      }}
-                      onBlur={(e) => {
-                        setEndTimeFocused(false)
-                        getInputFocusHandlers(themeColorRgb, isDarkMode).onBlur(e)
-                      }}
-                      style={{
-                        ...inputBaseStyle(isDarkMode, themeColorRgb),
-                        color: (unavailableEndTime || endTimeFocused) ? (isDarkMode ? 'var(--text-primary, #fff)' : '#333') : 'transparent'
-                      }}
-                    />
-                    {!unavailableEndTime && !endTimeFocused && (
-                      <div style={{
-                        position: 'absolute',
-                        left: '14px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        pointerEvents: 'none',
-                        fontSize: '14px',
-                        color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999',
-                        fontStyle: 'italic'
-                      }}>
-                        All day
-                      </div>
-                    )}
-                  </div>
-                </FormField>
-                
-                <FormField style={{ marginBottom: '12px' }}>
-                  <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Note (optional)</FormLabel>
-                  <input
-                    type="text"
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
-                    placeholder="e.g., Vacation, Doctor appointment"
-                    style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                    {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  />
-                </FormField>
-                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                  <button
-                    type="button"
-                    className="button-26 button-26--header"
-                    role="button"
-                    onClick={() => {
-                      setShowAddDate(false)
-                      setNewDate('')
-                      setNewEndDate('')
-                      setNewNote('')
-                      setUnavailableStartTime('')
-                      setUnavailableEndTime('')
-                      setStartTimeFocused(false)
-                      setEndTimeFocused(false)
-                      setEditingDateIndex(null) // Clear editing state on cancel
-                    }}
-                  >
-                    <div className="button-26__content">
-                      <span className="button-26__text text">Cancel</span>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    className="button-26 button-26--header"
-                    role="button"
-                    onClick={handleAddUnavailableDate}
-                  >
-                    <div className="button-26__content">
-                      <span className="button-26__text text">Add</span>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {unavailableDates.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {unavailableDates.map((item, index) => (
-                <div
-                  key={index}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '16px',
-                    border: isDarkMode ? '1px solid var(--border-light, #333)' : '1px solid #e8e8e8',
-                    borderRadius: '8px',
-                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'
-                    e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#d0d0d0'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa'
-                    e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-light, #333)' : '#e8e8e8'
-                  }}
-                >
-                  <div>
-                    <div style={{ 
-                      fontSize: '15px', 
-                      fontWeight: 600,
-                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a',
-                      marginBottom: '4px'
-                    }}>
-                      {new Date(item.date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
-                    </div>
-                    {item.startTime && item.endTime ? (
-                      <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '4px' }}>
-                        Can't work: {item.startTime} - {item.endTime}
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '4px' }}>
-                        All day
-                      </div>
-                    )}
-                    {item.note && (
-                      <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '4px' }}>
-                        {item.note}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <button
-                      onClick={() => handleEditUnavailableDate(index)}
-                      style={{
-                        padding: '6px 10px',
-                        backgroundColor: 'transparent',
-                        border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        transition: 'all 0.2s ease',
-                        opacity: 0.7
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.opacity = '1'
-                        e.currentTarget.style.backgroundColor = isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#f5f5f5'
-                        e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-light, #555)' : '#bbb'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.opacity = '0.7'
-                        e.currentTarget.style.backgroundColor = 'transparent'
-                        e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#ddd'
-                      }}
-                      title="Edit"
-                    >
-                      <Pencil size={14} style={{ color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }} />
-                    </button>
-                    <button
-                      onClick={() => handleRemoveUnavailableDate(index)}
-                      style={{
-                        padding: '6px 10px',
-                        backgroundColor: 'transparent',
-                        border: '1px solid rgba(211, 47, 47, 0.3)',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        transition: 'all 0.2s ease',
-                        opacity: 0.7
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.opacity = '1'
-                        e.currentTarget.style.backgroundColor = 'rgba(211, 47, 47, 0.1)'
-                        e.currentTarget.style.borderColor = 'rgba(211, 47, 47, 0.5)'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.opacity = '0.7'
-                        e.currentTarget.style.backgroundColor = 'transparent'
-                        e.currentTarget.style.borderColor = 'rgba(211, 47, 47, 0.3)'
-                      }}
-                      title="Remove"
-                    >
-                      <Trash2 size={14} style={{ color: '#d32f2f' }} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ 
-              color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', 
-              fontSize: '14px', 
-              textAlign: 'center', 
-              padding: '40px 20px',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-            }}>
-              No unavailable dates added
-            </div>
-          )}
         </div>
-          </div>
-        )}
-        </div>
-      </div>
         </>
+        </div>
       )}
 
       {activeTab === 'settings' && (
-        <div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
           <style>{`
             .profile-app-settings-switch .ikxBAC {
               appearance: none;
@@ -1801,6 +1250,7 @@ function Profile({ employeeId, employeeName }) {
             }
           `}</style>
 
+          <div style={{ maxWidth: '480px', width: '100%', marginLeft: 'auto', marginRight: 'auto' }}>
           {settingsSaved && (
             <div style={{
               padding: '12px 16px',
@@ -1967,11 +1417,15 @@ function Profile({ employeeId, employeeName }) {
               </button>
             </div>
           </div>
+          </div>
+        </div>
         </div>
       )}
 
       {activeTab === 'admin' && hasAdminAccess && (
-        <AdminDashboard />
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <AdminDashboard />
+        </div>
       )}
       </div>
     </div>

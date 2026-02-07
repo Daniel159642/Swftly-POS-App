@@ -38,6 +38,9 @@ const CACHEABLE_PATTERNS = [
   /^\/api\/payment-methods(\?|$)/,
   /^\/api\/register\/cash-settings(\?|$)/,
   /^\/api\/register\/session(\?|$)/,
+  /^\/api\/register\/events(\?|$)/,
+  /^\/api\/register\/summary(\?|$)/,
+  /^\/api\/register\/daily-count(\?|$)/,
   /^\/api\/receipt-templates(\?|$)/,
   /^\/api\/pos-bootstrap(\?|$)/
 ]

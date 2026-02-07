@@ -5,10 +5,19 @@
     padding: 0;
     box-sizing: border-box;
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+    display: none;
 }
 
 html {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
 }
 
 /* Theme Variables */
@@ -52,6 +61,14 @@ body {
     color: var(--text-primary);
     font-size: 14px;
     transition: background-color 0.3s ease, color 0.3s ease;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
+#root {
+    height: 100%;
+    overflow: hidden;
 }
 
 /* Hide scrollbar for horizontal tab strips (Tables page + Checkout UI modal) */
@@ -707,6 +724,16 @@ body {
 
 .password-jitter {
     animation: passwordJitter 0.6s ease-in-out;
+}
+
+/* Settings tab: skeleton loading for fields */
+@keyframes settingsSkeletonPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.9; }
+}
+.settings-field-loading {
+  animation: settingsSkeletonPulse 1.2s ease-in-out infinite;
+  pointer-events: none;
 }
 
 /* Accounting reports: print only the report content, not the whole page */

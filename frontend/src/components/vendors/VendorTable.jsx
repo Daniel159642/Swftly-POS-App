@@ -1,20 +1,12 @@
 import React from 'react'
 
-function VendorTable({ vendors = [], onView, onEdit, onDelete, onToggleStatus }) {
+function VendorTable({ vendors = [], loading = false, onView, onEdit, onDelete, onToggleStatus }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
 
   const formatCurrency = (amount) => {
     const n = Number(amount)
     if (Number.isNaN(n)) return '$0.00'
     return `$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  }
-
-  if (!vendors || vendors.length === 0) {
-    return (
-      <div style={{ textAlign: 'center', padding: '48px 16px', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>
-        No vendors found
-      </div>
-    )
   }
 
   const thStyle = {
@@ -48,7 +40,19 @@ function VendorTable({ vendors = [], onView, onEdit, onDelete, onToggleStatus })
           </tr>
         </thead>
         <tbody>
-          {vendors.map((v) => (
+          {loading ? (
+            <tr>
+              <td colSpan={6} style={{ padding: '48px 24px', textAlign: 'center', color: isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '14px' }}>
+                Loading…
+              </td>
+            </tr>
+          ) : !vendors || vendors.length === 0 ? (
+            <tr>
+              <td colSpan={6} style={{ padding: '48px 24px', textAlign: 'center', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>
+                No vendors found
+              </td>
+            </tr>
+          ) : vendors.map((v) => (
             <tr key={v.id} style={{ opacity: !v.is_active ? 0.6 : 1, backgroundColor: !v.is_active ? (isDarkMode ? '#1f1f1f' : '#f9fafb') : 'transparent' }}>
               <td style={tdStyle}>
                 <div style={{ fontWeight: 500, color: isDarkMode ? '#e5e7eb' : '#111' }}>{v.vendor_name}</div>

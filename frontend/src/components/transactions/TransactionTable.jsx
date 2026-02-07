@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import Button from '../common/Button'
 
-function TransactionTable({ transactions, onView, onEdit, onDelete, onPost, onUnpost, onVoid }) {
+function TransactionTable({ transactions, loading = false, onView, onEdit, onDelete, onPost, onUnpost, onVoid }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const [expandedIds, setExpandedIds] = useState(new Set())
   const [openMenuId, setOpenMenuId] = useState(null)
@@ -142,18 +142,10 @@ function TransactionTable({ transactions, onView, onEdit, onDelete, onPost, onUn
     cursor: 'pointer'
   }
 
-  if (transactions.length === 0) {
-    return (
-      <div style={{ textAlign: 'center', padding: '48px', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>
-        <p>No transactions found</p>
-      </div>
-    )
-  }
-
   return (
-    <div style={{ overflowX: 'auto' }}>
+    <div style={{ overflowX: 'auto', minWidth: 0 }}>
       <table style={tableStyle}>
-        <thead>
+        <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9fafb', boxShadow: isDarkMode ? '0 1px 0 #3a3a3a' : '0 1px 0 #e5e7eb' }}>
           <tr>
             <th style={thStyle}>Date</th>
             <th style={thStyle}>Transaction #</th>
@@ -165,7 +157,19 @@ function TransactionTable({ transactions, onView, onEdit, onDelete, onPost, onUn
           </tr>
         </thead>
         <tbody>
-          {transactions.map((item) => {
+          {loading ? (
+            <tr>
+              <td colSpan={7} style={{ padding: '48px 24px', textAlign: 'center', color: isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '14px' }}>
+                Loading…
+              </td>
+            </tr>
+          ) : !transactions || transactions.length === 0 ? (
+            <tr>
+              <td colSpan={7} style={{ padding: '48px 24px', textAlign: 'center', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>
+                No transactions found
+              </td>
+            </tr>
+          ) : transactions.map((item) => {
             const isExpanded = expandedIds.has(item.transaction.id)
             const { debits, credits } = calculateTotals(item.lines)
             const status = item.transaction.is_void ? 'voided' : 

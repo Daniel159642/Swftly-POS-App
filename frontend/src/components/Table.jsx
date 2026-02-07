@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Image } from 'lucide-react'
 
-function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, selectedRowIds, onSelectedRowIdsChange, actionsAsEllipsis = false, ellipsisMenuItems, themeColorRgb = '132, 0, 255', onRowClick, highlightedRowId }) {
+function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, selectedRowIds, onSelectedRowIdsChange, actionsAsEllipsis = false, ellipsisMenuItems, themeColorRgb = '132, 0, 255', onRowClick, highlightedRowId, stickyHeader = false }) {
   const [isDarkMode, setIsDarkMode] = useState(() => {
     return document.documentElement.classList.contains('dark-theme')
   })
@@ -268,7 +268,8 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
                   fontSize: '13px',
                   textTransform: 'uppercase',
                   letterSpacing: '0.5px',
-                  width: '48px'
+                  width: '48px',
+                  ...(stickyHeader ? { position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa', boxShadow: isDarkMode ? '0 1px 0 0 var(--border-color, #404040)' : '0 1px 0 0 #dee2e6' } : {})
                 }}
               >
                 <input
@@ -295,7 +296,8 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
                   fontSize: '13px',
                   textTransform: 'uppercase',
                   letterSpacing: '0.5px',
-                  width: (col === 'photo' || col.includes('image') || col.includes('photo')) ? '60px' : (col === 'actions' ? '100px' : 'auto')
+                  width: (col === 'photo' || col.includes('image') || col.includes('photo')) ? '60px' : (col === 'actions' ? '100px' : 'auto'),
+                  ...(stickyHeader ? { position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa', boxShadow: isDarkMode ? '0 1px 0 0 var(--border-color, #404040)' : '0 1px 0 0 #dee2e6' } : {})
                 }}
               >
                 {col === 'photo' ? (
@@ -314,7 +316,8 @@ function Table({ columns, data, onEdit, enableRowSelection = false, getRowId, se
                   fontSize: '13px',
                   textTransform: 'uppercase',
                   letterSpacing: '0.5px',
-                  width: '100px'
+                  width: '100px',
+                  ...(stickyHeader ? { position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa', boxShadow: isDarkMode ? '0 1px 0 0 var(--border-color, #404040)' : '0 1px 0 0 #dee2e6' } : {})
                 }}
               >
                 Actions

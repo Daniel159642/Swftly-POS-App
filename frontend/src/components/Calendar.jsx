@@ -510,16 +510,16 @@ function Calendar({ employee }) {
   const loadCalendarData = async () => {
     setLoading(true)
     try {
-      // Load calendar events
-      const eventsResponse = await fetch(`/api/master_calendar`)
-      const eventsData = await eventsResponse.json()
+      const [eventsResponse, schedulesResponse] = await Promise.all([
+        fetch('/api/master_calendar'),
+        fetch('/api/employee_schedule')
+      ])
+      const [eventsData, schedulesData] = await Promise.all([
+        eventsResponse.json(),
+        schedulesResponse.json()
+      ])
       setEvents(eventsData.data || [])
-
-      // Load schedules
-      const schedulesResponse = await fetch(`/api/employee_schedule`)
-      const schedulesData = await schedulesResponse.json()
       setSchedules(schedulesData.data || [])
-
     } catch (err) {
       console.error('Error loading calendar data:', err)
     } finally {
@@ -1536,42 +1536,26 @@ function Calendar({ employee }) {
             </div>
           </div>
           
-          {/* FullCalendar – skeleton in same area while loading */}
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-            {loading ? (
-              <div style={{
-                flex: 1,
-                minHeight: 0,
-                display: 'grid',
-                gridTemplateRows: 'auto 1fr',
-                gap: '8px',
-                padding: '8px 0'
-              }} aria-busy="true" aria-label="Loading calendar">
-                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                  {[1, 2, 3].map(i => (
-                    <div key={i} style={{ height: '28px', width: '56px', borderRadius: '6px', backgroundColor: 'var(--border-color, #e0e0e0)' }} />
-                  ))}
-                </div>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(7, 1fr)',
-                  gridTemplateRows: 'repeat(5, 1fr)',
-                  gap: '4px',
-                  minHeight: 0
-                }}>
-                  {Array.from({ length: 35 }, (_, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        borderRadius: '6px',
-                        backgroundColor: 'var(--border-color, #e0e0e0)',
-                        opacity: 0.6 + (i % 7) * 0.05
-                      }}
-                    />
-                  ))}
-                </div>
+          {/* FullCalendar always visible; fade overlay when loading (like Profile weekly schedule) */}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }} aria-busy={loading} aria-label={loading ? 'Loading calendar events' : 'Calendar'}>
+            {loading && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: '8px',
+                  backgroundColor: isDarkMode ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 10,
+                  fontSize: '14px',
+                  color: 'var(--text-primary, #333)'
+                }}
+              >
+                Loading…
               </div>
-            ) : (
+            )}
             <FullCalendar
               key={showScheduleBuilder && isAdmin && !draftSchedule ? `sb-${sbStartDate || ''}-${sbEndDate || ''}` : `default-${draftScheduleVersion}-${draftShiftsFingerprint}`}
               ref={calendarRef}
@@ -1601,7 +1585,6 @@ function Calendar({ employee }) {
                 day: 'Day'
               }}
             />
-            )}
           </div>
         </div>
 

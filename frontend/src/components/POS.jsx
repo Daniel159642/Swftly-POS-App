@@ -179,7 +179,7 @@ function POS({ employeeId, employeeName }) {
     const sessionToken = localStorage.getItem('sessionToken')
     if (!sessionToken) return false
     try {
-      const res = await fetch(`/api/register/session?status=open`, {
+      const res = await cachedFetch(`/api/register/session?status=open`, {
         headers: { 'Authorization': `Bearer ${sessionToken}` }
       })
       const data = await res.json()

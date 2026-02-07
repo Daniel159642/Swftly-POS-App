@@ -20,7 +20,8 @@ function CustomDropdown({
   disabled = false,
   triggerVariant = 'input',
   triggerFullWidth = false,
-  compactTrigger = false
+  compactTrigger = false,
+  triggerHeight
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 120 })
@@ -99,12 +100,14 @@ function CustomDropdown({
   const boxShadow = isOpen ? `0 0 0 3px rgba(${themeColorRgb}, 0.1)` : 'none'
 
   const isButtonTrigger = triggerVariant === 'button'
+  const compactHeight = triggerHeight ?? 32
   const triggerStyle = {
     width: isButtonTrigger ? undefined : '100%',
     padding: compactTrigger ? '5px 14px' : (isButtonTrigger ? '4px 16px' : '6px 10px'),
-    minHeight: compactTrigger ? 32 : (isButtonTrigger ? 28 : 34),
+    minHeight: compactTrigger ? compactHeight : (isButtonTrigger ? 28 : 34),
+    ...(compactTrigger && { height: compactHeight }),
     border: `1px solid ${borderColor}`,
-    borderRadius: isButtonTrigger ? 8 : 6,
+    borderRadius: compactTrigger ? 8 : (isButtonTrigger ? 8 : 6),
     fontSize: 14,
     fontFamily: 'inherit',
     backgroundColor: disabled ? (_isDark ? '#2a2a2a' : '#f3f4f6') : (_isDark ? 'var(--bg-secondary, #2d2d2d)' : '#fff'),
