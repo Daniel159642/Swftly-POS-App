@@ -4,22 +4,39 @@ function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransac
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const [sortField, setSortField] = useState('transaction_date')
   const [sortDirection, setSortDirection] = useState('desc')
+  const [hoveredTransactionId, setHoveredTransactionId] = useState(null)
 
   const sortedEntries = useMemo(() => {
     const sorted = [...entries].sort((a, b) => {
-      let comparison = 0
-      
-      if (sortField === 'transaction_date') {
-        comparison = new Date(a.transaction_date).getTime() - new Date(b.transaction_date).getTime()
-      } else {
-        comparison = (a.account_name || '').localeCompare(b.account_name || '')
-      }
-
-      return sortDirection === 'asc' ? comparison : -comparison
+      const dateA = new Date(a.transaction_date).getTime()
+      const dateB = new Date(b.transaction_date).getTime()
+      const idA = a.transaction_id != null ? a.transaction_id : 0
+      const idB = b.transaction_id != null ? b.transaction_id : 0
+      if (dateA !== dateB) return sortDirection === 'asc' ? dateA - dateB : dateB - dateA
+      if (idA !== idB) return sortDirection === 'asc' ? idA - idB : idB - idA
+      const lineA = a.line_id ?? a.line_number ?? 0
+      const lineB = b.line_id ?? b.line_number ?? 0
+      if (lineA !== lineB) return lineA - lineB
+      const accountCmp = (a.account_name || '').localeCompare(b.account_name || '')
+      return sortField === 'account_name' ? (sortDirection === 'asc' ? accountCmp : -accountCmp) : 0
     })
-
     return sorted
   }, [entries, sortField, sortDirection])
+
+  // Group rows by transaction_id so one transaction = one block; hover highlights entire block
+  const groupedByTransaction = useMemo(() => {
+    const groups = []
+    for (const entry of sortedEntries) {
+      const tid = entry.transaction_id != null ? entry.transaction_id : (entry.id != null ? `tx-${entry.id}` : `line-${entry.line_id ?? Math.random()}`)
+      const last = groups[groups.length - 1]
+      if (last && last.transaction_id === tid) {
+        last.entries.push(entry)
+      } else {
+        groups.push({ transaction_id: tid, entries: [entry] })
+      }
+    }
+    return groups
+  }, [sortedEntries])
 
   const handleSort = (field) => {
     if (sortField === field) {
@@ -38,161 +55,196 @@ function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransac
 
   const { totalDebits, totalCredits } = calculateTotals()
 
+  // Match Financial Statements reports: teal/blue-grey headers, same borders and cell styles
+  const mainHeaderBg = isDarkMode ? '#2d4a5a' : '#2d5a6b'
+  const subHeaderBg = isDarkMode ? '#3a5566' : '#c5d9e0'
+  const totalRowBg = isDarkMode ? '#2a3a45' : '#e8e8e8'
+  const borderColor = isDarkMode ? '#3a4a55' : '#d0d0d0'
+  const textColor = isDarkMode ? '#e8e8e8' : '#333'
+  const subHeaderText = isDarkMode ? '#c8d4dc' : '#2d4a5a'
+
   const SortIcon = ({ field }) => {
     if (sortField !== field) {
-      return <span style={{ marginLeft: '4px', color: isDarkMode ? '#6b7280' : '#9ca3af' }}>↕</span>
+      return <span style={{ marginLeft: '4px', opacity: 0.8 }}>↕</span>
     }
     return <span style={{ marginLeft: '4px' }}>{sortDirection === 'asc' ? '↑' : '↓'}</span>
+  }
+
+  const bannerStyle = {
+    backgroundColor: mainHeaderBg,
+    padding: '14px 20px',
+    textAlign: 'center',
+    border: `1px solid ${borderColor}`,
+    borderBottom: 'none'
+  }
+
+  const columnHeaderStyle = {
+    padding: '8px 12px',
+    fontSize: '12px',
+    fontWeight: 700,
+    color: subHeaderText,
+    backgroundColor: subHeaderBg,
+    border: `1px solid ${borderColor}`,
+    borderTop: 'none',
+    textAlign: 'left',
+    textTransform: 'uppercase',
+    letterSpacing: '0.02em',
+    cursor: 'pointer'
+  }
+
+  const getCellStyle = (backgroundColor) => ({
+    padding: '6px 12px',
+    fontSize: '14px',
+    color: textColor,
+    border: `1px solid ${borderColor}`,
+    borderTop: 'none',
+    backgroundColor: backgroundColor ?? (isDarkMode ? '#1f2a33' : '#fff')
+  })
+
+  const totalRowStyle = {
+    padding: '10px 12px',
+    fontSize: '14px',
+    fontWeight: 700,
+    color: textColor,
+    backgroundColor: totalRowBg,
+    border: `1px solid ${borderColor}`,
+    borderTop: `2px solid ${borderColor}`
   }
 
   const tableStyle = {
     width: '100%',
     borderCollapse: 'collapse',
-    backgroundColor: isDarkMode ? '#2a2a2a' : 'white'
+    fontSize: '14px'
   }
 
-  const thStyle = {
-    padding: '12px 24px',
-    fontSize: '12px',
-    fontWeight: 500,
-    color: isDarkMode ? '#9ca3af' : '#6b7280',
-    textTransform: 'uppercase',
-    textAlign: 'left',
-    borderBottom: '1px solid ' + (isDarkMode ? '#3a3a3a' : '#e5e7eb'),
-    backgroundColor: isDarkMode ? '#1f1f1f' : '#f9fafb',
-    cursor: 'pointer'
-  }
-
-  const tdStyle = {
-    padding: '12px 24px',
-    fontSize: '14px',
-    verticalAlign: 'middle',
-    borderBottom: '1px solid ' + (isDarkMode ? '#3a3a3a' : '#e5e7eb'),
-    color: isDarkMode ? '#e5e7eb' : '#111'
-  }
+  const rowBg = isDarkMode ? '#1f2a33' : '#fff'
+  const hoverBg = totalRowBg
 
   if (entries.length === 0) {
     return (
-      <div style={{ 
-        textAlign: 'center', 
-        padding: '48px', 
-        backgroundColor: isDarkMode ? '#2a2a2a' : 'white',
+      <div style={{
+        border: `1px solid ${borderColor}`,
         borderRadius: '8px',
-        border: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`
+        overflow: 'hidden',
+        backgroundColor: isDarkMode ? '#1f2a33' : '#fff'
       }}>
-        <p style={{ color: isDarkMode ? '#9ca3af' : '#6b7280', marginBottom: '8px' }}>
-          No ledger entries found for the selected criteria
-        </p>
-        <p style={{ fontSize: '14px', color: isDarkMode ? '#6b7280' : '#9ca3af' }}>
-          Try adjusting your filters or post some transactions
-        </p>
+        <div style={bannerStyle}>
+          <span style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>General Ledger</span>
+        </div>
+        <div style={{ textAlign: 'center', padding: '48px' }}>
+          <p style={{ color: subHeaderText, marginBottom: '8px' }}>No ledger entries found for the selected criteria</p>
+          <p style={{ fontSize: '14px', color: textColor }}>Try adjusting your filters or post some transactions</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div style={{ 
-      backgroundColor: isDarkMode ? '#2a2a2a' : 'white',
+    <div style={{
+      border: `1px solid ${borderColor}`,
       borderRadius: '8px',
-      border: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`,
       overflow: 'hidden',
-      boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
+      backgroundColor: isDarkMode ? '#1f2a33' : '#fff'
     }}>
+      <div style={bannerStyle}>
+        <span style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>General Ledger</span>
+      </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={tableStyle}>
           <thead>
             <tr>
               <th
-                style={thStyle}
+                style={columnHeaderStyle}
                 onClick={() => handleSort('transaction_date')}
-                onMouseEnter={(e) => e.target.style.backgroundColor = isDarkMode ? '#2a2a2a' : '#f3f4f6'}
-                onMouseLeave={(e) => e.target.style.backgroundColor = isDarkMode ? '#1a1a1a' : '#f9fafb'}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? '#4a6577' : '#b8d0d8' }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = subHeaderBg }}
               >
                 Date <SortIcon field="transaction_date" />
               </th>
-              <th style={thStyle}>Transaction #</th>
+              <th style={columnHeaderStyle}>Transaction #</th>
               <th
-                style={thStyle}
+                style={columnHeaderStyle}
                 onClick={() => handleSort('account_name')}
-                onMouseEnter={(e) => e.target.style.backgroundColor = isDarkMode ? '#2a2a2a' : '#f3f4f6'}
-                onMouseLeave={(e) => e.target.style.backgroundColor = isDarkMode ? '#1a1a1a' : '#f9fafb'}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = isDarkMode ? '#4a6577' : '#b8d0d8' }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = subHeaderBg }}
               >
                 Account <SortIcon field="account_name" />
               </th>
-              <th style={thStyle}>Description</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Debit</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Credit</th>
+              <th style={columnHeaderStyle}>Description</th>
+              <th style={{ ...columnHeaderStyle, textAlign: 'right' }}>Debit</th>
+              <th style={{ ...columnHeaderStyle, textAlign: 'right' }}>Credit</th>
               {showRunningBalance && (
-                <th style={{ ...thStyle, textAlign: 'right' }}>Balance</th>
+                <th style={{ ...columnHeaderStyle, textAlign: 'right' }}>Balance</th>
               )}
             </tr>
           </thead>
-          <tbody>
-            {sortedEntries.map((entry, index) => (
-              <tr
-                key={`${entry.transaction_id}-${entry.line_id}`}
-                style={{
-                  cursor: 'pointer',
-                  backgroundColor: index % 2 === 0 
-                    ? (isDarkMode ? '#2a2a2a' : 'white')
-                    : (isDarkMode ? '#1f1f1f' : '#f9fafb')
-                }}
-                onMouseEnter={(e) => e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f3f4f6'}
-                onMouseLeave={(e) => e.target.style.backgroundColor = index % 2 === 0 
-                  ? (isDarkMode ? '#2a2a2a' : 'white')
-                  : (isDarkMode ? '#1f1f1f' : '#f9fafb')
-                }
-                onClick={() => onViewTransaction(entry.transaction_id)}
+          {groupedByTransaction.map((group) => {
+            const isGroupHovered = hoveredTransactionId === group.transaction_id
+            const groupRowBg = isGroupHovered ? hoverBg : rowBg
+            const cellBg = groupRowBg
+            const baseCell = getCellStyle(cellBg)
+            const txId = group.entries[0]?.transaction_id
+            return (
+              <tbody
+                key={String(group.transaction_id)}
+                onMouseEnter={() => setHoveredTransactionId(group.transaction_id)}
+                onMouseLeave={() => setHoveredTransactionId(null)}
               >
-                <td style={tdStyle}>
-                  {new Date(entry.transaction_date).toLocaleDateString()}
-                </td>
-                <td style={{ ...tdStyle, fontWeight: '600', color: '#6366f1' }}>
-                  {entry.transaction_number}
-                </td>
-                <td style={tdStyle}>
-                  <div style={{ fontWeight: '500' }}>
-                    {entry.account_number && `${entry.account_number} - `}
-                    {entry.account_name}
-                  </div>
-                  <div style={{ fontSize: '12px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '2px' }}>
-                    {entry.account_type}
-                  </div>
-                </td>
-                <td style={tdStyle}>
-                  <div>{entry.line_description}</div>
-                  {entry.reference_number && (
-                    <div style={{ fontSize: '12px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '2px' }}>
-                      Ref: {entry.reference_number}
-                    </div>
-                  )}
-                </td>
-                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: '600' }}>
-                  {(parseFloat(entry.debit_amount) || 0) > 0 ? `$${(parseFloat(entry.debit_amount) || 0).toFixed(2)}` : '-'}
-                </td>
-                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: '600' }}>
-                  {(parseFloat(entry.credit_amount) || 0) > 0 ? `$${(parseFloat(entry.credit_amount) || 0).toFixed(2)}` : '-'}
-                </td>
-                {showRunningBalance && entry.running_balance !== undefined && (
-                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: '700' }}>
-                    ${(parseFloat(entry.running_balance) || 0).toFixed(2)}
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-          <tfoot style={{ backgroundColor: isDarkMode ? '#1a1a1a' : '#f3f4f6', fontWeight: '600' }}>
+                {group.entries.map((entry) => (
+                  <tr
+                    key={`${entry.transaction_id}-${entry.line_id}`}
+                    style={{
+                      cursor: 'pointer',
+                      backgroundColor: cellBg,
+                      transition: 'background-color 0.15s ease'
+                    }}
+                    onClick={() => onViewTransaction(entry.transaction_id != null ? entry.transaction_id : txId)}
+                  >
+                    <td style={baseCell}>
+                      {new Date(entry.transaction_date).toLocaleDateString()}
+                    </td>
+                    <td style={{ ...baseCell, fontWeight: 600, color: isDarkMode ? '#93c5fd' : '#2563eb' }}>
+                      {entry.transaction_number}
+                    </td>
+                    <td style={baseCell}>
+                      <div style={{ fontWeight: 500 }}>
+                        {entry.account_number && `${entry.account_number} - `}
+                        {entry.account_name}
+                      </div>
+                      <div style={{ fontSize: '12px', color: subHeaderText, marginTop: '2px' }}>
+                        {entry.account_type}
+                      </div>
+                    </td>
+                    <td style={baseCell}>
+                      <div>{entry.line_description}</div>
+                      {entry.reference_number && (
+                        <div style={{ fontSize: '12px', color: subHeaderText, marginTop: '2px' }}>
+                          Ref: {entry.reference_number}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ ...baseCell, textAlign: 'right', fontWeight: 600 }}>
+                      {(parseFloat(entry.debit_amount) || 0) > 0 ? `$${(parseFloat(entry.debit_amount) || 0).toFixed(2)}` : '-'}
+                    </td>
+                    <td style={{ ...baseCell, textAlign: 'right', fontWeight: 600 }}>
+                      {(parseFloat(entry.credit_amount) || 0) > 0 ? `$${(parseFloat(entry.credit_amount) || 0).toFixed(2)}` : '-'}
+                    </td>
+                    {showRunningBalance && entry.running_balance !== undefined && (
+                      <td style={{ ...baseCell, textAlign: 'right', fontWeight: 700 }}>
+                        ${(parseFloat(entry.running_balance) || 0).toFixed(2)}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            )
+          })}
+          <tfoot>
             <tr>
-              <td colSpan={4} style={{ ...tdStyle, textAlign: 'right' }}>
-                Totals:
-              </td>
-              <td style={{ ...tdStyle, textAlign: 'right', fontWeight: '700' }}>
-                ${totalDebits.toFixed(2)}
-              </td>
-              <td style={{ ...tdStyle, textAlign: 'right', fontWeight: '700' }}>
-                ${totalCredits.toFixed(2)}
-              </td>
-              {showRunningBalance && <td></td>}
+              <td colSpan={4} style={{ ...totalRowStyle, textAlign: 'right' }}>Totals:</td>
+              <td style={{ ...totalRowStyle, textAlign: 'right' }}>${totalDebits.toFixed(2)}</td>
+              <td style={{ ...totalRowStyle, textAlign: 'right' }}>${totalCredits.toFixed(2)}</td>
+              {showRunningBalance && <td style={{ ...totalRowStyle }}></td>}
             </tr>
           </tfoot>
         </table>

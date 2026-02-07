@@ -80,6 +80,7 @@ from decimal import Decimal
 import tempfile
 import traceback
 import io
+import shutil
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 
@@ -9075,13 +9076,30 @@ def api_daily_cash_count():
 # ============================================================================
 
 if _ACCOUNTING_BACKEND_AVAILABLE:
+    # One-time ensure accounting schema and accounting.accounts exist (e.g. in Supabase)
+    _accounting_schema_ensured = False
+
+    def _ensure_accounting_schema_once():
+        global _accounting_schema_ensured
+        if _accounting_schema_ensured:
+            return
+        try:
+            from accounting_bootstrap import ensure_accounting_schema
+            ensure_accounting_schema()
+            _accounting_schema_ensured = True
+        except Exception as e:
+            print(f"Accounting schema bootstrap (ensure_accounting_schema): {e}")
+            traceback.print_exc()
+
     # ---------- /api/v1/accounts ----------
     @app.route('/api/v1/accounts', methods=['GET'])
     def api_v1_accounts_list():
+        _ensure_accounting_schema_once()
         return account_controller.get_all_accounts()
 
     @app.route('/api/v1/accounts', methods=['POST'])
     def api_v1_accounts_create():
+        _ensure_accounting_schema_once()
         return account_controller.create_account()
 
     @app.route('/api/v1/accounts/tree', methods=['GET'])
@@ -9509,16 +9527,36 @@ if _ACCOUNTING_BACKEND_AVAILABLE:
         except Exception as e:
             return make_response(jsonify({'success': False, 'message': str(e)}), 500)
 
-    @app.route('/api/accounting/directory/report/<path:filename>', methods=['GET', 'DELETE'])
+    @app.route('/api/accounting/directory/report/<path:filename>', methods=['GET', 'DELETE', 'PATCH'])
     def api_accounting_directory_report(filename):
-        """Serve (GET) or delete (DELETE) a saved report file from the accounting directory."""
+        """Serve (GET), delete (DELETE), or rename (PATCH) a saved report file from the accounting directory."""
         try:
             filename = secure_filename(os.path.basename(filename))
             if not filename or filename.startswith('.'):
-                if request.method == 'DELETE':
+                if request.method in ('DELETE', 'PATCH'):
                     return make_response(jsonify({'success': False, 'message': 'Invalid filename'}), 400)
                 return make_response(jsonify({'error': 'Invalid filename'}), 400)
             file_path = os.path.join(ACCOUNTING_REPORTS_DIR, filename)
+            if request.method == 'PATCH':
+                data = request.get_json(silent=True) or {}
+                new_name = (data.get('new_name') or data.get('name') or '').strip()
+                if not new_name:
+                    return make_response(jsonify({'success': False, 'message': 'New filename is required'}), 400)
+                new_name = secure_filename(os.path.basename(new_name))
+                if not new_name or new_name.startswith('.'):
+                    return make_response(jsonify({'success': False, 'message': 'Invalid new filename (use only letters, numbers, hyphens, underscores, and one extension)'}), 400)
+                if new_name == filename:
+                    return make_response(jsonify({'success': True, 'data': {'name': filename}}), 200)
+                new_path = os.path.join(ACCOUNTING_REPORTS_DIR, new_name)
+                if not os.path.isfile(file_path):
+                    return make_response(jsonify({'success': False, 'message': 'File not found'}), 404)
+                if os.path.exists(new_path) and os.path.abspath(new_path) != os.path.abspath(file_path):
+                    return make_response(jsonify({'success': False, 'message': 'A file with that name already exists'}), 409)
+                try:
+                    shutil.move(file_path, new_path)
+                except OSError as e:
+                    return make_response(jsonify({'success': False, 'message': 'Could not rename file: ' + str(e)}), 500)
+                return make_response(jsonify({'success': True, 'data': {'name': new_name}}), 200)
             if request.method == 'DELETE':
                 if not os.path.isfile(file_path):
                     return make_response(jsonify({'success': False, 'message': 'File not found'}), 404)
@@ -9526,7 +9564,7 @@ if _ACCOUNTING_BACKEND_AVAILABLE:
                 return make_response(jsonify({'success': True, 'message': 'Report deleted'}), 200)
             return send_from_directory(ACCOUNTING_REPORTS_DIR, filename, as_attachment=False)
         except Exception as e:
-            if request.method == 'DELETE':
+            if request.method in ('DELETE', 'PATCH'):
                 return make_response(jsonify({'success': False, 'message': str(e)}), 500)
             return make_response(jsonify({'error': str(e)}), 404)
 

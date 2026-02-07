@@ -1,9 +1,48 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import Button from '../common/Button'
 
 function TransactionTable({ transactions, onView, onEdit, onDelete, onPost, onUnpost, onVoid }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const [expandedIds, setExpandedIds] = useState(new Set())
+  const [openMenuId, setOpenMenuId] = useState(null)
+  const [confirmPostId, setConfirmPostId] = useState(null)
+  const [confirmUnpostId, setConfirmUnpostId] = useState(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  const [confirmVoidId, setConfirmVoidId] = useState(null)
+  const [voidReason, setVoidReason] = useState('')
+  const [menuOpenUpward, setMenuOpenUpward] = useState(false)
+  const menuRef = useRef(null)
+
+  const isMenuOrConfirmOpen = (id) =>
+    openMenuId === id || confirmPostId === id || confirmUnpostId === id || confirmDeleteId === id || confirmVoidId === id
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpenMenuId(null)
+        setConfirmPostId(null)
+        setConfirmUnpostId(null)
+        setConfirmDeleteId(null)
+        setConfirmVoidId(null)
+        setVoidReason('')
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    if (!openMenuId && !confirmPostId && !confirmUnpostId && !confirmDeleteId && !confirmVoidId) {
+      setMenuOpenUpward(false)
+      return
+    }
+    const el = menuRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const estimatedHeight = 380
+    const spaceBelow = typeof window !== 'undefined' ? window.innerHeight - rect.bottom - 8 : 400
+    setMenuOpenUpward(spaceBelow < estimatedHeight)
+  }, [openMenuId, confirmPostId, confirmUnpostId, confirmDeleteId, confirmVoidId])
 
   const toggleExpand = (id) => {
     const newExpanded = new Set(expandedIds)
@@ -64,14 +103,43 @@ function TransactionTable({ transactions, onView, onEdit, onDelete, onPost, onUn
     }
   }
 
-  const actionButtonStyle = {
-    background: 'none',
+  const menuStyle = {
+    position: 'absolute',
+    ...(menuOpenUpward ? { bottom: '100%', marginBottom: '4px' } : { top: '100%', marginTop: '4px' }),
+    right: 0,
+    minWidth: '140px',
+    backgroundColor: isDarkMode ? '#2d2d2d' : '#fff',
+    border: isDarkMode ? '1px solid #333' : '1px solid #e5e7eb',
+    borderRadius: '6px',
+    boxShadow: isDarkMode ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.15)',
+    zIndex: 1000,
+    overflow: 'hidden'
+  }
+
+  const menuItemStyle = {
+    display: 'block',
+    width: '100%',
+    padding: '10px 14px',
+    textAlign: 'left',
     border: 'none',
-    cursor: 'pointer',
+    background: 'none',
+    color: isDarkMode ? '#fff' : '#333',
     fontSize: '14px',
-    fontWeight: '500',
-    padding: '4px 8px',
-    margin: '0 4px'
+    cursor: 'pointer',
+    transition: 'background-color 0.15s'
+  }
+
+  const confirmPanelStyle = {
+    minWidth: '200px',
+    padding: '12px 14px',
+    textAlign: 'left'
+  }
+
+  const confirmButtonStyle = {
+    padding: '6px 12px',
+    fontSize: '13px',
+    borderRadius: '6px',
+    cursor: 'pointer'
   }
 
   if (transactions.length === 0) {
@@ -87,7 +155,6 @@ function TransactionTable({ transactions, onView, onEdit, onDelete, onPost, onUn
       <table style={tableStyle}>
         <thead>
           <tr>
-            <th style={thStyle}></th>
             <th style={thStyle}>Date</th>
             <th style={thStyle}>Transaction #</th>
             <th style={thStyle}>Type</th>
@@ -106,27 +173,16 @@ function TransactionTable({ transactions, onView, onEdit, onDelete, onPost, onUn
             
             return (
               <React.Fragment key={item.transaction.id}>
-                <tr style={{
-                  backgroundColor: item.transaction.is_void 
-                    ? (isDarkMode ? '#2a1a1a' : '#fee2e2') 
-                    : (isDarkMode ? '#2a2a2a' : 'white'),
-                  opacity: item.transaction.is_void ? 0.6 : 1
-                }}>
-                  <td style={tdStyle}>
-                    <button
-                      onClick={() => toggleExpand(item.transaction.id)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        color: isDarkMode ? '#9ca3af' : '#6b7280',
-                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                        transition: 'transform 0.2s'
-                      }}
-                    >
-                      ▶
-                    </button>
-                  </td>
+                <tr
+                  style={{
+                    backgroundColor: item.transaction.is_void
+                      ? (isDarkMode ? '#2a1a1a' : '#fee2e2')
+                      : (isDarkMode ? '#2a2a2a' : 'white'),
+                    opacity: item.transaction.is_void ? 0.6 : 1,
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => toggleExpand(item.transaction.id)}
+                >
                   <td style={tdStyle}>
                     {new Date(item.transaction.transaction_date).toLocaleDateString()}
                   </td>
@@ -152,51 +208,103 @@ function TransactionTable({ transactions, onView, onEdit, onDelete, onPost, onUn
                       {status === 'voided' ? 'Voided' : status === 'posted' ? 'Posted' : 'Draft'}
                     </span>
                   </td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+                  <td style={{ ...tdStyle, textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                    <div ref={isMenuOrConfirmOpen(item.transaction.id) ? menuRef : null} style={{ position: 'relative', display: 'inline-block' }}>
                       <button
-                        onClick={() => onView(item)}
-                        style={{ ...actionButtonStyle, color: '#6366f1' }}
+                        type="button"
+                        onClick={() => {
+                          setOpenMenuId((id) => (id === item.transaction.id ? null : item.transaction.id))
+                          setConfirmPostId(null)
+                          setConfirmUnpostId(null)
+                          setConfirmDeleteId(null)
+                          setConfirmVoidId(null)
+                          setVoidReason('')
+                        }}
+                        aria-label="Actions"
+                        aria-expanded={isMenuOrConfirmOpen(item.transaction.id)}
+                        style={{
+                          padding: '4px 8px',
+                          backgroundColor: isMenuOrConfirmOpen(item.transaction.id) ? (isDarkMode ? '#3a3a3a' : '#eee') : 'transparent',
+                          color: isDarkMode ? '#9ca3af' : '#6b7280',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '18px',
+                          lineHeight: 1,
+                          transition: 'color 0.2s, background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isMenuOrConfirmOpen(item.transaction.id)) {
+                            e.target.style.color = isDarkMode ? '#fff' : '#333'
+                            e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#eee'
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isMenuOrConfirmOpen(item.transaction.id)) {
+                            e.target.style.color = isDarkMode ? '#9ca3af' : '#6b7280'
+                            e.target.style.backgroundColor = 'transparent'
+                          }
+                        }}
                       >
-                        View
+                        ⋮
                       </button>
-                      {!item.transaction.is_posted && !item.transaction.is_void && (
-                        <>
-                          <button
-                            onClick={() => onEdit(item)}
-                            style={{ ...actionButtonStyle, color: '#2563eb' }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => onPost(item)}
-                            style={{ ...actionButtonStyle, color: '#10b981' }}
-                          >
-                            Post
-                          </button>
-                          <button
-                            onClick={() => onDelete(item)}
-                            style={{ ...actionButtonStyle, color: '#ef4444' }}
-                          >
-                            Delete
-                          </button>
-                        </>
-                      )}
-                      {item.transaction.is_posted && !item.transaction.is_void && (
-                        <>
-                          <button
-                            onClick={() => onUnpost(item)}
-                            style={{ ...actionButtonStyle, color: '#f59e0b' }}
-                          >
-                            Unpost
-                          </button>
-                          <button
-                            onClick={() => onVoid(item)}
-                            style={{ ...actionButtonStyle, color: '#ef4444' }}
-                          >
-                            Void
-                          </button>
-                        </>
+                      {isMenuOrConfirmOpen(item.transaction.id) && (
+                        <div role="menu" style={{ ...menuStyle, ...(confirmPostId === item.transaction.id || confirmUnpostId === item.transaction.id || confirmDeleteId === item.transaction.id || confirmVoidId === item.transaction.id ? confirmPanelStyle : {}) }}>
+                          {confirmPostId === item.transaction.id ? (
+                            <>
+                              <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: isDarkMode ? '#e5e7eb' : '#111' }}>Post this transaction? This will affect account balances.</p>
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-start' }}>
+                                <button type="button" onClick={() => setConfirmPostId(null)} style={{ ...confirmButtonStyle, border: isDarkMode ? '1px solid #333' : '1px solid #e5e7eb', background: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#e5e7eb' : '#111' }}>Cancel</button>
+                                <button type="button" onClick={() => { onPost(item); setConfirmPostId(null) }} style={{ ...confirmButtonStyle, border: 'none', background: isDarkMode ? '#10b981' : '#059669', color: '#fff' }}>Post</button>
+                              </div>
+                            </>
+                          ) : confirmUnpostId === item.transaction.id ? (
+                            <>
+                              <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: isDarkMode ? '#e5e7eb' : '#111' }}>Unpost this transaction? This will reverse its effect on account balances.</p>
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-start' }}>
+                                <button type="button" onClick={() => setConfirmUnpostId(null)} style={{ ...confirmButtonStyle, border: isDarkMode ? '1px solid #333' : '1px solid #e5e7eb', background: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#e5e7eb' : '#111' }}>Cancel</button>
+                                <button type="button" onClick={() => { onUnpost(item); setConfirmUnpostId(null) }} style={{ ...confirmButtonStyle, border: 'none', background: isDarkMode ? '#f59e0b' : '#d97706', color: '#fff' }}>Unpost</button>
+                              </div>
+                            </>
+                          ) : confirmDeleteId === item.transaction.id ? (
+                            <>
+                              <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: isDarkMode ? '#e5e7eb' : '#111' }}>Delete this transaction? This cannot be undone.</p>
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-start' }}>
+                                <button type="button" onClick={() => setConfirmDeleteId(null)} style={{ ...confirmButtonStyle, border: isDarkMode ? '1px solid #333' : '1px solid #e5e7eb', background: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#e5e7eb' : '#111' }}>Cancel</button>
+                                <button type="button" onClick={() => { onDelete(item); setConfirmDeleteId(null) }} style={{ ...confirmButtonStyle, border: 'none', background: isDarkMode ? '#dc2626' : '#ef4444', color: '#fff' }}>Delete</button>
+                              </div>
+                            </>
+                          ) : confirmVoidId === item.transaction.id ? (
+                            <>
+                              <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: isDarkMode ? '#e5e7eb' : '#111' }}>Void this transaction? This cannot be undone.</p>
+                              <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>Reason (required)</label>
+                              <input
+                                type="text"
+                                value={voidReason}
+                                onChange={(e) => setVoidReason(e.target.value)}
+                                placeholder="Enter reason..."
+                                style={{ width: '100%', boxSizing: 'border-box', padding: '6px 10px', fontSize: '13px', borderRadius: '6px', border: isDarkMode ? '1px solid #333' : '1px solid #e5e7eb', background: isDarkMode ? '#1f1f1f' : '#fff', color: isDarkMode ? '#e5e7eb' : '#111', marginBottom: '12px' }}
+                              />
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-start' }}>
+                                <button type="button" onClick={() => { setConfirmVoidId(null); setVoidReason('') }} style={{ ...confirmButtonStyle, border: isDarkMode ? '1px solid #333' : '1px solid #e5e7eb', background: isDarkMode ? '#2d2d2d' : '#fff', color: isDarkMode ? '#e5e7eb' : '#111' }}>Cancel</button>
+                                <button type="button" disabled={!voidReason.trim()} onClick={() => { onVoid(item, voidReason.trim()); setConfirmVoidId(null); setVoidReason('') }} style={{ ...confirmButtonStyle, border: 'none', background: voidReason.trim() ? (isDarkMode ? '#dc2626' : '#ef4444') : (isDarkMode ? '#4a4a4a' : '#d1d5db'), color: '#fff', cursor: voidReason.trim() ? 'pointer' : 'not-allowed' }}>Void</button>
+                              </div>
+                            </>
+                          ) : !item.transaction.is_posted && !item.transaction.is_void ? (
+                            <>
+                              <button role="menuitem" type="button" style={menuItemStyle} onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }} onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }} onClick={() => { onEdit(item); setOpenMenuId(null) }}>Edit</button>
+                              <button role="menuitem" type="button" style={menuItemStyle} onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }} onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }} onClick={() => setConfirmPostId(item.transaction.id)}>Post</button>
+                              <button role="menuitem" type="button" style={{ ...menuItemStyle, color: '#ef4444' }} onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }} onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }} onClick={() => setConfirmDeleteId(item.transaction.id)}>Delete</button>
+                            </>
+                          ) : item.transaction.is_posted && !item.transaction.is_void ? (
+                            <>
+                              <button role="menuitem" type="button" style={menuItemStyle} onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }} onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }} onClick={() => setConfirmUnpostId(item.transaction.id)}>Unpost</button>
+                              <button role="menuitem" type="button" style={{ ...menuItemStyle, color: '#ef4444' }} onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }} onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }} onClick={() => { setConfirmVoidId(item.transaction.id); setVoidReason('') }}>Void</button>
+                            </>
+                          ) : (
+                            <p style={{ margin: 0, padding: '10px 14px', fontSize: '13px', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>No actions available</p>
+                          )}
+                        </div>
                       )}
                     </div>
                   </td>
@@ -205,7 +313,7 @@ function TransactionTable({ transactions, onView, onEdit, onDelete, onPost, onUn
                 {/* Expanded Lines */}
                 {isExpanded && (
                   <tr>
-                    <td colSpan={8} style={{ ...tdStyle, padding: '16px', backgroundColor: isDarkMode ? '#1a1a1a' : '#f9fafb' }}>
+                    <td colSpan={7} style={{ ...tdStyle, padding: '16px', backgroundColor: isDarkMode ? '#1a1a1a' : '#f9fafb' }}>
                       <div style={{ fontSize: '14px' }}>
                         <div style={{ fontWeight: '600', marginBottom: '12px', color: isDarkMode ? '#ffffff' : '#1a1a1a' }}>
                           Transaction Lines:

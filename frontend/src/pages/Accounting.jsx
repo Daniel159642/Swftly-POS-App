@@ -67,6 +67,17 @@ import {
   FormField,
   getInputFocusHandlers
 } from '../components/FormStyles'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
+
+/** Professional export filename: "Report Name_YYYY-MM-DD.ext" or "Report Name_Start_to_End.ext" */
+function exportFilename(reportName, dateOrStart, endDate, ext) {
+  const today = new Date().toISOString().split('T')[0]
+  const base = dateOrStart && endDate
+    ? `${reportName}_${dateOrStart}_to_${endDate}`
+    : `${reportName}_${dateOrStart || today}`
+  return `${base}.${ext}`
+}
 
 /** Download an array-of-arrays as Excel (.xlsx) using SheetJS */
 async function downloadExcel(rows, filename) {
@@ -80,6 +91,7 @@ async function downloadExcel(rows, filename) {
 function Accounting() {
   const { themeMode, themeColor } = useTheme()
   const [activeTab, setActiveTab] = useState('dashboard')
+  const [accountIdForLedgerModal, setAccountIdForLedgerModal] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [dateRange, setDateRange] = useState({
@@ -290,9 +302,31 @@ function Accounting() {
         {/* Tab Content */}
         {activeTab === 'dashboard' && <DashboardTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} onDirectoryRefresh={directoryRefreshRef} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />}
         {activeTab === 'settings' && <SettingsTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />}
-        {activeTab === 'chart-of-accounts' && <ChartOfAccountsTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />}
+        {activeTab === 'chart-of-accounts' && (
+          <ChartOfAccountsTab
+            formatCurrency={formatCurrency}
+            getAuthHeaders={getAuthHeaders}
+            themeColorRgb={themeColorRgb}
+            isDarkMode={isDarkMode}
+            setActiveTab={setActiveTab}
+            onViewLedgerInLedgerTab={(account) => {
+              setAccountIdForLedgerModal(account.id)
+              setActiveTab('general-ledger')
+            }}
+          />
+        )}
         {activeTab === 'transactions' && <TransactionsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />}
-        {activeTab === 'general-ledger' && <GeneralLedgerTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode} />}
+        {activeTab === 'general-ledger' && (
+          <GeneralLedgerTab
+            dateRange={dateRange}
+            formatCurrency={formatCurrency}
+            getAuthHeaders={getAuthHeaders}
+            themeColorRgb={themeColorRgb}
+            isDarkMode={isDarkMode}
+            accountIdForLedgerModal={accountIdForLedgerModal}
+            onCloseAccountLedgerModal={() => setAccountIdForLedgerModal(null)}
+          />
+        )}
         {activeTab === 'account-ledger' && (
           <AccountLedgerTab
             key={`account-ledger-${sessionStorage.getItem('selectedAccountId') || ''}`}
@@ -332,6 +366,7 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
   const [searchQuery, setSearchQuery] = useState('')
   const [openMenuKey, setOpenMenuKey] = useState(null) // 'report:name' or 'shipment:id'
   const [confirmDeleteKey, setConfirmDeleteKey] = useState(null) // 'report:name' or 'shipment:id' when showing confirm
+  const [renameReport, setRenameReport] = useState(null) // { currentName, newName } when renaming a report
   const menuRef = useRef(null)
   const [viewingFile, setViewingFile] = useState(null) // { type: 'report'|'shipment', name, url?, isPdf, csvText?, isExcel?, excelHtml? }
   const [pdfNumPages, setPdfNumPages] = useState(null)
@@ -504,6 +539,29 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
     }
   }
 
+  const renameReportSubmit = async () => {
+    if (!renameReport || !renameReport.newName?.trim()) return
+    const newName = renameReport.newName.trim()
+    if (newName === renameReport.currentName) {
+      setRenameReport(null)
+      return
+    }
+    try {
+      const res = await fetch(`${baseUrl}/api/accounting/directory/report/${encodeURIComponent(renameReport.currentName)}`, {
+        method: 'PATCH',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_name: newName })
+      })
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.message || 'Failed to rename')
+      showToast('Report renamed', 'success')
+      setRenameReport(null)
+      loadDirectory()
+    } catch (err) {
+      showToast(err.message || 'Failed to rename report', 'error')
+    }
+  }
+
   const deleteShipment = async (id, name) => {
     try {
       const res = await fetch(`${baseUrl}/api/accounting/directory/shipment/${id}`, { method: 'DELETE', headers: getAuthHeaders() })
@@ -550,6 +608,29 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
 
   return (
     <div>
+      {renameReport && (
+        <Modal
+          isOpen={!!renameReport}
+          onClose={() => setRenameReport(null)}
+          title="Rename report"
+        >
+          <div style={{ padding: '8px 0' }}>
+            <label style={{ display: 'block', fontSize: '14px', color: textSecondary, marginBottom: '8px' }}>File name</label>
+            <Input
+              value={renameReport.newName}
+              onChange={(e) => setRenameReport((r) => r ? { ...r, newName: e.target.value } : null)}
+              placeholder="Report name with extension"
+              style={{ width: '100%', marginBottom: '16px' }}
+            />
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" onClick={() => setRenameReport(null)}>Cancel</Button>
+              <Button onClick={renameReportSubmit} disabled={!renameReport.newName?.trim() || renameReport.newName.trim() === renameReport.currentName}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Directory</h1>
         <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Saved reports and shipment documents. Use <strong>Save</strong> on each report to add it here.</p>
@@ -648,6 +729,16 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
                               onClick={() => { viewReport(item.name); setOpenMenuKey(null) }}
                             >
                               View
+                            </button>
+                            <button
+                              role="menuitem"
+                              type="button"
+                              style={menuItemStyle}
+                              onMouseEnter={(e) => { e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }}
+                              onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }}
+                              onClick={() => { setOpenMenuKey(null); setRenameReport({ currentName: item.name, newName: item.name }) }}
+                            >
+                              Rename
                             </button>
                             <button
                               role="menuitem"
@@ -1422,7 +1513,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
             >
               Remove
             </button>
-          </div>
+        </div>
         ))}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
           <button
@@ -1542,23 +1633,23 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
         <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginBottom: '12px' }}>
           Fee rate per payment method (as decimal, e.g. 0.029 = 2.9%). Cash/check/store credit typically 0.
         </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
-          {feeMethods.map(method => (
-            <div key={method} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+            {feeMethods.map(method => (
+              <div key={method} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <label style={{ ...formLabelStyle(isDarkMode), marginBottom: 0, minWidth: '110px', fontSize: '13px' }}>{method.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</label>
-              <input
-                type="number"
+                <input
+                  type="number"
                 min={0}
                 max={1}
                 step={0.001}
-                value={rates[method] ?? 0}
-                onChange={e => setFeeRate(method, e.target.value)}
+                  value={rates[method] ?? 0}
+                  onChange={e => setFeeRate(method, e.target.value)}
                 {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
                 style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '80px' }}
-              />
-            </div>
-          ))}
-        </div>
+                />
+              </div>
+            ))}
+          </div>
         <button
           type="button"
           disabled={saving}
@@ -1573,7 +1664,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
         >
           {saving ? 'Saving...' : 'Save transaction fees'}
         </button>
-      </div>
+        </div>
 
       {/* Tips settings */}
       <div style={cardStyle}>
@@ -1793,7 +1884,7 @@ function MetricCard({ title, value, color, cardBackgroundColor, borderColor, tex
 }
 
 // Chart of Accounts Tab - New Implementation with Full CRUD
-function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isDarkMode }) {
+function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isDarkMode, setActiveTab, onViewLedgerInLedgerTab }) {
   const { show: showToast } = useToast()
   const [accounts, setAccounts] = useState([])
   const [filteredAccounts, setFilteredAccounts] = useState([])
@@ -1802,9 +1893,7 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
   
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
-  const [isBalanceModalOpen, setIsBalanceModalOpen] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState(null)
-  const [accountBalance, setAccountBalance] = useState(null)
   
   const _isDark = isDarkMode ?? document.documentElement.classList.contains('dark-theme')
   const textColor = _isDark ? '#ffffff' : '#1a1a1a'
@@ -1884,10 +1973,6 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
   }
 
   const handleDeleteAccount = async (account) => {
-    if (!window.confirm(`Are you sure you want to delete "${account.account_name}"?`)) {
-      return
-    }
-
     try {
       await accountService.deleteAccount(account.id)
       showToast('Account deleted successfully', 'success')
@@ -1907,15 +1992,8 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
     }
   }
 
-  const handleViewBalance = async (account) => {
-    try {
-      const balance = await accountService.getAccountBalance(account.id)
-      setAccountBalance(balance)
-      setSelectedAccount(account)
-      setIsBalanceModalOpen(true)
-    } catch (error) {
-      showToast(error.response?.data?.message || 'Failed to fetch account balance', 'error')
-    }
+  const handleViewBalance = (account) => {
+    onViewLedgerInLedgerTab(account)
   }
 
   const handleClearFilters = () => {
@@ -2049,6 +2127,7 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
         onClose={() => setIsCreateModalOpen(false)}
         title="Create New Account"
         size="lg"
+        showCloseButton={false}
       >
         <AccountForm
           accounts={accounts}
@@ -2076,57 +2155,6 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
             setSelectedAccount(null)
           }}
         />
-      </Modal>
-
-      {/* Account Balance Modal */}
-      <Modal
-        isOpen={isBalanceModalOpen}
-        onClose={() => {
-          setIsBalanceModalOpen(false)
-          setAccountBalance(null)
-          setSelectedAccount(null)
-        }}
-        title="Account Balance"
-        size="md"
-      >
-        {accountBalance && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div>
-              <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, margin: '0 0 4px 0' }}>
-                Account Name
-              </p>
-              <p style={{ fontSize: '18px', fontWeight: 600, color: textColor, margin: 0 }}>
-                {accountBalance.accountName}
-              </p>
-            </div>
-            <div>
-              <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, margin: '0 0 4px 0' }}>
-                Balance Type
-              </p>
-              <p style={{ fontSize: '16px', color: textColor, margin: 0, textTransform: 'capitalize' }}>
-                {accountBalance.balanceType}
-              </p>
-            </div>
-            <div>
-              <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, margin: '0 0 4px 0' }}>
-                Current Balance
-              </p>
-              <p style={{ fontSize: '32px', fontWeight: 700, color: '#3b82f6', margin: 0 }}>
-                {formatCurrency(accountBalance.balance || 0)}
-              </p>
-            </div>
-            {accountBalance.asOfDate && (
-              <div>
-                <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, margin: '0 0 4px 0' }}>
-                  As of Date
-                </p>
-                <p style={{ fontSize: '14px', color: textColor, margin: 0 }}>
-                  {new Date(accountBalance.asOfDate).toLocaleDateString()}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
       </Modal>
     </div>
   )
@@ -2231,10 +2259,6 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
   }
 
   const handleDeleteTransaction = async (transaction) => {
-    if (!window.confirm('Are you sure you want to delete this transaction?')) {
-      return
-    }
-
     try {
       await transactionService.deleteTransaction(transaction.transaction.id)
       showToast('Transaction deleted successfully', 'success')
@@ -2245,10 +2269,6 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
   }
 
   const handlePostTransaction = async (transaction) => {
-    if (!window.confirm('Post this transaction? This will affect account balances.')) {
-      return
-    }
-
     try {
       await transactionService.postTransaction(transaction.transaction.id)
       showToast('Transaction posted successfully', 'success')
@@ -2259,10 +2279,6 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
   }
 
   const handleUnpostTransaction = async (transaction) => {
-    if (!window.confirm('Unpost this transaction? This will reverse its effect on account balances.')) {
-      return
-    }
-
     try {
       await transactionService.unpostTransaction(transaction.transaction.id)
       showToast('Transaction unposted successfully', 'success')
@@ -2272,10 +2288,7 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
     }
   }
 
-  const handleVoidTransaction = async (transaction) => {
-    const reason = window.prompt('Enter reason for voiding this transaction:')
-    if (!reason) return
-
+  const handleVoidTransaction = async (transaction, reason) => {
     try {
       await transactionService.voidTransaction(transaction.transaction.id, reason)
       showToast('Transaction voided successfully', 'success')
@@ -2660,7 +2673,7 @@ function InvoicesTab({ dateRange, formatCurrency, getAuthHeaders }) {
 }
 
 // General Ledger Tab
-function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColorRgb, isDarkMode }) {
+function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColorRgb, isDarkMode, accountIdForLedgerModal, onCloseAccountLedgerModal }) {
   const [entries, setEntries] = useState([])
   const [accounts, setAccounts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -2671,6 +2684,8 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
   
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [selectedTransaction, setSelectedTransaction] = useState(null)
+  const [accountLedgerModalData, setAccountLedgerModalData] = useState(null)
+  const [accountLedgerModalLoading, setAccountLedgerModalLoading] = useState(false)
   
   const { show: showToast } = useToast()
   const _isDark = isDarkMode ?? document.documentElement.classList.contains('dark-theme')
@@ -2694,6 +2709,34 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
       end_date: dateRange.end_date
     }))
   }, [dateRange])
+
+  // Load account ledger for the popup when accountIdForLedgerModal is set
+  useEffect(() => {
+    if (!accountIdForLedgerModal) {
+      setAccountLedgerModalData(null)
+      return
+    }
+    let cancelled = false
+    const loadAccountLedgerModal = async () => {
+      setAccountLedgerModalLoading(true)
+      setAccountLedgerModalData(null)
+      try {
+        const data = await transactionService.getAccountLedger(accountIdForLedgerModal, {
+          start_date: dateRange.start_date,
+          end_date: dateRange.end_date
+        })
+        if (!cancelled && data && data.account && Array.isArray(data.entries)) {
+          setAccountLedgerModalData(data)
+        }
+      } catch (err) {
+        if (!cancelled) showToast(err.response?.data?.message || 'Failed to fetch account ledger', 'error')
+      } finally {
+        if (!cancelled) setAccountLedgerModalLoading(false)
+      }
+    }
+    loadAccountLedgerModal()
+    return () => { cancelled = true }
+  }, [accountIdForLedgerModal, dateRange.start_date, dateRange.end_date])
 
   const loadAccounts = async () => {
     try {
@@ -2758,7 +2801,7 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `general-ledger-${new Date().toISOString().split('T')[0]}.csv`
+    a.download = exportFilename('General-Ledger', filters.start_date || new Date().toISOString().split('T')[0], filters.end_date, 'csv')
     a.click()
     window.URL.revokeObjectURL(url)
     showToast('Ledger exported to CSV', 'success')
@@ -2770,10 +2813,44 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
       return
     }
     try {
-      await downloadExcel(buildGeneralLedgerRows(), `general-ledger-${new Date().toISOString().split('T')[0]}.xlsx`)
+      await downloadExcel(buildGeneralLedgerRows(), exportFilename('General-Ledger', filters.start_date || new Date().toISOString().split('T')[0], filters.end_date, 'xlsx'))
       showToast('Ledger exported to Excel', 'success')
     } catch (e) {
       showToast('Excel export failed', 'error')
+    }
+  }
+
+  const handleExportPdf = () => {
+    if (entries.length === 0) {
+      showToast('No data to export', 'error')
+      return
+    }
+    try {
+      const allRows = buildGeneralLedgerRows()
+      const stringify = (row) => row.map((cell) => (cell == null ? '' : String(cell)))
+      const head = [stringify(allRows[0])]
+      const body = allRows.slice(1).map(stringify)
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+      doc.setFontSize(16)
+      doc.text('General Ledger', 14, 15)
+      doc.setFontSize(10)
+      if (filters.start_date && filters.end_date) {
+        doc.text(`Period: ${filters.start_date} to ${filters.end_date}`, 14, 22)
+      }
+      autoTable(doc, {
+        head,
+        body,
+        startY: 28,
+        margin: { left: 14 },
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [45, 90, 107], textColor: [255, 255, 255] },
+        alternateRowStyles: { fillColor: [245, 245, 245] }
+      })
+      doc.save(exportFilename('General-Ledger', filters.start_date || new Date().toISOString().split('T')[0], filters.end_date, 'pdf'))
+      showToast('Ledger exported to PDF', 'success')
+    } catch (e) {
+      console.error('Ledger PDF export error:', e)
+      showToast(e?.message || 'PDF export failed', 'error')
     }
   }
 
@@ -2807,6 +2884,7 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
         onClearFilters={handleClearFilters}
         onExport={handleExport}
         onExportExcel={handleExportExcel}
+        onExportPdf={handleExportPdf}
         loading={loading}
       />
 
@@ -2947,6 +3025,55 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
           </div>
         )}
       </Modal>
+
+      {/* Account Ledger popup (from Chart of Accounts → View Ledger) */}
+      <Modal
+        isOpen={!!accountIdForLedgerModal}
+        onClose={onCloseAccountLedgerModal}
+        title={accountLedgerModalData?.account ? `Account Ledger: ${accountLedgerModalData.account.account_number || ''} ${accountLedgerModalData.account.account_name ?? ''}`.trim() || 'Account Ledger' : 'Account Ledger'}
+        size="lg"
+      >
+        {accountLedgerModalLoading ? (
+          <LoadingSpinner size="lg" text="Loading account ledger..." />
+        ) : accountLedgerModalData?.account && Array.isArray(accountLedgerModalData?.entries) ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxHeight: '85vh' }}>
+            {/* Account Details + Balance Summary – always visible at top */}
+            <div style={{ flexShrink: 0 }}>
+              <AccountLedgerCard
+                ledgerData={accountLedgerModalData}
+                dateRange={{ start: dateRange.start_date, end: dateRange.end_date }}
+              />
+            </div>
+            {/* Transactions – scrollable below */}
+            <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <p style={{ fontSize: '14px', color: textColor, opacity: 0.7, flexShrink: 0, margin: 0 }}>
+                Showing <span style={{ fontWeight: '600' }}>{accountLedgerModalData.entries.length}</span> transactions
+              </p>
+              <div style={{ overflow: 'auto', flex: 1, minHeight: '200px', border: `1px solid ${borderColor}`, borderRadius: '8px' }}>
+                <GeneralLedgerTable
+                  entries={accountLedgerModalData.entries}
+                  showRunningBalance={true}
+                  onViewTransaction={handleViewTransaction}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
+              <Button variant="secondary" onClick={onCloseAccountLedgerModal} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: '16px', color: textColor }}>
+            {accountIdForLedgerModal ? 'Failed to load account ledger or no entries in this period.' : ''}
+            <div style={{ marginTop: '12px' }}>
+              <Button variant="secondary" onClick={onCloseAccountLedgerModal} themeColorRgb={themeColorRgb} isDarkMode={isDarkMode}>
+                Close
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
@@ -3047,7 +3174,7 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `account-ledger-${accountId}-${new Date().toISOString().split('T')[0]}.csv`
+    a.download = exportFilename(`Account-Ledger-${accountId}`, new Date().toISOString().split('T')[0], null, 'csv')
     a.click()
     window.URL.revokeObjectURL(url)
     showToast('Account ledger exported to CSV', 'success')
@@ -3059,7 +3186,7 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
       return
     }
     try {
-      await downloadExcel(buildAccountLedgerRows(), `account-ledger-${accountId}-${new Date().toISOString().split('T')[0]}.xlsx`)
+      await downloadExcel(buildAccountLedgerRows(), exportFilename(`Account-Ledger-${accountId}`, new Date().toISOString().split('T')[0], null, 'xlsx'))
       showToast('Account ledger exported to Excel', 'success')
     } catch (e) {
       showToast('Excel export failed', 'error')
@@ -3486,7 +3613,7 @@ const TrialBalanceTab = forwardRef(function TrialBalanceTab(
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `trial-balance-${filters.as_of_date}.csv`
+    a.download = exportFilename('Trial-Balance', filters.as_of_date, null, 'csv')
     a.click()
     window.URL.revokeObjectURL(url)
     showToast('Report exported to CSV', 'success')
@@ -3573,7 +3700,7 @@ const TrialBalanceTab = forwardRef(function TrialBalanceTab(
     })
     rows.push(['Total', '', '', totalDebits.toFixed(2), totalCredits.toFixed(2), ''])
     try {
-      await downloadExcel(rows, `trial-balance-${filters.as_of_date}.xlsx`)
+      await downloadExcel(rows, exportFilename('Trial-Balance', filters.as_of_date, null, 'xlsx'))
       showToast('Report exported to Excel', 'success')
     } catch (e) {
       showToast('Excel export failed', 'error')
@@ -3849,7 +3976,7 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `income-statement-${filters.start_date}-to-${filters.end_date}.csv`
+    a.download = exportFilename('Income-Statement', filters.start_date, filters.end_date, 'csv')
     a.click()
     window.URL.revokeObjectURL(url)
 
@@ -3951,7 +4078,7 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
     rows.push([])
     rows.push(['NET INCOME', num(reportData.net_income).toFixed(2), (num(reportData.net_income) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
     try {
-      await downloadExcel(rows, `income-statement-${filters.start_date}-to-${filters.end_date}.xlsx`)
+      await downloadExcel(rows, exportFilename('Income-Statement', filters.start_date, filters.end_date, 'xlsx'))
       showToast('Report exported to Excel', 'success')
     } catch (e) {
       showToast('Excel export failed', 'error')
@@ -4171,7 +4298,7 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `balance-sheet-${filters.as_of_date}.csv`
+    a.download = exportFilename('Balance-Sheet', filters.as_of_date, null, 'csv')
     a.click()
     window.URL.revokeObjectURL(url)
     showToast('Report exported to CSV', 'success')
@@ -4304,7 +4431,7 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
     rows.push([])
     rows.push(['TOTAL LIABILITIES AND EQUITY', (num(reportData.liabilities.total_liabilities) + num(reportData.equity.total_equity)).toFixed(2)])
     try {
-      await downloadExcel(rows, `balance-sheet-${filters.as_of_date}.xlsx`)
+      await downloadExcel(rows, exportFilename('Balance-Sheet', filters.as_of_date, null, 'xlsx'))
       showToast('Report exported to Excel', 'success')
     } catch (e) {
       showToast('Excel export failed', 'error')
@@ -4482,7 +4609,7 @@ const CashFlowTab = forwardRef(function CashFlowTab(
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `cash-flow-${filters.start_date}-to-${filters.end_date}.csv`
+    a.download = exportFilename('Cash-Flow-Statement', filters.start_date, filters.end_date, 'csv')
     a.click()
     window.URL.revokeObjectURL(url)
     showToast('Report exported to CSV', 'success')
@@ -4579,7 +4706,7 @@ const CashFlowTab = forwardRef(function CashFlowTab(
     rows.push(['Beginning Cash', num(reportData.beginning_cash).toFixed(2)])
     rows.push(['ENDING CASH', num(reportData.ending_cash).toFixed(2)])
     try {
-      await downloadExcel(rows, `cash-flow-${filters.start_date}-to-${filters.end_date}.xlsx`)
+      await downloadExcel(rows, exportFilename('Cash-Flow-Statement', filters.start_date, filters.end_date, 'xlsx'))
       showToast('Report exported to Excel', 'success')
     } catch (e) {
       showToast('Excel export failed', 'error')

@@ -12,6 +12,7 @@ import os
 # Add parent directory to path to import database_postgres
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from database_postgres import get_cursor, get_connection
+from psycopg2.extras import RealDictCursor
 
 
 class Account:
@@ -123,115 +124,132 @@ class AccountRepository:
     
     @staticmethod
     def create(data: Dict[str, Any], user_id: int) -> Account:
-        """Create a new account"""
-        cursor = get_cursor()
+        """Create a new account. Use a single connection so commit applies to the insert."""
         conn = get_connection()
         try:
-            cursor.execute("""
-                INSERT INTO accounting.accounts (
-                    account_number, account_name, account_type, sub_type,
-                    parent_account_id, balance_type, description, opening_balance,
-                    opening_balance_date, created_by, updated_by
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING *
-            """, (
-                data.get('account_number'),
-                data['account_name'],
-                data['account_type'],
-                data.get('sub_type'),
-                data.get('parent_account_id'),
-                data['balance_type'],
-                data.get('description'),
-                data.get('opening_balance', 0),
-                data.get('opening_balance_date'),
-                user_id,
-                user_id
-            ))
-            row = cursor.fetchone()
-            conn.commit()
-            return Account(dict(row))
-        except Exception as e:
-            conn.rollback()
-            raise
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                # opening_balance_date must be a date or None; empty string causes InvalidDatetimeFormat
+                ob_date = data.get('opening_balance_date')
+                if ob_date == '' or (isinstance(ob_date, str) and not ob_date.strip()):
+                    ob_date = None
+
+                cursor.execute("""
+                    INSERT INTO accounting.accounts (
+                        account_number, account_name, account_type, sub_type,
+                        parent_account_id, balance_type, description, opening_balance,
+                        opening_balance_date, created_by, updated_by
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                """, (
+                    data.get('account_number'),
+                    data['account_name'],
+                    data['account_type'],
+                    data.get('sub_type'),
+                    data.get('parent_account_id'),
+                    data['balance_type'],
+                    data.get('description'),
+                    data.get('opening_balance', 0),
+                    ob_date,
+                    user_id,
+                    user_id
+                ))
+                row = cursor.fetchone()
+                conn.commit()
+                return Account(dict(row))
+            except Exception as e:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
         finally:
-            cursor.close()
+            conn.close()
     
     @staticmethod
     def update(account_id: int, data: Dict[str, Any], user_id: int) -> Account:
-        """Update an existing account"""
-        cursor = get_cursor()
+        """Update an existing account. Use a single connection so commit applies to the update."""
         conn = get_connection()
         try:
-            # Build dynamic update query
-            fields = []
-            params = []
-            
-            allowed_fields = [
-                'account_number', 'account_name', 'account_type', 'sub_type',
-                'parent_account_id', 'balance_type', 'description', 'is_active',
-                'opening_balance', 'opening_balance_date'
-            ]
-            
-            for field in allowed_fields:
-                if field in data:
-                    fields.append(f"{field} = %s")
-                    params.append(data[field])
-            
-            if not fields:
-                # No fields to update, just return existing account
-                return AccountRepository.find_by_id(account_id)
-            
-            fields.append("updated_by = %s")
-            fields.append("updated_at = CURRENT_TIMESTAMP")
-            params.append(user_id)
-            params.append(account_id)
-            
-            query = f"UPDATE accounting.accounts SET {', '.join(fields)} WHERE id = %s RETURNING *"
-            cursor.execute(query, params)
-            row = cursor.fetchone()
-            
-            if not row:
-                raise ValueError('Account not found')
-            
-            conn.commit()
-            return Account(dict(row))
-        except Exception as e:
-            conn.rollback()
-            raise
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                # Build dynamic update query
+                fields = []
+                params = []
+                
+                allowed_fields = [
+                    'account_number', 'account_name', 'account_type', 'sub_type',
+                    'parent_account_id', 'balance_type', 'description', 'is_active',
+                    'opening_balance', 'opening_balance_date'
+                ]
+                
+                for field in allowed_fields:
+                    if field in data:
+                        val = data[field]
+                        if field == 'opening_balance_date' and (val == '' or (isinstance(val, str) and not val.strip())):
+                            val = None
+                        fields.append(f"{field} = %s")
+                        params.append(val)
+                
+                if not fields:
+                    cursor.close()
+                    conn.close()
+                    return AccountRepository.find_by_id(account_id)
+                
+                fields.append("updated_by = %s")
+                params.append(user_id)
+                params.append(account_id)
+                
+                query = f"UPDATE accounting.accounts SET {', '.join(fields)}, updated_at = CURRENT_TIMESTAMP WHERE id = %s RETURNING *"
+                cursor.execute(query, params)
+                row = cursor.fetchone()
+                
+                if not row:
+                    raise ValueError('Account not found')
+                
+                conn.commit()
+                return Account(dict(row))
+            except Exception as e:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
         finally:
-            cursor.close()
+            conn.close()
     
     @staticmethod
     def delete(account_id: int) -> bool:
-        """Delete an account"""
-        cursor = get_cursor()
+        """Delete an account. Use a single connection so commit applies to the delete."""
         conn = get_connection()
         try:
-            # Check if account has child accounts
-            cursor.execute("SELECT COUNT(*) AS cnt FROM accounting.accounts WHERE parent_account_id = %s", (account_id,))
-            child_count = cursor.fetchone()['cnt'] or 0
-            if child_count > 0:
-                raise ValueError('Cannot delete account with child accounts')
-            
-            # Check if account has been used in transactions
-            cursor.execute("SELECT COUNT(*) AS cnt FROM accounting.transaction_lines WHERE account_id = %s", (account_id,))
-            transaction_count = cursor.fetchone()['cnt'] or 0
-            if transaction_count > 0:
-                raise ValueError('Cannot delete account that has been used in transactions')
-            
-            # Check if it's a system account
-            account = AccountRepository.find_by_id(account_id)
-            if account and account.is_system_account:
-                raise ValueError('Cannot delete system account')
-            
-            cursor.execute("DELETE FROM accounting.accounts WHERE id = %s", (account_id,))
-            conn.commit()
-            return cursor.rowcount > 0
-        except Exception as e:
-            conn.rollback()
-            raise
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                # Check if account has child accounts
+                cursor.execute("SELECT COUNT(*) AS cnt FROM accounting.accounts WHERE parent_account_id = %s", (account_id,))
+                child_count = cursor.fetchone()['cnt'] or 0
+                if child_count > 0:
+                    raise ValueError('Cannot delete account with child accounts')
+                
+                # Check if account has been used in transactions
+                cursor.execute("SELECT COUNT(*) AS cnt FROM accounting.transaction_lines WHERE account_id = %s", (account_id,))
+                transaction_count = cursor.fetchone()['cnt'] or 0
+                if transaction_count > 0:
+                    raise ValueError('Cannot delete account that has been used in transactions')
+                
+                # Check if it's a system account
+                account = AccountRepository.find_by_id(account_id)
+                if account and account.is_system_account:
+                    raise ValueError('Cannot delete system account')
+                
+                cursor.execute("DELETE FROM accounting.accounts WHERE id = %s", (account_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
         finally:
-            cursor.close()
+            conn.close()
     
     @staticmethod
     def find_children(parent_id: int) -> List[Account]:

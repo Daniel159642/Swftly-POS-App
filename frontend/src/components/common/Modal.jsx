@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'
 
-function Modal({ isOpen, onClose, title, children, size = 'md' }) {
+function Modal({ isOpen, onClose, title, children, size = 'md', showCloseButton = true }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   
   useEffect(() => {
@@ -27,19 +27,21 @@ function Modal({ isOpen, onClose, title, children, size = 'md' }) {
     <div style={{
       position: 'fixed',
       inset: 0,
-      zIndex: 50,
+      zIndex: 10000,
       overflowY: 'auto',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       padding: '16px'
     }}>
-      {/* Background overlay */}
+      {/* Background overlay: light blur so modal sits in front of everything (including sidebar) */}
       <div
         style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.25)' : 'rgba(255, 255, 255, 0.4)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
           transition: 'opacity 0.2s'
         }}
         onClick={onClose}
@@ -70,22 +72,24 @@ function Modal({ isOpen, onClose, title, children, size = 'md' }) {
             }}>
               {title}
             </h3>
-            <button
-              onClick={onClose}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: isDarkMode ? '#9ca3af' : '#6b7280',
-                cursor: 'pointer',
-                padding: '4px',
-                fontSize: '24px',
-                lineHeight: 1
-              }}
-              onMouseEnter={(e) => e.target.style.color = isDarkMode ? '#ffffff' : '#111827'}
-              onMouseLeave={(e) => e.target.style.color = isDarkMode ? '#9ca3af' : '#6b7280'}
-            >
-              ×
-            </button>
+            {showCloseButton && (
+              <button
+                onClick={onClose}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isDarkMode ? '#9ca3af' : '#6b7280',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  fontSize: '24px',
+                  lineHeight: 1
+                }}
+                onMouseEnter={(e) => e.target.style.color = isDarkMode ? '#ffffff' : '#111827'}
+                onMouseLeave={(e) => e.target.style.color = isDarkMode ? '#9ca3af' : '#6b7280'}
+              >
+                ×
+              </button>
+            )}
           </div>
           <div>{children}</div>
         </div>

@@ -1494,25 +1494,14 @@ def get_labor_summary(start_date: str, end_date: str, establishment_id: Optional
         return {'total_hours': round(total_hours, 2), 'total_labor_cost': round(total_labor_cost, 2), 'entries': entries}
     except Exception:
         try:
+            conn.rollback()
+        except Exception:
+            pass
+        try:
             conn.close()
         except Exception:
             pass
         return {'total_hours': 0.0, 'total_labor_cost': 0.0, 'entries': []}
-    except Exception as e:
-        # Rollback on any error
-        try:
-            conn.rollback()
-        except:
-            pass
-        import traceback
-        traceback.print_exc()
-        raise
-    finally:
-        if should_close:
-            try:
-                conn.close()
-            except:
-                pass
 
 def add_vendor(
     vendor_name: str,

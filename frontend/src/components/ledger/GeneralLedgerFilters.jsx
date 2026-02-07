@@ -4,7 +4,7 @@ import CustomDropdown from '../common/CustomDropdown'
 import Button from '../common/Button'
 import { ChevronDown } from 'lucide-react'
 
-function GeneralLedgerFilters({ filters, accounts, onFilterChange, onClearFilters, onExport, onExportExcel, loading = false }) {
+function GeneralLedgerFilters({ filters, accounts, onFilterChange, onClearFilters, onExport, onExportExcel, onExportPdf, loading = false }) {
   const { themeColor } = useTheme()
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const [exportOpen, setExportOpen] = useState(false)
@@ -154,7 +154,7 @@ function GeneralLedgerFilters({ filters, accounts, onFilterChange, onClearFilter
           />
         </div>
 
-        {(onExport || onExportExcel) && (
+        {(onExport || onExportExcel || onExportPdf) && (
           <div ref={exportRef} style={{ position: 'relative', marginBottom: 0 }}>
             <button
               type="button"
@@ -237,6 +237,33 @@ function GeneralLedgerFilters({ filters, accounts, onFilterChange, onClearFilter
                     onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }}
                   >
                     Export to Excel
+                  </button>
+                )}
+                {onExportPdf && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onExportPdf()
+                      setExportOpen(false)
+                    }}
+                    disabled={loading}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      padding: '10px 14px',
+                      textAlign: 'left',
+                      border: 'none',
+                      background: 'none',
+                      color: isDarkMode ? '#fff' : '#333',
+                      fontSize: '14px',
+                      cursor: loading ? 'not-allowed' : 'pointer',
+                      opacity: loading ? 0.6 : 1,
+                      borderTop: isDarkMode ? '1px solid #333' : '1px solid #eee'
+                    }}
+                    onMouseEnter={(e) => { if (!loading) e.target.style.backgroundColor = isDarkMode ? '#3a3a3a' : '#f0f0f0' }}
+                    onMouseLeave={(e) => { e.target.style.backgroundColor = 'transparent' }}
+                  >
+                    Export to PDF
                   </button>
                 )}
               </div>
