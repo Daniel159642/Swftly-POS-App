@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { useTheme } from '../contexts/ThemeContext'
+import { cachedFetch } from '../services/offlineSync'
 import { 
   Settings as SettingsIcon, 
   MapPin, 
@@ -1636,7 +1637,7 @@ function Settings() {
   const loadEstablishmentSettings = async () => {
     try {
       const token = localStorage.getItem('sessionToken')
-      const res = await fetch('/api/accounting/settings', { headers: token ? { 'X-Session-Token': token } : {} })
+      const res = await cachedFetch('/api/accounting/settings', { headers: token ? { 'X-Session-Token': token } : {} })
       if (!res.ok) {
         if (res.status === 403) return
         return
@@ -1706,7 +1707,7 @@ function Settings() {
     queryKey: ['settings-bootstrap'],
     queryFn: async () => {
       const sessionToken = localStorage.getItem('sessionToken')
-      const res = await fetch('/api/settings-bootstrap', { headers: { 'X-Session-Token': sessionToken || '' } })
+      const res = await cachedFetch('/api/settings-bootstrap', { headers: { 'X-Session-Token': sessionToken || '' } })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Failed to load settings')
       return data
@@ -1885,7 +1886,7 @@ function Settings() {
 
   const loadReceiptSettings = async () => {
     try {
-      const response = await fetch('/api/receipt-settings')
+      const response = await cachedFetch('/api/receipt-settings')
       const data = await response.json()
       if (data.success && data.settings) {
         const s = data.settings
@@ -1922,7 +1923,7 @@ function Settings() {
 
   const loadReceiptTemplates = async () => {
     try {
-      const response = await fetch('/api/receipt-templates')
+      const response = await cachedFetch('/api/receipt-templates')
       const data = await response.json()
       if (data.success && data.templates) {
         setSavedTemplates(data.templates)
@@ -2044,7 +2045,7 @@ function Settings() {
 
   const loadStoreLocationSettings = async () => {
     try {
-      const response = await fetch('/api/store-location-settings')
+      const response = await cachedFetch('/api/store-location-settings')
       if (!response.ok) {
         console.warn('Store location settings not available:', response.status)
         return
@@ -2102,7 +2103,7 @@ function Settings() {
 
   const loadDisplaySettings = async () => {
     try {
-      const response = await fetch('/api/customer-display/settings')
+      const response = await cachedFetch('/api/customer-display/settings')
       const data = await response.json()
       if (data.success) {
         setDisplaySettings(prev => ({
@@ -2124,7 +2125,7 @@ function Settings() {
 
   const loadRewardsSettings = async () => {
     try {
-      const response = await fetch('/api/customer-rewards-settings')
+      const response = await cachedFetch('/api/customer-rewards-settings')
       const data = await response.json()
       if (data.success && data.settings) {
         const s = data.settings
@@ -2154,7 +2155,7 @@ function Settings() {
 
   const loadPosSettings = async () => {
     try {
-      const response = await fetch('/api/pos-settings')
+      const response = await cachedFetch('/api/pos-settings')
       const data = await response.json()
       if (data.success && data.settings) {
         const mode = data.settings.transaction_fee_mode || 'additional'
@@ -2176,7 +2177,7 @@ function Settings() {
   const loadCashSettings = async () => {
     try {
       const sessionToken = localStorage.getItem('sessionToken')
-      const response = await fetch(`/api/register/cash-settings?register_id=${cashSettings.register_id}&session_token=${sessionToken}`)
+      const response = await cachedFetch(`/api/register/cash-settings?register_id=${cashSettings.register_id}&session_token=${sessionToken}`)
       const data = await response.json()
       if (data.success && data.data) {
         if (Array.isArray(data.data) && data.data.length > 0) {

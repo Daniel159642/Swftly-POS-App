@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useTheme } from '../contexts/ThemeContext'
+import { cachedFetch } from '../services/offlineSync'
 import Table from '../components/Table'
 import BarcodeScanner from '../components/BarcodeScanner'
 import CustomDropdown from '../components/common/CustomDropdown'
@@ -154,7 +155,7 @@ function Inventory() {
       let url = '/api/inventory?limit=' + PAGE_SIZE + '&offset=' + inventoryPage * PAGE_SIZE
       if (inventoryFilter === 'archived') url += '&archived=1'
       else if (inventoryFilter && inventoryFilter !== 'all') url += '&item_type=' + inventoryFilter
-      const res = await fetch(url)
+      const res = await cachedFetch(url)
       const result = await res.json()
       if (!res.ok) throw new Error(result.message || 'Failed to load inventory')
       return result
@@ -221,7 +222,7 @@ function Inventory() {
     try {
       const archived = archivedOnly ?? isArchivedView
       const url = archived ? '/api/vendors?archived=1' : '/api/vendors'
-      const response = await fetch(url)
+      const response = await cachedFetch(url)
       const result = await response.json()
       if (result.data) {
         setAllVendors(result.data)
@@ -240,7 +241,7 @@ function Inventory() {
     try {
       const archived = archivedOnly ?? isArchivedView
       const url = archived ? '/api/categories?archived=1' : '/api/categories'
-      const response = await fetch(url)
+      const response = await cachedFetch(url)
       const result = await response.json()
       if (result.data) {
         setAllCategories(result.data)

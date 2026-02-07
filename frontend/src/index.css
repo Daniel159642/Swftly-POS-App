@@ -25,6 +25,14 @@ html {
     --shadow-hover: rgba(0, 0, 0, 0.15);
 }
 
+/* Tauri desktop: draggable title bar (Windows touch/pen) + no text selection */
+[data-tauri-drag-region] {
+    -webkit-app-region: drag;
+    app-region: drag;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
 .dark-theme {
     --bg-primary: #1a1a1a;
     --bg-secondary: #2d2d2d;

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { io } from 'socket.io-client'
 import { useTheme } from '../contexts/ThemeContext'
+import { getBackendOrigin } from '../utils/backendUrl'
+import { cachedFetch } from '../services/offlineSync'
 import './CustomerDisplay.css'
 
 function CustomerDisplay() {
@@ -51,16 +53,18 @@ function CustomerDisplay() {
     root.style.setProperty('--customer-display-gradient', gradient)
   }, [themeColor, themeColorRgb, getGradientBackground])
 
-  // Initialize Socket.IO connection
+  // Initialize Socket.IO connection (use backend origin when in Tauri/desktop)
   useEffect(() => {
-    // Use relative URL - Vite proxy will handle routing to backend
-    const newSocket = io({
-      // The backend runs Socket.IO in Werkzeug/threading mode, which does not reliably
-      // support WebSocket upgrades. Force polling to avoid "Invalid frame header".
+    const backendOrigin = getBackendOrigin()
+    const socketOpts = {
       transports: ['polling'],
       upgrade: false,
       path: '/socket.io/'
-    })
+    }
+    if (backendOrigin) {
+      socketOpts.url = backendOrigin
+    }
+    const newSocket = io(socketOpts)
     
     newSocket.on('connect', () => {
       console.log('Connected to Socket.IO server')
@@ -115,7 +119,7 @@ function CustomerDisplay() {
 
   const loadDisplaySettings = async () => {
     try {
-      const response = await fetch('/api/customer-display/settings')
+      const response = await cachedFetch('/api/customer-display/settings')
       const result = await response.json()
       if (result.success) {
         setTipEnabled(result.data.tip_enabled || false)
@@ -128,7 +132,7 @@ function CustomerDisplay() {
 
   const loadPaymentMethods = async () => {
     try {
-      const response = await fetch('/api/payment-methods')
+      const response = await cachedFetch('/api/payment-methods')
       const result = await response.json()
       if (result.success) {
         setPaymentMethods(result.data)

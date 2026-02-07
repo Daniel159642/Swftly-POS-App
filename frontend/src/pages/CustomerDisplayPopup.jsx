@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { io } from 'socket.io-client'
+import { getBackendOrigin } from '../utils/backendUrl'
+import { cachedFetch } from '../services/offlineSync'
 import '../components/CustomerDisplay.css'
 
 function CustomerDisplayPopup() {
@@ -84,15 +86,18 @@ function CustomerDisplayPopup() {
     return () => window.removeEventListener('message', handleMessage)
   }, [currentScreen, tipEnabled, selectedTip])
 
-  // Initialize Socket.IO connection
+  // Initialize Socket.IO (use backend origin when in Tauri/desktop)
   useEffect(() => {
-    const newSocket = io({
-      // The backend runs Socket.IO in Werkzeug/threading mode, which does not reliably
-      // support WebSocket upgrades. Force polling to avoid "Invalid frame header".
+    const backendOrigin = getBackendOrigin()
+    const socketOpts = {
       transports: ['polling'],
       upgrade: false,
       path: '/socket.io/'
-    })
+    }
+    if (backendOrigin) {
+      socketOpts.url = backendOrigin
+    }
+    const newSocket = io(socketOpts)
     
     newSocket.on('connect', () => {
       console.log('Customer display connected to Socket.IO')
@@ -164,7 +169,7 @@ function CustomerDisplayPopup() {
 
   const loadDisplaySettings = async () => {
     try {
-      const response = await fetch('/api/customer-display/settings')
+      const response = await cachedFetch('/api/customer-display/settings')
       const result = await response.json()
       if (result.success) {
         // Properly handle integer 0/1 from database
@@ -191,7 +196,7 @@ function CustomerDisplayPopup() {
 
   const loadPaymentMethods = async () => {
     try {
-      const response = await fetch('/api/payment-methods')
+      const response = await cachedFetch('/api/payment-methods')
       const result = await response.json()
       if (result.success) {
         setPaymentMethods(result.data)

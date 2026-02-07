@@ -1,0 +1,14 @@
+{
+  "name": "pos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "POS System with desktop (Tauri) and web frontend",
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

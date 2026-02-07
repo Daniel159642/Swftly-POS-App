@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { usePermissions, ProtectedComponent } from '../contexts/PermissionContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { useToast } from '../contexts/ToastContext'
+import { cachedFetch } from '../services/offlineSync'
 import BarcodeScanner from './BarcodeScanner'
 import CustomerDisplayPopup from './CustomerDisplayPopup'
 import { ScanBarcode, UserPlus, CheckCircle, Gift, X, AlertCircle, Percent, Check, Pencil } from 'lucide-react'
@@ -69,9 +70,25 @@ function POS({ employeeId, employeeName }) {
   const [orderType, setOrderType] = useState(null) // 'pickup', 'delivery', or null
   const [customerInfoConfirmed, setCustomerInfoConfirmed] = useState(false) // when true, hide pickup/delivery form and show summary only
   const [payAtPickupOrDelivery, setPayAtPickupOrDelivery] = useState(false) // true = pay when pickup/delivery (order placed with payment pending)
-  const [allowPayAtPickupEnabled, setAllowPayAtPickupEnabled] = useState(false) // from Settings: "Allow pay at pickup" — when false, only "Pay now" is valid
-  const [allowPickup, setAllowPickup] = useState(true) // from Settings: when false, hide Pickup button
-  const [allowDelivery, setAllowDelivery] = useState(true) // from Settings: when false, hide Delivery button
+  const POS_ORDER_SETTINGS_KEY = 'pos_order_delivery_settings'
+  const getStoredOrderDeliverySettings = () => {
+    try {
+      const raw = localStorage.getItem(POS_ORDER_SETTINGS_KEY)
+      if (!raw) return null
+      const o = JSON.parse(raw)
+      return {
+        allowPickup: o.allow_pickup !== false,
+        allowDelivery: o.allow_delivery !== false,
+        allowPayAtPickup: !!o.allow_pay_at_pickup
+      }
+    } catch {
+      return null
+    }
+  }
+  const stored = getStoredOrderDeliverySettings()
+  const [allowPayAtPickupEnabled, setAllowPayAtPickupEnabled] = useState(stored?.allowPayAtPickup ?? false)
+  const [allowPickup, setAllowPickup] = useState(stored?.allowPickup ?? true)
+  const [allowDelivery, setAllowDelivery] = useState(stored?.allowDelivery ?? true)
   const [orderPlacedPayLater, setOrderPlacedPayLater] = useState(null) // { orderId, orderNumber, total } after placing pay-later order
   const [orderToPayFromScan, setOrderToPayFromScan] = useState(null) // legacy: modal "Mark as paid (cash)" only
   const [payingForOrderId, setPayingForOrderId] = useState(null) // when set: order loaded in POS for payment (cart + customer); complete via checkout UI
@@ -209,7 +226,7 @@ function POS({ employeeId, employeeName }) {
   } = useQuery({
     queryKey: ['pos-bootstrap'],
     queryFn: async () => {
-      const res = await fetch('/api/pos-bootstrap')
+      const res = await cachedFetch('/api/pos-bootstrap')
       const json = await res.json()
       if (!res.ok) throw new Error(json.message || 'Failed to load')
       return json
@@ -292,7 +309,7 @@ function POS({ employeeId, employeeName }) {
           if (!cancelled) setTransactionFeeSettings(prev => ({ ...prev, rates: defaultRates }))
           return
         }
-        const accRes = await fetch('/api/accounting/settings', { headers: { 'X-Session-Token': token } })
+        const accRes = await cachedFetch('/api/accounting/settings', { headers: { 'X-Session-Token': token } })
         const accData = accRes.ok ? await accRes.json() : {}
         if (cancelled) return
         const rates = accData.data?.transaction_fee_rates || defaultRates
@@ -312,12 +329,19 @@ function POS({ employeeId, employeeName }) {
     const load = async () => {
       try {
         if (!token) return
-        const res = await fetch('/api/order-delivery-settings', { headers: { 'X-Session-Token': token } })
+        const res = await cachedFetch('/api/order-delivery-settings', { headers: { 'X-Session-Token': token } })
         const data = res.ok ? await res.json() : {}
         if (cancelled) return
         const payLaterEnabled = !!data.allow_pay_at_pickup
         const pickupEnabled = data.allow_pickup !== false
         const deliveryEnabled = data.allow_delivery !== false
+        try {
+          localStorage.setItem(POS_ORDER_SETTINGS_KEY, JSON.stringify({
+            allow_pickup: pickupEnabled,
+            allow_delivery: deliveryEnabled,
+            allow_pay_at_pickup: payLaterEnabled
+          }))
+        } catch (_) {}
         setAllowPayAtPickupEnabled(payLaterEnabled)
         setAllowPickup(pickupEnabled)
         setAllowDelivery(deliveryEnabled)
@@ -341,7 +365,7 @@ function POS({ employeeId, employeeName }) {
 
   const loadRewardsSettings = async () => {
     try {
-      const response = await fetch('/api/customer-rewards-settings')
+      const response = await cachedFetch('/api/customer-rewards-settings')
       const data = await response.json()
       if (data.success && data.settings) {
         setRewardsSettings(prev => ({
@@ -423,7 +447,7 @@ function POS({ employeeId, employeeName }) {
 
   const fetchAllProducts = async () => {
     try {
-      const response = await fetch(`/api/inventory?item_type=product&include_variants=1`)
+      const response = await cachedFetch(`/api/inventory?item_type=product&include_variants=1`)
       const data = await response.json()
       
       if (data.data) {
@@ -502,8 +526,7 @@ function POS({ employeeId, employeeName }) {
 
   const searchProducts = async (term) => {
     try {
-      // Always fetch fresh data from API to include newly created products
-      const response = await fetch(`/api/inventory?item_type=product&include_variants=1`)
+      const response = await cachedFetch(`/api/inventory?item_type=product&include_variants=1`)
       const data = await response.json()
       
       const productsToSearch = data.data || []
@@ -707,8 +730,7 @@ function POS({ employeeId, employeeName }) {
   const handleBarcodeScan = async (barcode) => {
     
     try {
-      // Always fetch fresh data from API to include newly created products
-      const response = await fetch(`/api/inventory?item_type=product&include_variants=1`)
+      const response = await cachedFetch(`/api/inventory?item_type=product&include_variants=1`)
       const data = await response.json()
       
       // Update cached products list
@@ -992,7 +1014,7 @@ function POS({ employeeId, employeeName }) {
       if (data.success && data.matches && data.matches.length > 0) {
         const match = data.matches[0]
         // Get full product details
-        const productResponse = await fetch(`/api/inventory?item_type=product&include_variants=1`)
+        const productResponse = await cachedFetch(`/api/inventory?item_type=product&include_variants=1`)
         const productData = await productResponse.json()
         
         if (productData.data) {
@@ -1544,7 +1566,7 @@ function POS({ employeeId, employeeName }) {
       const empId = employeeId ?? (localStorage.getItem('employeeId') ? parseInt(localStorage.getItem('employeeId'), 10) : null)
       const customerId = selectedCustomer?.customer_id || null
       const customerInfoToSave = customerInfo.name ? customerInfo : null
-      const res = await fetch('/api/create_order', {
+      const res = await cachedFetch('/api/create_order', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1586,7 +1608,14 @@ function POS({ employeeId, employeeName }) {
       }
     } catch (err) {
       console.error(err)
-      showToast('Failed to place order', 'error')
+      if (err?.queued) {
+        showToast('Order queued; will sync when back online.', 'success')
+        setCart([])
+        setShowSummary(false)
+        setPayAtPickupOrDelivery(false)
+      } else {
+        showToast('Failed to place order', 'error')
+      }
     } finally {
       setProcessing(false)
     }
@@ -1620,7 +1649,7 @@ function POS({ employeeId, employeeName }) {
       // Paying for a scanned pay-later order: UPDATE the existing order (mark paid/complete), do NOT create a new order
       if (payingForOrderId) {
         const token = localStorage.getItem('sessionToken')
-        const res = await fetch(`/api/orders/${payingForOrderId}/status`, {
+        const res = await cachedFetch(`/api/orders/${payingForOrderId}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
           body: JSON.stringify({
@@ -1735,7 +1764,7 @@ function POS({ employeeId, employeeName }) {
       let response, result
       if (transactionId) {
         // Get payment method ID
-        const paymentMethodsResponse = await fetch('/api/payment-methods')
+        const paymentMethodsResponse = await cachedFetch('/api/payment-methods')
         const paymentMethodsResult = await paymentMethodsResponse.json()
         // Find payment method by matching method_type or method_name
         const paymentMethodObj = paymentMethodsResult.data?.find(
@@ -1856,7 +1885,7 @@ function POS({ employeeId, employeeName }) {
           // Fall back to old system (no matching payment method - use create_order)
           // Pass transaction_id so backend updates existing order instead of creating duplicate
           const tipForCreate = selectedTipRef.current || selectedTip || 0
-          response = await fetch('/api/create_order', {
+          response = await cachedFetch('/api/create_order', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1936,7 +1965,7 @@ function POS({ employeeId, employeeName }) {
       } else {
         // Transaction/start failed or unavailable – fall back to create_order
         const tipForCreate = selectedTipRef.current || selectedTip || 0
-        response = await fetch('/api/create_order', {
+        response = await cachedFetch('/api/create_order', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -4906,7 +4935,7 @@ function POS({ employeeId, employeeName }) {
                 type="button"
                 onClick={async () => {
                   const token = localStorage.getItem('sessionToken')
-                  const res = await fetch(`/api/orders/${orderToPayFromScan.orderId}/status`, {
+                  const res = await cachedFetch(`/api/orders/${orderToPayFromScan.orderId}/status`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json', ...(token && { Authorization: `Bearer ${token}` }) },
                     body: JSON.stringify({ order_status: 'completed', payment_status: 'completed', payment_method: 'cash' })

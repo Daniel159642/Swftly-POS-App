@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { io } from 'socket.io-client'
 import { useTheme } from '../contexts/ThemeContext'
 import { mergeCheckoutUiFromApi } from '../utils/checkoutUi'
+import { getBackendOrigin } from '../utils/backendUrl'
+import { cachedFetch } from '../services/offlineSync'
 import './CustomerDisplay.css'
 import './CustomerDisplayButtons.css'
 
@@ -77,9 +79,10 @@ function CustomerDisplayPopup({ cart, subtotal, tax, discount = 0, transactionFe
     }
   }, [returnId])
 
-  // Initialize Socket.IO connection – use same origin so Vite proxy (or Flask) handles /socket.io
+  // Initialize Socket.IO (use backend origin when in Tauri/desktop)
   useEffect(() => {
-    const newSocket = io({
+    const backendOrigin = getBackendOrigin()
+    const socketOpts = {
       transports: ['polling'],
       upgrade: false,
       path: '/socket.io/',
@@ -87,7 +90,11 @@ function CustomerDisplayPopup({ cart, subtotal, tax, discount = 0, transactionFe
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,
       timeout: 20000
-    })
+    }
+    if (backendOrigin) {
+      socketOpts.url = backendOrigin
+    }
+    const newSocket = io(socketOpts)
     
     newSocket.on('connect', () => {
       console.log('Customer display connected to Socket.IO')
@@ -376,7 +383,7 @@ function CustomerDisplayPopup({ cart, subtotal, tax, discount = 0, transactionFe
 
   const loadDisplaySettings = async () => {
     try {
-      const response = await fetch('/api/customer-display/settings')
+      const response = await cachedFetch('/api/customer-display/settings')
       const result = await response.json()
       if (result.success) {
         setTipEnabled(result.data.tip_enabled || false)
@@ -395,7 +402,7 @@ function CustomerDisplayPopup({ cart, subtotal, tax, discount = 0, transactionFe
 
   const loadPaymentMethods = async () => {
     try {
-      const response = await fetch('/api/payment-methods')
+      const response = await cachedFetch('/api/payment-methods')
       const result = await response.json()
       if (result.success) {
         setPaymentMethods(result.data || [])

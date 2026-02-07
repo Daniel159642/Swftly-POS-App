@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Delancey",
+  "version": "1.0.0",
+  "identifier": "com.pos.desktop",
+  "build": {
+    "beforeDevCommand": {
+      "script": "sh -c 'cd frontend && npm run dev'",
+      "wait": false
+    },
+    "devUrl": "http://localhost:3000",
+    "beforeBuildCommand": {
+      "script": "sh -c 'cd frontend && npm run build:desktop'"
+    },
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "titleBarStyle": "Overlay",
+        "trafficLightPosition": { "x": 12, "y": 12 }
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [],
+    "macOS": {
+      "minimumSystemVersion": "10.13"
+    },
+    "shortDescription": "Point of Sale Desktop App",
+    "longDescription": "POS system desktop application. Start the backend server (python3 web_viewer.py) before using the app.",
+    "category": "Business"
+  },
+  "plugins": {}
+}

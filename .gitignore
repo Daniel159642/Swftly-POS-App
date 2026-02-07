@@ -114,3 +114,6 @@ coverage.xml
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Tauri / Rust
+src-tauri/target/

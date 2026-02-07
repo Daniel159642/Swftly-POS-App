@@ -63,6 +63,31 @@ All necessary files are committed:
    - Employee: ADMIN001
    - Password: 123456
 
+## 🖥️ Desktop app (Tauri)
+
+You can run the POS as a native desktop app (macOS, Windows, Linux) using Tauri.
+
+**Prerequisites:** [Rust](https://rustup.rs/) and Tauri’s [system dependencies](https://v2.tauri.app/start/prerequisites/) for your OS.
+
+1. **Install root and frontend deps:**
+   ```bash
+   npm install
+   cd frontend && npm install && cd ..
+   ```
+
+2. **Start the backend** (required — the desktop app talks to it):
+   ```bash
+   source venv/bin/activate   # or: venv\Scripts\activate on Windows
+   python3 web_viewer.py
+   ```
+   Keep this running (e.g. in another terminal).
+
+3. **Run the desktop app:**
+   - **Development:** From repo root: `npm run tauri:dev`. This starts the frontend dev server and opens the Tauri window (backend must be on port 5001).
+   - **Production build:** `npm run tauri:build`. Installer output is under `src-tauri/target/release/bundle/` (e.g. `.dmg` on macOS, `.msi`/`.exe` on Windows).
+
+The desktop build uses `frontend/build:desktop`, which sets `VITE_API_URL=http://localhost:5001/api/v1` so the app talks to your local Flask backend. Socket.IO and uploads also use `http://localhost:5001`.
+
 ## 📝 Important Notes
 
 - **Database credentials are NOT in git** - each computer needs its own `.env` file

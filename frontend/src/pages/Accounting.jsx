@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import { cachedFetch } from '../services/offlineSync'
 import {
   LayoutDashboard,
   FolderOpen,
@@ -1256,7 +1257,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
   const loadSettings = async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/accounting/settings', { headers: getAuthHeaders() })
+      const res = await cachedFetch('/api/accounting/settings', { headers: getAuthHeaders() })
       const json = await res.json()
       if (json.success && json.data) {
         const d = json.data

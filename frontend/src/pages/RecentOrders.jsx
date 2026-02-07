@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../contexts/ThemeContext'
+import { cachedFetch } from '../services/offlineSync'
 import BarcodeScanner from '../components/BarcodeScanner'
 import { ScanBarcode, CheckCircle, XCircle, ChevronDown, Pencil, MoreVertical } from 'lucide-react'
 import { formLabelStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel } from '../components/FormStyles'
@@ -98,7 +99,7 @@ function RecentOrders() {
       if (filterOrderTypeDelivery) typeIn.push('delivery')
       if (filterOrderTypeInPerson) typeIn.push('in-person')
       if (typeIn.length) params.set('order_type_in', typeIn.join(','))
-      const res = await fetch(`/api/orders?${params.toString()}`)
+      const res = await cachedFetch(`/api/orders?${params.toString()}`)
       const result = await res.json()
       if (!res.ok) throw new Error(result.message || 'Failed to load orders')
       return result
@@ -175,7 +176,7 @@ function RecentOrders() {
   // Load POS return settings (transaction fee take loss, refund tip)
   useEffect(() => {
     let cancelled = false
-    fetch('/api/pos-settings')
+    cachedFetch('/api/pos-settings')
       .then(res => res.json())
       .then(data => {
         if (!cancelled && data.success && data.settings) {
@@ -193,7 +194,7 @@ function RecentOrders() {
   // Load display settings for tip_refund_from (deduct from employee vs store absorbs)
   useEffect(() => {
     let cancelled = false
-    fetch('/api/customer-display/settings')
+    cachedFetch('/api/customer-display/settings')
       .then(res => res.json())
       .then(data => {
         if (!cancelled && data.success && data.data) {

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-route
 import { PermissionProvider, usePermissions } from './contexts/PermissionContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider } from './contexts/ToastContext'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Settings, User, LogOut } from 'lucide-react'
 import Login from './components/Login'
 import Dashboard from './components/Dashboard'
@@ -20,7 +21,9 @@ import SettingsPage from './pages/Settings'
 import Accounting from './pages/Accounting'
 import CashRegister from './pages/CashRegister'
 import Customers from './pages/Customers'
-import Home from './pages/Home'
+import OfflineBanner from './components/OfflineBanner'
+import { useOffline } from './contexts/OfflineContext'
+import { cachedFetch } from './services/offlineSync'
 import './index.css'
 
 function ProtectedRoute({ children, sessionToken, employee, sessionVerifying }) {
@@ -40,15 +43,33 @@ function ProtectedRoute({ children, sessionToken, employee, sessionVerifying }) 
   return children
 }
 
+const EMPLOYEE_STORAGE_KEY = 'pos_employee'
+
+function getStoredEmployee() {
+  try {
+    const raw = localStorage.getItem(EMPLOYEE_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function setStoredEmployee(employee) {
+  if (employee) localStorage.setItem(EMPLOYEE_STORAGE_KEY, JSON.stringify(employee))
+  else localStorage.removeItem(EMPLOYEE_STORAGE_KEY)
+}
+
 const loginSuccessHandler = (result, setSessionToken, setEmployee) => {
   if (result.success) {
-    setSessionToken(result.session_token)
-    setEmployee({
+    const emp = {
       employee_id: result.employee_id,
       employee_name: result.employee_name,
       position: result.position
-    })
+    }
+    setSessionToken(result.session_token)
+    setEmployee(emp)
     localStorage.setItem('sessionToken', result.session_token)
+    setStoredEmployee(emp)
   }
 }
 
@@ -205,7 +226,7 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
             <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>Loading session...</div>
           </div>
         ) : (
-          <Home />
+          <Navigate to="/login" replace />
         )
       } />
       <Route path="/onboarding" element={<Navigate to="/login" replace />} />
@@ -228,30 +249,70 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
   )
 }
 
+const isTauri = typeof window !== 'undefined' && window.__TAURI__
+
 function Layout({ children, employee, onLogout }) {
   const navigate = useNavigate()
   const { hasPermission } = usePermissions()
+  const { isOnline, isSyncing, pendingCount } = useOffline()
+  const showBanner = !isOnline || isSyncing || pendingCount > 0
+
+  useEffect(() => {
+    if (!navigator.onLine) return
+    cachedFetch('/api/inventory?limit=50&offset=0').then(() => {}).catch(() => {})
+    cachedFetch('/api/inventory?item_type=product&include_variants=1').then(() => {}).catch(() => {})
+    cachedFetch('/api/vendors').then(() => {}).catch(() => {})
+    cachedFetch('/api/categories').then(() => {}).catch(() => {})
+    cachedFetch('/api/pos-bootstrap').then(() => {}).catch(() => {})
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('sessionToken') : null
+    if (token) {
+      cachedFetch('/api/order-delivery-settings', { headers: { 'X-Session-Token': token } }).then(() => {}).catch(() => {})
+    }
+  }, [])
+
+  const handleHeaderDrag = (e) => {
+    if (e.target.closest('button')) return
+    e.preventDefault()
+    e.stopPropagation()
+    getCurrentWindow().startDragging()
+  }
 
   return (
-    <div style={{ minHeight: '100vh', paddingTop: '52px', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 1000,
-        backgroundColor: 'var(--bg-primary, #fff)',
-        borderBottom: '3px solid var(--border-color, #ddd)',
-        padding: '12px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+    <div style={{ minHeight: '100vh', paddingTop: showBanner ? 88 : 52, backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
+      <OfflineBanner />
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 1000,
+          backgroundColor: 'var(--bg-primary, #fff)',
+          borderBottom: '3px solid var(--border-color, #ddd)',
+          padding: '12px 20px',
+          paddingLeft: isTauri ? 72 : 20,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}
+      >
+        <div
+          data-tauri-drag-region
+          onMouseDown={isTauri ? handleHeaderDrag : undefined}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '20px',
+            flex: 1,
+            minWidth: 0,
+            userSelect: 'none',
+            cursor: isTauri ? 'move' : undefined
+          }}
+        >
           <button
             onClick={() => navigate('/dashboard')}
             style={{
-              padding: '6px 12px',
+              padding: '10px 12px 4px 12px',
               backgroundColor: 'transparent',
               border: 'none',
               cursor: 'pointer',
@@ -314,7 +375,7 @@ function Layout({ children, employee, onLogout }) {
 
 function App() {
   const [sessionToken, setSessionToken] = useState(localStorage.getItem('sessionToken'))
-  const [employee, setEmployee] = useState(null)
+  const [employee, setEmployee] = useState(() => (localStorage.getItem('sessionToken') ? getStoredEmployee() : null))
   const [sessionVerifying, setSessionVerifying] = useState(!!localStorage.getItem('sessionToken'))
 
   const handleLogout = () => {
@@ -329,10 +390,21 @@ function App() {
     setEmployee(null)
     setSessionVerifying(false)
     localStorage.removeItem('sessionToken')
+    setStoredEmployee(null)
   }
 
   const verifySession = async () => {
     if (!sessionToken) {
+      setSessionVerifying(false)
+      return
+    }
+    if (!navigator.onLine) {
+      const cached = getStoredEmployee()
+      if (cached) {
+        setEmployee(cached)
+      } else {
+        handleLogout()
+      }
       setSessionVerifying(false)
       return
     }
@@ -353,17 +425,24 @@ function App() {
 
       const result = await response.json()
       if (result.valid) {
-        setEmployee({
+        const emp = {
           employee_id: result.employee_id,
           employee_name: result.employee_name,
           position: result.position
-        })
+        }
+        setEmployee(emp)
+        setStoredEmployee(emp)
       } else {
         handleLogout()
       }
     } catch (err) {
       console.error('Session verification failed:', err)
-      handleLogout()
+      const cached = getStoredEmployee()
+      if (cached) {
+        setEmployee(cached)
+      } else {
+        handleLogout()
+      }
     } finally {
       setSessionVerifying(false)
     }

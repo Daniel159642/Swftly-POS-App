@@ -1,0 +1,18 @@
+[package]
+name = "pos-desktop"
+version = "1.0.0"
+description = "POS System Desktop App"
+authors = ["POS"]
+edition = "2021"
+rust-version = "1.70"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
