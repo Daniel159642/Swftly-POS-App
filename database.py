@@ -1358,6 +1358,7 @@ def get_establishment_settings(establishment_id: Optional[int] = None) -> Dict[s
             'delivery_fee_enabled': bool(s.get('delivery_fee_enabled', False)),
             'allow_scheduled_pickup': bool(s.get('allow_scheduled_pickup', False)),
             'allow_scheduled_delivery': bool(s.get('allow_scheduled_delivery', False)),
+            'sales_tax_by_state': s.get('sales_tax_by_state') if isinstance(s.get('sales_tax_by_state'), dict) else {},
         }
     except Exception:
         try:
@@ -1381,6 +1382,7 @@ def _default_store_settings() -> Dict[str, Any]:
         'delivery_fee_enabled': False,
         'allow_scheduled_pickup': False,
         'allow_scheduled_delivery': False,
+        'sales_tax_by_state': {},
     }
 
 
@@ -1424,6 +1426,8 @@ def update_establishment_settings(establishment_id: Optional[int], settings: Dic
             current['allow_scheduled_pickup'] = bool(settings['allow_scheduled_pickup'])
         if 'allow_scheduled_delivery' in settings:
             current['allow_scheduled_delivery'] = bool(settings['allow_scheduled_delivery'])
+        if 'sales_tax_by_state' in settings:
+            current['sales_tax_by_state'] = dict(settings['sales_tax_by_state'])
         import json
         cursor.execute(
             "UPDATE establishments SET settings = %s::jsonb WHERE establishment_id = %s",

@@ -17,7 +17,9 @@ import {
   FileBarChart,
   PanelLeft,
   Plus,
-  X
+  X,
+  MapPin,
+  DollarSign
 } from 'lucide-react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
@@ -600,15 +602,15 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
           {filteredReports.length === 0 ? (
             <div style={{ padding: '24px', color: textColor, opacity: 0.7 }}>No saved reports yet. Generate a report (Trial Balance, P&amp;L, Balance Sheet, Cash Flow) and click <strong>Save</strong> to add it here.</div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-              <thead>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                <thead>
                 <tr style={{ borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9fafb' }}>
                   <th style={{ textAlign: 'left', padding: '12px 24px', fontSize: '12px', fontWeight: 500, color: textSecondary, textTransform: 'uppercase' }}>Name</th>
                   <th style={{ textAlign: 'left', padding: '12px 24px', fontSize: '12px', fontWeight: 500, color: textSecondary, textTransform: 'uppercase' }}>Saved</th>
                   <th style={{ textAlign: 'right', padding: '12px 24px', fontSize: '12px', fontWeight: 500, color: textSecondary, textTransform: 'uppercase' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+                  </tr>
+                </thead>
+                <tbody>
                 {filteredReports.map((item) => (
                   <tr key={item.name} style={{ borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}` }}>
                     <td style={{ padding: '12px 24px', color: isDarkMode ? '#e5e7eb' : '#111', fontWeight: 500 }}>{item.name}</td>
@@ -697,10 +699,10 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
                         )}
                       </div>
                     </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
           )}
         </div>
       </div>
@@ -777,8 +779,8 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
                             >
                               Delete
                             </button>
-                          </div>
-                        )}
+            </div>
+          )}
                         {confirmDeleteKey === 'shipment:' + item.id && (
                           <div role="dialog" aria-label="Confirm delete" style={{ ...menuStyle, minWidth: '200px', padding: '12px 14px' }}>
                             <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: textColor }}>Delete &quot;{item.name}&quot;?</p>
@@ -814,8 +816,8 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
                                 Delete
                               </button>
                             </div>
-                          </div>
-                        )}
+        </div>
+      )}
                       </div>
                     </td>
                   </tr>
@@ -864,7 +866,7 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
             }}
           >
             {/* Filename header – same as Shipment Verification */}
-            <div style={{
+      <div style={{ 
               padding: '12px 16px',
               borderBottom: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
               backgroundColor: bgPrimary,
@@ -1051,8 +1053,8 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
                   style={{
                     width: '100%',
                     backgroundColor: bgPrimary,
-                    border: `1px solid ${borderColor}`,
-                    borderRadius: '8px',
+        border: `1px solid ${borderColor}`,
+        borderRadius: '8px',
                     overflow: 'auto',
                     padding: '16px'
                   }}
@@ -1069,7 +1071,7 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
                   >
                     {viewingFile.csvText || ''}
                   </pre>
-                </div>
+      </div>
               )}
             </div>
           </div>
@@ -1079,13 +1081,39 @@ function DashboardTab({ dateRange, formatCurrency, getAuthHeaders, onDirectoryRe
   )
 }
 
-// Settings tab: sales tax %, transaction fee rates, note about hourly wages
+// Settings tab: tax by state, transaction fee rates, employee rates & weekly hours
 function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 255', isDarkMode: isDarkModeProp }) {
   const { show: showToast } = useToast()
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [edit, setEdit] = useState({ default_sales_tax_pct: '', transaction_fee_rates: {} })
+  const [edit, setEdit] = useState({
+    default_sales_tax_pct: '',
+    transaction_fee_rates: {},
+    sales_tax_by_state: {}
+  })
+  const [employees, setEmployees] = useState([])
+  const [laborThisWeek, setLaborThisWeek] = useState({ entries: [] })
+  const [employeeRateSaving, setEmployeeRateSaving] = useState(null)
+  const [employeeRateEdits, setEmployeeRateEdits] = useState({})
+  const [posSettings, setPosSettings] = useState({
+    return_transaction_fee_take_loss: false,
+    transaction_fee_mode: 'additional',
+    transaction_fee_charge_cash: false,
+    num_registers: 1,
+    register_type: 'one_screen',
+    return_tip_refund: false,
+    require_signature_for_return: false
+  })
+  const [savingPosFee, setSavingPosFee] = useState(false)
+  const [tipAllocation, setTipAllocation] = useState('logged_in_employee') // 'logged_in_employee' | 'split_all'
+  const [tipRefundFrom, setTipRefundFrom] = useState('store') // 'employee' | 'store'
+  const [tipEnabled, setTipEnabled] = useState(false)
+  const [tipAfterPayment, setTipAfterPayment] = useState(false)
+  const [tipSuggestions, setTipSuggestions] = useState([15, 18, 20])
+  const [tipCustomInCheckout, setTipCustomInCheckout] = useState(false)
+  const [requireSignature, setRequireSignature] = useState(false) // checkout signature
+  const [savingTipAllocation, setSavingTipAllocation] = useState(false)
   const isDarkMode = isDarkModeProp ?? document.documentElement.classList.contains('dark-theme')
   const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
   const cardBg = isDarkMode ? '#1f1f1f' : '#f9f9f9'
@@ -1093,7 +1121,137 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
 
   useEffect(() => {
     loadSettings()
+    loadEmployeesAndLabor()
+    loadPosSettings()
+    loadDisplaySettings()
   }, [])
+
+  const loadDisplaySettings = async () => {
+    try {
+      const res = await fetch('/api/customer-display/settings', { headers: getAuthHeaders() })
+      const json = await res.json()
+      if (json.success && json.data) {
+        const d = json.data
+        setTipAllocation(d.tip_allocation === 'split_all' ? 'split_all' : 'logged_in_employee')
+        setTipRefundFrom(d.tip_refund_from === 'employee' ? 'employee' : 'store')
+        setTipEnabled(d.tip_enabled === 1 || d.tip_enabled === true)
+        setTipAfterPayment(d.tip_after_payment === 1 || d.tip_after_payment === true)
+        setTipSuggestions(Array.isArray(d.tip_suggestions) ? d.tip_suggestions.slice(0, 3) : [15, 18, 20])
+        setTipCustomInCheckout(d.tip_custom_in_checkout === 1 || d.tip_custom_in_checkout === true)
+        setRequireSignature(d.signature_required === 1 || d.signature_required === true)
+      }
+    } catch (err) {
+      console.warn('Error loading display/tip settings:', err)
+    }
+  }
+
+  const loadPosSettings = async () => {
+    try {
+      const res = await fetch('/api/pos-settings', { headers: getAuthHeaders() })
+      const json = await res.json()
+      if (json.success && json.settings) {
+        const s = json.settings
+        setPosSettings({
+          return_transaction_fee_take_loss: !!s.return_transaction_fee_take_loss,
+          transaction_fee_mode: ['additional', 'included', 'none'].includes(s.transaction_fee_mode) ? s.transaction_fee_mode : 'additional',
+          transaction_fee_charge_cash: !!s.transaction_fee_charge_cash,
+          num_registers: s.num_registers ?? 1,
+          register_type: s.register_type || 'one_screen',
+          return_tip_refund: !!s.return_tip_refund,
+          require_signature_for_return: !!s.require_signature_for_return
+        })
+      }
+    } catch (err) {
+      console.warn('Error loading POS settings:', err)
+    }
+  }
+
+  const savePosTransactionFeeSettings = async () => {
+    setSavingPosFee(true)
+    try {
+      const res = await fetch('/api/pos-settings', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          num_registers: posSettings.num_registers ?? 1,
+          register_type: posSettings.register_type || 'one_screen',
+          return_transaction_fee_take_loss: !!posSettings.return_transaction_fee_take_loss,
+          return_tip_refund: !!posSettings.return_tip_refund,
+          require_signature_for_return: !!posSettings.require_signature_for_return,
+          transaction_fee_mode: posSettings.transaction_fee_mode || 'additional',
+          transaction_fee_charge_cash: !!posSettings.transaction_fee_charge_cash
+        })
+      })
+      const json = await res.json()
+      if (json.success) {
+        showToast('Transaction fee settings saved.', 'success')
+      } else {
+        showToast(json.message || 'Failed to save', 'error')
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to save', 'error')
+    } finally {
+      setSavingPosFee(false)
+    }
+  }
+
+  const saveTipsSettings = async () => {
+    setSavingTipAllocation(true)
+    try {
+      const token = localStorage.getItem('sessionToken')
+      const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json', 'Authorization': `Bearer ${token || ''}` }
+      // 1) Customer display / tips UI settings
+      const displayRes = await fetch('/api/customer-display/settings', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          tip_enabled: tipEnabled ? 1 : 0,
+          tip_after_payment: tipAfterPayment ? 1 : 0,
+          tip_suggestions: tipSuggestions.slice(0, 3),
+          tip_custom_in_checkout: tipCustomInCheckout ? 1 : 0,
+          tip_allocation: tipAllocation,
+          tip_refund_from: tipRefundFrom,
+          signature_required: requireSignature ? 1 : 0
+        })
+      })
+      const displayJson = await displayRes.json()
+      if (!displayJson.success) {
+        showToast(displayJson.message || 'Failed to save tips settings', 'error')
+        setSavingTipAllocation(false)
+        return
+      }
+      // 2) POS settings (return tip refund + require signature for return)
+      const posRes = await fetch('/api/pos-settings', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          num_registers: posSettings.num_registers ?? 1,
+          register_type: posSettings.register_type || 'one_screen',
+          return_transaction_fee_take_loss: !!posSettings.return_transaction_fee_take_loss,
+          return_tip_refund: !!posSettings.return_tip_refund,
+          require_signature_for_return: !!posSettings.require_signature_for_return,
+          transaction_fee_mode: posSettings.transaction_fee_mode || 'additional',
+          transaction_fee_charge_cash: !!posSettings.transaction_fee_charge_cash
+        })
+      })
+      const posJson = await posRes.json()
+      if (displayJson.data) {
+        setTipAllocation(displayJson.data.tip_allocation === 'split_all' ? 'split_all' : 'logged_in_employee')
+        setTipRefundFrom(displayJson.data.tip_refund_from === 'employee' ? 'employee' : 'store')
+        setTipEnabled(displayJson.data.tip_enabled === 1 || displayJson.data.tip_enabled === true)
+        setTipAfterPayment(displayJson.data.tip_after_payment === 1 || displayJson.data.tip_after_payment === true)
+        if (Array.isArray(displayJson.data.tip_suggestions)) setTipSuggestions(displayJson.data.tip_suggestions.slice(0, 3))
+        setTipCustomInCheckout(displayJson.data.tip_custom_in_checkout === 1 || displayJson.data.tip_custom_in_checkout === true)
+        setRequireSignature(displayJson.data.signature_required === 1 || displayJson.data.signature_required === true)
+      }
+      if (posJson.success) setPosSettings(prev => ({ ...prev, return_tip_refund: !!posSettings.return_tip_refund, require_signature_for_return: !!posSettings.require_signature_for_return }))
+      showToast('Tips settings saved.', 'success')
+    } catch (err) {
+      showToast(err.message || 'Failed to save', 'error')
+    } finally {
+      setSavingTipAllocation(false)
+    }
+  }
 
   const loadSettings = async () => {
     try {
@@ -1101,10 +1259,12 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
       const res = await fetch('/api/accounting/settings', { headers: getAuthHeaders() })
       const json = await res.json()
       if (json.success && json.data) {
-        setSettings(json.data)
+        const d = json.data
+        setSettings(d)
         setEdit({
-          default_sales_tax_pct: String(json.data.default_sales_tax_pct ?? 8),
-          transaction_fee_rates: { ...(json.data.transaction_fee_rates || {}) }
+          default_sales_tax_pct: String(d.default_sales_tax_pct ?? 8),
+          transaction_fee_rates: { ...(d.transaction_fee_rates || {}) },
+          sales_tax_by_state: d.sales_tax_by_state && typeof d.sales_tax_by_state === 'object' ? { ...d.sales_tax_by_state } : {}
         })
       }
     } catch (err) {
@@ -1114,29 +1274,82 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
     }
   }
 
-  const handleSave = async () => {
+  const loadEmployeesAndLabor = async () => {
+    try {
+      const now = new Date()
+      const day = now.getDay()
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1)
+      const mon = new Date(now)
+      mon.setDate(diff)
+      const sun = new Date(mon)
+      sun.setDate(mon.getDate() + 6)
+      const start = mon.toISOString().slice(0, 10)
+      const end = sun.toISOString().slice(0, 10)
+      const [empRes, laborRes] = await Promise.all([
+        fetch('/api/employees', { headers: getAuthHeaders() }),
+        fetch(`/api/accounting/labor-summary?start_date=${start}&end_date=${end}`, { headers: getAuthHeaders() })
+      ])
+      if (empRes.ok) {
+        const empJson = await empRes.json()
+        const list = empJson.data && Array.isArray(empJson.data) ? empJson.data : (Array.isArray(empJson) ? empJson : [])
+        setEmployees(list)
+      }
+      if (laborRes.ok) {
+        const laborJson = await laborRes.json()
+        const entries = laborJson.data?.entries ?? laborJson.entries ?? []
+        setLaborThisWeek({ entries })
+      }
+    } catch (err) {
+      console.warn('Error loading employees/labor:', err)
+    }
+  }
+
+  const saveAccountingSettings = async (updates) => {
     try {
       setSaving(true)
-      const payload = {
-        default_sales_tax_pct: parseFloat(edit.default_sales_tax_pct) || 0,
-        transaction_fee_rates: edit.transaction_fee_rates
-      }
       const res = await fetch('/api/accounting/settings', {
         method: 'PATCH',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(updates)
       })
       const json = await res.json()
       if (json.success) {
-        setSettings(json.data)
+        if (json.data) setSettings(json.data)
         showToast('Settings saved.', 'success')
-      } else {
-        showToast(json.message || 'Failed to save', 'error')
+        return true
       }
+      showToast(json.message || 'Failed to save', 'error')
+      return false
     } catch (err) {
       showToast(err.message || 'Failed to save', 'error')
+      return false
     } finally {
       setSaving(false)
+    }
+  }
+
+  const saveEmployeeRate = async (employeeId, hourlyRate) => {
+    setEmployeeRateSaving(employeeId)
+    try {
+      const res = await fetch(`/api/admin/employees/${employeeId}`, {
+        method: 'PUT',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hourly_rate: hourlyRate })
+      })
+      const json = await res.json()
+      if (json.success) {
+        setEmployees(prev => prev.map(e => e.employee_id === employeeId ? { ...e, hourly_rate: hourlyRate } : e))
+        showToast('Employee rate updated.', 'success')
+        setEmployeeRateEdits(prev => { const next = { ...prev }; delete next[employeeId]; return next })
+        return true
+      }
+      showToast(json.error || json.message || 'Failed to update', 'error')
+      return false
+    } catch (err) {
+      showToast('Failed to update employee rate', 'error')
+      return false
+    } finally {
+      setEmployeeRateSaving(null)
     }
   }
 
@@ -1151,72 +1364,398 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
 
   const rates = edit.transaction_fee_rates || {}
   const feeMethods = ['credit_card', 'debit_card', 'mobile_payment', 'cash', 'check', 'store_credit']
+  const cardStyle = { padding: '20px', backgroundColor: cardBg, border: `1px solid ${borderColor}`, borderRadius: '12px' }
 
   return (
-    <div>
-      <div style={{ padding: '20px', backgroundColor: cardBg, border: `1px solid ${borderColor}`, borderRadius: '8px', maxWidth: '560px' }}>
-        <FormTitle isDarkMode={isDarkMode} style={{ fontSize: '18px', marginBottom: '16px' }}>Store accounting settings</FormTitle>
+    <div style={{ maxWidth: '720px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {/* Tax by state */}
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+          <MapPin size={18} style={{ flexShrink: 0 }} />
+          <span style={{ fontWeight: 600, fontSize: '15px', color: textColor }}>Tax by state</span>
+        </div>
+        <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginBottom: '12px' }}>
+          Default tax is used when no state-specific rate is set. Add state codes (e.g. CA, NY) and tax % for each.
+        </p>
         <FormField>
           <FormLabel isDarkMode={isDarkMode}>Default sales tax (%)</FormLabel>
           <input
             type="number"
-            min="0"
-            max="100"
-            step="0.01"
+            min={0}
+            max={100}
+            step={0.01}
             value={edit.default_sales_tax_pct}
             onChange={e => setEdit(prev => ({ ...prev, default_sales_tax_pct: e.target.value }))}
             {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
             style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '120px' }}
           />
-          <span style={{ marginLeft: '8px', color: textColor, opacity: 0.8 }}>% (e.g. 8 for 8%)</span>
         </FormField>
-        <FormField>
-          <FormLabel isDarkMode={isDarkMode}>Transaction fee rates (card/processing)</FormLabel>
-          <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginBottom: '8px' }}>As decimal (e.g. 0.029 = 2.9%). Cash/check/store credit typically 0.</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
-            {feeMethods.map(method => (
-              <div key={method} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <label style={{ ...formLabelStyle(isDarkMode), marginBottom: 0, minWidth: '110px', fontSize: '13px' }}>{method.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.001"
-                  value={rates[method] ?? 0}
-                  onChange={e => setFeeRate(method, e.target.value)}
-                  {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                  style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '80px' }}
-                />
-              </div>
-            ))}
+        <div style={{ marginBottom: '8px', fontWeight: 600, fontSize: '13px', color: textColor }}>State overrides</div>
+        {Object.entries(edit.sales_tax_by_state || {}).map(([stateCode, pct]) => (
+          <div key={stateCode} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <input
+              type="text"
+              value={stateCode}
+              readOnly
+              style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '64px', padding: '6px 8px', textTransform: 'uppercase' }}
+            />
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              value={pct}
+              onChange={e => setEdit(prev => ({
+                ...prev,
+                sales_tax_by_state: { ...prev.sales_tax_by_state, [stateCode]: parseFloat(e.target.value) || 0 }
+              }))}
+              style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '80px', padding: '6px 8px' }}
+            />
+            <span style={{ fontSize: '13px', color: textColor, opacity: 0.8 }}>%</span>
+            <button
+              type="button"
+              onClick={() => setEdit(prev => {
+                const next = { ...prev.sales_tax_by_state }; delete next[stateCode]; return { ...prev, sales_tax_by_state: next }
+              })}
+              style={{ padding: '6px 10px', border: 'none', borderRadius: '6px', background: isDarkMode ? '#444' : '#e0e0e0', color: textColor, cursor: 'pointer', fontSize: '12px' }}
+            >
+              Remove
+            </button>
           </div>
-        </FormField>
-        <FormField>
-          <div style={{ padding: '12px', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f3f4f6', borderRadius: '8px' }}>
-            <strong style={{ color: textColor }}>Hourly wage</strong>
-            <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginTop: '4px' }}>Set each employee’s hourly rate in <strong>Employees</strong>. Labor cost on the Dashboard uses time clock hours × hourly rate.</p>
+        ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
+          <button
+            type="button"
+            onClick={() => {
+              const code = prompt('State code (2 letters, e.g. CA)')
+              if (code && code.trim().length === 2) {
+                const upper = code.trim().toUpperCase()
+                setEdit(prev => ({ ...prev, sales_tax_by_state: { ...prev.sales_tax_by_state, [upper]: 0 } }))
+              }
+            }}
+            style={{ padding: '8px 14px', border: `1px solid ${borderColor}`, borderRadius: '8px', background: 'transparent', color: textColor, cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
+          >
+            + Add state
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={async () => {
+              const ok = await saveAccountingSettings({
+                default_sales_tax_pct: parseFloat(edit.default_sales_tax_pct) || 0,
+                sales_tax_by_state: edit.sales_tax_by_state || {}
+              })
+              if (ok) loadSettings()
+            }}
+            style={{
+              padding: '8px 16px', border: 'none', borderRadius: '8px', background: `rgba(${themeColorRgb}, 0.9)`, color: '#fff',
+              cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600
+            }}
+          >
+            {saving ? 'Saving...' : 'Save tax settings'}
+          </button>
+        </div>
+      </div>
+
+      {/* Transaction fee */}
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+          <DollarSign size={18} style={{ flexShrink: 0 }} />
+          <span style={{ fontWeight: 600, fontSize: '15px', color: textColor }}>Transaction fee</span>
+        </div>
+
+        <FormTitle isDarkMode={isDarkMode} style={{ marginTop: '4px', marginBottom: '8px', fontSize: '14px', fontWeight: 600 }}>
+          Transaction fee settings
+        </FormTitle>
+        <div style={{ marginTop: '2px', marginBottom: '16px', borderLeft: `3px solid ${borderColor}`, paddingLeft: '12px' }}>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: textColor, opacity: 0.85, marginBottom: '8px' }}>Returns</div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
+            <input
+              type="checkbox"
+              checked={posSettings.return_transaction_fee_take_loss || false}
+              onChange={e => setPosSettings(prev => ({ ...prev, return_transaction_fee_take_loss: e.target.checked }))}
+              style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
+            />
+            <span style={{ fontSize: '14px', fontWeight: 500, color: textColor }}>Take loss on transaction fee (do not deduct from return refund)</span>
+          </label>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: textColor, opacity: 0.85, marginBottom: '6px', marginTop: '14px' }}>At checkout</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="transaction_fee_mode"
+                checked={posSettings.transaction_fee_mode === 'additional'}
+                onChange={() => setPosSettings(prev => ({ ...prev, transaction_fee_mode: 'additional' }))}
+                style={{ accentColor: `rgb(${themeColorRgb})` }}
+              />
+              <span style={{ fontSize: '14px', color: textColor }}>Additional fee at checkout</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="transaction_fee_mode"
+                checked={posSettings.transaction_fee_mode === 'included'}
+                onChange={() => setPosSettings(prev => ({ ...prev, transaction_fee_mode: 'included' }))}
+                style={{ accentColor: `rgb(${themeColorRgb})` }}
+              />
+              <span style={{ fontSize: '14px', color: textColor }}>Included in product price (no separate fee)</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="transaction_fee_mode"
+                checked={posSettings.transaction_fee_mode === 'none'}
+                onChange={() => setPosSettings(prev => ({ ...prev, transaction_fee_mode: 'none' }))}
+                style={{ accentColor: `rgb(${themeColorRgb})` }}
+              />
+              <span style={{ fontSize: '14px', color: textColor }}>No fee (store absorbs)</span>
+            </label>
           </div>
-        </FormField>
+          {posSettings.transaction_fee_mode === 'additional' && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginTop: '6px' }}>
+              <input
+                type="checkbox"
+                checked={posSettings.transaction_fee_charge_cash || false}
+                onChange={e => setPosSettings(prev => ({ ...prev, transaction_fee_charge_cash: e.target.checked }))}
+                style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
+              />
+              <span style={{ fontSize: '14px', color: textColor }}>Charge transaction fee for cash payments</span>
+            </label>
+          )}
+        </div>
         <button
           type="button"
-          onClick={handleSave}
-          disabled={saving}
+          disabled={savingPosFee}
+          onClick={savePosTransactionFeeSettings}
           style={{
-            padding: '4px 16px',
-            height: '28px',
-            backgroundColor: saving ? borderColor : `rgba(${themeColorRgb}, 0.7)`,
-            color: '#fff',
-            border: `1px solid rgba(${themeColorRgb}, 0.5)`,
-            borderRadius: '8px',
-            cursor: saving ? 'not-allowed' : 'pointer',
-            fontWeight: 500,
-            fontSize: '14px',
-            boxShadow: saving ? 'none' : `0 4px 15px rgba(${themeColorRgb}, 0.3)`,
-            transition: 'all 0.2s ease'
+            padding: '8px 16px', marginBottom: '16px', border: 'none', borderRadius: '8px', background: `rgba(${themeColorRgb}, 0.9)`, color: '#fff',
+            cursor: savingPosFee ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600
           }}
         >
-          {saving ? 'Saving…' : 'Save settings'}
+          {savingPosFee ? 'Saving...' : 'Save transaction fee settings'}
         </button>
+
+        <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 600 }}>
+          Fee rates by payment method
+        </FormTitle>
+        <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginBottom: '12px' }}>
+          Fee rate per payment method (as decimal, e.g. 0.029 = 2.9%). Cash/check/store credit typically 0.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+          {feeMethods.map(method => (
+            <div key={method} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ ...formLabelStyle(isDarkMode), marginBottom: 0, minWidth: '110px', fontSize: '13px' }}>{method.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</label>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.001}
+                value={rates[method] ?? 0}
+                onChange={e => setFeeRate(method, e.target.value)}
+                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '80px' }}
+              />
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={async () => {
+            const ok = await saveAccountingSettings({ transaction_fee_rates: edit.transaction_fee_rates })
+            if (ok) loadSettings()
+          }}
+          style={{
+            padding: '8px 16px', marginTop: '12px', border: 'none', borderRadius: '8px', background: `rgba(${themeColorRgb}, 0.9)`, color: '#fff',
+            cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600
+          }}
+        >
+          {saving ? 'Saving...' : 'Save transaction fees'}
+        </button>
+      </div>
+
+      {/* Tips settings */}
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+          <Wallet size={18} style={{ flexShrink: 0 }} />
+          <span style={{ fontWeight: 600, fontSize: '15px', color: textColor }}>Tips settings</span>
+        </div>
+
+        <div style={{ borderLeft: `3px solid ${borderColor}`, paddingLeft: '12px', marginBottom: '16px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
+            <input
+              type="checkbox"
+              checked={posSettings.return_tip_refund || false}
+              onChange={e => setPosSettings(prev => ({ ...prev, return_tip_refund: e.target.checked }))}
+              style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
+            />
+            <span style={{ fontSize: '14px', fontWeight: 500, color: textColor }}>Refund tip on returns (do not deduct proportional tip from refund)</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
+            <input
+              type="checkbox"
+              checked={posSettings.require_signature_for_return || false}
+              onChange={e => setPosSettings(prev => ({ ...prev, require_signature_for_return: e.target.checked }))}
+              style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
+            />
+            <span style={{ fontSize: '14px', fontWeight: 500, color: textColor }}>Require signature for return (customer signs and chooses print/email/no receipt before processing)</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
+            <input
+              type="checkbox"
+              checked={tipEnabled}
+              onChange={e => setTipEnabled(e.target.checked)}
+              style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
+            />
+            <span style={{ fontSize: '14px', fontWeight: 500, color: textColor }}>Tip prompts before payment</span>
+          </label>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: textColor, opacity: 0.85, marginBottom: '8px' }}>Tip suggestion amounts (%) — 3 options only (4th is No tip)</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+            {(tipSuggestions.slice(0, 3)).map((p, i) => (
+              <input
+                key={i}
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={p}
+                onChange={e => {
+                  const v = parseInt(e.target.value, 10)
+                  if (isNaN(v) || v < 0 || v > 100) return
+                  const next = [...tipSuggestions.slice(0, 3)]
+                  next[i] = v
+                  setTipSuggestions(next)
+                }}
+                style={{
+                  width: '56px', padding: '6px 8px', fontSize: '14px', borderRadius: '6px',
+                  border: `1px solid ${borderColor}`, background: cardBg, color: textColor
+                }}
+              />
+            ))}
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
+            <input
+              type="checkbox"
+              checked={tipCustomInCheckout || false}
+              onChange={e => setTipCustomInCheckout(e.target.checked)}
+              style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
+            />
+            <span style={{ fontSize: '14px', color: textColor }}>Show custom tip option in checkout</span>
+          </label>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: textColor, opacity: 0.85, marginBottom: '6px' }}>Tip allocation</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input type="radio" name="tip_allocation" checked={tipAllocation === 'logged_in_employee'} onChange={() => setTipAllocation('logged_in_employee')} style={{ accentColor: `rgb(${themeColorRgb})` }} />
+              <span style={{ fontSize: '14px', color: textColor }}>Allocate to logged-in employee</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input type="radio" name="tip_allocation" checked={tipAllocation === 'split_all'} onChange={() => setTipAllocation('split_all')} style={{ accentColor: `rgb(${themeColorRgb})` }} />
+              <span style={{ fontSize: '14px', color: textColor }}>Split amongst all employees</span>
+            </label>
+          </div>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: textColor, opacity: 0.85, marginBottom: '6px' }}>When refunding tip</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input type="radio" name="tip_refund_from" checked={tipRefundFrom === 'employee'} onChange={() => setTipRefundFrom('employee')} style={{ accentColor: `rgb(${themeColorRgb})` }} />
+              <span style={{ fontSize: '14px', color: textColor }}>Deduct from employee(s)</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input type="radio" name="tip_refund_from" checked={tipRefundFrom === 'store'} onChange={() => setTipRefundFrom('store')} style={{ accentColor: `rgb(${themeColorRgb})` }} />
+              <span style={{ fontSize: '14px', color: textColor }}>Store absorbs cost</span>
+            </label>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginTop: '8px' }}>
+            <input
+              type="checkbox"
+              checked={requireSignature}
+              onChange={e => setRequireSignature(e.target.checked)}
+              style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
+            />
+            <span style={{ fontSize: '14px', fontWeight: 500, color: textColor }}>Require signature</span>
+          </label>
+        </div>
+        <button
+          type="button"
+          disabled={savingTipAllocation}
+          onClick={saveTipsSettings}
+          style={{
+            padding: '8px 16px', border: 'none', borderRadius: '8px', background: `rgba(${themeColorRgb}, 0.9)`, color: '#fff',
+            cursor: savingTipAllocation ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600
+          }}
+        >
+          {savingTipAllocation ? 'Saving...' : 'Save tips settings'}
+        </button>
+      </div>
+
+      {/* Employee rates & weekly hours */}
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+          <Users size={18} style={{ flexShrink: 0 }} />
+          <span style={{ fontWeight: 600, fontSize: '15px', color: textColor }}>Employee rates & hours</span>
+        </div>
+        <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginBottom: '12px' }}>
+          View and edit hourly rates. Hours shown are for the current week (Mon–Sun).
+        </p>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${borderColor}` }}>
+                <th style={{ textAlign: 'left', padding: '10px 8px', color: textColor, opacity: 0.8 }}>Employee</th>
+                <th style={{ textAlign: 'right', padding: '10px 8px', color: textColor, opacity: 0.8 }}>Hourly rate ($)</th>
+                <th style={{ textAlign: 'right', padding: '10px 8px', color: textColor, opacity: 0.8 }}>Hours this week</th>
+                <th style={{ width: '80px' }} />
+              </tr>
+            </thead>
+            <tbody>
+              {employees.map(emp => {
+                const laborEntry = laborThisWeek.entries.find(e => e.employee_id === emp.employee_id)
+                const hours = laborEntry?.hours ?? 0
+                const rateEdit = employeeRateEdits[emp.employee_id]
+                const rateDisplay = rateEdit !== undefined ? rateEdit.value : (emp.hourly_rate ?? 0)
+                const dirty = rateEdit?.dirty ?? false
+                return (
+                  <tr key={emp.employee_id} style={{ borderBottom: `1px solid ${borderColor}` }}>
+                    <td style={{ padding: '10px 8px', color: textColor }}>{emp.first_name} {emp.last_name}</td>
+                    <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={rateDisplay}
+                        onChange={e => {
+                          const v = parseFloat(e.target.value) || 0
+                          setEmployeeRateEdits(prev => ({ ...prev, [emp.employee_id]: { value: v, dirty: true } }))
+                        }}
+                        style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '80px', padding: '6px 8px', textAlign: 'right' }}
+                      />
+                    </td>
+                    <td style={{ padding: '10px 8px', textAlign: 'right', color: textColor }}>{hours.toFixed(1)}</td>
+                    <td style={{ padding: '10px 8px' }}>
+                      {dirty && (
+                        <button
+                          type="button"
+                          disabled={employeeRateSaving === emp.employee_id}
+                          onClick={async () => {
+                            const ok = await saveEmployeeRate(emp.employee_id, rateDisplay)
+                            if (ok) setEmployeeRateEdits(prev => { const next = { ...prev }; delete next[emp.employee_id]; return next })
+                          }}
+                          style={{ padding: '4px 10px', border: 'none', borderRadius: '6px', background: `rgba(${themeColorRgb}, 0.9)`, color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+                        >
+                          {employeeRateSaving === emp.employee_id ? 'Saving...' : 'Save'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        {employees.length === 0 && (
+          <div style={{ padding: '16px', textAlign: 'center', color: textColor, opacity: 0.8, fontSize: '14px' }}>
+            No employees. Add employees in Admin to set rates.
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1265,7 +1804,7 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
   const [isBalanceModalOpen, setIsBalanceModalOpen] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState(null)
   const [accountBalance, setAccountBalance] = useState(null)
-
+  
   const _isDark = isDarkMode ?? document.documentElement.classList.contains('dark-theme')
   const textColor = _isDark ? '#ffffff' : '#1a1a1a'
   const borderColor = _isDark ? '#3a3a3a' : '#e0e0e0'
@@ -1439,7 +1978,7 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
               cursor: 'pointer',
               boxShadow: `0 4px 15px rgba(${themeColorRgb || '59, 130, 246'}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
               transition: 'all 0.3s ease',
-              display: 'flex',
+        display: 'flex', 
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0
@@ -1467,14 +2006,14 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
       <div
         style={{
           backgroundColor: _isDark ? '#2a2a2a' : 'white',
-          borderRadius: '8px',
+        borderRadius: '8px',
           boxShadow: _isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-          overflow: 'hidden'
+        overflow: 'hidden'
         }}
       >
         <div
           style={{
-            padding: '16px 24px',
+          padding: '16px 24px',
             borderBottom: '1px solid ' + (_isDark ? '#3a3a3a' : '#e5e7eb'),
             display: 'flex',
             justifyContent: 'space-between',
@@ -1487,20 +2026,20 @@ function ChartOfAccountsTab({ formatCurrency, getAuthHeaders, themeColorRgb, isD
             Showing {filteredAccounts.length} of {accounts.length} accounts
           </p>
         </div>
-        <AccountTable
-          accounts={filteredAccounts}
-          onEdit={(account) => {
-            setSelectedAccount(account)
-            setIsEditModalOpen(true)
-          }}
-          onDelete={handleDeleteAccount}
-          onToggleStatus={handleToggleStatus}
-          onViewBalance={handleViewBalance}
-          onViewLedger={(account) => {
-            sessionStorage.setItem('selectedAccountId', account.id)
-            setActiveTab('account-ledger')
-          }}
-        />
+          <AccountTable
+            accounts={filteredAccounts}
+            onEdit={(account) => {
+              setSelectedAccount(account)
+              setIsEditModalOpen(true)
+            }}
+            onDelete={handleDeleteAccount}
+            onToggleStatus={handleToggleStatus}
+            onViewBalance={handleViewBalance}
+            onViewLedger={(account) => {
+              sessionStorage.setItem('selectedAccountId', account.id)
+              setActiveTab('account-ledger')
+            }}
+          />
       </div>
 
       {/* Create Account Modal */}
@@ -1610,7 +2149,7 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [selectedTransaction, setSelectedTransaction] = useState(null)
-
+  
   const _isDark = isDarkMode ?? document.documentElement.classList.contains('dark-theme')
   const textColor = _isDark ? '#ffffff' : '#1a1a1a'
   const borderColor = _isDark ? '#3a3a3a' : '#e0e0e0'
@@ -1767,7 +2306,7 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Transactions</h1>
         <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Record and manage journal entries</p>
-      </div>
+        </div>
 
       <div style={{ marginBottom: '20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
@@ -1843,17 +2382,17 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
       <div
         style={{
           backgroundColor: _isDark ? '#2a2a2a' : 'white',
-          borderRadius: '8px',
+        borderRadius: '8px', 
           boxShadow: _isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
           overflow: 'hidden'
         }}
       >
         <div
           style={{
-            padding: '16px 24px',
+          padding: '16px 24px', 
             borderBottom: '1px solid ' + (_isDark ? '#3a3a3a' : '#e5e7eb'),
-            display: 'flex',
-            justifyContent: 'space-between',
+          display: 'flex', 
+          justifyContent: 'space-between', 
             alignItems: 'center',
             flexWrap: 'wrap',
             gap: '16px'
@@ -1888,7 +2427,7 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
             </Button>
           </div>
         </div>
-
+        
         <TransactionTable
           transactions={transactions}
           onView={(transaction) => {
@@ -2070,20 +2609,20 @@ function InvoicesTab({ dateRange, formatCurrency, getAuthHeaders }) {
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Invoices</h1>
         <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Sales you&apos;ve sent to customers for the selected date range. Track amounts owed and payment status.</p>
-      </div>
-      <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Invoice #</th>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Date</th>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Customer</th>
-              <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Total</th>
-              <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
-              <th style={{ padding: '12px', textAlign: 'center', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
+        </div>
+        <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Invoice #</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Date</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Customer</th>
+                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Total</th>
+                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
+                <th style={{ padding: '12px', textAlign: 'center', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
             {invoices.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
@@ -2112,9 +2651,9 @@ function InvoicesTab({ dateRange, formatCurrency, getAuthHeaders }) {
                 </tr>
               ))
             )}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
     </div>
   )
 }
@@ -2285,8 +2824,8 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
             style={{
               padding: '16px 24px',
               borderBottom: '1px solid ' + (_isDark ? '#3a3a3a' : '#e5e7eb'),
-              display: 'flex',
-              justifyContent: 'space-between',
+            display: 'flex', 
+            justifyContent: 'space-between', 
               alignItems: 'center',
               flexWrap: 'wrap',
               gap: '16px'
@@ -2300,7 +2839,7 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
             {entries.length > 0 && (
               <span style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280' }}>
                 Debits: ${totalDebits.toFixed(2)} · Credits: ${totalCredits.toFixed(2)}
-              </span>
+                </span>
             )}
           </div>
 
@@ -2454,7 +2993,7 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
     try {
       const data = await transactionService.getAccountLedger(accountId, filters)
       if (data && data.account && Array.isArray(data.entries)) {
-        setLedgerData(data)
+      setLedgerData(data)
       } else {
         showToast('Invalid account ledger response', 'error')
       }
@@ -2625,16 +3164,16 @@ function AccountLedgerTab({ dateRange, formatCurrency, getAuthHeaders, setActive
           <div style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, marginBottom: '4px', visibility: 'hidden', lineHeight: 1.2 }} aria-hidden>Actions</label>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <Button
-                type="button"
+            <Button
+              type="button"
                 variant="primary"
-                onClick={handleClearFilters}
-                style={{ flex: 1 }}
+              onClick={handleClearFilters}
+              style={{ flex: 1 }}
                 themeColorRgb={themeColorRgb}
                 isDarkMode={isDarkMode}
-              >
-                Clear Filters
-              </Button>
+            >
+              Clear Filters
+            </Button>
             <Button
               type="button"
               variant="primary"
@@ -3191,7 +3730,7 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
     end_date: dateRange.end_date,
     comparison_type: 'none',
   })
-
+  
   const _isDark = isDarkMode ?? document.documentElement.classList.contains('dark-theme')
   const textColor = _isDark ? '#ffffff' : '#1a1a1a'
   const borderColor = _isDark ? '#3a3a3a' : '#e0e0e0'
@@ -3445,14 +3984,14 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
   return (
     <div>
       {!hideTitle && (
-        <div style={{ marginBottom: '24px' }}>
+      <div style={{ marginBottom: '24px' }}>
           <h3 style={{ ...formTitleStyle(_isDark), marginBottom: '8px', fontSize: '24px' }}>
             Income Statement
-          </h3>
-          <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
-            Income statement showing revenue, expenses, and net income
-          </p>
-        </div>
+        </h3>
+        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+          Income statement showing revenue, expenses, and net income
+        </p>
+      </div>
       )}
 
       <ProfitLossFilters
@@ -3474,15 +4013,15 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
               
               <div style={{ marginBottom: '24px' }}>
                 <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px', color: textColor }}>
-                  Current Period Detail
-                </h3>
-                <ProfitLossTable
-                  data={reportData}
-                  showPercentages={true}
-                  onAccountClick={handleAccountClick}
+                    Current Period Detail
+                  </h3>
+                  <ProfitLossTable
+                    data={reportData}
+                    showPercentages={true}
+                    onAccountClick={handleAccountClick}
                   periodLabel={getPeriodLabel() + (comparativeData ? ` — Compared to: ${getPriorPeriodLabel()}` : '')}
-                />
-              </div>
+                  />
+                </div>
               <div style={{ width: '100%' }}>
                 <ProfitLossChart data={reportData} />
               </div>
@@ -3498,9 +4037,9 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
                 />
               </div>
               <div style={{ width: '100%' }}>
-                <ProfitLossChart data={reportData} />
-              </div>
-            </>
+              <ProfitLossChart data={reportData} />
+            </div>
+        </>
           )}
         </div>
       )}
@@ -3792,13 +4331,13 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
   return (
     <div>
       {!hideTitle && (
-        <div style={{ marginBottom: '24px' }}>
+      <div style={{ marginBottom: '24px' }}>
           <h3 style={{ ...formTitleStyle(isDarkMode), marginBottom: '8px', fontSize: '24px' }}>Balance Sheet</h3>
-          <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
             Statement of financial position showing assets, liabilities, and equity.
             Inventory (Current Assets) is calculated from actual store stock (quantity × cost).
-          </p>
-        </div>
+        </p>
+      </div>
       )}
       <BalanceSheetFilters
         filters={filters}
@@ -3817,7 +4356,7 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
               <div style={{ marginBottom: '24px' }}>
                 <h3 style={{ ...formTitleStyle(isDarkMode), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
                 <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} dateLabel={`As of ${getAsOfLabel()} — Compared to: ${getPriorLabel()}`} />
-              </div>
+                </div>
               <div style={{ width: '100%' }}>
                 <BalanceSheetChart data={reportData} />
               </div>
@@ -3828,9 +4367,9 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
                 <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} dateLabel={`As of ${getAsOfLabel()}`} />
               </div>
               <div style={{ width: '100%' }}>
-                <BalanceSheetChart data={reportData} />
-              </div>
-            </>
+              <BalanceSheetChart data={reportData} />
+            </div>
+        </>
           )}
         </div>
       )}
@@ -4071,12 +4610,12 @@ const CashFlowTab = forwardRef(function CashFlowTab(
   return (
     <div>
       {!hideTitle && (
-        <div style={{ marginBottom: '24px' }}>
+      <div style={{ marginBottom: '24px' }}>
           <h3 style={{ ...formTitleStyle(isDarkMode), marginBottom: '8px', fontSize: '24px' }}>Cash Flow Statement</h3>
-          <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
-            Statement of cash flows showing operating, investing, and financing activities
-          </p>
-        </div>
+        <p style={{ color: textColor, opacity: 0.7, fontSize: '14px' }}>
+          Statement of cash flows showing operating, investing, and financing activities
+        </p>
+      </div>
       )}
       <CashFlowFilters filters={filters} onFilterChange={setFilters} />
       {loading && <LoadingSpinner size="lg" text="Generating report..." />}
@@ -4088,7 +4627,7 @@ const CashFlowTab = forwardRef(function CashFlowTab(
               <div style={{ marginBottom: '24px' }}>
                 <h3 style={{ ...formTitleStyle(isDarkMode), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
                 <CashFlowTable data={reportData} onAccountClick={handleAccountClick} periodLabel={`${getPeriodLabel()} — Compared to: ${getPriorLabel()}`} />
-              </div>
+                </div>
               <div style={{ width: '100%' }}>
                 <CashFlowChart data={reportData} />
               </div>
@@ -4099,9 +4638,9 @@ const CashFlowTab = forwardRef(function CashFlowTab(
                 <CashFlowTable data={reportData} onAccountClick={handleAccountClick} periodLabel={getPeriodLabel()} />
               </div>
               <div style={{ width: '100%' }}>
-                <CashFlowChart data={reportData} />
-              </div>
-            </>
+              <CashFlowChart data={reportData} />
+            </div>
+        </>
           )}
         </div>
       )}
@@ -4154,20 +4693,20 @@ function BillsTab({ dateRange, formatCurrency, getAuthHeaders }) {
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Bills</h1>
         <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Amounts you owe to vendors for the selected date range. Track due dates and payment status.</p>
-      </div>
-      <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Bill #</th>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Date</th>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Vendor</th>
-              <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Total</th>
-              <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
-              <th style={{ padding: '12px', textAlign: 'center', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
+        </div>
+        <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Bill #</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Date</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Vendor</th>
+                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Total</th>
+                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
+                <th style={{ padding: '12px', textAlign: 'center', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
             {bills.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
@@ -4196,9 +4735,9 @@ function BillsTab({ dateRange, formatCurrency, getAuthHeaders }) {
                 </tr>
               ))
             )}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
     </div>
   )
 }
@@ -4249,19 +4788,19 @@ function CustomersTab({ formatCurrency, getAuthHeaders }) {
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Customers</h1>
         <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Same list as the main Customers page. Use for accounting context and linking to invoices.</p>
-      </div>
-      <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Customer #</th>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Name</th>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Email</th>
+        </div>
+        <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Customer #</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Name</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Email</th>
               <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Phone</th>
-              <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
-            </tr>
-          </thead>
-          <tbody>
+                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
+              </tr>
+            </thead>
+            <tbody>
             {customers.length === 0 ? (
               <tr>
                 <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
@@ -4279,9 +4818,9 @@ function CustomersTab({ formatCurrency, getAuthHeaders }) {
                 </tr>
               ))
             )}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
     </div>
   )
 }
@@ -4323,18 +4862,18 @@ function VendorsTab({ formatCurrency, getAuthHeaders }) {
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Vendors</h1>
         <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Suppliers you purchase from. Track contact info and balances. Bills are linked to vendors.</p>
-      </div>
-      <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Vendor #</th>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Name</th>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Email</th>
-              <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
-            </tr>
-          </thead>
-          <tbody>
+        </div>
+        <div style={{ border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9' }}>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Vendor #</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Name</th>
+                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Email</th>
+                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
+              </tr>
+            </thead>
+            <tbody>
             {vendors.length === 0 ? (
               <tr>
                 <td colSpan={4} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
@@ -4351,9 +4890,9 @@ function VendorsTab({ formatCurrency, getAuthHeaders }) {
                 </tr>
               ))
             )}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
     </div>
   )
 }
@@ -4488,8 +5027,8 @@ function ReportsTabContent({ selectedReport, reportData, formatCurrency, textCol
     const periodLabel = payload.start_date && payload.end_date
       ? `${new Date(payload.start_date).toLocaleDateString()} – ${new Date(payload.end_date).toLocaleDateString()}`
       : ''
-    return (
-      <div>
+  return (
+    <div>
         {periodLabel && (
           <p style={{ color: textColor, opacity: 0.85, marginBottom: '16px', fontSize: '14px' }}>Period: {periodLabel}</p>
         )}
@@ -4548,7 +5087,7 @@ function ReportsTabContent({ selectedReport, reportData, formatCurrency, textCol
               </tr>
             </tbody>
           </table>
-        </div>
+      </div>
       </div>
     )
   }
@@ -4611,7 +5150,7 @@ function ReportsTabContent({ selectedReport, reportData, formatCurrency, textCol
             </tbody>
           </table>
         </div>
-      </div>
+        </div>
     )
   }
 
@@ -4644,7 +5183,7 @@ function ReportsTabContent({ selectedReport, reportData, formatCurrency, textCol
             ))}
           </tbody>
         </table>
-      </div>
+    </div>
     )
   }
 

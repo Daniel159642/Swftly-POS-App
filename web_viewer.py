@@ -139,8 +139,7 @@ app = Flask(__name__)
 set_current_establishment = None
 get_current_establishment = None
 
-# System now uses local PostgreSQL - no Supabase
-# Import PostgreSQL connection (required)
+# PostgreSQL connection (local or Supabase via DATABASE_URL)
 try:
     from database_postgres import (
         get_connection as get_postgres_connection,
@@ -153,11 +152,14 @@ try:
         test_conn.close()
         set_current_establishment = _set_establishment
         get_current_establishment = _get_establishment
-        print("✓ Connected to local PostgreSQL database")
+        db_url = os.environ.get('DATABASE_URL') or os.environ.get('POSTGRES_URL') or ''
+        if 'supabase' in db_url.lower():
+            print("✓ Connected to Supabase (PostgreSQL)")
+        else:
+            print("✓ Connected to PostgreSQL database")
     except Exception as conn_err:
         print(f"❌ ERROR: PostgreSQL connection failed: {conn_err}")
-        print("❌ This system requires PostgreSQL. Please check your database connection settings.")
-        print("❌ Set DATABASE_URL or DB_HOST, DB_USER, DB_PASSWORD (and DB_NAME) in .env file")
+        print("❌ Set DATABASE_URL (Supabase URI) or DB_HOST, DB_USER, DB_PASSWORD (and DB_NAME) in .env")
         raise SystemExit("Cannot start without PostgreSQL connection")
 except ImportError as e:
     print(f"❌ ERROR: PostgreSQL module not found: {e}")
@@ -9807,6 +9809,8 @@ def api_accounting_settings():
             updates['allow_scheduled_pickup'] = bool(data['allow_scheduled_pickup'])
         if 'allow_scheduled_delivery' in data:
             updates['allow_scheduled_delivery'] = bool(data['allow_scheduled_delivery'])
+        if 'sales_tax_by_state' in data and isinstance(data['sales_tax_by_state'], dict):
+            updates['sales_tax_by_state'] = {str(k): float(v) for k, v in data['sales_tax_by_state'].items()}
         if not updates:
             return jsonify({'success': False, 'message': 'No settings to update'}), 400
         ok = update_establishment_settings(None, updates)
