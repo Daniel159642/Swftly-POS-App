@@ -9,6 +9,7 @@ import {
   hashPin,
   getPermissionsCache
 } from '../services/employeeRolesCache'
+import { apiFetch } from '../utils/apiFetch'
 import '../index.css'
 
 function Login({ onLogin }) {
@@ -156,7 +157,7 @@ function Login({ onLogin }) {
 
   const fetchEmployees = async () => {
     try {
-      const response = await fetch('/api/employees')
+      const response = await apiFetch('/api/employees')
       if (!response.ok) {
         console.error('Error fetching employees: HTTP', response.status)
         const cached = getEmployeesCache()
@@ -270,7 +271,7 @@ function Login({ onLogin }) {
       if (didLocal) {
         setLoading(false)
         if (navigator.onLine) {
-          fetch('/api/login', {
+          apiFetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: employeeCode, employee_code: employeeCode, password })
@@ -287,7 +288,7 @@ function Login({ onLogin }) {
     const timeoutId = setTimeout(() => controller.abort(), 10000)
 
     try {
-      const response = await fetch('/api/login', {
+      const response = await apiFetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

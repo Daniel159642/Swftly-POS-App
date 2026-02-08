@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import { useToast } from '../contexts/ToastContext'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
@@ -17,6 +18,7 @@ import CustomDropdown from '../components/common/CustomDropdown'
 
 function Profile({ employeeId, employeeName }) {
   const { themeColor, setThemeColor, themeMode, setThemeMode } = useTheme()
+  const { show: showToast } = useToast()
   const [activeTab, setActiveTab] = useState('profile')
   const [sidebarMinimized, setSidebarMinimized] = useState(false)
   const [hoveringProfile, setHoveringProfile] = useState(false)
@@ -93,7 +95,6 @@ function Profile({ employeeId, employeeName }) {
     timeFormat: '12h',
     language: 'en'
   })
-  const [settingsSaved, setSettingsSaved] = useState(false)
   const [clockStatus, setClockStatus] = useState(null)
   const [clockLoading, setClockLoading] = useState(false)
   const [clockMessage, setClockMessage] = useState(null)
@@ -544,11 +545,10 @@ function Profile({ employeeId, employeeName }) {
   const saveAppSettings = () => {
     try {
       localStorage.setItem(`app_settings_${employeeId}`, JSON.stringify(appSettings))
-      setSettingsSaved(true)
-      setTimeout(() => setSettingsSaved(false), 3000)
+      showToast('Settings saved successfully!', 'success')
     } catch (err) {
       console.error('Error saving app settings:', err)
-      alert('Failed to save settings')
+      showToast('Failed to save settings', 'error')
     }
   }
 
@@ -1243,20 +1243,6 @@ function Profile({ employeeId, employeeName }) {
           `}</style>
 
           <div style={{ maxWidth: '480px', width: '100%', marginLeft: 'auto', marginRight: 'auto' }}>
-          {settingsSaved && (
-            <div style={{
-              padding: '12px 16px',
-              backgroundColor: '#4caf50',
-              color: 'white',
-              borderRadius: '8px',
-              marginBottom: '20px',
-              fontSize: '14px',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif'
-            }}>
-              Settings saved successfully!
-            </div>
-          )}
-
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             {/* Theme Settings */}
             <div>

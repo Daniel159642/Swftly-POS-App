@@ -5386,18 +5386,29 @@ def api_product_barcode_image():
     png_bytes, encoded_value = _generate_product_barcode_png(barcode_value)
     if not png_bytes:
         return jsonify({'success': False, 'error': 'Failed to generate barcode image'}), 500
-    # If product had no barcode, save the exact value that was encoded in the image (EAN13 recalculates the 13th digit)
+    # Save the exact value shown on the barcode image (encoded_value) so table and image stay in sync.
+    # Do this when: (1) product had no/short barcode, or (2) image is 13 digits but DB has 12 (EAN-13 case).
     existing = (product.get('barcode') or '').strip()
-    if (not existing or (existing.isdigit() and len(existing) < 8)) and encoded_value:
+    value_to_save = None
+    should_save = encoded_value and (
+        not existing or (existing.isdigit() and len(existing) < 8) or
+        (existing.isdigit() and len(existing) == 12 and len(encoded_value) == 13)
+    )
+    if should_save:
+        value_to_save = encoded_value
         try:
             from database import update_product
-            update_product(product_id, barcode=encoded_value)
+            update_product(product_id, barcode=value_to_save)
         except Exception as e:
             traceback.print_exc()
-    return Response(png_bytes, mimetype='image/png', headers={
+    headers = {
         'Cache-Control': 'no-store',
         'Content-Disposition': f'inline; filename="barcode_{product_id}.png"',
-    })
+    }
+    # Always send the value shown on the image so the UI (preview/table) can display it
+    if encoded_value:
+        headers['X-Barcode-Value'] = value_to_save if value_to_save is not None else encoded_value
+    return Response(png_bytes, mimetype='image/png', headers=headers)
 
 # ============================================================================
 # BARCODE SCANNING API ENDPOINTS

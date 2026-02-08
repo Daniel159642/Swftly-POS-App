@@ -210,8 +210,14 @@ def assign_admin_role_to_admin():
     
     print("\n5. Assigning Admin role to admin account...")
     
-    # Get admin employee
-    cursor.execute("SELECT employee_id FROM employees WHERE position = 'admin' AND active = 1 LIMIT 1")
+    # Get admin employee (case-insensitive: Admin, admin, Administrator, etc.)
+    cursor.execute("""
+        SELECT employee_id FROM employees
+        WHERE LOWER(TRIM(COALESCE(position, ''))) IN ('admin', 'administrator', 'owner')
+        AND active = 1
+        ORDER BY employee_id
+        LIMIT 1
+    """)
     admin_employee = cursor.fetchone()
     
     if not admin_employee:

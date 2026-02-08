@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
 
-function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransaction, fixedHeader = false }) {
+function GeneralLedgerTable({ entries, loading = false, showRunningBalance = false, onViewTransaction, fixedHeader = false }) {
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const [sortField, setSortField] = useState('transaction_date')
   const [sortDirection, setSortDirection] = useState('desc')
@@ -120,25 +120,6 @@ function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransac
   const rowBg = isDarkMode ? '#1f2a33' : '#fff'
   const hoverBg = totalRowBg
 
-  if (entries.length === 0) {
-    return (
-      <div style={{
-        border: `1px solid ${borderColor}`,
-        borderRadius: '8px',
-        overflow: 'hidden',
-        backgroundColor: isDarkMode ? '#1f2a33' : '#fff'
-      }}>
-        <div style={bannerStyle}>
-          <span style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>General Ledger</span>
-        </div>
-        <div style={{ textAlign: 'center', padding: '48px' }}>
-          <p style={{ color: subHeaderText, marginBottom: '8px' }}>No ledger entries found for the selected criteria</p>
-          <p style={{ fontSize: '14px', color: textColor }}>Try adjusting your filters or post some transactions</p>
-        </div>
-      </div>
-    )
-  }
-
   const colWidths = showRunningBalance ? '11% 12% 18% 32% 9% 9% 9%' : '11% 14% 20% 35% 10% 10%'
   const headerRow = (
     <tr>
@@ -167,6 +148,62 @@ function GeneralLedgerTable({ entries, showRunningBalance = false, onViewTransac
       )}
     </tr>
   )
+
+  const showPlaceholder = loading || entries.length === 0
+  const placeholderColSpan = showRunningBalance ? 7 : 6
+  const placeholderBody = (
+    <tbody>
+      <tr>
+        <td
+          colSpan={placeholderColSpan}
+          style={{
+            padding: '48px 24px',
+            textAlign: 'center',
+            color: subHeaderText,
+            fontSize: '14px',
+            border: `1px solid ${borderColor}`,
+            borderTop: 'none',
+            backgroundColor: rowBg
+          }}
+        >
+          {loading ? 'Loading…' : (
+            <>
+              <p style={{ marginBottom: '8px' }}>No ledger entries found for the selected criteria</p>
+              <p style={{ fontSize: '14px', color: textColor }}>Try adjusting your filters or post some transactions</p>
+            </>
+          )}
+        </td>
+      </tr>
+    </tbody>
+  )
+
+  if (showPlaceholder) {
+    return (
+      <div style={{
+        flex: fixedHeader ? 1 : undefined,
+        minHeight: fixedHeader ? 0 : undefined,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        border: `1px solid ${borderColor}`,
+        borderRadius: '8px',
+        backgroundColor: isDarkMode ? '#1f2a33' : '#fff'
+      }}>
+        <div style={bannerStyle}>
+          <span style={{ fontSize: '20px', fontWeight: 700, color: '#fff' }}>General Ledger</span>
+        </div>
+        <div style={{ overflowX: 'auto', flex: fixedHeader ? 1 : undefined, minHeight: fixedHeader ? 0 : undefined }}>
+          <table style={{ ...tableStyle, tableLayout: 'fixed', width: '100%' }}>
+            <colgroup>
+              {colWidths.split(' ').map((w, i) => <col key={i} style={{ width: w }} />)}
+            </colgroup>
+            <thead>{headerRow}</thead>
+            {placeholderBody}
+          </table>
+        </div>
+      </div>
+    )
+  }
 
   if (fixedHeader) {
     return (

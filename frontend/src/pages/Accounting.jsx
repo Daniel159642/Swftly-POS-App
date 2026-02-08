@@ -12,15 +12,14 @@ import {
   Wallet,
   Workflow,
   FileText,
-  Receipt,
-  Users,
   Truck,
   FileBarChart,
   PanelLeft,
   Plus,
   X,
   MapPin,
-  DollarSign
+  DollarSign,
+  Users
 } from 'lucide-react'
 import accountService from '../services/accountService'
 
@@ -51,15 +50,12 @@ import AccountLedgerCard from '../components/ledger/AccountLedgerCard'
 import ProfitLossFilters from '../components/reports/ProfitLossFilters'
 import ProfitLossTable from '../components/reports/ProfitLossTable'
 import ComparativeProfitLossTable from '../components/reports/ComparativeProfitLossTable'
-import ProfitLossChart from '../components/reports/ProfitLossChart'
 import BalanceSheetFilters from '../components/reports/BalanceSheetFilters'
 import BalanceSheetTable from '../components/reports/BalanceSheetTable'
 import ComparativeBalanceSheetTable from '../components/reports/ComparativeBalanceSheetTable'
-import BalanceSheetChart from '../components/reports/BalanceSheetChart'
 import CashFlowFilters from '../components/reports/CashFlowFilters'
 import CashFlowTable from '../components/reports/CashFlowTable'
 import ComparativeCashFlowTable from '../components/reports/ComparativeCashFlowTable'
-import CashFlowChart from '../components/reports/CashFlowChart'
 import reportService from '../services/reportService'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
@@ -68,6 +64,7 @@ import CustomDropdown from '../components/common/CustomDropdown'
 import LoadingSpinner from '../components/common/LoadingSpinner'
 import { useToast } from '../contexts/ToastContext'
 import AccountingDirectoryTab from './AccountingDirectoryTab'
+import Invoices from './Invoices'
 import {
   formTitleStyle,
   formLabelStyle,
@@ -90,6 +87,15 @@ function exportFilename(reportName, dateOrStart, endDate, ext) {
   return `${base}.${ext}`
 }
 
+/** Format number as currency for export (match UI: $1,234.56 or empty for 0) */
+function exportFormatCurrency(amount, alwaysShowZero = false) {
+  const n = Number(amount)
+  if (Number.isNaN(n)) return alwaysShowZero ? '$0.00' : ''
+  if (n === 0 && !alwaysShowZero) return ''
+  if (n < 0) return `($${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 /** Download an array-of-arrays as Excel (.xlsx) using SheetJS */
 async function downloadExcel(rows, filename) {
   const XLSX = await import('xlsx')
@@ -97,6 +103,49 @@ async function downloadExcel(rows, filename) {
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
   XLSX.writeFile(wb, filename)
+}
+
+// Row type styling for PDF (match UI: teal headers, grey totals)
+const PDF_ROW_STYLES = {
+  title: { fillColor: [45, 90, 107], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 12 },
+  subtitle: { fillColor: [45, 90, 107], textColor: [255, 255, 255], fontSize: 10 },
+  columnHeader: { fillColor: [197, 217, 224], textColor: [45, 74, 91], fontStyle: 'bold', fontSize: 9 },
+  section: { fillColor: [45, 90, 107], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+  data: { fillColor: [255, 255, 255], textColor: [51, 51, 51], fontSize: 9 },
+  subtotal: { fillColor: [232, 232, 232], textColor: [51, 51, 51], fontStyle: 'bold', fontSize: 9 },
+  finalTotal: { fillColor: [232, 232, 232], textColor: [51, 51, 51], fontStyle: 'bold', fontSize: 9 },
+  empty: { fillColor: [255, 255, 255], textColor: [51, 51, 51], fontSize: 9 }
+}
+
+/** Export report rows to PDF; rowTypes (optional) same length as rows: title|subtitle|columnHeader|section|data|subtotal|finalTotal|empty */
+function exportReportToPdf(rows, filename, rowTypes) {
+  const maxCols = Math.max(...rows.map((r) => r.length), 1)
+  const body = rows.map((r) => {
+    const row = [...r].map((c) => String(c ?? ''))
+    while (row.length < maxCols) row.push('')
+    return row
+  })
+  const orientation = maxCols > 3 ? 'landscape' : 'portrait'
+  const doc = new jsPDF({ orientation, unit: 'mm', format: 'a4' })
+  const useRowTypes = Array.isArray(rowTypes) && rowTypes.length === body.length
+  autoTable(doc, {
+    body,
+    startY: 14,
+    margin: { left: 14, right: 14 },
+    styles: { fontSize: 9 },
+    alternateRowStyles: useRowTypes ? undefined : { fillColor: [248, 248, 248] },
+    didParseCell: useRowTypes
+      ? (data) => {
+          const rowType = rowTypes[data.row.index] || 'data'
+          const s = PDF_ROW_STYLES[rowType] || PDF_ROW_STYLES.data
+          if (s.fillColor) data.cell.styles.fillColor = s.fillColor
+          if (s.textColor) data.cell.styles.textColor = s.textColor
+          if (s.fontStyle) data.cell.styles.fontStyle = s.fontStyle
+          if (s.fontSize) data.cell.styles.fontSize = s.fontSize
+        }
+      : undefined
+  })
+  doc.save(filename)
 }
 
 function Accounting() {
@@ -166,8 +215,6 @@ function Accounting() {
     { id: 'general-ledger', label: 'Ledger', icon: Library },
     { id: 'financial-statements', label: 'Financial Statements', icon: FileBarChart },
     { id: 'invoices', label: 'Invoices', icon: FileText },
-    { id: 'bills', label: 'Bills', icon: Receipt },
-    { id: 'customers', label: 'Customers', icon: Users },
     { id: 'vendors', label: 'Vendors', icon: Truck }
   ]
 
@@ -175,7 +222,7 @@ function Accounting() {
     <div style={{
       display: 'flex',
       width: '100%',
-      ...(['dashboard', 'chart-of-accounts', 'transactions', 'bills', 'customers', 'vendors', 'invoices', 'general-ledger', 'financial-statements'].includes(activeTab)
+      ...(['dashboard', 'chart-of-accounts', 'transactions', 'vendors', 'invoices', 'general-ledger', 'financial-statements'].includes(activeTab)
         ? { height: '100%', minHeight: 0, overflow: 'hidden' }
         : { minHeight: '100vh' })
     }}>
@@ -308,11 +355,11 @@ function Accounting() {
         backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
         maxWidth: sidebarMinimized ? 'none' : '1200px',
         transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-        ...(['dashboard', 'chart-of-accounts', 'transactions', 'bills', 'customers', 'vendors', 'invoices', 'general-ledger', 'financial-statements'].includes(activeTab) ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' } : {})
+        ...(['dashboard', 'chart-of-accounts', 'transactions', 'vendors', 'invoices', 'general-ledger', 'financial-statements'].includes(activeTab) ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' } : {})
       }}>
         {/* Error Display */}
         {error && (
-          <div style={{ padding: '16px', marginBottom: '20px', backgroundColor: isDarkMode ? '#4a1a1a' : '#fee', border: `1px solid ${isDarkMode ? '#6a2a2a' : '#fcc'}`, borderRadius: '8px', color: isDarkMode ? '#ff6b6b' : '#c33', ...formFieldContainerStyle, ...(['dashboard', 'chart-of-accounts', 'transactions', 'bills', 'customers', 'vendors', 'invoices', 'general-ledger', 'financial-statements'].includes(activeTab) ? { flexShrink: 0 } : {}) }}>
+          <div style={{ padding: '16px', marginBottom: '20px', backgroundColor: isDarkMode ? '#4a1a1a' : '#fee', border: `1px solid ${isDarkMode ? '#6a2a2a' : '#fcc'}`, borderRadius: '8px', color: isDarkMode ? '#ff6b6b' : '#c33', ...formFieldContainerStyle, ...(['dashboard', 'chart-of-accounts', 'transactions', 'vendors', 'invoices', 'general-ledger', 'financial-statements'].includes(activeTab) ? { flexShrink: 0 } : {}) }}>
             Error: {error}
           </div>
         )}
@@ -383,17 +430,7 @@ function Accounting() {
         )}
         {activeTab === 'invoices' && (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <InvoicesTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />
-          </div>
-        )}
-        {activeTab === 'bills' && (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <BillsTab dateRange={dateRange} formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />
-          </div>
-        )}
-        {activeTab === 'customers' && (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <CustomersTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />
+            <Invoices />
           </div>
         )}
         {activeTab === 'vendors' && (
@@ -412,13 +449,17 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
   const local = getAccountingSettingsFromLocal()
   const defaultEdit = { default_sales_tax_pct: '', transaction_fee_rates: {}, sales_tax_by_state: {} }
   const defaultPos = { return_transaction_fee_take_loss: false, transaction_fee_mode: 'additional', transaction_fee_charge_cash: false, num_registers: 1, register_type: 'one_screen', return_tip_refund: false, require_signature_for_return: false }
+  // Use local storage for instant display; never block tax-by-state on API (load from DB in background)
+  const initialAccounting = local?.accounting && typeof local.accounting === 'object'
+    ? { ...defaultEdit, ...local.accounting }
+    : defaultEdit
   const [settings, setSettings] = useState(local?.settingsRaw ?? null)
-  const [settingsLoading, setSettingsLoading] = useState(!local?.accounting)
+  const [settingsLoading, setSettingsLoading] = useState(false)
   const [posSettingsLoading, setPosSettingsLoading] = useState(!local?.pos)
   const [displaySettingsLoading, setDisplaySettingsLoading] = useState(!local?.display)
   const [employeesLoading, setEmployeesLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [edit, setEdit] = useState(local?.accounting && typeof local.accounting.default_sales_tax_pct !== 'undefined' ? { ...defaultEdit, ...local.accounting } : defaultEdit)
+  const [edit, setEdit] = useState(initialAccounting)
   const [employees, setEmployees] = useState([])
   const [laborThisWeek, setLaborThisWeek] = useState({ entries: [] })
   const [employeeRateSaving, setEmployeeRateSaving] = useState(null)
@@ -468,7 +509,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
   const loadDisplaySettings = async () => {
     setDisplaySettingsLoading(true)
     try {
-      const res = await cachedFetch('/api/customer-display/settings', { headers: getAuthHeaders() })
+      const res = await cachedFetch('/api/customer-display/settings', { headers: (getAuthHeaders && getAuthHeaders()) || {} })
       const json = await res.json()
       if (json.success && json.data) {
         const d = json.data
@@ -493,7 +534,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
   const loadPosSettings = async () => {
     setPosSettingsLoading(true)
     try {
-      const res = await cachedFetch('/api/pos-settings', { headers: getAuthHeaders() })
+      const res = await cachedFetch('/api/pos-settings', { headers: (getAuthHeaders && getAuthHeaders()) || {} })
       const json = await res.json()
       if (json.success && json.settings) {
         const s = json.settings
@@ -517,18 +558,20 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
 
   const savePosTransactionFeeSettings = async () => {
     setSavingPosFee(true)
+    const pos = posSettings ?? defaultPos
     try {
+      const headers = getAuthHeaders && getAuthHeaders()
       const res = await fetch('/api/pos-settings', {
         method: 'POST',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        headers: { ...(headers || {}), 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          num_registers: posSettings.num_registers ?? 1,
-          register_type: posSettings.register_type || 'one_screen',
-          return_transaction_fee_take_loss: !!posSettings.return_transaction_fee_take_loss,
-          return_tip_refund: !!posSettings.return_tip_refund,
-          require_signature_for_return: !!posSettings.require_signature_for_return,
-          transaction_fee_mode: posSettings.transaction_fee_mode || 'additional',
-          transaction_fee_charge_cash: !!posSettings.transaction_fee_charge_cash
+          num_registers: pos.num_registers ?? 1,
+          register_type: pos.register_type || 'one_screen',
+          return_transaction_fee_take_loss: !!pos.return_transaction_fee_take_loss,
+          return_tip_refund: !!pos.return_tip_refund,
+          require_signature_for_return: !!pos.require_signature_for_return,
+          transaction_fee_mode: pos.transaction_fee_mode || 'additional',
+          transaction_fee_charge_cash: !!pos.transaction_fee_charge_cash
         })
       })
       const json = await res.json()
@@ -546,9 +589,11 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
 
   const saveTipsSettings = async () => {
     setSavingTipAllocation(true)
+    const pos = posSettings ?? defaultPos
     try {
       const token = localStorage.getItem('sessionToken')
-      const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json', 'Authorization': `Bearer ${token || ''}` }
+      const authHeaders = getAuthHeaders && getAuthHeaders()
+      const headers = { ...(authHeaders || {}), 'Content-Type': 'application/json', 'Authorization': `Bearer ${token || ''}` }
       // 1) Customer display / tips UI settings
       const displayRes = await fetch('/api/customer-display/settings', {
         method: 'POST',
@@ -572,15 +617,15 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
       // 2) POS settings (return tip refund + require signature for return)
       const posRes = await fetch('/api/pos-settings', {
         method: 'POST',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        headers: { ...(authHeaders || {}), 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          num_registers: posSettings.num_registers ?? 1,
-          register_type: posSettings.register_type || 'one_screen',
-          return_transaction_fee_take_loss: !!posSettings.return_transaction_fee_take_loss,
-          return_tip_refund: !!posSettings.return_tip_refund,
-          require_signature_for_return: !!posSettings.require_signature_for_return,
-          transaction_fee_mode: posSettings.transaction_fee_mode || 'additional',
-          transaction_fee_charge_cash: !!posSettings.transaction_fee_charge_cash
+          num_registers: pos.num_registers ?? 1,
+          register_type: pos.register_type || 'one_screen',
+          return_transaction_fee_take_loss: !!pos.return_transaction_fee_take_loss,
+          return_tip_refund: !!pos.return_tip_refund,
+          require_signature_for_return: !!pos.require_signature_for_return,
+          transaction_fee_mode: pos.transaction_fee_mode || 'additional',
+          transaction_fee_charge_cash: !!pos.transaction_fee_charge_cash
         })
       })
       const posJson = await posRes.json()
@@ -593,7 +638,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
         setTipCustomInCheckout(displayJson.data.tip_custom_in_checkout === 1 || displayJson.data.tip_custom_in_checkout === true)
         setRequireSignature(displayJson.data.signature_required === 1 || displayJson.data.signature_required === true)
       }
-      if (posJson.success) setPosSettings(prev => ({ ...prev, return_tip_refund: !!posSettings.return_tip_refund, require_signature_for_return: !!posSettings.require_signature_for_return }))
+      if (posJson.success) setPosSettings(prev => ({ ...(prev ?? defaultPos), return_tip_refund: !!pos.return_tip_refund, require_signature_for_return: !!pos.require_signature_for_return }))
       showToast('Tips settings saved.', 'success')
     } catch (err) {
       showToast(err.message || 'Failed to save', 'error')
@@ -605,7 +650,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
   const loadSettings = async () => {
     setSettingsLoading(true)
     try {
-      const res = await cachedFetch('/api/accounting/settings', { headers: getAuthHeaders() })
+      const res = await cachedFetch('/api/accounting/settings', { headers: (getAuthHeaders && getAuthHeaders()) || {} })
       const json = await res.json()
       if (json.success && json.data) {
         const d = json.data
@@ -636,9 +681,10 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
       sun.setDate(mon.getDate() + 6)
       const start = mon.toISOString().slice(0, 10)
       const end = sun.toISOString().slice(0, 10)
+      const authH = (getAuthHeaders && getAuthHeaders()) || {}
       const [empRes, laborRes] = await Promise.all([
-        fetch('/api/employees', { headers: getAuthHeaders() }),
-        fetch(`/api/accounting/labor-summary?start_date=${start}&end_date=${end}`, { headers: getAuthHeaders() })
+        fetch('/api/employees', { headers: authH }),
+        fetch(`/api/accounting/labor-summary?start_date=${start}&end_date=${end}`, { headers: authH })
       ])
       if (empRes.ok) {
         const empJson = await empRes.json()
@@ -662,7 +708,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
       setSaving(true)
       const res = await fetch('/api/accounting/settings', {
         method: 'PATCH',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        headers: { ...((getAuthHeaders && getAuthHeaders()) || {}), 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
       })
       const json = await res.json()
@@ -693,7 +739,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
     try {
       const res = await fetch(`/api/admin/employees/${employeeId}`, {
         method: 'PUT',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        headers: { ...((getAuthHeaders && getAuthHeaders()) || {}), 'Content-Type': 'application/json' },
         body: JSON.stringify({ hourly_rate: hourlyRate })
       })
       const json = await res.json()
@@ -720,7 +766,9 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
     }))
   }
 
-  const rates = edit.transaction_fee_rates || {}
+  const safeEdit = edit ?? defaultEdit
+  const safePosSettings = posSettings ?? defaultPos
+  const rates = safeEdit.transaction_fee_rates || {}
   const feeMethods = ['credit_card', 'debit_card', 'mobile_payment', 'cash', 'check', 'store_credit']
   const cardStyle = { padding: '20px', backgroundColor: cardBg, border: `1px solid ${borderColor}`, borderRadius: '12px' }
 
@@ -743,19 +791,19 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
               min={0}
               max={100}
               step={0.01}
-              value={edit.default_sales_tax_pct}
+              value={safeEdit.default_sales_tax_pct}
               placeholder={settingsLoading ? 'Loading…' : ''}
-              onChange={e => setEdit(prev => ({ ...prev, default_sales_tax_pct: e.target.value }))}
+              onChange={e => setEdit(prev => ({ ...(prev ?? defaultEdit), default_sales_tax_pct: e.target.value }))}
               {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
               style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '120px' }}
               disabled={settingsLoading}
             />
           </FormField>
           <div style={{ marginBottom: '8px', fontWeight: 600, fontSize: '13px', color: textColor }}>State overrides</div>
-          {settingsLoading && Object.keys(edit.sales_tax_by_state || {}).length === 0 ? (
+          {settingsLoading && Object.keys(safeEdit.sales_tax_by_state || {}).length === 0 ? (
             <div style={{ padding: '8px 0', color: textColor, opacity: 0.6, fontSize: '13px' }}>Loading…</div>
           ) : null}
-          {Object.entries(edit.sales_tax_by_state || {}).map(([stateCode, pct]) => (
+          {Object.entries(safeEdit.sales_tax_by_state || {}).map(([stateCode, pct]) => (
           <div key={stateCode} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
             <input
               type="text"
@@ -769,17 +817,18 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
               max={100}
               step={0.01}
               value={pct}
-              onChange={e => setEdit(prev => ({
-                ...prev,
-                sales_tax_by_state: { ...prev.sales_tax_by_state, [stateCode]: parseFloat(e.target.value) || 0 }
-              }))}
+              onChange={e => setEdit(prev => {
+                const p = prev ?? defaultEdit
+                return { ...p, sales_tax_by_state: { ...(p.sales_tax_by_state || {}), [stateCode]: parseFloat(e.target.value) || 0 } }
+              })}
               style={{ ...inputBaseStyle(isDarkMode, themeColorRgb, false), width: '80px', padding: '6px 8px' }}
             />
             <span style={{ fontSize: '13px', color: textColor, opacity: 0.8 }}>%</span>
             <button
               type="button"
               onClick={() => setEdit(prev => {
-                const next = { ...prev.sales_tax_by_state }; delete next[stateCode]; return { ...prev, sales_tax_by_state: next }
+                const p = prev ?? defaultEdit
+                const next = { ...(p.sales_tax_by_state || {}) }; delete next[stateCode]; return { ...p, sales_tax_by_state: next }
               })}
               style={{ padding: '6px 10px', border: 'none', borderRadius: '6px', background: isDarkMode ? '#444' : '#e0e0e0', color: textColor, cursor: 'pointer', fontSize: '12px' }}
             >
@@ -795,7 +844,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
                 const code = prompt('State code (2 letters, e.g. CA)')
               if (code && code.trim().length === 2) {
                 const upper = code.trim().toUpperCase()
-                setEdit(prev => ({ ...prev, sales_tax_by_state: { ...prev.sales_tax_by_state, [upper]: 0 } }))
+                setEdit(prev => { const p = prev ?? defaultEdit; return { ...p, sales_tax_by_state: { ...(p.sales_tax_by_state || {}), [upper]: 0 } } })
               }
             }}
               style={{ padding: '8px 14px', marginRight: 'auto', border: `1px solid ${borderColor}`, borderRadius: '8px', background: 'transparent', color: textColor, cursor: settingsLoading ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 500, opacity: settingsLoading ? 0.6 : 1 }}
@@ -807,8 +856,8 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
               disabled={saving || settingsLoading}
               onClick={async () => {
                 const ok = await saveAccountingSettings({
-                  default_sales_tax_pct: parseFloat(edit.default_sales_tax_pct) || 0,
-                  sales_tax_by_state: edit.sales_tax_by_state || {}
+                  default_sales_tax_pct: parseFloat(safeEdit.default_sales_tax_pct) || 0,
+                  sales_tax_by_state: safeEdit.sales_tax_by_state || {}
                 })
                 if (ok) loadSettings()
               }}
@@ -836,7 +885,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
           <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
             <input
               type="checkbox"
-              checked={posSettings.return_transaction_fee_take_loss || false}
+              checked={safePosSettings.return_transaction_fee_take_loss || false}
               onChange={e => setPosSettings(prev => ({ ...prev, return_transaction_fee_take_loss: e.target.checked }))}
               style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
             />
@@ -848,7 +897,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
               <input
                 type="radio"
                 name="transaction_fee_mode"
-                checked={posSettings.transaction_fee_mode === 'additional'}
+                checked={safePosSettings.transaction_fee_mode === 'additional'}
                 onChange={() => setPosSettings(prev => ({ ...prev, transaction_fee_mode: 'additional' }))}
                 style={{ accentColor: `rgb(${themeColorRgb})` }}
               />
@@ -858,7 +907,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
               <input
                 type="radio"
                 name="transaction_fee_mode"
-                checked={posSettings.transaction_fee_mode === 'included'}
+                checked={safePosSettings.transaction_fee_mode === 'included'}
                 onChange={() => setPosSettings(prev => ({ ...prev, transaction_fee_mode: 'included' }))}
                 style={{ accentColor: `rgb(${themeColorRgb})` }}
               />
@@ -868,18 +917,18 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
               <input
                 type="radio"
                 name="transaction_fee_mode"
-                checked={posSettings.transaction_fee_mode === 'none'}
+                checked={safePosSettings.transaction_fee_mode === 'none'}
                 onChange={() => setPosSettings(prev => ({ ...prev, transaction_fee_mode: 'none' }))}
                 style={{ accentColor: `rgb(${themeColorRgb})` }}
               />
               <span style={{ fontSize: '14px', color: textColor }}>No fee (store absorbs)</span>
             </label>
           </div>
-          {posSettings.transaction_fee_mode === 'additional' && (
+          {safePosSettings.transaction_fee_mode === 'additional' && (
             <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginTop: '6px' }}>
               <input
                 type="checkbox"
-                checked={posSettings.transaction_fee_charge_cash || false}
+                checked={safePosSettings.transaction_fee_charge_cash || false}
                 onChange={e => setPosSettings(prev => ({ ...prev, transaction_fee_charge_cash: e.target.checked }))}
                 style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
               />
@@ -933,7 +982,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
             variant="primary"
             disabled={saving || settingsLoading}
             onClick={async () => {
-              const ok = await saveAccountingSettings({ transaction_fee_rates: edit.transaction_fee_rates })
+              const ok = await saveAccountingSettings({ transaction_fee_rates: safeEdit.transaction_fee_rates })
               if (ok) loadSettings()
             }}
             themeColorRgb={themeColorRgb}
@@ -955,7 +1004,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
           <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
             <input
               type="checkbox"
-              checked={posSettings.return_tip_refund || false}
+              checked={safePosSettings.return_tip_refund || false}
               onChange={e => setPosSettings(prev => ({ ...prev, return_tip_refund: e.target.checked }))}
               style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
             />
@@ -964,7 +1013,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
           <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
             <input
               type="checkbox"
-              checked={posSettings.require_signature_for_return || false}
+              checked={safePosSettings.require_signature_for_return || false}
               onChange={e => setPosSettings(prev => ({ ...prev, require_signature_for_return: e.target.checked }))}
               style={{ width: '18px', height: '18px', accentColor: `rgb(${themeColorRgb})` }}
             />
@@ -1879,99 +1928,6 @@ function TransactionsTab({ dateRange, formatCurrency, getAuthHeaders, themeColor
   )
 }
 
-// Invoices Tab
-function InvoicesTab({ dateRange, formatCurrency, getAuthHeaders }) {
-  const [invoices, setInvoices] = useState([])
-  const [loading, setLoading] = useState(true)
-  const isDarkMode = document.documentElement.classList.contains('dark-theme')
-  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
-  const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
-  const cardBg = isDarkMode ? '#2a2a2a' : 'white'
-
-  useEffect(() => {
-    loadInvoices()
-  }, [dateRange])
-
-  const loadInvoices = async () => {
-    try {
-      setLoading(true)
-      const response = await fetch(
-        `/api/accounting/invoices?start_date=${dateRange.start_date}&end_date=${dateRange.end_date}`,
-        { headers: getAuthHeaders() }
-      )
-      if (response.ok) {
-        const data = await response.json()
-        setInvoices(Array.isArray(data) ? data : (data?.data ?? []))
-      }
-    } catch (err) {
-      console.error('Error loading invoices:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
-      <div style={{ marginBottom: '24px', flexShrink: 0 }}>
-        <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Invoices</h1>
-        <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Sales you&apos;ve sent to customers for the selected date range. Track amounts owed and payment status.</p>
-        </div>
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9', boxShadow: isDarkMode ? '0 1px 0 #3a3a3a' : '0 1px 0 #e0e0e0' }}>
-              <tr>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Invoice #</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Date</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Customer</th>
-                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Total</th>
-                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
-                <th style={{ padding: '12px', textAlign: 'center', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
-                  Loading…
-                </td>
-              </tr>
-            ) : invoices.length === 0 ? (
-              <tr>
-                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
-                  No invoices found for this period.
-                </td>
-              </tr>
-            ) : (
-              invoices.map(inv => (
-                <tr key={inv.id} style={{ borderBottom: `1px solid ${borderColor}` }}>
-                  <td style={{ padding: '12px', color: textColor }}>{inv.invoice_number}</td>
-                  <td style={{ padding: '12px', color: textColor }}>{inv.invoice_date}</td>
-                  <td style={{ padding: '12px', color: textColor }}>{inv.customer_name || '-'}</td>
-                  <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>{formatCurrency(inv.total_amount || 0)}</td>
-                  <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>{formatCurrency(inv.balance_due || 0)}</td>
-                  <td style={{ padding: '12px', textAlign: 'center', color: textColor }}>
-                    <span style={{
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      backgroundColor: inv.status === 'paid' ? '#10b981' : inv.status === 'partial' ? '#f59e0b' : '#6b7280',
-                      color: 'white',
-                      fontSize: '12px'
-                    }}>
-                      {inv.status || 'draft'}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            )}
-            </tbody>
-          </table>
-          </div>
-        </div>
-    </div>
-  )
-}
-
 // General Ledger Tab
 function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColorRgb, isDarkMode, accountIdForLedgerModal, onCloseAccountLedgerModal }) {
   const [entries, setEntries] = useState([])
@@ -2227,18 +2183,13 @@ function GeneralLedgerTab({ dateRange, formatCurrency, getAuthHeaders, themeColo
           )}
         </div>
 
-        {loading ? (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px' }}>
-            <LoadingSpinner size="lg" text="Loading ledger entries..." />
-          </div>
-        ) : (
-          <GeneralLedgerTable
-            entries={entries}
-            showRunningBalance={false}
-            onViewTransaction={handleViewTransaction}
-            fixedHeader
-          />
-        )}
+        <GeneralLedgerTable
+          entries={entries}
+          loading={loading}
+          showRunningBalance={false}
+          onViewTransaction={handleViewTransaction}
+          fixedHeader
+        />
       </div>
 
       {/* View Transaction Modal */}
@@ -2731,6 +2682,7 @@ function FinancialStatementsTab({ dateRange, formatCurrency, getAuthHeaders, set
   const exportOptions = [
     { value: 'csv', label: 'Export to CSV' },
     { value: 'excel', label: 'Export to Excel' },
+    { value: 'pdf', label: 'Export to PDF' },
     { value: 'print', label: 'Print' }
   ]
   const handleExportSelect = (e) => {
@@ -2738,6 +2690,7 @@ function FinancialStatementsTab({ dateRange, formatCurrency, getAuthHeaders, set
     setExportChoice('')
     if (v === 'csv') generateReportRef.current?.exportToCsv()
     else if (v === 'excel') generateReportRef.current?.exportToExcel()
+    else if (v === 'pdf') generateReportRef.current?.exportToPdf()
     else if (v === 'print') generateReportRef.current?.print()
   }
   const handleSaveToDirectory = () => {
@@ -2895,34 +2848,53 @@ const TrialBalanceTab = forwardRef(function TrialBalanceTab(
     }
   }
 
-  const handleExport = () => {
-    if (!reportData) {
-      showToast('No report data to export', 'error')
-      return
-    }
+  // Build Trial Balance rows to match UI: A/C. Code, Account Title, Debit, Credit; Total row; Status row
+  const getTrialBalanceExport = () => {
     const payload = reportData?.data ?? reportData
-    const accounts = payload.accounts ?? []
+    const accounts = payload?.accounts ?? []
     const num = (v) => (parseFloat(v) || 0)
-    const totalDebits = num(payload.total_debits)
-    const totalCredits = num(payload.total_credits)
-    const asOfDate = payload.date ? new Date(payload.date).toLocaleDateString() : filters.as_of_date
+    const dateStr = payload?.date && String(payload.date).split('T')[0]
+    const asOfDate = dateStr ? (() => { const [y, m, d] = dateStr.split('-'); return m && d && y ? `${Number(m)}/${Number(d)}/${y}` : dateStr })() : (filters.as_of_date || '')
+    const getDebitCredit = (row) => {
+      const bal = num(row.balance)
+      const bt = (row.balance_type || '').toLowerCase()
+      if (bt === 'debit') return { debit: bal >= 0 ? bal : 0, credit: bal < 0 ? Math.abs(bal) : 0 }
+      if (bt === 'credit') return { debit: bal < 0 ? Math.abs(bal) : 0, credit: bal >= 0 ? bal : 0 }
+      const deb = num(row.total_debits)
+      const cred = num(row.total_credits)
+      return deb >= cred ? { debit: deb - cred, credit: 0 } : { debit: 0, credit: cred - deb }
+    }
+    let sumDebit = 0
+    let sumCredit = 0
+    const dataRows = accounts.map((row) => {
+      const { debit, credit } = getDebitCredit(row)
+      sumDebit += debit
+      sumCredit += credit
+      return [
+        row.account_number ?? '',
+        row.account_name ?? '',
+        exportFormatCurrency(debit),
+        exportFormatCurrency(credit)
+      ]
+    })
+    const difference = Math.abs(sumDebit - sumCredit)
+    const isBalanced = difference < 0.01
     const rows = [
       ['Trial Balance'],
       [`As of ${asOfDate}`],
       [],
-      ['Account #', 'Account Name', 'Type', 'Debits', 'Credits', 'Balance']
+      ['A/C. Code', 'Account Title', 'Debit', 'Credit'],
+      ...dataRows,
+      ['', 'Total', exportFormatCurrency(sumDebit, true), exportFormatCurrency(sumCredit, true)],
+      ['', 'Status / Difference', isBalanced ? 'Balanced' : '', exportFormatCurrency(difference, true)]
     ]
-    accounts.forEach((row) => {
-      rows.push([
-        row.account_number ?? '',
-        row.account_name ?? '',
-        row.account_type ?? '',
-        num(row.total_debits).toFixed(2),
-        num(row.total_credits).toFixed(2),
-        num(row.balance).toFixed(2)
-      ])
-    })
-    rows.push(['Total', '', '', totalDebits.toFixed(2), totalCredits.toFixed(2), ''])
+    const rowTypes = ['title', 'subtitle', 'empty', 'columnHeader', ...dataRows.map(() => 'data'), 'subtotal', 'subtotal']
+    return { rows, rowTypes }
+  }
+
+  const handleExport = () => {
+    if (!reportData) { showToast('No report data to export', 'error'); return }
+    const { rows } = getTrialBalanceExport()
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = window.URL.createObjectURL(blob)
@@ -2935,35 +2907,10 @@ const TrialBalanceTab = forwardRef(function TrialBalanceTab(
   }
 
   const handleSaveToDirectory = async () => {
-    if (!reportData) {
-      showToast('No report data to save', 'error')
-      return
-    }
+    if (!reportData) { showToast('No report data to save', 'error'); return }
     setSaving?.(true)
     try {
-      const payload = reportData?.data ?? reportData
-      const accounts = payload.accounts ?? []
-      const num = (v) => (parseFloat(v) || 0)
-      const totalDebits = num(payload.total_debits)
-      const totalCredits = num(payload.total_credits)
-      const asOfDate = payload.date ? new Date(payload.date).toLocaleDateString() : filters.as_of_date
-      const rows = [
-        ['Trial Balance'],
-        [`As of ${asOfDate}`],
-        [],
-        ['Account #', 'Account Name', 'Type', 'Debits', 'Credits', 'Balance']
-      ]
-      accounts.forEach((row) => {
-        rows.push([
-          row.account_number ?? '',
-          row.account_name ?? '',
-          row.account_type ?? '',
-          num(row.total_debits).toFixed(2),
-          num(row.total_credits).toFixed(2),
-          num(row.balance).toFixed(2)
-        ])
-      })
-      rows.push(['Total', '', '', totalDebits.toFixed(2), totalCredits.toFixed(2), ''])
+      const { rows } = getTrialBalanceExport()
       const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
       const res = await fetch('/api/accounting/reports/save', {
         method: 'POST',
@@ -2987,34 +2934,9 @@ const TrialBalanceTab = forwardRef(function TrialBalanceTab(
   }
 
   const handleExportExcel = async () => {
-    if (!reportData) {
-      showToast('No report data to export', 'error')
-      return
-    }
-    const payload = reportData?.data ?? reportData
-    const accounts = payload.accounts ?? []
-    const num = (v) => (parseFloat(v) || 0)
-    const totalDebits = num(payload.total_debits)
-    const totalCredits = num(payload.total_credits)
-    const asOfDate = payload.date ? new Date(payload.date).toLocaleDateString() : filters.as_of_date
-    const rows = [
-      ['Trial Balance'],
-      [`As of ${asOfDate}`],
-      [],
-      ['Account #', 'Account Name', 'Type', 'Debits', 'Credits', 'Balance']
-    ]
-    accounts.forEach((row) => {
-      rows.push([
-        row.account_number ?? '',
-        row.account_name ?? '',
-        row.account_type ?? '',
-        num(row.total_debits).toFixed(2),
-        num(row.total_credits).toFixed(2),
-        num(row.balance).toFixed(2)
-      ])
-    })
-    rows.push(['Total', '', '', totalDebits.toFixed(2), totalCredits.toFixed(2), ''])
+    if (!reportData) { showToast('No report data to export', 'error'); return }
     try {
+      const { rows } = getTrialBalanceExport()
       await downloadExcel(rows, exportFilename('Trial-Balance', filters.as_of_date, null, 'xlsx'))
       showToast('Report exported to Excel', 'success')
     } catch (e) {
@@ -3022,13 +2944,25 @@ const TrialBalanceTab = forwardRef(function TrialBalanceTab(
     }
   }
 
+  const handleExportPdf = () => {
+    if (!reportData) { showToast('No report data to export', 'error'); return }
+    try {
+      const { rows, rowTypes } = getTrialBalanceExport()
+      exportReportToPdf(rows, exportFilename('Trial-Balance', filters.as_of_date, null, 'pdf'), rowTypes)
+      showToast('Report exported to PDF', 'success')
+    } catch (e) {
+      showToast(e?.message || 'PDF export failed', 'error')
+    }
+  }
+
   useImperativeHandle(ref, () => ({
     generateReport: handleGenerateReport,
     exportToCsv: handleExport,
     exportToExcel: handleExportExcel,
+    exportToPdf: handleExportPdf,
     print: () => window.print(),
     saveToDirectory: handleSaveToDirectory
-  }), [handleGenerateReport, handleExport, handleExportExcel, handleSaveToDirectory])
+  }), [handleGenerateReport, handleExport, handleExportExcel, handleExportPdf, handleSaveToDirectory])
 
   const gridStyle = {
     display: 'grid',
@@ -3253,60 +3187,56 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
     }
   }
 
-  const handleExport = () => {
-    if (!reportData) {
-      showToast('No report data to export', 'error')
-      return
-    }
-
-    const rows = [
-      ['Income Statement'],
-      [`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`],
-      [],
-      ['Account', 'Amount', '% of Revenue'],
-      [],
-      ['REVENUE'],
-    ]
-
+  // Build Income Statement rows to match ProfitLossTable: same sections and labels
+  const getProfitLossExport = () => {
     const num = (v) => (Number(v) || 0)
-    reportData.revenue.forEach(account => {
-      rows.push([
-        `  ${account.account_number || ''} ${account.account_name}`,
-        num(account.balance).toFixed(2),
-        num(account.percentage_of_revenue).toFixed(1) + '%'
-      ])
+    const revBase = reportData.net_sales ?? reportData.total_revenue ?? 0
+    const pct = (val) => (revBase > 0 ? (num(val) / revBase * 100).toFixed(1) + '%' : '')
+    const rows = []
+    const rowTypes = []
+    const add = (r, t) => { rows.push(r); rowTypes.push(t) }
+    add(['Income Statement'], 'title')
+    add([`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`], 'subtitle')
+    add([], 'empty')
+    add(['Account', 'Amount', '% of Revenue'], 'columnHeader')
+    add([], 'empty')
+    add(['Revenue'], 'section')
+    ;(reportData.revenue || []).forEach(account => {
+      add([`  ${account.account_number || ''} ${account.account_name}`.trim(), exportFormatCurrency(account.balance), (account.percentage_of_revenue != null ? num(account.percentage_of_revenue).toFixed(1) + '%' : pct(account.balance))], 'data')
     })
-
-    rows.push(['Total Revenue', num(reportData.total_revenue).toFixed(2), '100.0%'])
-    rows.push([])
-
-    if (reportData.cost_of_goods_sold && reportData.cost_of_goods_sold.length > 0) {
-      rows.push(['COST OF GOODS SOLD'])
+    ;(reportData.contra_revenue || []).forEach(account => {
+      add([`  Less: ${account.account_name}`, exportFormatCurrency(account.balance), pct(account.balance)], 'data')
+    })
+    add(['Net Sales', exportFormatCurrency(reportData.net_sales ?? reportData.total_revenue, true), revBase > 0 ? '100.0%' : ''], 'subtotal')
+    if ((reportData.cost_of_goods_sold || []).length > 0) {
+      add(['Cost of Goods Sold'], 'section')
       reportData.cost_of_goods_sold.forEach(account => {
-        rows.push([
-          `  ${account.account_number || ''} ${account.account_name}`,
-          num(account.balance).toFixed(2),
-          num(account.percentage_of_revenue).toFixed(1) + '%'
-        ])
+        add([`  ${account.account_number || ''} ${account.account_name}`.trim(), exportFormatCurrency(account.balance), pct(account.balance)], 'data')
       })
-      rows.push(['Total Cost of Goods Sold', num(reportData.total_cogs).toFixed(2), (num(reportData.total_cogs) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
-      rows.push(['GROSS PROFIT', num(reportData.gross_profit).toFixed(2), (num(reportData.gross_profit) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
-      rows.push([])
+      add(['Total Cost of Goods Sold', exportFormatCurrency(reportData.total_cogs, true), pct(reportData.total_cogs)], 'subtotal')
+      add(['Gross Profit', exportFormatCurrency(reportData.gross_profit, true), pct(reportData.gross_profit)], 'subtotal')
     }
-
-    rows.push(['EXPENSES'])
-    reportData.expenses.forEach(account => {
-      rows.push([
-        `  ${account.account_number || ''} ${account.account_name}`,
-        num(account.balance).toFixed(2),
-        num(account.percentage_of_revenue).toFixed(1) + '%'
-      ])
+    add(['Operating Expenses'], 'section')
+    ;(reportData.expenses || []).forEach(account => {
+      add([`  ${account.account_number || ''} ${account.account_name}`.trim(), exportFormatCurrency(account.balance), pct(account.balance)], 'data')
     })
+    const opProfit = reportData.operating_profit ?? (num(reportData.gross_profit) - num(reportData.total_expenses))
+    add(['Total Operating Expenses', exportFormatCurrency(reportData.total_expenses, true), pct(reportData.total_expenses)], 'subtotal')
+    add(['Operating Profit (Loss)', exportFormatCurrency(opProfit, true), pct(opProfit)], 'subtotal')
+    add(['Add Other Income'], 'data')
+    ;(reportData.other_income || []).forEach(account => {
+      add([`  ${account.account_number || ''} ${account.account_name}`.trim(), exportFormatCurrency(account.balance), pct(account.balance)], 'data')
+    })
+    const profitBeforeTax = reportData.profit_before_taxes ?? reportData.net_income
+    add(['Profit (Loss) Before Taxes', exportFormatCurrency(profitBeforeTax, true), pct(profitBeforeTax)], 'subtotal')
+    add(['Less: Tax Expense', exportFormatCurrency(reportData.tax_expense ?? 0), pct(reportData.tax_expense ?? 0)], 'data')
+    add(['Net Profit (Loss)', exportFormatCurrency(reportData.net_income, true), pct(reportData.net_income)], 'finalTotal')
+    return { rows, rowTypes }
+  }
 
-    rows.push(['Total Expenses', num(reportData.total_expenses).toFixed(2), (num(reportData.total_expenses) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
-    rows.push([])
-    rows.push(['NET INCOME', num(reportData.net_income).toFixed(2), (num(reportData.net_income) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
-
+  const handleExport = () => {
+    if (!reportData) { showToast('No report data to export', 'error'); return }
+    const { rows } = getProfitLossExport()
     const csvContent = rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv' })
     const url = window.URL.createObjectURL(blob)
@@ -3315,47 +3245,14 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
     a.download = exportFilename('Income-Statement', filters.start_date, filters.end_date, 'csv')
     a.click()
     window.URL.revokeObjectURL(url)
-
     showToast('Report exported to CSV', 'success')
   }
 
   const handleSaveToDirectory = async () => {
-    if (!reportData) {
-      showToast('No report data to save', 'error')
-      return
-    }
+    if (!reportData) { showToast('No report data to save', 'error'); return }
     setSaving?.(true)
     try {
-      const rows = [
-        ['Income Statement'],
-        [`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`],
-        [],
-        ['Account', 'Amount', '% of Revenue'],
-        [],
-        ['REVENUE'],
-      ]
-      const num = (v) => (Number(v) || 0)
-      reportData.revenue.forEach(account => {
-        rows.push([`  ${account.account_number || ''} ${account.account_name}`, num(account.balance).toFixed(2), num(account.percentage_of_revenue).toFixed(1) + '%'])
-      })
-      rows.push(['Total Revenue', num(reportData.total_revenue).toFixed(2), '100.0%'])
-      rows.push([])
-      if (reportData.cost_of_goods_sold?.length > 0) {
-        rows.push(['COST OF GOODS SOLD'])
-        reportData.cost_of_goods_sold.forEach(account => {
-          rows.push([`  ${account.account_number || ''} ${account.account_name}`, num(account.balance).toFixed(2), num(account.percentage_of_revenue).toFixed(1) + '%'])
-        })
-        rows.push(['Total Cost of Goods Sold', num(reportData.total_cogs).toFixed(2), (num(reportData.total_cogs) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
-        rows.push(['GROSS PROFIT', num(reportData.gross_profit).toFixed(2), (num(reportData.gross_profit) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
-        rows.push([])
-      }
-      rows.push(['EXPENSES'])
-      reportData.expenses.forEach(account => {
-        rows.push([`  ${account.account_number || ''} ${account.account_name}`, num(account.balance).toFixed(2), num(account.percentage_of_revenue).toFixed(1) + '%'])
-      })
-      rows.push(['Total Expenses', num(reportData.total_expenses).toFixed(2), (num(reportData.total_expenses) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
-      rows.push([])
-      rows.push(['NET INCOME', num(reportData.net_income).toFixed(2), (num(reportData.net_income) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
+      const { rows } = getProfitLossExport()
       const csvContent = rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n')
       const res = await fetch('/api/accounting/reports/save', {
         method: 'POST',
@@ -3379,45 +3276,24 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
   }
 
   const handleExportExcel = async () => {
-    if (!reportData) {
-      showToast('No report data to export', 'error')
-      return
-    }
-    const rows = [
-      ['Income Statement'],
-      [`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`],
-      [],
-      ['Account', 'Amount', '% of Revenue'],
-      [],
-      ['REVENUE'],
-    ]
-    const num = (v) => (Number(v) || 0)
-    reportData.revenue.forEach(account => {
-      rows.push([`  ${account.account_number || ''} ${account.account_name}`, num(account.balance).toFixed(2), num(account.percentage_of_revenue).toFixed(1) + '%'])
-    })
-    rows.push(['Total Revenue', num(reportData.total_revenue).toFixed(2), '100.0%'])
-    rows.push([])
-    if (reportData.cost_of_goods_sold?.length > 0) {
-      rows.push(['COST OF GOODS SOLD'])
-      reportData.cost_of_goods_sold.forEach(account => {
-        rows.push([`  ${account.account_number || ''} ${account.account_name}`, num(account.balance).toFixed(2), num(account.percentage_of_revenue).toFixed(1) + '%'])
-      })
-      rows.push(['Total Cost of Goods Sold', num(reportData.total_cogs).toFixed(2), (num(reportData.total_cogs) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
-      rows.push(['GROSS PROFIT', num(reportData.gross_profit).toFixed(2), (num(reportData.gross_profit) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
-      rows.push([])
-    }
-    rows.push(['EXPENSES'])
-    reportData.expenses.forEach(account => {
-      rows.push([`  ${account.account_number || ''} ${account.account_name}`, num(account.balance).toFixed(2), num(account.percentage_of_revenue).toFixed(1) + '%'])
-    })
-    rows.push(['Total Expenses', num(reportData.total_expenses).toFixed(2), (num(reportData.total_expenses) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
-    rows.push([])
-    rows.push(['NET INCOME', num(reportData.net_income).toFixed(2), (num(reportData.net_income) / num(reportData.total_revenue) * 100).toFixed(1) + '%'])
+    if (!reportData) { showToast('No report data to export', 'error'); return }
     try {
+      const { rows } = getProfitLossExport()
       await downloadExcel(rows, exportFilename('Income-Statement', filters.start_date, filters.end_date, 'xlsx'))
       showToast('Report exported to Excel', 'success')
     } catch (e) {
       showToast('Excel export failed', 'error')
+    }
+  }
+
+  const handleExportPdf = () => {
+    if (!reportData) { showToast('No report data to export', 'error'); return }
+    try {
+      const { rows, rowTypes } = getProfitLossExport()
+      exportReportToPdf(rows, exportFilename('Income-Statement', filters.start_date, filters.end_date, 'pdf'), rowTypes)
+      showToast('Report exported to PDF', 'success')
+    } catch (e) {
+      showToast(e?.message || 'PDF export failed', 'error')
     }
   }
 
@@ -3441,9 +3317,10 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
     generateReport: handleGenerateReport,
     exportToCsv: handleExport,
     exportToExcel: handleExportExcel,
+    exportToPdf: handleExportPdf,
     print: () => window.print(),
     saveToDirectory: handleSaveToDirectory
-  }), [handleGenerateReport, handleExport, handleExportExcel, handleSaveToDirectory])
+  }), [handleGenerateReport, handleExport, handleExportExcel, handleExportPdf, handleSaveToDirectory])
 
   const filtersSection = (
     <>
@@ -3480,9 +3357,6 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
                   periodLabel={getPeriodLabel() + (comparativeData ? ` — Compared to: ${getPriorPeriodLabel()}` : '')}
                 />
               </div>
-              <div style={{ width: '100%' }}>
-                <ProfitLossChart data={reportData} />
-              </div>
             </div>
           ) : (
             <>
@@ -3493,9 +3367,6 @@ const ProfitLossTab = forwardRef(function ProfitLossTab(
                   onAccountClick={handleAccountClick}
                   periodLabel={getPeriodLabel()}
                 />
-              </div>
-              <div style={{ width: '100%' }}>
-                <ProfitLossChart data={reportData} />
               </div>
             </>
           )}
@@ -3581,57 +3452,71 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
     }
   }
 
-  const handleExport = () => {
-    if (!reportData) {
-      showToast('No report data to export', 'error')
-      return
-    }
-    const rows = [
-      ['Balance Sheet'],
-      [`As of: ${new Date(reportData.as_of_date).toLocaleDateString()}`],
-      [],
-      ['ASSETS']
-    ]
+  // Build Balance Sheet rows to match BalanceSheetTable: same section labels + COMMON FINANCIAL RATIO
+  const getBalanceSheetExport = () => {
     const num = (v) => (Number(v) || 0)
+    const rows = []
+    const rowTypes = []
+    const add = (r, t) => { rows.push(r); rowTypes.push(t) }
+    add(['Balance Sheet'], 'title')
+    add([`As of: ${new Date(reportData.as_of_date).toLocaleDateString()}`], 'subtitle')
+    add([], 'empty')
+    add(['ASSETS'], 'section')
     if (reportData.assets.current_assets?.length > 0) {
-      rows.push(['Current Assets'])
-      reportData.assets.current_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      rows.push(['Total Current Assets', num(reportData.assets.total_current_assets).toFixed(2)])
+      add(['CURRENT ASSETS'], 'columnHeader')
+      reportData.assets.current_assets.forEach((a) => add([`  ${(a.account_number || '')} ${a.account_name}`.trim(), exportFormatCurrency(a.balance, true)], 'data'))
+      add(['TOTAL CURRENT ASSETS', exportFormatCurrency(reportData.assets.total_current_assets, true)], 'subtotal')
     }
     if (reportData.assets.fixed_assets?.length > 0) {
-      rows.push(['Fixed Assets'])
-      reportData.assets.fixed_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      rows.push(['Total Fixed Assets', num(reportData.assets.total_fixed_assets).toFixed(2)])
+      add(['FIXED (LONG TERM) ASSETS'], 'columnHeader')
+      reportData.assets.fixed_assets.forEach((a) => add([`  ${(a.account_number || '')} ${a.account_name}`.trim(), exportFormatCurrency(a.balance, true)], 'data'))
+      add(['TOTAL FIXED ASSETS', exportFormatCurrency(reportData.assets.total_fixed_assets, true)], 'subtotal')
     }
     if (reportData.assets.other_assets?.length > 0) {
-      rows.push(['Other Assets'])
-      reportData.assets.other_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      rows.push(['Total Other Assets', num(reportData.assets.total_other_assets).toFixed(2)])
+      add(['OTHER ASSETS'], 'columnHeader')
+      reportData.assets.other_assets.forEach((a) => add([`  ${(a.account_number || '')} ${a.account_name}`.trim(), exportFormatCurrency(a.balance, true)], 'data'))
+      add(['TOTAL OTHER ASSETS', exportFormatCurrency(reportData.assets.total_other_assets, true)], 'subtotal')
     }
-    rows.push(['TOTAL ASSETS', num(reportData.assets.total_assets).toFixed(2)])
-    rows.push([])
-    rows.push(['LIABILITIES'])
+    add(['TOTAL ASSETS', exportFormatCurrency(reportData.assets.total_assets, true)], 'finalTotal')
+    add([], 'empty')
+    add(['LIABILITIES AND OWNER\'S EQUITY'], 'section')
     if (reportData.liabilities.current_liabilities?.length > 0) {
-      rows.push(['Current Liabilities'])
-      reportData.liabilities.current_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      rows.push(['Total Current Liabilities', num(reportData.liabilities.total_current_liabilities).toFixed(2)])
+      add(['CURRENT LIABILITIES'], 'columnHeader')
+      reportData.liabilities.current_liabilities.forEach((a) => add([`  ${(a.account_number || '')} ${a.account_name}`.trim(), exportFormatCurrency(a.balance, true)], 'data'))
+      add(['TOTAL CURRENT LIABILITIES', exportFormatCurrency(reportData.liabilities.total_current_liabilities, true)], 'subtotal')
     }
     if (reportData.liabilities.long_term_liabilities?.length > 0) {
-      rows.push(['Long-term Liabilities'])
-      reportData.liabilities.long_term_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      rows.push(['Total Long-term Liabilities', num(reportData.liabilities.total_long_term_liabilities).toFixed(2)])
+      add(['LONG TERM LIABILITIES'], 'columnHeader')
+      reportData.liabilities.long_term_liabilities.forEach((a) => add([`  ${(a.account_number || '')} ${a.account_name}`.trim(), exportFormatCurrency(a.balance, true)], 'data'))
+      add(['TOTAL LONG-TERM LIABILITIES', exportFormatCurrency(reportData.liabilities.total_long_term_liabilities, true)], 'subtotal')
     }
-    rows.push(['TOTAL LIABILITIES', num(reportData.liabilities.total_liabilities).toFixed(2)])
-    rows.push([])
-    rows.push(['EQUITY'])
-    reportData.equity.equity_accounts?.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
+    add(['OWNER\'S EQUITY'], 'columnHeader')
+    reportData.equity.equity_accounts?.forEach((a) => add([`  ${(a.account_number || '')} ${a.account_name}`.trim(), exportFormatCurrency(a.balance, true)], 'data'))
     if (typeof reportData.equity.inventory_valuation_adjustment === 'number' && Math.abs(reportData.equity.inventory_valuation_adjustment) >= 0.005) {
-      rows.push(['  Inventory valuation adjustment', num(reportData.equity.inventory_valuation_adjustment).toFixed(2)])
+      add(['  Inventory valuation adjustment', exportFormatCurrency(reportData.equity.inventory_valuation_adjustment, true)], 'data')
     }
-    rows.push(['Current Year Earnings', num(reportData.equity.current_year_earnings).toFixed(2)])
-    rows.push(['TOTAL EQUITY', num(reportData.equity.total_equity).toFixed(2)])
-    rows.push([])
-    rows.push(['TOTAL LIABILITIES AND EQUITY', (num(reportData.liabilities.total_liabilities) + num(reportData.equity.total_equity)).toFixed(2)])
+    add(['Current Year Earnings', exportFormatCurrency(reportData.equity.current_year_earnings, true)], 'data')
+    add(['TOTAL OWNER\'S EQUITY', exportFormatCurrency(reportData.equity.total_equity, true)], 'subtotal')
+    const totalLE = num(reportData.liabilities.total_liabilities) + num(reportData.equity.total_equity)
+    add(['TOTAL LIABILITIES AND OWNER\'S EQUITY', exportFormatCurrency(totalLE, true)], 'finalTotal')
+    const totalAssets = num(reportData.assets.total_assets)
+    const totalLiab = num(reportData.liabilities.total_liabilities)
+    const totalEquity = num(reportData.equity.total_equity)
+    const currentAssets = num(reportData.assets.total_current_assets)
+    const currentLiab = num(reportData.liabilities.total_current_liabilities)
+    add([], 'empty')
+    add(['COMMON FINANCIAL RATIO'], 'section')
+    add(['Debt Ratio (Total Liabilities / Total Assets)', totalAssets !== 0 ? (totalLiab / totalAssets).toFixed(2) : '-'], 'data')
+    add(['Current Ratio (Current Assets / Current Liabilities)', currentLiab !== 0 ? (currentAssets / currentLiab).toFixed(2) : '-'], 'data')
+    add(['Working Capital (Current Assets - Current Liabilities)', exportFormatCurrency(currentAssets - currentLiab, true)], 'data')
+    add(['Assets-to-Equity Ratio (Total Assets / Owner\'s Equity)', totalEquity !== 0 ? (totalAssets / totalEquity).toFixed(2) : '-'], 'data')
+    add(['Debt-to-Equity Ratio (Total Liabilities / Owner\'s Equity)', totalEquity !== 0 ? (totalLiab / totalEquity).toFixed(2) : '-'], 'data')
+    return { rows, rowTypes }
+  }
+
+  const handleExport = () => {
+    if (!reportData) { showToast('No report data to export', 'error'); return }
+    const { rows } = getBalanceSheetExport()
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = window.URL.createObjectURL(blob)
@@ -3644,58 +3529,10 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
   }
 
   const handleSaveToDirectory = async () => {
-    if (!reportData) {
-      showToast('No report data to save', 'error')
-      return
-    }
+    if (!reportData) { showToast('No report data to save', 'error'); return }
     setSaving?.(true)
     try {
-      const rows = [
-        ['Balance Sheet'],
-        [`As of: ${new Date(reportData.as_of_date).toLocaleDateString()}`],
-        [],
-        ['ASSETS']
-      ]
-      const num = (v) => (Number(v) || 0)
-      if (reportData.assets.current_assets?.length > 0) {
-        rows.push(['Current Assets'])
-        reportData.assets.current_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-        rows.push(['Total Current Assets', num(reportData.assets.total_current_assets).toFixed(2)])
-      }
-      if (reportData.assets.fixed_assets?.length > 0) {
-        rows.push(['Fixed Assets'])
-        reportData.assets.fixed_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-        rows.push(['Total Fixed Assets', num(reportData.assets.total_fixed_assets).toFixed(2)])
-      }
-      if (reportData.assets.other_assets?.length > 0) {
-        rows.push(['Other Assets'])
-        reportData.assets.other_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-        rows.push(['Total Other Assets', num(reportData.assets.total_other_assets).toFixed(2)])
-      }
-      rows.push(['TOTAL ASSETS', num(reportData.assets.total_assets).toFixed(2)])
-      rows.push([])
-      rows.push(['LIABILITIES'])
-      if (reportData.liabilities.current_liabilities?.length > 0) {
-        rows.push(['Current Liabilities'])
-        reportData.liabilities.current_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-        rows.push(['Total Current Liabilities', num(reportData.liabilities.total_current_liabilities).toFixed(2)])
-      }
-      if (reportData.liabilities.long_term_liabilities?.length > 0) {
-        rows.push(['Long-term Liabilities'])
-        reportData.liabilities.long_term_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-        rows.push(['Total Long-term Liabilities', num(reportData.liabilities.total_long_term_liabilities).toFixed(2)])
-      }
-      rows.push(['TOTAL LIABILITIES', num(reportData.liabilities.total_liabilities).toFixed(2)])
-      rows.push([])
-      rows.push(['EQUITY'])
-      reportData.equity.equity_accounts?.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      if (typeof reportData.equity.inventory_valuation_adjustment === 'number' && Math.abs(reportData.equity.inventory_valuation_adjustment) >= 0.005) {
-        rows.push(['  Inventory valuation adjustment', num(reportData.equity.inventory_valuation_adjustment).toFixed(2)])
-      }
-      rows.push(['Current Year Earnings', num(reportData.equity.current_year_earnings).toFixed(2)])
-      rows.push(['TOTAL EQUITY', num(reportData.equity.total_equity).toFixed(2)])
-      rows.push([])
-      rows.push(['TOTAL LIABILITIES AND EQUITY', (num(reportData.liabilities.total_liabilities) + num(reportData.equity.total_equity)).toFixed(2)])
+      const { rows } = getBalanceSheetExport()
       const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
       const res = await fetch('/api/accounting/reports/save', {
         method: 'POST',
@@ -3719,61 +3556,24 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
   }
 
   const handleExportExcel = async () => {
-    if (!reportData) {
-      showToast('No report data to export', 'error')
-      return
-    }
-    const rows = [
-      ['Balance Sheet'],
-      [`As of: ${new Date(reportData.as_of_date).toLocaleDateString()}`],
-      [],
-      ['ASSETS']
-    ]
-    const num = (v) => (Number(v) || 0)
-    if (reportData.assets.current_assets?.length > 0) {
-      rows.push(['Current Assets'])
-      reportData.assets.current_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      rows.push(['Total Current Assets', num(reportData.assets.total_current_assets).toFixed(2)])
-    }
-    if (reportData.assets.fixed_assets?.length > 0) {
-      rows.push(['Fixed Assets'])
-      reportData.assets.fixed_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      rows.push(['Total Fixed Assets', num(reportData.assets.total_fixed_assets).toFixed(2)])
-    }
-    if (reportData.assets.other_assets?.length > 0) {
-      rows.push(['Other Assets'])
-      reportData.assets.other_assets.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      rows.push(['Total Other Assets', num(reportData.assets.total_other_assets).toFixed(2)])
-    }
-    rows.push(['TOTAL ASSETS', num(reportData.assets.total_assets).toFixed(2)])
-    rows.push([])
-    rows.push(['LIABILITIES'])
-    if (reportData.liabilities.current_liabilities?.length > 0) {
-      rows.push(['Current Liabilities'])
-      reportData.liabilities.current_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      rows.push(['Total Current Liabilities', num(reportData.liabilities.total_current_liabilities).toFixed(2)])
-    }
-    if (reportData.liabilities.long_term_liabilities?.length > 0) {
-      rows.push(['Long-term Liabilities'])
-      reportData.liabilities.long_term_liabilities.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-      rows.push(['Total Long-term Liabilities', num(reportData.liabilities.total_long_term_liabilities).toFixed(2)])
-    }
-    rows.push(['TOTAL LIABILITIES', num(reportData.liabilities.total_liabilities).toFixed(2)])
-    rows.push([])
-    rows.push(['EQUITY'])
-    reportData.equity.equity_accounts?.forEach((a) => rows.push([`  ${a.account_number || ''} ${a.account_name}`, num(a.balance).toFixed(2)]))
-    if (typeof reportData.equity.inventory_valuation_adjustment === 'number' && Math.abs(reportData.equity.inventory_valuation_adjustment) >= 0.005) {
-      rows.push(['  Inventory valuation adjustment', num(reportData.equity.inventory_valuation_adjustment).toFixed(2)])
-    }
-    rows.push(['Current Year Earnings', num(reportData.equity.current_year_earnings).toFixed(2)])
-    rows.push(['TOTAL EQUITY', num(reportData.equity.total_equity).toFixed(2)])
-    rows.push([])
-    rows.push(['TOTAL LIABILITIES AND EQUITY', (num(reportData.liabilities.total_liabilities) + num(reportData.equity.total_equity)).toFixed(2)])
+    if (!reportData) { showToast('No report data to export', 'error'); return }
     try {
+      const { rows } = getBalanceSheetExport()
       await downloadExcel(rows, exportFilename('Balance-Sheet', filters.as_of_date, null, 'xlsx'))
       showToast('Report exported to Excel', 'success')
     } catch (e) {
       showToast('Excel export failed', 'error')
+    }
+  }
+
+  const handleExportPdf = () => {
+    if (!reportData) { showToast('No report data to export', 'error'); return }
+    try {
+      const { rows, rowTypes } = getBalanceSheetExport()
+      exportReportToPdf(rows, exportFilename('Balance-Sheet', filters.as_of_date, null, 'pdf'), rowTypes)
+      showToast('Report exported to PDF', 'success')
+    } catch (e) {
+      showToast(e?.message || 'PDF export failed', 'error')
     }
   }
 
@@ -3791,9 +3591,10 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
     generateReport: handleGenerateReport,
     exportToCsv: handleExport,
     exportToExcel: handleExportExcel,
+    exportToPdf: handleExportPdf,
     print: () => window.print(),
     saveToDirectory: handleSaveToDirectory
-  }), [handleGenerateReport, handleExport, handleExportExcel, handleSaveToDirectory])
+  }), [handleGenerateReport, handleExport, handleExportExcel, handleExportPdf, handleSaveToDirectory])
 
   const filtersSection = (
     <>
@@ -3826,17 +3627,11 @@ const BalanceSheetTab = forwardRef(function BalanceSheetTab(
                 <h3 style={{ ...formTitleStyle(isDarkMode), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
                 <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} dateLabel={`As of ${getAsOfLabel()} — Compared to: ${getPriorLabel()}`} />
               </div>
-              <div style={{ width: '100%' }}>
-                <BalanceSheetChart data={reportData} />
-              </div>
             </div>
           ) : (
             <>
               <div style={{ marginBottom: '24px', width: '100%' }}>
                 <BalanceSheetTable data={reportData} onAccountClick={handleAccountClick} dateLabel={`As of ${getAsOfLabel()}`} />
-              </div>
-              <div style={{ width: '100%' }}>
-                <BalanceSheetChart data={reportData} />
               </div>
             </>
           )}
@@ -3928,39 +3723,45 @@ const CashFlowTab = forwardRef(function CashFlowTab(
     }
   }
 
-  const handleExport = () => {
-    if (!reportData) {
-      showToast('No report data to export', 'error')
-      return
-    }
+  // Build Cash Flow rows to match CashFlowTable: Cash at beginning, sections (receipts/paid), Net Increase, Cash at end
+  const getCashFlowExport = () => {
     const op = reportData.operating_activities || {}
     const inv = reportData.investing_activities || {}
     const fin = reportData.financing_activities || {}
     const num = (v) => (Number(v) || 0)
-    const rows = [
-      ['Cash Flow Statement'],
-      [`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`],
-      [],
-      ['OPERATING ACTIVITIES'],
-      ['Net Income', num(op.net_income).toFixed(2)]
-    ]
-    ;(op.adjustments || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-    ;(op.working_capital_changes || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-    rows.push(['Net Cash from Operating Activities', num(op.net_cash_from_operations).toFixed(2)])
-    rows.push([])
-    rows.push(['INVESTING ACTIVITIES'])
-    if ((inv.items || []).length === 0) rows.push(['  No investing activities'])
-    else (inv.items || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-    rows.push(['Net Cash from Investing Activities', num(inv.net_cash_from_investing).toFixed(2)])
-    rows.push([])
-    rows.push(['FINANCING ACTIVITIES'])
-    if ((fin.items || []).length === 0) rows.push(['  No financing activities'])
-    else (fin.items || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-    rows.push(['Net Cash from Financing Activities', num(fin.net_cash_from_financing).toFixed(2)])
-    rows.push([])
-    rows.push(['NET CHANGE IN CASH', num(reportData.net_change_in_cash).toFixed(2)])
-    rows.push(['Beginning Cash', num(reportData.beginning_cash).toFixed(2)])
-    rows.push(['ENDING CASH', num(reportData.ending_cash).toFixed(2)])
+    const receipts = (s) => s.cash_receipts_from || []
+    const paid = (s) => s.cash_paid_for || []
+    const rows = []
+    const rowTypes = []
+    const add = (r, t) => { rows.push(r); rowTypes.push(t) }
+    add(['Cash Flow Statement'], 'title')
+    add([`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`], 'subtitle')
+    add([], 'empty')
+    add(['Activity', 'Amount'], 'columnHeader')
+    add(['Cash at beginning of year', exportFormatCurrency(reportData.beginning_cash ?? 0, true)], 'data')
+    const renderSection = (title, section, netLabel, netAmount) => {
+      add([title], 'section')
+      add(['Cash receipts from:'], 'columnHeader')
+      const rec = receipts(section)
+      if (rec.length === 0) add(['  No receipts'], 'data')
+      else rec.forEach((item) => add([`  ${item.description || ''}`, exportFormatCurrency(item.amount)], 'data'))
+      add(['Cash paid for:'], 'columnHeader')
+      const pay = paid(section)
+      if (pay.length === 0) add(['  No payments'], 'data')
+      else pay.forEach((item) => add([`  ${item.description || ''}`, exportFormatCurrency(item.amount)], 'data'))
+      add([netLabel, exportFormatCurrency(netAmount, true)], 'subtotal')
+    }
+    renderSection('Operations', op, 'Net Cash Flow from Operations', op.net_cash_from_operations ?? 0)
+    renderSection('Investing Activities', inv, 'Net Cash Flow from Investing Activities', inv.net_cash_from_investing ?? 0)
+    renderSection('Financing Activities', fin, 'Net Cash Flow from Financing Activities', fin.net_cash_from_financing ?? 0)
+    add(['Net Increase in Cash', exportFormatCurrency(reportData.net_change_in_cash ?? 0, true)], 'finalTotal')
+    add(['Cash at end of year', exportFormatCurrency(reportData.ending_cash ?? 0, true)], 'data')
+    return { rows, rowTypes }
+  }
+
+  const handleExport = () => {
+    if (!reportData) { showToast('No report data to export', 'error'); return }
+    const { rows } = getCashFlowExport()
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = window.URL.createObjectURL(blob)
@@ -3973,40 +3774,10 @@ const CashFlowTab = forwardRef(function CashFlowTab(
   }
 
   const handleSaveToDirectory = async () => {
-    if (!reportData) {
-      showToast('No report data to save', 'error')
-      return
-    }
+    if (!reportData) { showToast('No report data to save', 'error'); return }
     setSaving?.(true)
     try {
-      const op = reportData.operating_activities || {}
-      const inv = reportData.investing_activities || {}
-      const fin = reportData.financing_activities || {}
-      const num = (v) => (Number(v) || 0)
-      const rows = [
-        ['Cash Flow Statement'],
-        [`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`],
-        [],
-        ['OPERATING ACTIVITIES'],
-        ['Net Income', num(op.net_income).toFixed(2)]
-      ]
-      ;(op.adjustments || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-      ;(op.working_capital_changes || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-      rows.push(['Net Cash from Operating Activities', num(op.net_cash_from_operations).toFixed(2)])
-      rows.push([])
-      rows.push(['INVESTING ACTIVITIES'])
-      if ((inv.items || []).length === 0) rows.push(['  No investing activities'])
-      else (inv.items || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-      rows.push(['Net Cash from Investing Activities', num(inv.net_cash_from_investing).toFixed(2)])
-      rows.push([])
-      rows.push(['FINANCING ACTIVITIES'])
-      if ((fin.items || []).length === 0) rows.push(['  No financing activities'])
-      else (fin.items || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-      rows.push(['Net Cash from Financing Activities', num(fin.net_cash_from_financing).toFixed(2)])
-      rows.push([])
-      rows.push(['NET CHANGE IN CASH', num(reportData.net_change_in_cash).toFixed(2)])
-      rows.push(['Beginning Cash', num(reportData.beginning_cash).toFixed(2)])
-      rows.push(['ENDING CASH', num(reportData.ending_cash).toFixed(2)])
+      const { rows } = getCashFlowExport()
       const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
       const res = await fetch('/api/accounting/reports/save', {
         method: 'POST',
@@ -4030,43 +3801,24 @@ const CashFlowTab = forwardRef(function CashFlowTab(
   }
 
   const handleExportExcel = async () => {
-    if (!reportData) {
-      showToast('No report data to export', 'error')
-      return
-    }
-    const op = reportData.operating_activities || {}
-    const inv = reportData.investing_activities || {}
-    const fin = reportData.financing_activities || {}
-    const num = (v) => (Number(v) || 0)
-    const rows = [
-      ['Cash Flow Statement'],
-      [`Period: ${new Date(reportData.start_date).toLocaleDateString()} - ${new Date(reportData.end_date).toLocaleDateString()}`],
-      [],
-      ['OPERATING ACTIVITIES'],
-      ['Net Income', num(op.net_income).toFixed(2)]
-    ]
-    ;(op.adjustments || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-    ;(op.working_capital_changes || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-    rows.push(['Net Cash from Operating Activities', num(op.net_cash_from_operations).toFixed(2)])
-    rows.push([])
-    rows.push(['INVESTING ACTIVITIES'])
-    if ((inv.items || []).length === 0) rows.push(['  No investing activities'])
-    else (inv.items || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-    rows.push(['Net Cash from Investing Activities', num(inv.net_cash_from_investing).toFixed(2)])
-    rows.push([])
-    rows.push(['FINANCING ACTIVITIES'])
-    if ((fin.items || []).length === 0) rows.push(['  No financing activities'])
-    else (fin.items || []).forEach((item) => rows.push([`  ${item.description}`, num(item.amount).toFixed(2)]))
-    rows.push(['Net Cash from Financing Activities', num(fin.net_cash_from_financing).toFixed(2)])
-    rows.push([])
-    rows.push(['NET CHANGE IN CASH', num(reportData.net_change_in_cash).toFixed(2)])
-    rows.push(['Beginning Cash', num(reportData.beginning_cash).toFixed(2)])
-    rows.push(['ENDING CASH', num(reportData.ending_cash).toFixed(2)])
+    if (!reportData) { showToast('No report data to export', 'error'); return }
     try {
+      const { rows } = getCashFlowExport()
       await downloadExcel(rows, exportFilename('Cash-Flow-Statement', filters.start_date, filters.end_date, 'xlsx'))
       showToast('Report exported to Excel', 'success')
     } catch (e) {
       showToast('Excel export failed', 'error')
+    }
+  }
+
+  const handleExportPdf = () => {
+    if (!reportData) { showToast('No report data to export', 'error'); return }
+    try {
+      const { rows, rowTypes } = getCashFlowExport()
+      exportReportToPdf(rows, exportFilename('Cash-Flow-Statement', filters.start_date, filters.end_date, 'pdf'), rowTypes)
+      showToast('Report exported to PDF', 'success')
+    } catch (e) {
+      showToast(e?.message || 'PDF export failed', 'error')
     }
   }
 
@@ -4088,9 +3840,10 @@ const CashFlowTab = forwardRef(function CashFlowTab(
     generateReport: handleGenerateReport,
     exportToCsv: handleExport,
     exportToExcel: handleExportExcel,
+    exportToPdf: handleExportPdf,
     print: () => window.print(),
     saveToDirectory: handleSaveToDirectory
-  }), [handleGenerateReport, handleExport, handleExportExcel, handleSaveToDirectory])
+  }), [handleGenerateReport, handleExport, handleExportExcel, handleExportPdf, handleSaveToDirectory])
 
   const filtersSection = (
     <>
@@ -4118,17 +3871,11 @@ const CashFlowTab = forwardRef(function CashFlowTab(
                 <h3 style={{ ...formTitleStyle(_isDark), fontSize: '18px', marginBottom: '16px' }}>Current Period Detail</h3>
                 <CashFlowTable data={reportData} onAccountClick={handleAccountClick} periodLabel={`${getPeriodLabel()} — Compared to: ${getPriorLabel()}`} />
               </div>
-              <div style={{ width: '100%' }}>
-                <CashFlowChart data={reportData} />
-              </div>
             </div>
           ) : (
             <>
               <div style={{ marginBottom: '24px', width: '100%' }}>
                 <CashFlowTable data={reportData} onAccountClick={handleAccountClick} periodLabel={getPeriodLabel()} />
-              </div>
-              <div style={{ width: '100%' }}>
-                <CashFlowChart data={reportData} />
               </div>
             </>
           )}
@@ -4158,186 +3905,6 @@ const CashFlowTab = forwardRef(function CashFlowTab(
     </div>
   )
 })
-
-// Bills Tab
-function BillsTab({ dateRange, formatCurrency, getAuthHeaders }) {
-  const [bills, setBills] = useState([])
-  const [loading, setLoading] = useState(true)
-  const isDarkMode = document.documentElement.classList.contains('dark-theme')
-  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
-  const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
-  const cardBg = isDarkMode ? '#2a2a2a' : 'white'
-
-  useEffect(() => {
-    loadBills()
-  }, [dateRange])
-
-  const loadBills = async () => {
-    try {
-      setLoading(true)
-      const response = await fetch(
-        `/api/accounting/bills?start_date=${dateRange.start_date}&end_date=${dateRange.end_date}`,
-        { headers: getAuthHeaders() }
-      )
-      if (response.ok) {
-        const data = await response.json()
-        setBills(Array.isArray(data) ? data : (data?.data ?? []))
-      }
-    } catch (err) {
-      console.error('Error loading bills:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
-      <div style={{ marginBottom: '24px', flexShrink: 0 }}>
-        <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Bills</h1>
-        <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Amounts you owe to vendors for the selected date range. Track due dates and payment status.</p>
-        </div>
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9', boxShadow: isDarkMode ? '0 1px 0 #3a3a3a' : '0 1px 0 #e0e0e0' }}>
-              <tr>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Bill #</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Date</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Vendor</th>
-                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Total</th>
-                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
-                <th style={{ padding: '12px', textAlign: 'center', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
-                  Loading…
-                </td>
-              </tr>
-            ) : bills.length === 0 ? (
-              <tr>
-                <td colSpan={6} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
-                  No bills found for this period.
-                </td>
-              </tr>
-            ) : (
-              bills.map(bill => (
-                <tr key={bill.id} style={{ borderBottom: `1px solid ${borderColor}` }}>
-                  <td style={{ padding: '12px', color: textColor }}>{bill.bill_number}</td>
-                  <td style={{ padding: '12px', color: textColor }}>{bill.bill_date}</td>
-                  <td style={{ padding: '12px', color: textColor }}>{bill.vendor_name || '-'}</td>
-                  <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>{formatCurrency(bill.total_amount || 0)}</td>
-                  <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>{formatCurrency(bill.balance_due || 0)}</td>
-                  <td style={{ padding: '12px', textAlign: 'center', color: textColor }}>
-                    <span style={{
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      backgroundColor: bill.status === 'paid' ? '#10b981' : bill.status === 'partial' ? '#f59e0b' : '#6b7280',
-                      color: 'white',
-                      fontSize: '12px'
-                    }}>
-                      {bill.status || 'draft'}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            )}
-            </tbody>
-          </table>
-          </div>
-        </div>
-    </div>
-  )
-}
-
-// Customers Tab – uses same source as Customers page (/api/customers) so data matches
-function CustomersTab({ formatCurrency, getAuthHeaders }) {
-  const [customers, setCustomers] = useState([])
-  const [loading, setLoading] = useState(true)
-  const isDarkMode = document.documentElement.classList.contains('dark-theme')
-  const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
-  const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
-  const cardBg = isDarkMode ? '#2a2a2a' : 'white'
-
-  useEffect(() => {
-    loadCustomers()
-  }, [])
-
-  const loadCustomers = async () => {
-    try {
-      setLoading(true)
-      const response = await fetch('/api/customers', { headers: getAuthHeaders() })
-      if (response.ok) {
-        const json = await response.json()
-        const raw = Array.isArray(json.data) ? json.data : (json.columns && Array.isArray(json.data) ? json.data : [])
-        setCustomers(raw.map(row => ({
-          id: row.customer_id ?? row.id,
-          customer_number: String(row.customer_id ?? row.customer_number ?? row.id ?? ''),
-          display_name: row.customer_name ?? row.display_name ?? row.name ?? '-',
-          email: row.email ?? '',
-          phone: row.phone ?? '',
-          address: row.address ?? '',
-          account_balance: row.account_balance ?? 0
-        })))
-      }
-    } catch (err) {
-      console.error('Error loading customers:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
-      <div style={{ marginBottom: '24px', flexShrink: 0 }}>
-        <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Customers</h1>
-        <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Same list as the main Customers page. Use for accounting context and linking to invoices.</p>
-        </div>
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: `1px solid ${borderColor}`, borderRadius: '8px', overflow: 'hidden' }}>
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: isDarkMode ? '#1f1f1f' : '#f9f9f9', boxShadow: isDarkMode ? '0 1px 0 #3a3a3a' : '0 1px 0 #e0e0e0' }}>
-              <tr>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Customer #</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Name</th>
-                <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Email</th>
-              <th style={{ padding: '12px', textAlign: 'left', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Phone</th>
-                <th style={{ padding: '12px', textAlign: 'right', color: textColor, borderBottom: `1px solid ${borderColor}` }}>Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
-                  Loading…
-                </td>
-              </tr>
-            ) : customers.length === 0 ? (
-              <tr>
-                <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: textColor, opacity: 0.8 }}>
-                  No customers found. Add customers from the main Customers section.
-                </td>
-              </tr>
-            ) : (
-              customers.map(customer => (
-                <tr key={customer.id} style={{ borderBottom: `1px solid ${borderColor}` }}>
-                  <td style={{ padding: '12px', color: textColor }}>{customer.customer_number}</td>
-                  <td style={{ padding: '12px', color: textColor }}>{customer.display_name}</td>
-                  <td style={{ padding: '12px', color: textColor }}>{customer.email || '-'}</td>
-                  <td style={{ padding: '12px', color: textColor }}>{customer.phone || '-'}</td>
-                  <td style={{ padding: '12px', textAlign: 'right', color: textColor }}>{formatCurrency(customer.account_balance || 0)}</td>
-                </tr>
-              ))
-            )}
-            </tbody>
-          </table>
-          </div>
-        </div>
-    </div>
-  )
-}
 
 // Vendors Tab
 function VendorsTab({ formatCurrency, getAuthHeaders }) {

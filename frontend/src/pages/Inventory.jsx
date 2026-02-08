@@ -440,7 +440,10 @@ function Inventory() {
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       barcodeObjectUrlRef.current = url
-      setBarcodePreview({ product, imageDataUrl: url, blob })
+      // Use saved barcode from header so table/preview show the actual stored value (e.g. 12-digit for EAN13)
+      const savedBarcode = res.headers.get('X-Barcode-Value')
+      const productForPreview = savedBarcode != null ? { ...product, barcode: savedBarcode } : product
+      setBarcodePreview({ product: productForPreview, imageDataUrl: url, blob })
       // Backend may have saved the barcode to the product when it had none; refresh table so the row updates
       invalidateInventory()
     } catch (e) {

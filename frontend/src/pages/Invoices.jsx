@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import invoiceService from '../services/invoiceService'
-import customerService from '../services/customerService'
 import accountService from '../services/accountService'
 import InvoiceTable from '../components/invoices/InvoiceTable'
 import InvoiceForm from '../components/invoices/InvoiceForm'
 import InvoiceFilters from '../components/invoices/InvoiceFilters'
 import Modal from '../components/common/Modal'
 import Button from '../components/common/Button'
-import LoadingSpinner from '../components/common/LoadingSpinner'
 import { useToast } from '../contexts/ToastContext'
 
 function InvoiceDetailView({ invoice }) {
@@ -192,12 +190,34 @@ function Invoices() {
 
   async function fetchInitialData() {
     try {
-      const [custRes, accountsData, _taxRates] = await Promise.all([
-        customerService.getAllCustomers({ is_active: true, limit: 500 }),
+      const token = localStorage.getItem('sessionToken')
+      const headers = { 'Content-Type': 'application/json' }
+      if (token) headers['X-Session-Token'] = token
+      const [posCustRes, accountsData, _taxRates] = await Promise.all([
+        fetch('/api/customers?limit=1000', { headers }).then(async (r) => {
+          if (!r.ok) return { data: [] }
+          const json = await r.json()
+          const rows = Array.isArray(json.data) ? json.data : []
+          return {
+            customers: rows.map((c) => ({
+              id: c.customer_id ?? c.id,
+              customer_number: String(c.customer_id ?? c.id ?? ''),
+              display_name: c.customer_name ?? c.display_name ?? '',
+              company_name: c.company_name ?? '',
+              first_name: c.first_name ?? '',
+              last_name: c.last_name ?? '',
+              email: c.email ?? '',
+              phone: c.phone ?? '',
+              account_balance: 0,
+              payment_terms_days: 30,
+              payment_terms: 'Net 30'
+            }))
+          }
+        }),
         accountService.getAllAccounts({ account_type: 'Revenue', is_active: true }),
         Promise.resolve([])
       ])
-      setCustomers(custRes.customers || [])
+      setCustomers(posCustRes.customers || [])
       setRevenueAccounts(Array.isArray(accountsData) ? accountsData : [])
       setTaxRates(Array.isArray(_taxRates) ? _taxRates : [])
     } catch (err) {
@@ -313,47 +333,48 @@ function Invoices() {
   const totalPages = pagination.total_pages || 1
   const total = pagination.total || 0
 
-  if (loading && invoices.length === 0) {
-    return (
-      <div style={{ padding: '32px' }}>
-        <LoadingSpinner size="lg" text="Loading invoices..." />
-      </div>
-    )
-  }
-
   return (
-    <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 16px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: 0 }}>
+      <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ fontSize: '28px', fontWeight: 700, color: isDarkMode ? '#fff' : '#111', margin: 0 }}>Invoices</h1>
+          <h1 style={{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>Invoices</h1>
           <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Create and manage sales invoices</p>
         </div>
         <Button onClick={() => setIsCreateModalOpen(true)}>+ New Invoice</Button>
       </div>
 
-      <InvoiceFilters filters={filters} customers={customers} onFilterChange={setFilters} onClearFilters={handleClearFilters} />
+      <div style={{ flexShrink: 0 }}>
+        <InvoiceFilters filters={filters} customers={customers} onFilterChange={setFilters} onClearFilters={handleClearFilters} />
+      </div>
 
       <div
         style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
           backgroundColor: isDarkMode ? '#2a2a2a' : 'white',
           borderRadius: '8px',
           boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-          overflow: 'hidden'
+          border: isDarkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.06)'
         }}
       >
         <div
           style={{
             padding: '16px 24px',
-            borderBottom: '1px solid ' + (isDarkMode ? '#3a3a3a' : '#e5e7eb'),
+            borderBottom: `1px solid ${isDarkMode ? '#3a3a3a' : '#e5e7eb'}`,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: '16px'
+            gap: '16px',
+            flexShrink: 0
           }}
         >
           <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280', margin: 0 }}>
-            Showing {invoices.length} of {total} invoices
+            {loading ? 'Loading...' : `Showing ${invoices.length} of ${total} invoices`}
+            {!loading && filters.start_date && filters.end_date && ` · ${new Date(filters.start_date).toLocaleDateString()} – ${new Date(filters.end_date).toLocaleDateString()}`}
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Button type="button" size="sm" variant="secondary" onClick={() => handlePageChange(page - 1)} disabled={page <= 1}>
@@ -368,13 +389,10 @@ function Invoices() {
           </div>
         </div>
 
-        {loading ? (
-          <div style={{ padding: '48px' }}>
-            <LoadingSpinner size="md" text="Loading..." />
-          </div>
-        ) : (
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           <InvoiceTable
             invoices={invoices}
+            loading={loading}
             onView={(item) => {
               setSelectedInvoice(item)
               setIsViewModalOpen(true)
@@ -388,7 +406,7 @@ function Invoices() {
             onVoid={handleVoidInvoice}
             onRecordPayment={handleRecordPayment}
           />
-        )}
+        </div>
       </div>
 
       <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Create New Invoice" size="xl">

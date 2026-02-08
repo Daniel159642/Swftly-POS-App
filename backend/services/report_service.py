@@ -321,7 +321,7 @@ class ReportService:
 
     @staticmethod
     def get_balance_sheet(as_of_date: date, establishment_id: Optional[int] = None) -> Dict[str, Any]:
-        """Generate Balance Sheet as of a specific date in template order. Inventory (1200) uses actual store stock value."""
+        """Generate Balance Sheet as of a specific date in template order. All accounts use ledger balances (Assets = Liabilities + Equity)."""
         _f = ReportService._to_float
         all_accounts = AccountRepository.find_all()
         accounts_by_number = {getattr(a, 'account_number', None): a for a in all_accounts if getattr(a, 'account_number', None)}
@@ -329,11 +329,7 @@ class ReportService:
         liability_accounts = [a for a in all_accounts if a.account_type == 'Liability' and a.is_active]
         equity_accounts = [a for a in all_accounts if a.account_type == 'Equity' and a.is_active]
 
-        store_inventory_value = get_store_inventory_value(establishment_id)
-
         def _balance(acc) -> float:
-            if getattr(acc, 'account_number', None) == '1200':
-                return _f(store_inventory_value)
             b = AccountRepository.get_account_balance(acc.id, as_of_date)
             return _f(b)
 
@@ -484,11 +480,9 @@ class ReportService:
         pl = ReportService.get_profit_loss(year_start, as_of_date)
         current_year_earnings = _f(pl.get('net_income'))
 
-        # Inventory (1200) uses actual store stock value; ledger 1200 may differ.
-        # Add equity adjustment so Assets = Liabilities + Equity (balance sheet balances).
-        equity_before_adjustment = _f(retained_earnings) + _f(current_year_earnings)
-        inventory_valuation_adjustment = _f(total_assets) - _f(total_liabilities) - _f(equity_before_adjustment)
-        total_equity = _f(equity_before_adjustment + inventory_valuation_adjustment)
+        # All balances from ledger; no equity plug. Assets = Liabilities + Equity by double-entry.
+        total_equity = _f(retained_earnings) + _f(current_year_earnings)
+        inventory_valuation_adjustment = 0.0
         balances = abs(_f(total_assets) - _f(total_liabilities + total_equity)) < 0.01
 
         # Normalize all list items so 'balance' is float

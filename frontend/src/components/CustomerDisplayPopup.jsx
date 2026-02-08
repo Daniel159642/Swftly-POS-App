@@ -647,24 +647,16 @@ function CustomerDisplayPopup({ cart, subtotal, tax, discount = 0, transactionFe
               // Double-check blob type or size
               if (blob.type === 'application/pdf' || blob.size > 0) {
                 const isExchangeCompletion = endpoint.includes('exchange_completion')
-                const downloadUrl = window.URL.createObjectURL(blob)
-                const link = document.createElement('a')
-                link.href = downloadUrl
-                link.download = isExchangeCompletion ? `exchange_receipt_order_${id}.pdf` : `receipt-${isOrder ? 'order' : 'transaction'}-${id}.pdf`
-                link.style.display = 'none'
-                document.body.appendChild(link)
-                link.click()
-                setTimeout(() => {
-                  if (link.parentNode) document.body.removeChild(link)
-                  window.URL.revokeObjectURL(downloadUrl)
-                }, 500)
-                
-                console.log('Receipt downloaded successfully')
-                if (isExchangeCompletion && creditInfo) {
-                  sessionStorage.removeItem('exchangeCreditUsed')
+                const filename = isExchangeCompletion ? `exchange_receipt_order_${id}.pdf` : `receipt-${isOrder ? 'order' : 'transaction'}-${id}.pdf`
+                const { downloadReceiptPdf } = await import('../utils/downloadReceipt')
+                const ok = await downloadReceiptPdf(blob, filename)
+                if (ok) {
+                  console.log('Receipt downloaded successfully')
+                  if (isExchangeCompletion && creditInfo) {
+                    sessionStorage.removeItem('exchangeCreditUsed')
+                  }
                 }
-                
-                return true
+                return ok
               } else {
                 console.error('Invalid blob type received:', blob.type, 'Size:', blob.size)
                 return false

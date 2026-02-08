@@ -13,10 +13,32 @@ from backend.models.invoice_model import InvoiceRepository
 from backend.models.customer_model import CustomerRepository
 
 
+def _resolve_customer_id_for_invoice(raw_id: int) -> Optional[int]:
+    """Resolve customer_id to accounting_customers.id (by id, or by POS link, or None)."""
+    if raw_id is None:
+        return None
+    ac = CustomerRepository.find_by_id(raw_id)
+    if ac:
+        return ac["id"]
+    ac = CustomerRepository.find_by_pos_customer_id(raw_id)
+    return ac["id"] if ac else None
+
+
 class InvoiceService:
     @staticmethod
     def get_all(filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        return InvoiceRepository.find_all(filters or {})
+        f = dict(filters or {})
+        if f.get("customer_id") is not None:
+            resolved = _resolve_customer_id_for_invoice(int(f["customer_id"]))
+            if resolved is None:
+                return {
+                    "invoices": [],
+                    "total": 0,
+                    "page": f.get("page", 1),
+                    "total_pages": 0,
+                }
+            f["customer_id"] = resolved
+        return InvoiceRepository.find_all(f)
 
     @staticmethod
     def get_by_id(invoice_id: int) -> Dict[str, Any]:
@@ -27,9 +49,24 @@ class InvoiceService:
 
     @staticmethod
     def create(data: Dict[str, Any], user_id: int) -> Dict[str, Any]:
-        customer = CustomerRepository.find_by_id(data.get("customer_id"))
+        raw_customer_id = data.get("customer_id")
+        if raw_customer_id is None:
+            raise ValueError("Customer is required")
+        customer = CustomerRepository.find_by_id(raw_customer_id)
         if not customer:
-            raise ValueError("Customer not found")
+            customer = CustomerRepository.find_by_pos_customer_id(raw_customer_id)
+            if customer:
+                data = {**data, "customer_id": customer["id"]}
+            else:
+                try:
+                    new_ac = CustomerRepository.create(
+                        {"customer_id": raw_customer_id, "customer_type": "individual"},
+                        user_id,
+                    )
+                    data = {**data, "customer_id": new_ac["id"]}
+                    customer = new_ac
+                except Exception as e:
+                    raise ValueError(f"Customer not found and could not create from POS: {e}")
         if not customer.get("is_active", True):
             raise ValueError("Cannot create invoice for inactive customer")
 

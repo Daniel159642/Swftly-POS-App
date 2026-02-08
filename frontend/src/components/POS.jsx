@@ -1232,23 +1232,8 @@ function POS({ employeeId, employeeName }) {
           
           // Double-check blob type or size
           if (blob.type === 'application/pdf' || blob.size > 0) {
-            const url = window.URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = `receipt_${orderNumber}.pdf`
-            a.style.display = 'none' // Hide the link
-            document.body.appendChild(a)
-            
-            // Use setTimeout to ensure the link is fully added to DOM
-            setTimeout(() => {
-              a.click()
-              // Clean up after a delay to ensure download starts
-              setTimeout(() => {
-                window.URL.revokeObjectURL(url)
-                document.body.removeChild(a)
-              }, 100)
-            }, 10)
-            return true
+            const { downloadReceiptPdf } = await import('../utils/downloadReceipt')
+            return downloadReceiptPdf(blob, `receipt_${orderNumber}.pdf`)
           } else {
             console.error('Invalid blob type received:', blob.type, 'Size:', blob.size)
             return false
@@ -1285,26 +1270,11 @@ function POS({ employeeId, employeeName }) {
           
           // Double-check blob type or size
           if (blob.type === 'application/pdf' || blob.size > 0) {
-            const url = window.URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
             const filename = orderNumber 
               ? `receipt_${orderNumber}.pdf`
               : `receipt_transaction_${transactionId}.pdf`
-            a.download = filename
-            a.style.display = 'none' // Hide the link
-            document.body.appendChild(a)
-            
-            // Use setTimeout to ensure the link is fully added to DOM
-            setTimeout(() => {
-              a.click()
-              // Clean up after a delay to ensure download starts
-              setTimeout(() => {
-                window.URL.revokeObjectURL(url)
-                document.body.removeChild(a)
-              }, 100)
-            }, 10)
-            return true
+            const { downloadReceiptPdf } = await import('../utils/downloadReceipt')
+            return downloadReceiptPdf(blob, filename)
           } else {
             console.error('Invalid blob type received:', blob.type, 'Size:', blob.size)
             return false
@@ -4864,9 +4834,20 @@ function POS({ employeeId, employeeName }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <button
                 type="button"
-                onClick={() => {
-                  if (orderPlacedPayLater.orderId) {
-                    window.open(`/api/receipt/${orderPlacedPayLater.orderId}`, '_blank', 'noopener')
+                onClick={async () => {
+                  if (!orderPlacedPayLater.orderId) return
+                  try {
+                    const res = await fetch(`/api/receipt/${orderPlacedPayLater.orderId}`)
+                    if (!res.ok) { showToast('Could not load receipt', 'error'); return }
+                    const blob = await res.blob()
+                    if (!blob.size) { showToast('Receipt is empty', 'error'); return }
+                    const { downloadReceiptPdf } = await import('../utils/downloadReceipt')
+                    const ok = await downloadReceiptPdf(blob, `receipt_${orderPlacedPayLater.orderNumber}.pdf`)
+                    if (ok) showToast('Receipt saved', 'success')
+                    else showToast('Could not save receipt', 'error')
+                  } catch (e) {
+                    console.error(e)
+                    showToast('Could not save receipt', 'error')
                   }
                 }}
                 style={{

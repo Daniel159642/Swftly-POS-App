@@ -1,8 +1,16 @@
 import React, { useMemo } from 'react'
+import { useTheme } from '../../contexts/ThemeContext'
 import Input from '../common/Input'
-import Select from '../common/Select'
+import CustomDropdown from '../common/CustomDropdown'
+
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+}
 
 function InvoiceLineInput({ line, lineIndex, revenueAccounts, taxRates, onChange, onRemove, canRemove }) {
+  const { themeColor } = useTheme()
+  const themeColorRgb = hexToRgb(themeColor)
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
 
   const calculatedTotal = useMemo(() => {
@@ -40,20 +48,20 @@ function InvoiceLineInput({ line, lineIndex, revenueAccounts, taxRates, onChange
 
   const rowStyle = {
     display: 'grid',
-    gridTemplateColumns: '32px 1fr 80px 100px 140px 100px 90px 40px',
-    gap: '8px',
+    gridTemplateColumns: '28px 1fr 72px 90px 120px 90px 80px 36px',
+    gap: '6px',
     alignItems: 'start',
-    padding: '12px',
-    borderRadius: '8px',
+    padding: '8px',
+    borderRadius: '6px',
     backgroundColor: isDarkMode ? '#1f1f1f' : '#f9fafb',
     border: '1px solid ' + (isDarkMode ? '#3a3a3a' : '#e5e7eb'),
-    marginBottom: '8px',
-    minWidth: '700px'
+    marginBottom: '6px',
+    minWidth: '640px'
   }
 
   return (
     <div style={rowStyle}>
-      <div style={{ paddingTop: '24px', fontWeight: 600, color: isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '14px', textAlign: 'center' }}>
+      <div style={{ paddingTop: '6px', fontWeight: 600, color: isDarkMode ? '#9ca3af' : '#6b7280', fontSize: '13px', textAlign: 'center' }}>
         {lineIndex + 1}
       </div>
       <div style={{ marginBottom: 0 }}>
@@ -93,22 +101,31 @@ function InvoiceLineInput({ line, lineIndex, revenueAccounts, taxRates, onChange
         />
       </div>
       <div style={{ marginBottom: 0 }}>
-        <Select
+        <CustomDropdown
           name={`account_${lineIndex}`}
           value={line.account_id ?? ''}
           onChange={(e) => handleChange('account_id', e.target.value ? parseInt(e.target.value, 10) : null)}
           options={accountOptions}
           placeholder="Revenue account"
           required
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
+          compactTrigger
+          triggerFullWidth
           style={{ marginBottom: 0 }}
         />
       </div>
       <div style={{ marginBottom: 0 }}>
-        <Select
+        <CustomDropdown
           name={`tax_${lineIndex}`}
           value={line.tax_rate_id ?? ''}
           onChange={(e) => handleChange('tax_rate_id', e.target.value ? parseInt(e.target.value, 10) : undefined)}
           options={taxRateOptions}
+          placeholder="No Tax"
+          isDarkMode={isDarkMode}
+          themeColorRgb={themeColorRgb}
+          compactTrigger
+          triggerFullWidth
           style={{ marginBottom: 0 }}
         />
       </div>

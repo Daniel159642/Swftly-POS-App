@@ -1,10 +1,18 @@
 import React, { useState, useEffect } from 'react'
+import { useTheme } from '../../contexts/ThemeContext'
 import Input from '../common/Input'
-import Select from '../common/Select'
+import CustomDropdown from '../common/CustomDropdown'
 import Button from '../common/Button'
 import InvoiceLineInput from './InvoiceLineInput'
 
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
+}
+
 function InvoiceForm({ invoice, customers = [], revenueAccounts = [], taxRates = [], onSubmit, onCancel }) {
+  const { themeColor } = useTheme()
+  const themeColorRgb = hexToRgb(themeColor)
   const isDarkMode = document.documentElement.classList.contains('dark-theme')
   const today = new Date().toISOString().split('T')[0]
 
@@ -158,22 +166,22 @@ function InvoiceForm({ invoice, customers = [], revenueAccounts = [], taxRates =
 
   const selectedCustomer = customers.find((c) => c.id === formData.customer_id)
   const sectionStyle = {
-    padding: '16px',
-    borderRadius: '8px',
+    padding: '10px 12px',
+    borderRadius: '6px',
     backgroundColor: isDarkMode ? '#1f1f1f' : '#f9fafb',
     border: '1px solid ' + (isDarkMode ? '#3a3a3a' : '#e5e7eb'),
-    marginBottom: '16px'
+    marginBottom: '10px'
   }
-  const sectionTitle = { fontSize: '16px', fontWeight: 600, color: isDarkMode ? '#fff' : '#111', marginBottom: '16px' }
-  const grid2 = { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }
+  const sectionTitle = { fontSize: '14px', fontWeight: 600, color: isDarkMode ? '#fff' : '#111', marginBottom: '8px' }
+  const grid2 = { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 0, paddingBottom: '4px' }}>
       <div style={sectionStyle}>
         <h3 style={sectionTitle}>Invoice Details</h3>
         <div style={grid2}>
           <div style={{ gridColumn: '1 / -1' }}>
-            <Select
+            <CustomDropdown
               label="Customer"
               name="customer_id"
               value={formData.customer_id || ''}
@@ -182,22 +190,26 @@ function InvoiceForm({ invoice, customers = [], revenueAccounts = [], taxRates =
               placeholder="Select customer"
               required
               error={errors.customer_id}
+              isDarkMode={isDarkMode}
+              themeColorRgb={themeColorRgb}
+              compactTrigger
+              triggerFullWidth
               style={{ marginBottom: 0 }}
             />
             {selectedCustomer && (
               <div
                 style={{
-                  marginTop: '8px',
-                  padding: '12px',
+                  marginTop: '6px',
+                  padding: '8px 10px',
                   borderRadius: '6px',
                   backgroundColor: isDarkMode ? 'rgba(59,130,246,0.1)' : '#eff6ff',
-                  fontSize: '14px'
+                  fontSize: '13px'
                 }}
               >
                 <div style={{ fontWeight: 500, color: isDarkMode ? '#93c5fd' : '#1e40af' }}>{selectedCustomer.display_name || selectedCustomer.company_name || [selectedCustomer.first_name, selectedCustomer.last_name].filter(Boolean).join(' ')}</div>
                 {selectedCustomer.email && <div style={{ color: isDarkMode ? '#9ca3af' : '#4b5563' }}>{selectedCustomer.email}</div>}
                 {selectedCustomer.phone && <div style={{ color: isDarkMode ? '#9ca3af' : '#4b5563' }}>{selectedCustomer.phone}</div>}
-                <div style={{ marginTop: '4px', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>
+                <div style={{ marginTop: '2px', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>
                   Balance:{' '}
                   <span style={{ fontWeight: 600, color: (selectedCustomer.account_balance || 0) > 0 ? '#dc2626' : '#16a34a' }}>
                     ${Number(selectedCustomer.account_balance || 0).toFixed(2)}
@@ -214,57 +226,59 @@ function InvoiceForm({ invoice, customers = [], revenueAccounts = [], taxRates =
           <Input label="Payment Terms" name="terms" value={formData.terms} onChange={handleChange} placeholder="Net 30" style={{ marginBottom: 0 }} />
           <Input label="Invoice Discount %" name="discount_percentage" type="number" step="0.01" min="0" value={formData.discount_percentage || 0} onChange={handleChange} placeholder="0" style={{ marginBottom: 0, textAlign: 'right' }} />
         </div>
-        <div style={{ marginTop: '16px' }}>
-          <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#d1d5db' : '#374151', marginBottom: '6px' }}>Memo (visible to customer)</label>
+        <div style={{ marginTop: '8px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: isDarkMode ? '#d1d5db' : '#374151', marginBottom: '4px' }}>Memo (visible to customer)</label>
           <textarea
             name="memo"
             value={formData.memo}
             onChange={handleChange}
-            rows={2}
+            rows={1}
             placeholder="Thank you for your business..."
             style={{
               width: '100%',
-              padding: '8px 12px',
+              padding: '6px 10px',
               border: '1px solid ' + (isDarkMode ? '#3a3a3a' : '#d1d5db'),
               borderRadius: '6px',
               backgroundColor: isDarkMode ? '#1f1f1f' : 'white',
               color: isDarkMode ? '#fff' : '#1a1a1a',
-              fontSize: '14px',
+              fontSize: '13px',
               fontFamily: 'inherit',
-              resize: 'vertical'
+              resize: 'vertical',
+              minHeight: '32px'
             }}
           />
         </div>
-        <div style={{ marginTop: '16px' }}>
-          <label style={{ display: 'block', fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#d1d5db' : '#374151', marginBottom: '6px' }}>Internal Notes (not visible to customer)</label>
+        <div style={{ marginTop: '8px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: isDarkMode ? '#d1d5db' : '#374151', marginBottom: '4px' }}>Internal Notes (not visible to customer)</label>
           <textarea
             name="internal_notes"
             value={formData.internal_notes}
             onChange={handleChange}
-            rows={2}
+            rows={1}
             placeholder="Internal notes..."
             style={{
               width: '100%',
-              padding: '8px 12px',
+              padding: '6px 10px',
               border: '1px solid ' + (isDarkMode ? '#3a3a3a' : '#d1d5db'),
               borderRadius: '6px',
               backgroundColor: isDarkMode ? '#1f1f1f' : 'white',
               color: isDarkMode ? '#fff' : '#1a1a1a',
-              fontSize: '14px',
+              fontSize: '13px',
               fontFamily: 'inherit',
-              resize: 'vertical'
+              resize: 'vertical',
+              minHeight: '32px'
             }}
           />
         </div>
       </div>
 
       <div style={sectionStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <h3 style={{ ...sectionTitle, marginBottom: 0 }}>Line Items</h3>
           <Button type="button" onClick={handleAddLine} size="sm">+ Add Line</Button>
         </div>
-        <div style={{ overflowX: 'auto', marginBottom: '8px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 80px 100px 140px 100px 90px 40px', gap: '8px', padding: '0 12px', fontSize: '12px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', minWidth: '700px' }}>
+        <div style={{ overflowX: 'auto', marginBottom: '6px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 72px 90px 120px 90px 80px 36px', gap: '6px', padding: '0 8px', fontSize: '11px', fontWeight: 500, color: isDarkMode ? '#9ca3af' : '#6b7280', minWidth: '640px' }}>
             <div>#</div>
             <div>Description</div>
             <div style={{ textAlign: 'right' }}>Qty</div>
@@ -290,7 +304,7 @@ function InvoiceForm({ invoice, customers = [], revenueAccounts = [], taxRates =
           ))}
         </div>
         {Object.keys(errors).some((k) => k.startsWith('line_')) && (
-          <div style={{ marginTop: '12px', fontSize: '14px', color: '#dc2626' }}>
+          <div style={{ marginTop: '8px', fontSize: '13px', color: '#dc2626' }}>
             {Object.entries(errors)
               .filter(([k]) => k.startsWith('line_'))
               .map(([k, v]) => (
@@ -298,22 +312,22 @@ function InvoiceForm({ invoice, customers = [], revenueAccounts = [], taxRates =
               ))}
           </div>
         )}
-        <div style={{ marginTop: '24px', marginLeft: 'auto', maxWidth: '320px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
+        <div style={{ marginTop: '12px', marginLeft: 'auto', maxWidth: '280px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
             <span style={{ color: isDarkMode ? '#d1d5db' : '#374151' }}>Subtotal:</span>
             <span style={{ fontWeight: 500 }}>${Number(subtotal).toFixed(2)}</span>
           </div>
           {formData.discount_percentage > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
               <span style={{ color: isDarkMode ? '#d1d5db' : '#374151' }}>Discount ({formData.discount_percentage}%):</span>
               <span style={{ fontWeight: 500, color: '#dc2626' }}>-${Number(invoiceDiscount).toFixed(2)}</span>
             </div>
           )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '4px' }}>
             <span style={{ color: isDarkMode ? '#d1d5db' : '#374151' }}>Tax:</span>
             <span style={{ fontWeight: 500 }}>${Number(totalTax).toFixed(2)}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 700, paddingTop: '12px', borderTop: '2px solid ' + (isDarkMode ? '#3a3a3a' : '#e5e7eb') }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', fontWeight: 700, paddingTop: '8px', borderTop: '2px solid ' + (isDarkMode ? '#3a3a3a' : '#e5e7eb') }}>
             <span>Total:</span>
             <span style={{ color: '#2563eb' }}>${Number(total).toFixed(2)}</span>
           </div>
@@ -321,7 +335,7 @@ function InvoiceForm({ invoice, customers = [], revenueAccounts = [], taxRates =
       </div>
 
       {!invoice && (
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', cursor: 'pointer', fontSize: '14px', color: isDarkMode ? '#d1d5db' : '#374151' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', cursor: 'pointer', fontSize: '13px', color: isDarkMode ? '#d1d5db' : '#374151' }}>
           <input type="checkbox" checked={sendImmediately} onChange={(e) => setSendImmediately(e.target.checked)} style={{ width: '16px', height: '16px' }} />
           Mark as sent immediately (status draft → sent)
         </label>

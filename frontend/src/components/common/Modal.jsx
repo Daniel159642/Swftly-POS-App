@@ -20,8 +20,10 @@ function Modal({ isOpen, onClose, title, children, size = 'md', showCloseButton 
     sm: { maxWidth: '448px' },
     md: { maxWidth: '512px' },
     lg: { maxWidth: '768px' },
-    xl: { maxWidth: '1024px' },
+    xl: { maxWidth: '960px' },
   }
+
+  const isLarge = size === 'lg' || size === 'xl'
 
   return (
     <div style={{
@@ -30,9 +32,9 @@ function Modal({ isOpen, onClose, title, children, size = 'md', showCloseButton 
       zIndex: 10000,
       overflowY: 'auto',
       display: 'flex',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       justifyContent: 'center',
-      padding: '16px'
+      padding: '20px 16px'
     }}>
       {/* Background overlay: light blur so modal sits in front of everything (including sidebar) */}
       <div
@@ -47,25 +49,28 @@ function Modal({ isOpen, onClose, title, children, size = 'md', showCloseButton 
         onClick={onClose}
       />
 
-      {/* Modal panel */}
+      {/* Modal panel: cap height so it fits on one screen */}
       <div style={{
         position: 'relative',
         backgroundColor: isDarkMode ? '#2a2a2a' : 'white',
         borderRadius: '8px',
         boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
         width: '100%',
+        maxHeight: isLarge ? '90vh' : undefined,
+        display: isLarge ? 'flex' : undefined,
+        flexDirection: isLarge ? 'column' : undefined,
         ...sizeStyles[size],
-        margin: '32px auto'
+        margin: '0 auto'
       }}>
-        <div style={{ padding: '24px' }}>
+        <div style={{ padding: isLarge ? '16px 20px 0' : '24px', flexShrink: 0 }}>
           <div style={{
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'space-between',
-            marginBottom: '16px'
+            marginBottom: isLarge ? '12px' : '16px'
           }}>
             <h3 style={{
-              fontSize: '18px',
+              fontSize: isLarge ? '16px' : '18px',
               fontWeight: 500,
               color: isDarkMode ? '#ffffff' : '#111827',
               margin: 0
@@ -91,7 +96,14 @@ function Modal({ isOpen, onClose, title, children, size = 'md', showCloseButton 
               </button>
             )}
           </div>
-          <div>{children}</div>
+        </div>
+        <div style={{
+          padding: isLarge ? '0 20px 20px' : '0 24px 24px',
+          overflowY: 'auto',
+          flex: isLarge ? 1 : undefined,
+          minHeight: isLarge ? 0 : undefined
+        }}>
+          {children}
         </div>
       </div>
     </div>

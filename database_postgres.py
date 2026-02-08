@@ -27,9 +27,10 @@ DB_NAME = os.getenv('DB_NAME', 'pos_db')
 DB_USER = os.getenv('DB_USER', 'postgres')
 DB_PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
 
-# Pool size (tune for your deployment; 2–10 is typical for a single backend)
-POOL_MIN_CONN = int(os.getenv('DB_POOL_MIN', '2'))
-POOL_MAX_CONN = int(os.getenv('DB_POOL_MAX', '10'))
+# Pool size. Supabase Session mode has a small pool_size limit (e.g. 15); use a low max to avoid "max clients reached".
+# For local PostgreSQL you can raise DB_POOL_MAX (e.g. 10) in .env.
+POOL_MIN_CONN = int(os.getenv('DB_POOL_MIN', '1'))
+POOL_MAX_CONN = int(os.getenv('DB_POOL_MAX', '3'))
 
 
 class _PooledConnectionWrapper:

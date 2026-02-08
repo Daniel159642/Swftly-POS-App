@@ -46,15 +46,23 @@ function ProtectedRoute({ children, sessionToken, employee, sessionVerifying }) 
 }
 
 function AdminOnlyRedirect({ children }) {
-  const { isAdmin } = usePermissions()
+  const { isAdmin, loading: permissionsLoading } = usePermissions()
   const navigate = useNavigate()
   const { show: showToast } = useToast()
   useEffect(() => {
+    if (permissionsLoading) return
     if (!isAdmin) {
       showToast("You don't have permission", 'error')
       navigate('/dashboard', { replace: true })
     }
-  }, [isAdmin, navigate, showToast])
+  }, [isAdmin, permissionsLoading, navigate, showToast])
+  if (permissionsLoading) {
+    return (
+      <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary, #666)' }}>
+        Loading…
+      </div>
+    )
+  }
   if (!isAdmin) return null
   return children
 }
@@ -470,6 +478,12 @@ function App() {
       return
     }
     if (sessionToken === 'offline') {
+      if (navigator.onLine) {
+        // Back online with offline-only session — server requires a real session for register/settings etc.
+        handleLogout()
+        setSessionVerifying(false)
+        return
+      }
       const cached = getStoredEmployee()
       if (cached) setEmployee(cached)
       setSessionVerifying(false)
@@ -531,6 +545,21 @@ function App() {
     } else {
       setSessionVerifying(false)
     }
+  }, [])
+
+  // When app comes back online with an offline-only session, require re-login for server features (e.g. cash register)
+  useEffect(() => {
+    const onOnline = () => {
+      if (localStorage.getItem('sessionToken') === 'offline') {
+        setSessionToken(null)
+        setEmployee(null)
+        setSessionVerifying(false)
+        localStorage.removeItem('sessionToken')
+        setStoredEmployee(null)
+      }
+    }
+    window.addEventListener('online', onOnline)
+    return () => window.removeEventListener('online', onOnline)
   }, [])
 
   return (

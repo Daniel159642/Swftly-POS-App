@@ -297,8 +297,45 @@ function CashRegister() {
     return new Date(dateString).toLocaleString()
   }
 
+  const needRelogin = typeof navigator !== 'undefined' && navigator.onLine && sessionToken === 'offline'
+
   return (
     <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
+      {needRelogin && (
+        <div style={{
+          marginBottom: '16px',
+          padding: '12px 16px',
+          background: '#fff3cd',
+          border: '1px solid #ffc107',
+          borderRadius: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '8px'
+        }}>
+          <span>You're back online. Log in again to open the register and use server features.</span>
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.removeItem('sessionToken')
+              localStorage.removeItem('pos_employee')
+              window.location.href = '/login'
+            }}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: themeColor,
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 500
+            }}
+          >
+            Log in again
+          </button>
+        </div>
+      )}
       <h1 style={{ marginBottom: '20px', color: themeColor }}>Cash Register Control</h1>
 
       {/* Current Session Card */}

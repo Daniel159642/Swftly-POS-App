@@ -40,9 +40,14 @@ export const PermissionProvider = ({ children }) => {
     }
   }
 
+  // Admin-by-position: full access even if API/cache returned no permissions (avoids "no permission to process sales" for admins)
+  const positionLower = (employee?.position ?? '').toString().toLowerCase().trim()
+  const isAdminByPosition = ['admin', 'administrator', 'owner', 'manager'].includes(positionLower)
+
   const hasPermission = (permissionName) => {
     if (!permissionName) return false
-    
+    if (isAdminByPosition) return true
+
     // Check all categories for the permission
     for (let category in permissions) {
       const found = permissions[category]?.find(
@@ -53,9 +58,9 @@ export const PermissionProvider = ({ children }) => {
     return false
   }
 
-  // Admin = full access; Employee = restricted (two main positions)
+  // Admin = full access; Employee = restricted. Treat common admin role names and key permissions as admin.
   const isAdmin = Boolean(
-    employee?.position?.toLowerCase() === 'admin' ||
+    isAdminByPosition ||
     hasPermission('manage_permissions') ||
     hasPermission('add_employee')
   )
