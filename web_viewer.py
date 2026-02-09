@@ -41,7 +41,7 @@ from database import (
     get_store_location_settings, update_store_location_settings,
     get_customer_rewards_settings, update_customer_rewards_settings, calculate_rewards,
     get_register_cash_settings, get_daily_cash_counts,
-    add_customer, get_customer, update_customer, add_customer_points, search_customers, get_customer_rewards_detail,
+    add_customer, get_customer, update_customer, delete_customer, add_customer_points, search_customers, get_customer_rewards_detail,
     # Accounting / store settings
     get_establishment_settings, update_establishment_settings, get_labor_summary,
     generate_balance_sheet, generate_income_statement,
@@ -1520,6 +1520,11 @@ def api_preview_shipment():
             (request.args.get('manual') or '')
         ).strip().lower()
         manual = manual_val in ('1', 'true', 'yes')
+        use_legacy = (
+            (request.headers.get('X-Shipment-Use-Legacy-Scraper') or '') or
+            (request.form.get('use_legacy_scraper') or '') or
+            (request.args.get('use_legacy_scraper') or '')
+        ).strip().lower() in ('1', 'true', 'yes')
         
         # Save uploaded file temporarily
         filename = secure_filename(f"preview_{datetime.now().timestamp()}_{file.filename}")
@@ -1536,17 +1541,36 @@ def api_preview_shipment():
                 'filename': file.filename
             })
         
-        # Scrape the document
-        from document_scraper import scrape_document
-        try:
-            items = scrape_document(file_path)
-        except Exception as e:
-            # Clean up file on error
+        if use_legacy:
+            # Legacy scraper (PDF, Excel, CSV only)
             try:
-                os.remove(file_path)
-            except:
-                pass
-            return jsonify({'success': False, 'message': f'Error scraping document: {str(e)}'}), 400
+                from archive.document_scraper_legacy import scrape_document
+                items = scrape_document(file_path)
+            except Exception as e:
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+                return jsonify({'success': False, 'message': f'Error scraping document: {str(e)}'}), 400
+        else:
+            # AI-powered document extraction
+            from shipment_processor import ShipmentProcessor, ai_products_to_shipment_items
+            try:
+                processor = ShipmentProcessor()
+                result = processor.process_shipment(file_path)
+            except Exception as e:
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+                return jsonify({'success': False, 'message': f'Error processing document: {str(e)}'}), 400
+            if not result.get('success'):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+                return jsonify({'success': False, 'message': result.get('error', 'Processing failed')}), 400
+            items = ai_products_to_shipment_items(result.get('products') or [])
         
         if not items:
             # Clean up file if no items
@@ -1891,6 +1915,7 @@ def api_upload_shipment():
         purchase_order_number = request.form.get('purchase_order_number', '').strip()
         expected_delivery_date = request.form.get('expected_delivery_date', '').strip() or None
         verification_mode = request.form.get('verification_mode', 'auto_add').strip()
+        use_legacy_scraper = request.form.get('use_legacy_scraper', '').strip().lower() in ('1', 'true', 'yes')
         
         # Validate verification_mode
         if verification_mode not in ('auto_add', 'verify_whole_shipment'):
@@ -1910,7 +1935,8 @@ def api_upload_shipment():
             purchase_order_number=purchase_order_number if purchase_order_number else None,
             expected_delivery_date=expected_delivery_date,
             uploaded_by=employee_id,
-            verification_mode=verification_mode
+            verification_mode=verification_mode,
+            use_legacy_scraper=use_legacy_scraper
         )
         
         if not result.get('success'):
@@ -3328,15 +3354,25 @@ def api_customers():
     return jsonify({'columns': columns, 'data': data})
 
 
-@app.route('/api/customers/<int:customer_id>', methods=['GET', 'PUT'])
+@app.route('/api/customers/<int:customer_id>', methods=['GET', 'PUT', 'DELETE'])
 def api_customer_by_id(customer_id):
-    """Get one customer (GET) or update customer (PUT)."""
+    """Get one customer (GET), update customer (PUT), or delete customer (DELETE)."""
     if request.method == 'GET':
         try:
             customer = get_customer(customer_id)
             if not customer:
                 return jsonify({'success': False, 'message': 'Customer not found'}), 404
             return jsonify({'success': True, 'data': customer})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+    if request.method == 'DELETE':
+        try:
+            ok, err = delete_customer(customer_id)
+            if not ok:
+                return jsonify({'success': False, 'message': err or 'Customer not found'}), 400
+            return jsonify({'success': True, 'message': 'Customer deleted'})
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -6206,21 +6242,27 @@ def api_employee_permissions(employee_id):
 
 @app.route('/api/employees/<int:employee_id>/permissions/grant', methods=['POST'])
 def api_grant_permission(employee_id):
-    """Grant permission to employee"""
+    """Grant permission to employee. Requires session and manage_permissions."""
     try:
+        current_eid, err = _get_session_employee_id()
+        if err:
+            return err[0], err[1]
+        
+        pm = get_permission_manager()
+        if not pm.has_permission(current_eid, 'manage_permissions'):
+            return jsonify({'error': 'Permission denied', 'success': False}), 403
+        
         if not request.json:
             return jsonify({'error': 'Invalid request'}), 400
         
         permission_name = request.json.get('permission_name')
-        granted_by = request.json.get('granted_by')
-        reason = request.json.get('reason')
+        reason = request.json.get('reason') or 'Custom permission change'
         
-        if not permission_name or not granted_by:
-            return jsonify({'error': 'permission_name and granted_by required'}), 400
+        if not permission_name:
+            return jsonify({'error': 'permission_name required'}), 400
         
-        pm = get_permission_manager()
         success = pm.grant_permission_to_employee(
-            employee_id, permission_name, granted_by, reason
+            employee_id, permission_name, current_eid, reason
         )
         
         return jsonify({'success': success})
@@ -6229,21 +6271,27 @@ def api_grant_permission(employee_id):
 
 @app.route('/api/employees/<int:employee_id>/permissions/revoke', methods=['POST'])
 def api_revoke_permission(employee_id):
-    """Revoke permission from employee"""
+    """Revoke permission from employee. Requires session and manage_permissions."""
     try:
+        current_eid, err = _get_session_employee_id()
+        if err:
+            return err[0], err[1]
+        
+        pm = get_permission_manager()
+        if not pm.has_permission(current_eid, 'manage_permissions'):
+            return jsonify({'error': 'Permission denied', 'success': False}), 403
+        
         if not request.json:
             return jsonify({'error': 'Invalid request'}), 400
         
         permission_name = request.json.get('permission_name')
-        revoked_by = request.json.get('revoked_by')
-        reason = request.json.get('reason')
+        reason = request.json.get('reason') or 'Custom permission change'
         
-        if not permission_name or not revoked_by:
-            return jsonify({'error': 'permission_name and revoked_by required'}), 400
+        if not permission_name:
+            return jsonify({'error': 'permission_name required'}), 400
         
-        pm = get_permission_manager()
         success = pm.revoke_permission_from_employee(
-            employee_id, permission_name, revoked_by, reason
+            employee_id, permission_name, current_eid, reason
         )
         
         return jsonify({'success': success})
@@ -6264,6 +6312,30 @@ def api_roles():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def _get_session_employee_id():
+    """Get current employee_id from session token. Returns (employee_id, error_response) - error_response is set on failure."""
+    data = request.get_json(silent=True) or {}
+    session_token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.headers.get('X-Session-Token') or data.get('session_token')
+    if not session_token:
+        return None, (jsonify({'error': 'Session required', 'success': False}), 401)
+    session_data = verify_session(session_token)
+    if not session_data or not session_data.get('valid'):
+        return None, (jsonify({'error': 'Invalid session', 'success': False}), 401)
+    eid = session_data.get('employee_id')
+    if not eid:
+        return None, (jsonify({'error': 'Employee not found in session', 'success': False}), 401)
+    return eid, None
+
+@app.route('/api/roles/<int:role_id>/permissions', methods=['GET'])
+def api_role_permissions(role_id):
+    """Get permissions for a role"""
+    try:
+        pm = get_permission_manager()
+        permissions = pm.get_role_permissions(role_id)
+        return jsonify({'success': True, 'permissions': permissions})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/permissions', methods=['GET'])
 def api_permissions():
     """Get all permissions"""
@@ -6280,8 +6352,16 @@ def api_permissions():
 
 @app.route('/api/employees/<int:employee_id>/assign_role', methods=['POST'])
 def api_assign_role(employee_id):
-    """Assign role to employee"""
+    """Assign role to employee. Requires session and manage_permissions."""
     try:
+        current_eid, err = _get_session_employee_id()
+        if err:
+            return err[0], err[1]
+        
+        pm = get_permission_manager()
+        if not pm.has_permission(current_eid, 'manage_permissions'):
+            return jsonify({'error': 'Permission denied', 'success': False}), 403
+        
         if not request.json:
             return jsonify({'error': 'Invalid request'}), 400
         

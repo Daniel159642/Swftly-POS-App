@@ -341,46 +341,32 @@ for vendor_total in breakdown['vendor_totals']:
 
 #### Document Scraping and Pending Shipments
 
-The system supports uploading vendor documents (PDF, Excel, CSV) and automatically extracting shipment data:
+The system supports uploading vendor documents (PDF, Excel, Word, images) and uses an AI-powered document processor to extract shipment data:
 
 ```python
 from database import (
-    create_pending_shipment, add_pending_shipment_item,
+    create_shipment_from_document,
     auto_match_pending_items, approve_pending_shipment,
     get_pending_shipment_details
 )
-from document_scraper import scrape_document
 
-# 1. Scrape vendor document
-items = scrape_document('vendor_shipment.pdf')  # or .xlsx, .csv
-
-# 2. Create pending shipment
-pending_id = create_pending_shipment(
-    vendor_id=vendor_id,
+# 1. Process document and create pending shipment (AI extraction; adds items automatically)
+result = create_shipment_from_document(
     file_path='vendor_shipment.pdf',
+    vendor_id=vendor_id,
     purchase_order_number='PO-2024-001'
 )
+pending_id = result['pending_shipment_id']
 
-# 3. Add scraped items
-for item in items:
-    add_pending_shipment_item(
-        pending_shipment_id=pending_id,
-        product_sku=item['product_sku'],
-        product_name=item['product_name'],
-        quantity_expected=item['quantity_expected'],
-        unit_cost=item['unit_cost'],
-        lot_number=item.get('lot_number')
-    )
-
-# 4. Auto-match items to products
+# 2. Auto-match items to products
 match_results = auto_match_pending_items(pending_id)
 print(f"Matched {match_results['matched']} items")
 
-# 5. Review and verify quantities
+# 3. Review and verify quantities
 pending_details = get_pending_shipment_details(pending_id)
 # ... review items, update verified quantities if needed ...
 
-# 6. Approve and transfer to actual shipment
+# 4. Approve and transfer to actual shipment
 shipment_id = approve_pending_shipment(
     pending_shipment_id=pending_id,
     reviewed_by="Admin User"

@@ -440,6 +440,23 @@ class PermissionManager:
         finally:
             conn.close()
 
+    def get_role_permissions(self, role_id: int) -> List[Dict[str, Any]]:
+        """Get permissions granted to a role (returns list of permission dicts)"""
+        conn = self.get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        try:
+            cursor.execute("""
+                SELECT p.*
+                FROM permissions p
+                INNER JOIN role_permissions rp ON p.permission_id = rp.permission_id AND rp.role_id = %s AND rp.granted = 1
+                ORDER BY p.permission_category, p.permission_name
+            """, (role_id,))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
 
 # Global permission manager instance
 _permission_manager = None

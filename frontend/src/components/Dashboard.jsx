@@ -27,7 +27,9 @@ const NO_PERMISSION_MSG = "You don't have permission"
 
 function Dashboard() {
   const navigate = useNavigate()
-  const { isAdmin } = usePermissions()
+  const { isAdmin, hasPermission } = usePermissions()
+  const canAccessAccounting = isAdmin || hasPermission('view_financial_reports')
+  const canAccessTables = isAdmin
   const { show: showToast } = useToast()
   const { themeColor } = useTheme()
   const isMobile = useIsMobile()
@@ -81,7 +83,7 @@ function Dashboard() {
       description: 'Financial reports and accounting',
       size: 'large',
       onClick: () => {
-        if (!isAdmin) {
+        if (!canAccessAccounting) {
           showToast(NO_PERMISSION_MSG, 'error')
           return
         }
@@ -133,7 +135,7 @@ function Dashboard() {
       description: 'View all tables',
       size: 'medium',
       onClick: () => {
-        if (!isAdmin) {
+        if (!canAccessTables) {
           showToast(NO_PERMISSION_MSG, 'error')
           return
         }

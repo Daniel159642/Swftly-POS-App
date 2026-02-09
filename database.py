@@ -4139,6 +4139,27 @@ def update_customer(
         conn.close()
 
 
+def delete_customer(customer_id: int) -> tuple[bool, Optional[str]]:
+    """Delete a customer. Returns (True, None) on success, (False, error_message) if not found or has orders/transactions."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT 1 FROM customers WHERE customer_id = %s", (customer_id,))
+        if not cursor.fetchone():
+            return False, "Customer not found"
+        cursor.execute("SELECT 1 FROM orders WHERE customer_id = %s LIMIT 1", (customer_id,))
+        if cursor.fetchone():
+            return False, "Cannot delete customer with existing orders"
+        cursor.execute("SELECT 1 FROM transactions WHERE customer_id = %s LIMIT 1", (customer_id,))
+        if cursor.fetchone():
+            return False, "Cannot delete customer with existing transactions"
+        cursor.execute("DELETE FROM customers WHERE customer_id = %s", (customer_id,))
+        conn.commit()
+        return cursor.rowcount >= 1, None
+    finally:
+        conn.close()
+
+
 def add_customer_points(customer_id: int, points: int, reason: Optional[str] = None) -> Optional[int]:
     """Add (or subtract) loyalty points for a customer. Returns new balance or None if not found."""
     conn = get_connection()
@@ -8800,9 +8821,14 @@ def get_verification_progress(pending_shipment_id: int) -> Dict[str, Any]:
         traceback.print_exc()
         raise
     finally:
-        # Don't close the shared global connection
-        # The connection is managed by database_postgres.py
-        pass
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
     
     # Calculate completion percentage
     if progress['total_expected_quantity']:
@@ -9360,7 +9386,8 @@ def create_shipment_from_document(
     expected_delivery_date: Optional[str] = None,
     uploaded_by: Optional[int] = None,
     column_mapping: Optional[Dict[str, str]] = None,
-    verification_mode: str = 'verify_whole_shipment'
+    verification_mode: str = 'verify_whole_shipment',
+    use_legacy_scraper: bool = False
 ) -> Dict[str, Any]:
     """
     Create a pending shipment from a scraped vendor document
@@ -9371,23 +9398,38 @@ def create_shipment_from_document(
         purchase_order_number: Optional PO number
         expected_delivery_date: Optional expected delivery date
         uploaded_by: Employee ID who uploaded
-        column_mapping: Optional column mapping for document scraping
+        column_mapping: Optional column mapping (legacy scraper only)
         verification_mode: 'auto_add' or 'verify_whole_shipment' (default)
+        use_legacy_scraper: If True, use legacy PDF/Excel/CSV scraper instead of AI
     
     Returns:
         Dictionary with pending_shipment_id and items created
     """
-    from document_scraper import scrape_document
-    
-    # Scrape the document
-    try:
-        items = scrape_document(file_path, column_mapping)
-    except Exception as e:
-        return {
-            'success': False,
-            'message': f'Error scraping document: {str(e)}'
-        }
-    
+    if use_legacy_scraper:
+        try:
+            from archive.document_scraper_legacy import scrape_document
+            items = scrape_document(file_path, column_mapping)
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error scraping document: {str(e)}'
+            }
+    else:
+        from shipment_processor import ShipmentProcessor, ai_products_to_shipment_items
+        try:
+            processor = ShipmentProcessor()
+            result = processor.process_shipment(file_path)
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error processing document: {str(e)}'
+            }
+        if not result.get('success'):
+            return {
+                'success': False,
+                'message': result.get('error', 'Processing failed')
+            }
+        items = ai_products_to_shipment_items(result.get('products') or [])
     if not items:
         return {
             'success': False,

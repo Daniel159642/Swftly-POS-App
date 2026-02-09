@@ -3236,7 +3236,8 @@ function UploadShipmentForm({ onClose, onSuccess }) {
     document: null,
     verification_mode: 'auto_add',
     tracking_number: '',
-    manualEntry: false
+    manualEntry: false,
+    useLegacyScraper: false
   })
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null) // { message, type: 'success' | 'error' }
@@ -3419,10 +3420,11 @@ function UploadShipmentForm({ onClose, onSuccess }) {
     const file = e.target.files[0]
     if (file) {
       // Check file type
-      const validTypes = ['.pdf', '.xlsx', '.xls', '.csv']
+      const validTypes = ['.pdf', '.xlsx', '.xls', '.csv', '.docx', '.jpg', '.jpeg', '.png']
       const fileExt = '.' + file.name.split('.').pop().toLowerCase()
       if (!validTypes.includes(fileExt)) {
-        setError('Invalid file type. Please upload PDF, Excel, or CSV file.')
+        setError(null)
+        setToast({ message: 'Invalid file type. Use PDF, Excel, CSV, Word, or image.', type: 'error' })
         return
       }
       setFormData({ ...formData, document: file })
@@ -3436,12 +3438,14 @@ function UploadShipmentForm({ onClose, onSuccess }) {
     setToast(null)
 
     if (!formData.vendor_id) {
-      setError('Please select a vendor')
+      setError(null)
+      setToast({ message: 'Please select a vendor', type: 'error' })
       return
     }
 
     if (!formData.document) {
-      setError('Please select a document to upload')
+      setError(null)
+      setToast({ message: 'Please select a document to upload', type: 'error' })
       return
     }
 
@@ -3451,6 +3455,9 @@ function UploadShipmentForm({ onClose, onSuccess }) {
       const sessionToken = localStorage.getItem('sessionToken')
       const uploadFormData = new FormData()
       uploadFormData.append('document', formData.document)
+      if (!formData.manualEntry && formData.useLegacyScraper) {
+        uploadFormData.append('use_legacy_scraper', '1')
+      }
 
       // Manual entry uses a separate endpoint so the server never scrapes
       const isManual = Boolean(formData.manualEntry)
@@ -3463,7 +3470,8 @@ function UploadShipmentForm({ onClose, onSuccess }) {
       const previewResult = await previewResponse.json()
 
       if (!previewResult.success) {
-        setError(previewResult.message || 'Failed to preview document')
+        setError(null)
+        setToast({ message: previewResult.message || 'Failed to preview document', type: 'error' })
         setUploading(false)
         return
       }
@@ -3521,7 +3529,8 @@ function UploadShipmentForm({ onClose, onSuccess }) {
       setUploading(false)
     } catch (error) {
       console.error('Error previewing shipment:', error)
-      setError('Error previewing shipment. Please try again.')
+      setError(null)
+      setToast({ message: 'Error previewing shipment. Please try again.', type: 'error' })
       setUploading(false)
     }
   }
@@ -3572,7 +3581,8 @@ function UploadShipmentForm({ onClose, onSuccess }) {
             onSuccess(result.pending_shipment_id)
           }, 1500)
         } else {
-          setError(result.message || 'Failed to confirm draft')
+          setError(null)
+          setToast({ message: result.message || 'Failed to confirm draft', type: 'error' })
         }
       } else {
         // Create new shipment (original flow)
@@ -3609,12 +3619,14 @@ function UploadShipmentForm({ onClose, onSuccess }) {
             onSuccess(result.pending_shipment_id)
           }, 1500)
         } else {
-          setError(result.message || 'Failed to create shipment')
+          setError(null)
+          setToast({ message: result.message || 'Failed to create shipment', type: 'error' })
         }
       }
     } catch (error) {
       console.error('Error creating shipment:', error)
-      setError('Error creating shipment. Please try again.')
+      setError(null)
+      setToast({ message: 'Error creating shipment. Please try again.', type: 'error' })
     } finally {
       setUploading(false)
     }
@@ -4880,6 +4892,41 @@ function UploadShipmentForm({ onClose, onSuccess }) {
                 : 'Document will be scraped to pre-fill line items.'}
             </div>
           </FormField>
+
+          {!formData.manualEntry && (
+            <FormField>
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                cursor: 'pointer'
+              }}>
+                <div className="checkbox-wrapper-2 upload-form-switch">
+                  <input
+                    type="checkbox"
+                    className="sc-gJwTLC ikxBAC"
+                    checked={formData.useLegacyScraper}
+                    onChange={(e) => setFormData({ ...formData, useLegacyScraper: e.target.checked })}
+                  />
+                </div>
+                <span style={{
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Use legacy scraper
+                </span>
+              </label>
+              <div style={{
+                fontSize: '13px',
+                color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                marginTop: '8px',
+                lineHeight: '1.5'
+              }}>
+                PDF, Excel, CSV only (table-based extraction). Turn off for AI extraction (Word, images, scanned docs).
+              </div>
+            </FormField>
+          )}
 
           <FormField style={{ marginBottom: '32px' }}>
             <FormLabel isDarkMode={isDarkMode}>

@@ -28,9 +28,9 @@ DB_USER = os.getenv('DB_USER', 'postgres')
 DB_PASSWORD = os.getenv('DB_PASSWORD', 'postgres')
 
 # Pool size. Supabase Session mode has a small pool_size limit (e.g. 15); use a low max to avoid "max clients reached".
-# For local PostgreSQL we use a larger default so concurrent requests don't exhaust the pool.
+# For local PostgreSQL we use a larger default so concurrent requests + polling don't exhaust the pool.
 _is_local_db = (DB_URL or '').lower().count('localhost') > 0 or (os.getenv('DB_HOST') or 'localhost').lower() == 'localhost'
-_default_pool_max = 10 if _is_local_db else 3
+_default_pool_max = 25 if _is_local_db else 3
 POOL_MIN_CONN = int(os.getenv('DB_POOL_MIN', '1'))
 POOL_MAX_CONN = int(os.getenv('DB_POOL_MAX', str(_default_pool_max)))
 

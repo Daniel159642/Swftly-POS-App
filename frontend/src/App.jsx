@@ -67,6 +67,29 @@ function AdminOnlyRedirect({ children }) {
   return children
 }
 
+function PermissionRedirect({ permission, children }) {
+  const { hasPermission, isAdmin, loading: permissionsLoading } = usePermissions()
+  const navigate = useNavigate()
+  const { show: showToast } = useToast()
+  const allowed = isAdmin || (permission && hasPermission(permission))
+  useEffect(() => {
+    if (permissionsLoading) return
+    if (!allowed) {
+      showToast("You don't have permission", 'error')
+      navigate('/dashboard', { replace: true })
+    }
+  }, [allowed, permissionsLoading, navigate, showToast])
+  if (permissionsLoading) {
+    return (
+      <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary, #666)' }}>
+        Loading…
+      </div>
+    )
+  }
+  if (!allowed) return null
+  return children
+}
+
 const EMPLOYEE_STORAGE_KEY = 'pos_employee'
 
 function getStoredEmployee() {
@@ -238,11 +261,11 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
       <Route path="/accounting" element={
         <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
           <Layout employee={employee} onLogout={onLogout}>
-            <AdminOnlyRedirect>
+            <PermissionRedirect permission="view_financial_reports">
               <Suspense fallback={<div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary, #666)' }}>Loading…</div>}>
                 <Accounting />
               </Suspense>
-            </AdminOnlyRedirect>
+            </PermissionRedirect>
           </Layout>
         </ProtectedRoute>
       } />

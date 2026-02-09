@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
 import { useToast } from '../contexts/ToastContext'
 import { useTheme } from '../contexts/ThemeContext'
-import { UserPlus, MoreVertical } from 'lucide-react'
+import { UserPlus, MoreVertical, Trash2 } from 'lucide-react'
 import { formLabelStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel } from '../components/FormStyles'
 
 const isDark = () => document.documentElement.classList.contains('dark-theme')
@@ -28,6 +28,8 @@ export default function Customers() {
   const [pointsForm, setPointsForm] = useState({ points: '', reason: '' })
   const [actionsOpenFor, setActionsOpenFor] = useState(null)
   const [dropdownAnchor, setDropdownAnchor] = useState(null)
+  const [deleteConfirmFor, setDeleteConfirmFor] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   const [expandedCustomerId, setExpandedCustomerId] = useState(null)
   const [expandedRewards, setExpandedRewards] = useState({})
   const [loadingRewardsFor, setLoadingRewardsFor] = useState(null)
@@ -206,6 +208,33 @@ export default function Customers() {
       showToast('Failed to update points', 'error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleDeleteCustomer = async () => {
+    const customer = deleteConfirmFor != null ? filtered.find((c) => c.customer_id === deleteConfirmFor) : null
+    if (!customer) {
+      setDeleteConfirmFor(null)
+      return
+    }
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/customers/${customer.customer_id}`, { method: 'DELETE' })
+      const json = await res.json()
+      if (json.success) {
+        showToast('Customer deleted', 'success')
+        setDeleteConfirmFor(null)
+        setActionsOpenFor(null)
+        setDropdownAnchor(null)
+        setExpandedCustomerId((id) => (id === customer.customer_id ? null : id))
+        queryClient.invalidateQueries({ queryKey: ['customers'] })
+      } else {
+        showToast(json.message || 'Could not delete customer', 'error')
+      }
+    } catch (e) {
+      showToast('Failed to delete customer', 'error')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -595,8 +624,98 @@ export default function Customers() {
             >
               Give points / coupon
             </button>
+            <button
+              type="button"
+              onClick={() => { close(); setDeleteConfirmFor(customer.customer_id) }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                width: '100%',
+                padding: '10px 14px',
+                textAlign: 'left',
+                border: 'none',
+                borderTop: '1px solid #e5e7eb',
+                backgroundColor: '#fef2f2',
+                color: '#dc2626',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: 'pointer'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#fee2e2'; e.currentTarget.style.color = '#b91c1c' }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#fef2f2'; e.currentTarget.style.color = '#dc2626' }}
+            >
+              <Trash2 size={16} strokeWidth={2.5} />
+              Delete
+            </button>
           </div>,
           document.body
+        )
+      })()}
+
+      {/* Delete confirmation modal */}
+      {deleteConfirmFor != null && (() => {
+        const customer = filtered.find((c) => c.customer_id === deleteConfirmFor)
+        if (!customer) return null
+        return (
+          <div style={modalOverlay} onClick={() => !deleting && setDeleteConfirmFor(null)}>
+            <div style={modalBox} onClick={(e) => e.stopPropagation()}>
+              <div style={{ marginBottom: '16px' }}>
+                <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: '#333' }}>
+                  Delete customer?
+                </h3>
+              </div>
+              <p style={{ margin: '0 0 20px', fontSize: '14px', color: '#666' }}>
+                Are you sure you want to delete <strong>{customer.customer_name || 'this customer'}</strong>? This cannot be undone. Customers with existing orders or transactions cannot be deleted.
+              </p>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => !deleting && setDeleteConfirmFor(null)}
+                  disabled={deleting}
+                  style={{
+                    padding: '4px 16px',
+                    height: '28px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    whiteSpace: 'nowrap',
+                    backgroundColor: 'var(--bg-tertiary)',
+                    border: '1px solid #ddd',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: 'var(--text-secondary)',
+                    cursor: deleting ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteCustomer}
+                  disabled={deleting}
+                  style={{
+                    padding: '4px 16px',
+                    height: '28px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    whiteSpace: 'nowrap',
+                    backgroundColor: '#dc2626',
+                    border: '1px solid #b91c1c',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#fff',
+                    cursor: deleting ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {deleting ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
         )
       })()}
 
