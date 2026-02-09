@@ -13,6 +13,12 @@ import argparse
 from typing import List
 from datetime import datetime
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 

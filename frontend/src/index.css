@@ -734,9 +734,7 @@ body {
 .settings-field-loading {
   animation: settingsSkeletonPulse 1.2s ease-in-out infinite;
   pointer-events: none;
-}
-
-/* Accounting reports: print only the report content, not the whole page */
+}/* Accounting reports: print only the report content, not the whole page */
 @media print {
     body * {
         visibility: hidden;

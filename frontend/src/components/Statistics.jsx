@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
-import { DollarSign, RotateCcw, ChevronDown } from 'lucide-react'
+import { DollarSign, RotateCcw, ChevronDown, BarChart2, FileText } from 'lucide-react'
 
 const STAT_OPTIONS = [
   { id: 'weekly_revenue', label: 'Weekly Revenue (Last 7 Days)' },
@@ -44,6 +44,7 @@ function Statistics({ compact = false }) {
   const [selectedFormat, setSelectedFormat] = useState('bar')
   const [formatOpen, setFormatOpen] = useState(false)
   const [statOpen, setStatOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState('charts') // 'charts' | 'reports'
   const dropdownRef = useRef(null)
   
   // Convert hex to RGB for rgba usage
@@ -653,6 +654,145 @@ function Statistics({ compact = false }) {
     )
   }
 
+  const renderReportsTab = () => {
+    const textColor = isDarkMode ? '#fff' : '#1a1a1a'
+    const labelColor = isDarkMode ? '#999' : '#666'
+    const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
+    const sectionStyle = {
+      backgroundColor: isDarkMode ? '#2a2a2a' : '#ffffff',
+      border: `1px solid ${borderColor}`,
+      borderRadius: '12px',
+      padding: '20px',
+      marginBottom: '16px',
+      boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)'
+    }
+    const h3Style = { fontSize: '14px', fontWeight: 600, color: textColor, marginBottom: '12px', marginTop: 0 }
+    const pStyle = { fontSize: '13px', color: labelColor, lineHeight: 1.6, margin: '0 0 8px 0' }
+    const todayRev = stats?.revenue?.today ?? 0
+    const todayReturns = stats?.returns?.today ?? 0
+    const todayReturnsAmt = stats?.returns?.today_amount ?? 0
+    const weekRev = stats?.revenue?.week ?? 0
+    const monthRev = stats?.revenue?.month ?? 0
+    const allTimeRev = stats?.revenue?.all_time ?? 0
+    const avgOrder = stats?.avg_order_value ?? 0
+    const totalOrders = stats?.total_orders ?? 0
+    const totalReturns = stats?.total_returns ?? 0
+    const returnsRate = stats?.returns_rate ?? 0
+    const inv = stats?.inventory ?? {}
+    const discount = stats?.discount ?? {}
+    const weekly = stats?.weekly_revenue ?? []
+    const weeklyTotal = weekly.reduce((s, d) => s + (d.revenue || 0), 0)
+    const statusBreakdown = stats?.order_status_breakdown ?? {}
+    const topProducts = stats?.top_products ?? []
+    const customersTotal = stats?.customers_total ?? 0
+    const customersRewards = stats?.customers_in_rewards ?? 0
+
+    return (
+      <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0 }}>
+        <div style={sectionStyle}>
+          <h3 style={h3Style}>Executive summary</h3>
+          <p style={pStyle}>
+            Today&apos;s revenue is <strong style={{ color: textColor }}>{formatCurrency(todayRev)}</strong>.
+            {todayReturns > 0 ? ` There were ${todayReturns} approved return(s) today (${formatCurrency(todayReturnsAmt)} total refunded).` : ' No returns today.'}
+          </p>
+          <p style={pStyle}>
+            Last 7 days revenue: <strong style={{ color: textColor }}>{formatCurrency(weekRev)}</strong>.
+            This month to date: <strong style={{ color: textColor }}>{formatCurrency(monthRev)}</strong>.
+            All-time revenue: <strong style={{ color: textColor }}>{formatCurrency(allTimeRev)}</strong>.
+          </p>
+          <p style={pStyle}>
+            Average order value: <strong style={{ color: textColor }}>{formatCurrency(avgOrder)}</strong>.
+            Total orders (all time): <strong style={{ color: textColor }}>{totalOrders}</strong>.
+            Returns rate: <strong style={{ color: textColor }}>{returnsRate}%</strong>.
+          </p>
+        </div>
+
+        <div style={sectionStyle}>
+          <h3 style={h3Style}>Weekly revenue (last 7 days)</h3>
+          {weekly.length === 0 ? (
+            <p style={pStyle}>No revenue data for the last 7 days.</p>
+          ) : (
+            <>
+              <p style={pStyle}>
+                Total for the period: <strong style={{ color: textColor }}>{formatCurrency(weeklyTotal)}</strong>.
+              </p>
+              <ul style={{ margin: 0, paddingLeft: '20px', color: labelColor, fontSize: '13px' }}>
+                {weekly.map((d) => (
+                  <li key={d.date}>{d.day} ({d.date}): {formatCurrency(d.revenue || 0)}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+
+        <div style={sectionStyle}>
+          <h3 style={h3Style}>Order status breakdown</h3>
+          {Object.keys(statusBreakdown).length === 0 ? (
+            <p style={pStyle}>No order status data available.</p>
+          ) : (
+            <>
+              <p style={pStyle}>Orders by status:</p>
+              <ul style={{ margin: 0, paddingLeft: '20px', color: labelColor, fontSize: '13px' }}>
+                {Object.entries(statusBreakdown).map(([status, count]) => (
+                  <li key={status}><strong style={{ color: textColor }}>{status}</strong>: {count} order(s)</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+
+        <div style={sectionStyle}>
+          <h3 style={h3Style}>Top products (last 30 days)</h3>
+          {topProducts.length === 0 ? (
+            <p style={pStyle}>No product sales data for the last 30 days.</p>
+          ) : (
+            <>
+              <p style={pStyle}>Best sellers by quantity sold:</p>
+              <ul style={{ margin: 0, paddingLeft: '20px', color: labelColor, fontSize: '13px' }}>
+                {topProducts.map((p, i) => (
+                  <li key={p.product_id || i}>
+                    <strong style={{ color: textColor }}>{p.product_name}</strong>: {p.total_quantity} sold, {formatCurrency(p.total_revenue || 0)} revenue
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+
+        <div style={sectionStyle}>
+          <h3 style={h3Style}>Inventory snapshot</h3>
+          <p style={pStyle}>
+            Total products in inventory: <strong style={{ color: textColor }}>{inv.total_products ?? 0}</strong>.
+            {inv.low_stock != null && inv.low_stock > 0 && (
+              <> <strong style={{ color: textColor }}>{inv.low_stock}</strong> item(s) at or below low-stock threshold (10 units).</>
+            )}
+          </p>
+          <p style={pStyle}>
+            Total inventory value (cost): <strong style={{ color: textColor }}>{formatCurrency(inv.total_value ?? 0)}</strong>.
+          </p>
+        </div>
+
+        <div style={sectionStyle}>
+          <h3 style={h3Style}>Customers & rewards</h3>
+          <p style={pStyle}>
+            Total customers: <strong style={{ color: textColor }}>{customersTotal}</strong>.
+            Customers with loyalty points: <strong style={{ color: textColor }}>{customersRewards}</strong>.
+          </p>
+        </div>
+
+        <div style={sectionStyle}>
+          <h3 style={h3Style}>Discounts given</h3>
+          <p style={pStyle}>
+            Today: <strong style={{ color: textColor }}>{formatCurrency(discount.today ?? 0)}</strong>.
+            Last 7 days: <strong style={{ color: textColor }}>{formatCurrency(discount.week ?? 0)}</strong>.
+            This month: <strong style={{ color: textColor }}>{formatCurrency(discount.month ?? 0)}</strong>.
+            All time: <strong style={{ color: textColor }}>{formatCurrency(discount.all_time ?? 0)}</strong>.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   const renderCustomView = () => {
     if (selectedStat === 'weekly_revenue') {
       const data = stats?.weekly_revenue || []
@@ -804,12 +944,70 @@ function Statistics({ compact = false }) {
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      gap: '24px',
+      gap: '0',
       width: '100%',
       overflowY: 'hidden',
       overflowX: 'hidden',
-      padding: '0'
+      padding: '0',
+      minHeight: 0
     }}>
+      {/* Tabs: Charts | Reports */}
+      <div style={{
+        display: 'flex',
+        gap: '4px',
+        padding: '0 0 16px 0',
+        borderBottom: `1px solid ${borderColor}`,
+        marginBottom: '16px',
+        flexShrink: 0
+      }}>
+        <button
+          type="button"
+          onClick={() => setActiveTab('charts')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '10px 16px',
+            border: 'none',
+            borderBottom: activeTab === 'charts' ? `2px solid rgba(${themeColorRgb}, 0.9)` : '2px solid transparent',
+            borderRadius: '8px',
+            background: activeTab === 'charts' ? (isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)') : 'transparent',
+            color: activeTab === 'charts' ? (isDarkMode ? '#fff' : '#1a1a1a') : (isDarkMode ? '#999' : '#666'),
+            fontSize: '14px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <BarChart2 size={18} /> Charts
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('reports')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '10px 16px',
+            border: 'none',
+            borderBottom: activeTab === 'reports' ? `2px solid rgba(${themeColorRgb}, 0.9)` : '2px solid transparent',
+            borderRadius: '8px',
+            background: activeTab === 'reports' ? (isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)') : 'transparent',
+            color: activeTab === 'reports' ? (isDarkMode ? '#fff' : '#1a1a1a') : (isDarkMode ? '#999' : '#666'),
+            fontSize: '14px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <FileText size={18} /> Reports
+        </button>
+      </div>
+
+      {activeTab === 'reports' ? (
+        renderReportsTab()
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       {/* Today's Stats Row */}
       <div style={{
         display: 'grid',
@@ -1004,6 +1202,8 @@ function Statistics({ compact = false }) {
           {renderCustomView()}
         </div>
       </div>
+        </div>
+      )}
     </div>
   )
 }
