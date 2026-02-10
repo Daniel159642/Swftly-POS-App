@@ -6,8 +6,12 @@ const ToastContext = createContext(null)
 export function ToastProvider({ children }) {
   const [toast, setToast] = useState(null) // { message, type: 'success' | 'error' | 'warning', action?: { label, onClick } }
 
-  const show = useCallback((message, type = 'success', action) => {
-    setToast({ message, type, action: action || undefined })
+  const show = useCallback((message, type = 'success', actionOrOptions) => {
+    const action = actionOrOptions && (actionOrOptions.label != null || actionOrOptions.onClick != null)
+      ? actionOrOptions
+      : undefined
+    const icon = actionOrOptions && actionOrOptions.icon ? actionOrOptions.icon : undefined
+    setToast({ message, type, action: action || undefined, icon: icon || undefined })
   }, [])
 
   useEffect(() => {
@@ -52,9 +56,15 @@ export function ToastProvider({ children }) {
           }}
           onClick={handleToastClick}
         >
-          {toast.type === 'error' && <XCircle size={20} style={{ flexShrink: 0, color: toast.action?.iconColor ?? '#ef4444' }} />}
-          {toast.type === 'warning' && <AlertCircle size={20} style={{ flexShrink: 0, color: toast.action?.iconColor ?? '#f59e0b' }} />}
-          {toast.type === 'success' && <CheckCircle size={20} style={{ flexShrink: 0, color: toast.action?.iconColor ?? '#10b981' }} />}
+          {toast.icon ? (
+            <img src={toast.icon.src} alt="" style={{ height: '22px', width: 'auto', maxWidth: '72px', objectFit: 'contain', flexShrink: 0 }} />
+          ) : (
+            <>
+              {toast.type === 'error' && <XCircle size={20} style={{ flexShrink: 0, color: toast.action?.iconColor ?? '#ef4444' }} />}
+              {toast.type === 'warning' && <AlertCircle size={20} style={{ flexShrink: 0, color: toast.action?.iconColor ?? '#f59e0b' }} />}
+              {toast.type === 'success' && <CheckCircle size={20} style={{ flexShrink: 0, color: toast.action?.iconColor ?? '#10b981' }} />}
+            </>
+          )}
           <span style={{ flex: 1 }}>{toast.message}</span>
           {toast.action && (
             <span

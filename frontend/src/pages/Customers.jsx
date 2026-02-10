@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { useToast } from '../contexts/ToastContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { UserPlus, MoreVertical, Trash2 } from 'lucide-react'
-import { formLabelStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel } from '../components/FormStyles'
+import { formLabelStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel, modalOverlayStyle, modalContentStyle } from '../components/FormStyles'
 
 const isDark = () => document.documentElement.classList.contains('dark-theme')
 
@@ -273,25 +273,7 @@ export default function Customers() {
   }
 
   const dark = isDark()
-  const modalOverlay = {
-    position: 'fixed',
-    inset: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000
-  }
-  const modalBox = {
-    backgroundColor: '#fff',
-    borderRadius: '8px',
-    padding: '24px',
-    maxWidth: '560px',
-    width: '90%',
-    maxHeight: '90vh',
-    overflow: 'auto',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-  }
+  const customersModalContentOverrides = { maxWidth: '560px', width: '90%', maxHeight: '90vh' }
 
   const pageBg = isDark() ? 'var(--bg-primary)' : '#ffffff'
   const theadBg = isDark() ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa'
@@ -658,8 +640,8 @@ export default function Customers() {
         const customer = filtered.find((c) => c.customer_id === deleteConfirmFor)
         if (!customer) return null
         return (
-          <div style={modalOverlay} onClick={() => !deleting && setDeleteConfirmFor(null)}>
-            <div style={modalBox} onClick={(e) => e.stopPropagation()}>
+          <div style={modalOverlayStyle(dark, 1000)} onClick={() => !deleting && setDeleteConfirmFor(null)}>
+            <div style={modalContentStyle(dark, customersModalContentOverrides)} onClick={(e) => e.stopPropagation()}>
               <div style={{ marginBottom: '16px' }}>
                 <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: '#333' }}>
                   Delete customer?
@@ -721,8 +703,8 @@ export default function Customers() {
 
       {/* Edit modal (create or update) */}
       {modal === 'edit' && (
-        <div style={modalOverlay} onClick={() => !saving && closeModal()}>
-          <div style={modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={modalOverlayStyle(dark, 1000)} onClick={() => !saving && closeModal()}>
+          <div style={modalContentStyle(dark, customersModalContentOverrides)} onClick={(e) => e.stopPropagation()}>
             <div style={{ marginBottom: '20px' }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: '#333' }}>
                 {selected ? 'Edit customer' : 'New customer'}
@@ -830,8 +812,8 @@ export default function Customers() {
 
       {/* Add points / coupon modal */}
       {modal === 'points' && selected && (
-        <div style={modalOverlay} onClick={() => !saving && closeModal()}>
-          <div style={modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={modalOverlayStyle(dark, 1000)} onClick={() => !saving && closeModal()}>
+          <div style={modalContentStyle(dark, customersModalContentOverrides)} onClick={(e) => e.stopPropagation()}>
             <div style={{ marginBottom: '20px' }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: '#333' }}>
                 Give points / coupon — {selected.customer_name || 'Customer'}

@@ -100,6 +100,35 @@ export const formModalStyle = (isDarkMode) => ({
   boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
 })
 
+// Shared modal overlay: soft blur + semi-transparent backdrop (use for modals across the app)
+export const modalOverlayStyle = (isDarkMode, zIndex = 1001) => ({
+  position: 'fixed',
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.25)' : 'rgba(255, 255, 255, 0.28)',
+  backdropFilter: 'blur(3px)',
+  WebkitBackdropFilter: 'blur(3px)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex
+})
+
+// Shared modal content (dialog box): subtle shadow, rounded corners (use for modal panels)
+export const modalContentStyle = (isDarkMode, overrides = {}) => ({
+  backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+  borderRadius: '8px',
+  padding: '24px',
+  maxWidth: '420px',
+  width: '100%',
+  maxHeight: '85vh',
+  overflowY: 'auto',
+  boxShadow: isDarkMode ? '0 2px 12px rgba(0,0,0,0.3)' : '0 2px 12px rgba(0,0,0,0.15)',
+  ...overrides
+})
+
 // Form modal actions: Cancel + primary button using button-26 style
 // primaryType: 'button' (default) uses onClick, 'submit' uses form submit
 export const FormModalActions = ({

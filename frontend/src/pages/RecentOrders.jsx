@@ -6,9 +6,51 @@ import { useTheme } from '../contexts/ThemeContext'
 import { cachedFetch } from '../services/offlineSync'
 import BarcodeScanner from '../components/BarcodeScanner'
 import { ScanBarcode, CheckCircle, XCircle, ChevronDown, Pencil, MoreVertical, List, LayoutGrid } from 'lucide-react'
-import { formLabelStyle, formTitleStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel, CompactFormActions } from '../components/FormStyles'
+import { formLabelStyle, formTitleStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel, CompactFormActions, modalOverlayStyle, modalContentStyle } from '../components/FormStyles'
 import Table from '../components/Table'
 import CustomerDisplayPopup from '../components/CustomerDisplayPopup'
+
+const NEW_ORDER_TOAST_OPTIONS_KEY = 'pos_new_order_toast_options'
+const DEFAULT_NEW_ORDER_TOAST_OPTIONS = { play_sound: true, auto_dismiss_sec: 0, click_action: 'go_to_order' }
+
+function getNewOrderToastOptions() {
+  try {
+    const s = localStorage.getItem(NEW_ORDER_TOAST_OPTIONS_KEY)
+    if (s) {
+      const parsed = JSON.parse(s)
+      return { ...DEFAULT_NEW_ORDER_TOAST_OPTIONS, ...parsed }
+    }
+  } catch (_) {}
+  return { ...DEFAULT_NEW_ORDER_TOAST_OPTIONS }
+}
+
+function playNewOrderSound() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return
+    const ctx = new Ctx()
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(() => playNewOrderBeep(ctx)).catch(() => {})
+    } else {
+      playNewOrderBeep(ctx)
+    }
+  } catch (_) {}
+}
+
+function playNewOrderBeep(ctx) {
+  try {
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.frequency.value = 800
+    osc.type = 'sine'
+    gain.gain.setValueAtTime(0.15, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2)
+    osc.start(ctx.currentTime)
+    osc.stop(ctx.currentTime + 0.2)
+  } catch (_) {}
+}
 
 function RecentOrders() {
   const navigate = useNavigate()
@@ -23,7 +65,7 @@ function RecentOrders() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
   const [scannerExpanded, setScannerExpanded] = useState(false) // for smooth open/close animation
-  const [selectedStatus, setSelectedStatus] = useState('all') // 'all' | 'in_progress' | 'out_for_delivery' | 'completed'
+  const [selectedStatus, setSelectedStatus] = useState('in_progress') // 'all' | 'in_progress' | 'ready' | 'out_for_delivery' | 'completed'
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false)
   const filterDropdownRef = useRef(null)
   // Extra filters (sent to API): returns, canceled, order types (Out for delivery is a top chip, delivery-only)
@@ -32,8 +74,8 @@ function RecentOrders() {
   const [filterOrderTypePickup, setFilterOrderTypePickup] = useState(false)
   const [filterOrderTypeDelivery, setFilterOrderTypeDelivery] = useState(false)
   const [filterOrderTypeInPerson, setFilterOrderTypeInPerson] = useState(false)
-  const [dateRange, setDateRange] = useState(null) // null | 'today' | 'week' | 'month' - sort/filter list by date
-  const [viewMode, setViewMode] = useState('table') // 'table' | 'cards' - how we view the order list
+  const [dateRange, setDateRange] = useState('today') // null | 'today' | 'week' | 'month' - sort/filter list by date
+  const [viewMode, setViewMode] = useState('cards') // 'table' | 'cards' - how we view the order list
   const [allOrderItems, setAllOrderItems] = useState([]) // Cache all order items for searching
   const [scannedProducts, setScannedProducts] = useState([]) // Array of {product_id, product_name, sku, barcode}
   const [orderItemsMap, setOrderItemsMap] = useState({}) // Map of order_id -> order items
@@ -354,12 +396,21 @@ function RecentOrders() {
         if (latestId == null) return
         if (lastKnownOrderIdRef.current != null && latestId !== lastKnownOrderIdRef.current) {
           lastKnownOrderIdRef.current = latestId
-          const source = (result.order_source || '').toLowerCase().trim()
-          setNewOrderToast({
-            order_id: latestId,
-            order_number: result.order_number || `#${latestId}`,
-            order_source: source
-          })
+          try {
+            const notifSettings = localStorage.getItem('pos_notification_settings')
+            const prefs = notifSettings ? JSON.parse(notifSettings) : {}
+            if (prefs.recent_new_order !== false) {
+              const source = (result.order_source || '').toLowerCase().trim()
+              setNewOrderToast({
+                order_id: latestId,
+                order_number: result.order_number || `#${latestId}`,
+                order_source: source
+              })
+            }
+          } catch (_) {
+            const source = (result.order_source || '').toLowerCase().trim()
+            setNewOrderToast({ order_id: latestId, order_number: result.order_number || `#${latestId}`, order_source: source })
+          }
           invalidateOrders()
         }
       } catch (_) {}
@@ -378,6 +429,17 @@ function RecentOrders() {
       }, 100)
     }
   }, [highlightedOrderId])
+
+  // New order toast: play sound and/or auto-dismiss per settings
+  useEffect(() => {
+    if (!newOrderToast) return
+    const opts = getNewOrderToastOptions()
+    if (opts.play_sound) playNewOrderSound()
+    if (opts.auto_dismiss_sec > 0) {
+      const t = setTimeout(() => setNewOrderToast(null), opts.auto_dismiss_sec * 1000)
+      return () => clearTimeout(t)
+    }
+  }, [newOrderToast])
 
   // Update input padding when chips change
   useEffect(() => {
@@ -967,7 +1029,7 @@ function RecentOrders() {
     })
   }
 
-  // Chips: In progress = pickup/delivery placed or being_made. Out for delivery = delivery only, out_for_delivery. Completed = in-person always; pickup/delivery when ready, delivered, or completed.
+  // Chips: In progress = pickup/delivery placed or being_made. Ready = pickup/delivery ready (DoorDash, Shopify, Uber Eats, in-house). Out for delivery = delivery only. Completed = in-person; or pickup/delivery delivered/completed/voided/returned.
   const IN_PROGRESS_STATUSES = ['placed', 'being_made']
   if (selectedStatus !== 'all') {
     filteredData = filteredData.filter(row => {
@@ -975,8 +1037,9 @@ function RecentOrders() {
       const rowType = (row.order_type || row.orderType || '').toLowerCase().replace(/_/g, '-')
       const isInPerson = rowType === 'in-person' || rowType === 'inperson'
       if (selectedStatus === 'in_progress') return (rowType === 'pickup' || rowType === 'delivery') && IN_PROGRESS_STATUSES.includes(rowStatus)
+      if (selectedStatus === 'ready') return (rowType === 'pickup' || rowType === 'delivery') && rowStatus === 'ready'
       if (selectedStatus === 'out_for_delivery') return rowType === 'delivery' && rowStatus === 'out_for_delivery'
-      if (selectedStatus === 'completed') return isInPerson || ['ready', 'delivered', 'completed', 'voided', 'returned'].includes(rowStatus)
+      if (selectedStatus === 'completed') return isInPerson || ['delivered', 'completed', 'voided', 'returned'].includes(rowStatus)
       return true
     })
   }
@@ -1291,10 +1354,10 @@ function RecentOrders() {
   // Order source logo for DoorDash / Shopify / Uber Eats (order_source from API)
   const getOrderSourceLogo = (row) => {
     const raw = row?.order_source ?? row?.orderSource ?? (row && row['order_source']) ?? ''
-    const source = String(raw).toLowerCase().trim()
+    const source = String(raw).toLowerCase().trim().replace(/\s+/g, '_')
     if (source === 'doordash') return { src: '/doordash-logo.svg', alt: 'DoorDash', textOnly: false }
     if (source === 'shopify') return { src: '/shopify-logo.svg', alt: 'Shopify', textOnly: false }
-    if (source === 'uber_eats') return { src: '/uber-eats-logo.svg', alt: 'Uber Eats', textOnly: false }
+    if (source === 'uber_eats' || source === 'ubereats') return { src: '/uber-eats-logo.svg', alt: 'Uber Eats', textOnly: false }
     return null
   }
 
@@ -1320,6 +1383,16 @@ function RecentOrders() {
         (() => {
           const toastLogo = getOrderSourceLogo({ order_source: newOrderToast.order_source })
           const fromLabel = toastLogo ? toastLogo.alt : (newOrderToast.order_source || 'New order')
+          const opts = getNewOrderToastOptions()
+          const handleGoToOrder = () => {
+            setHighlightedOrderId(newOrderToast.order_id)
+            setNewOrderToast(null)
+          }
+          const handlePrintReceipt = () => {
+            window.open(`/api/receipt/${newOrderToast.order_id}`, '_blank')
+            setNewOrderToast(null)
+          }
+          const handlePrimaryClick = opts.click_action === 'go_to_order' ? handleGoToOrder : opts.click_action === 'print_receipt' ? handlePrintReceipt : null
           return (
         <div
           style={{
@@ -1337,32 +1410,78 @@ function RecentOrders() {
             alignItems: 'center',
             gap: '12px',
             maxWidth: '90vw',
+            flexWrap: 'wrap',
             animation: 'fadeIn 0.3s ease'
           }}
         >
-          {toastLogo && !toastLogo.textOnly && (
-            <img src={toastLogo.src} alt="" style={{ height: '28px', width: 'auto', maxWidth: '80px', objectFit: 'contain', flexShrink: 0 }} />
-          )}
-          <span style={{ fontWeight: 600, color: `rgba(${themeColorRgb}, 1)` }}>New order</span>
-          <span style={{ color: isDarkMode ? 'var(--text-primary)' : '#333' }}>
-            {newOrderToast.order_number} from {fromLabel}
-          </span>
-          <button
-            type="button"
-            onClick={() => setNewOrderToast(null)}
-            style={{
-              marginLeft: '8px',
-              padding: '4px 10px',
-              borderRadius: '6px',
-              border: 'none',
-              background: isDarkMode ? '#444' : '#eee',
-              color: isDarkMode ? '#fff' : '#333',
-              cursor: 'pointer',
-              fontSize: '13px'
-            }}
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: '1 1 auto', minWidth: 0, cursor: handlePrimaryClick ? 'pointer' : 'default' }}
+            onClick={handlePrimaryClick || undefined}
+            onKeyDown={e => { if (handlePrimaryClick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handlePrimaryClick() } }}
+            role={handlePrimaryClick ? 'button' : undefined}
+            tabIndex={handlePrimaryClick ? 0 : undefined}
           >
-            Dismiss
-          </button>
+            {toastLogo && !toastLogo.textOnly && (
+              <img src={toastLogo.src} alt="" style={{ height: '28px', width: 'auto', maxWidth: '80px', objectFit: 'contain', flexShrink: 0 }} />
+            )}
+            <span style={{ fontWeight: 600, color: `rgba(${themeColorRgb}, 1)` }}>New order</span>
+            <span style={{ color: isDarkMode ? 'var(--text-primary)' : '#333' }}>
+              {newOrderToast.order_number} from {fromLabel}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            {opts.click_action === 'go_to_order' && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleGoToOrder() }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: `rgba(${themeColorRgb}, 0.9)`,
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600
+                }}
+              >
+                View order
+              </button>
+            )}
+            {opts.click_action === 'print_receipt' && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handlePrintReceipt() }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: `rgba(${themeColorRgb}, 0.9)`,
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600
+                }}
+              >
+                Print receipt
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setNewOrderToast(null) }}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: 'none',
+                background: isDarkMode ? '#444' : '#eee',
+                color: isDarkMode ? '#fff' : '#333',
+                cursor: 'pointer',
+                fontSize: '13px'
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
           )
         })(),
@@ -1667,6 +1786,7 @@ function RecentOrders() {
           const statusFilters = [
             { value: 'all', label: 'All' },
             { value: 'in_progress', label: 'In progress' },
+            { value: 'ready', label: 'Ready' },
             { value: 'out_for_delivery', label: 'Out for delivery' },
             { value: 'completed', label: 'Completed' }
           ]
@@ -2001,6 +2121,7 @@ function RecentOrders() {
                   const totalStr = typeof totalVal === 'number' ? `$${totalVal.toFixed(2)}` : `$${parseFloat(totalVal || 0).toFixed(2)}`
                   const cardSource = String(row?.order_source ?? row?.orderSource ?? '').toLowerCase().trim()
                   const cardOutline = cardSource === 'doordash' ? '2px solid #FF3008' : cardSource === 'shopify' ? '2px solid #5A863E' : cardSource === 'uber_eats' ? '2px solid #1a1a1a' : (isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee')
+                  const cardThemeColor = cardSource === 'doordash' ? '#FF3008' : cardSource === 'shopify' ? '#5A863E' : cardSource === 'uber_eats' ? '#1a1a1a' : themeColor
                   const cardNextPhase = getNextPhase(row)
                   return (
                     <div
@@ -2015,7 +2136,7 @@ function RecentOrders() {
                         cursor: 'pointer'
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px', color: isDarkMode ? 'var(--text-primary)' : '#333', minWidth: 0 }}>
                           {(() => {
                             const logo = getOrderSourceLogo(row)
@@ -2026,12 +2147,6 @@ function RecentOrders() {
                             return <img key={`logo-${normalizedOrderId}`} src={logo.src} alt={logo.alt} style={{ height: '18px', width: 'auto', maxWidth: '80px', minWidth: '20px', objectFit: 'contain', flexShrink: 0, display: 'block' }} />
                           })()}
                           <span style={{ flexShrink: 0 }}>{row.order_number || `#${orderId}`}</span>
-                        </span>
-                        <span style={{ fontSize: '14px', fontWeight: 600, color: `rgba(${themeColorRgb}, 1)` }}>{totalStr}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-                        <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary)' : '#666' }}>
-                          {formatOrderDate(row.order_date || row.orderDate || '')}
                         </span>
                         <span
                           role={cardNextPhase ? 'button' : undefined}
@@ -2046,33 +2161,140 @@ function RecentOrders() {
                           {getStatusDisplay(row)}
                         </span>
                       </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                        <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary)' : '#666' }}>
+                          {formatOrderDate(row.order_date || row.orderDate || '')}
+                        </span>
+                        <span style={{ fontSize: '14px', fontWeight: 600, color: cardThemeColor }}>{totalStr}</span>
+                      </div>
                       {(row.prepare_by) && (
                         <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary)' : '#666', marginTop: '4px' }}>
                           Prepare by: {formatOrderDate(row.prepare_by)}
                         </div>
                       )}
-                      {/* Purchased items list visible in card container */}
-                      {(() => {
-                        const cardItems = orderDetails[normalizedOrderId]?.items ?? orderItemsMap[normalizedOrderId] ?? []
-                        if (cardItems.length === 0) return null
-                        return (
-                          <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee' }}>
-                            <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '6px', textTransform: 'uppercase' }}>Items</div>
-                            <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '13px', color: isDarkMode ? 'var(--text-secondary)' : '#555', lineHeight: 1.5 }}>
-                              {cardItems.slice(0, 5).map((item, i) => (
-                                <li key={i}>
-                                  {item.product_name || item.productName || 'Item'} ×{item.quantity || 0}
-                                </li>
-                              ))}
-                              {cardItems.length > 5 && (
-                                <li style={{ color: isDarkMode ? '#999' : '#888', fontSize: '12px' }}>+{cardItems.length - 5} more</li>
-                              )}
-                            </ul>
+                      {/* Product info + actions ellipsis inline (bottom right when collapsed) */}
+                      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '8px', marginTop: '10px', paddingTop: '10px', borderTop: `1px solid ${cardThemeColor}` }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {(() => {
+                            const cardItems = orderDetails[normalizedOrderId]?.items ?? orderItemsMap[normalizedOrderId] ?? []
+                            if (cardItems.length === 0) return null
+                            return (
+                              <>
+                                <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '6px', textTransform: 'uppercase' }}>Items</div>
+                                <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '13px', color: isDarkMode ? 'var(--text-secondary)' : '#555', lineHeight: 1.5 }}>
+                                  {cardItems.slice(0, 5).map((item, i) => (
+                                    <li key={i}>
+                                      {item.product_name || item.productName || 'Item'} ×{item.quantity || 0}
+                                    </li>
+                                  ))}
+                                  {cardItems.length > 5 && (
+                                    <li style={{ color: isDarkMode ? '#999' : '#888', fontSize: '12px' }}>+{cardItems.length - 5} more</li>
+                                  )}
+                                </ul>
+                              </>
+                            )
+                          })()}
+                        </div>
+                        {!isExpanded && (
+                          <div
+                            ref={actionsDropdownOrderId === normalizedOrderId ? actionsDropdownRef : null}
+                            style={{ position: 'relative', flexShrink: 0 }}
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setActionsDropdownOrderId(prev => prev === normalizedOrderId ? null : normalizedOrderId)
+                              }}
+                              style={{
+                                padding: '6px',
+                                border: 'none',
+                                background: 'none',
+                                color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}
+                            >
+                              <MoreVertical size={20} />
+                            </button>
+                            {actionsDropdownOrderId === normalizedOrderId && (
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  bottom: '100%',
+                                  right: 0,
+                                  left: 'auto',
+                                  marginBottom: '4px',
+                                  minWidth: '160px',
+                                  backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#fff',
+                                  border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #dee2e6',
+                                  borderRadius: '8px',
+                                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                  zIndex: 50,
+                                  overflow: 'hidden'
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setActionsDropdownOrderId(null); fetchOrderById(normalizedOrderId) }}
+                                  style={{
+                                    width: '100%',
+                                    padding: '10px 14px',
+                                    textAlign: 'left',
+                                    border: 'none',
+                                    background: 'none',
+                                    fontSize: '14px',
+                                    color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  Return
+                                </button>
+                                {isUnpaidOrder(row, details) && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); handleVoidOrder(normalizedOrderId) }}
+                                    style={{
+                                      width: '100%',
+                                      padding: '10px 14px',
+                                      textAlign: 'left',
+                                      border: 'none',
+                                      borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
+                                      background: 'none',
+                                      fontSize: '14px',
+                                      color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    Void
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleReprintReceipt(normalizedOrderId) }}
+                                  style={{
+                                    width: '100%',
+                                    padding: '10px 14px',
+                                    textAlign: 'left',
+                                    border: 'none',
+                                    borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
+                                    background: 'none',
+                                    fontSize: '14px',
+                                    color: isDarkMode ? 'var(--text-primary)' : '#333',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  Reprint receipt
+                                </button>
+                              </div>
+                            )}
                           </div>
-                        )
-                      })()}
+                        )}
+                      </div>
                       {isExpanded && (
-                        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee' }}>
+                        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${cardThemeColor}` }}>
                           {isLoading ? (
                             <div style={{ textAlign: 'center', padding: '12px', color: isDarkMode ? '#999' : '#999', fontSize: '13px' }}>Loading...</div>
                           ) : details ? (
@@ -2098,7 +2320,7 @@ function RecentOrders() {
                               )}
                               <div
                                 ref={actionsDropdownOrderId === normalizedOrderId ? actionsDropdownRef : null}
-                                style={{ marginTop: '8px', paddingTop: '8px', borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee', position: 'relative' }}
+                                style={{ marginTop: '8px', paddingTop: '8px', borderTop: `1px solid ${cardThemeColor}`, position: 'relative', display: 'flex', justifyContent: 'flex-end' }}
                               >
                                 <button
                                   type="button"
@@ -2124,9 +2346,10 @@ function RecentOrders() {
                                     style={{
                                       position: 'absolute',
                                       top: '100%',
-                                      left: 0,
                                       right: 0,
+                                      left: 'auto',
                                       marginTop: '4px',
+                                      minWidth: '160px',
                                       backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#fff',
                                       border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #dee2e6',
                                       borderRadius: '8px',
@@ -2669,31 +2892,11 @@ function RecentOrders() {
         const modalItems = orderDetails[orderId]?.items ?? orderItemsMap[orderId] ?? []
         return (
           <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 1001
-            }}
+            style={modalOverlayStyle(isDarkMode)}
             onClick={closeStatusPhaseModal}
           >
             <div
-              style={{
-                ...(isDarkMode ? { backgroundColor: 'var(--bg-primary, #1a1a1a)' } : { backgroundColor: '#fff' }),
-                borderRadius: '8px',
-                padding: isMobile ? '16px' : '24px',
-                maxWidth: isMobile ? '95%' : '420px',
-                width: '100%',
-                maxHeight: '85vh',
-                overflowY: 'auto',
-                boxShadow: isDarkMode ? '0 4px 20px rgba(0,0,0,0.5)' : '0 4px 20px rgba(0,0,0,0.3)'
-              }}
+              style={modalContentStyle(isDarkMode, { padding: isMobile ? '16px' : '24px', maxWidth: isMobile ? '95%' : '420px' })}
               onClick={(e) => e.stopPropagation()}
             >
               <h3 style={formTitleStyle(isDarkMode)}>Move order to next phase</h3>

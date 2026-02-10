@@ -8,7 +8,7 @@ import { cachedFetch } from '../services/offlineSync'
 import BarcodeScanner from './BarcodeScanner'
 import CustomerDisplayPopup from './CustomerDisplayPopup'
 import { ScanBarcode, UserPlus, CheckCircle, Gift, X, AlertCircle, Percent, Check, Pencil } from 'lucide-react'
-import { formLabelStyle, formModalStyle, inputBaseStyle, getInputFocusHandlers, FormModalActions, FormField, FormLabel } from './FormStyles'
+import { formLabelStyle, formModalStyle, inputBaseStyle, getInputFocusHandlers, FormModalActions, FormField, FormLabel, modalOverlayStyle, modalContentStyle, CompactFormActions } from './FormStyles'
 
 function POS({ employeeId, employeeName }) {
   const navigate = useNavigate()
@@ -122,14 +122,14 @@ function POS({ employeeId, employeeName }) {
   const [showDiscountModal, setShowDiscountModal] = useState(false)
   const [discountInput, setDiscountInput] = useState('')
   const [orderDiscount, setOrderDiscount] = useState(0)
-  const [orderDiscountType, setOrderDiscountType] = useState('') // 'student' | 'employee' | 'senior' | 'military' | 'other' | ''
-  // Preset discount scenarios (label and percent)
-  const DISCOUNT_PRESETS = [
+  const [orderDiscountType, setOrderDiscountType] = useState('') // preset id or ''
+  const DEFAULT_DISCOUNT_PRESETS = [
     { id: 'student', label: 'Student', percent: 10 },
     { id: 'employee', label: 'Employee', percent: 15 },
     { id: 'senior', label: 'Senior', percent: 10 },
     { id: 'military', label: 'Military', percent: 10 }
   ]
+  const [discountPresets, setDiscountPresets] = useState([...DEFAULT_DISCOUNT_PRESETS])
   // POS intelligent search: space-separated tokens become filter chips (size, topping, etc.) – configurable for any product type
   const [searchFilterChips, setSearchFilterChips] = useState([])
   const [posSearchFilters, setPosSearchFilters] = useState(null)
@@ -269,6 +269,9 @@ function POS({ employeeId, employeeName }) {
         mode: (data.posSettings.transaction_fee_mode || 'additional').toLowerCase(),
         charge_cash: !!data.posSettings.transaction_fee_charge_cash
       }))
+      if (Array.isArray(data.posSettings.discount_presets) && data.posSettings.discount_presets.length > 0) {
+        setDiscountPresets(data.posSettings.discount_presets)
+      }
     }
   }, [bootstrapSuccess, bootstrapData])
 
@@ -3153,7 +3156,7 @@ function POS({ employeeId, employeeName }) {
           {orderDiscount > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
               <span style={{ color: '#666' }}>
-                Discount{orderDiscountType ? ` (${DISCOUNT_PRESETS.find(p => p.id === orderDiscountType)?.label || orderDiscountType})` : ''}:
+                Discount{orderDiscountType ? ` (${discountPresets.find(p => p.id === orderDiscountType)?.label || orderDiscountType})` : ''}:
               </span>
               <span style={{ fontFamily: '"Product Sans", sans-serif', fontWeight: 500 }}>
                 -${orderDiscount.toFixed(2)}
@@ -4152,15 +4155,7 @@ function POS({ employeeId, employeeName }) {
         showCreateCustomer ? (
           /* Add Customer form — identical to Customers page (New customer modal) */
           <div
-            style={{
-              position: 'fixed',
-              inset: 0,
-              backgroundColor: 'rgba(0,0,0,0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 2000
-            }}
+            style={modalOverlayStyle(isDarkMode, 2000)}
             onClick={() => {
               setShowCustomerInfoModal(false)
               setShowCreateCustomer(false)
@@ -4168,16 +4163,7 @@ function POS({ employeeId, employeeName }) {
             }}
           >
             <div
-              style={{
-                backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-                borderRadius: '8px',
-                padding: '24px',
-                maxWidth: '560px',
-                width: '90%',
-                maxHeight: '90vh',
-                overflow: 'auto',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-              }}
+              style={modalContentStyle(isDarkMode, { maxWidth: '560px', width: '90%', maxHeight: '90vh' })}
               onClick={(e) => e.stopPropagation()}
             >
               <div style={{ marginBottom: '20px' }}>
@@ -4598,19 +4584,8 @@ function POS({ employeeId, employeeName }) {
 
       {/* Edit Customer Modal - same style as Add Customer / Customer Info form */}
       {showEditCustomerModal && selectedCustomer && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'transparent',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 2000
-        }} onClick={() => setShowEditCustomerModal(false)}>
-          <div style={formModalStyle(isDarkMode)} onClick={e => e.stopPropagation()}>
+        <div style={modalOverlayStyle(isDarkMode, 2000)} onClick={() => setShowEditCustomerModal(false)}>
+          <div style={modalContentStyle(isDarkMode, { maxWidth: '560px', width: '90%', maxHeight: '90vh' })} onClick={e => e.stopPropagation()}>
             <div style={{ marginBottom: '20px' }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>
                 Edit customer
@@ -4672,10 +4647,13 @@ function POS({ employeeId, employeeName }) {
               />
             </div>
 
-            <FormModalActions
+            <CompactFormActions
               onCancel={() => setShowEditCustomerModal(false)}
               onPrimary={handleSaveEditCustomer}
               primaryLabel="Save"
+              primaryType="button"
+              isDarkMode={isDarkMode}
+              themeColorRgb={themeColorRgb}
             />
           </div>
         </div>
@@ -4707,31 +4685,33 @@ function POS({ employeeId, employeeName }) {
             }}
             onClick={e => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
-              {DISCOUNT_PRESETS.map((preset) => (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+              {discountPresets.map((preset) => (
                 <button
                   key={preset.id}
                   type="button"
                   onClick={() => applyPresetDiscount(preset)}
                   style={{
-                    padding: '8px 14px',
-                    height: '32px',
+                    padding: '12px',
+                    minHeight: '44px',
                     display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    whiteSpace: 'nowrap',
+                    gap: '2px',
                     backgroundColor: `rgba(${themeColorRgb}, 0.15)`,
                     border: `1px solid rgba(${themeColorRgb}, 0.4)`,
                     borderRadius: '8px',
                     fontSize: '14px',
-                    fontWeight: 500,
+                    fontWeight: 600,
                     color: `rgb(${themeColorRgb})`,
                     cursor: 'pointer',
                     transition: 'all 0.3s ease',
                     boxShadow: 'none'
                   }}
                 >
-                  {preset.label} {preset.percent}%
+                  <span>{preset.label}</span>
+                  <span style={{ fontSize: '13px', fontWeight: 500, opacity: 0.9 }}>{preset.percent}%</span>
                 </button>
               ))}
             </div>

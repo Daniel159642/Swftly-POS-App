@@ -40,7 +40,7 @@ import {
 } from 'lucide-react'
 import BarcodeScanner from '../components/BarcodeScanner'
 import AdminDashboard from '../components/AdminDashboard'
-import { FormTitle, FormLabel, FormField, inputBaseStyle, getInputFocusHandlers, compactCancelButtonStyle, compactPrimaryButtonStyle } from '../components/FormStyles'
+import { FormTitle, FormLabel, FormField, inputBaseStyle, getInputFocusHandlers, compactCancelButtonStyle, compactPrimaryButtonStyle, modalOverlayStyle, modalContentStyle } from '../components/FormStyles'
 import Table from '../components/Table'
 import '../components/CustomerDisplay.css'
 import '../components/CustomerDisplayButtons.css'
@@ -1189,6 +1189,61 @@ const SETTINGS_TAB_IDS = ['location', 'pos', 'cash', 'notifications', 'rewards',
 const NO_PERMISSION_MSG = "You don't have permission"
 const EMPLOYEE_ALLOWED_SETTINGS_TABS = ['cash', 'location'] // Employee can only open Cash Register and Store Information (location read-only)
 
+const NOTIFICATION_OPTIONS = [
+  { id: 'pos_order_success', label: 'Order completed', description: 'Shown when a sale is completed successfully.', toastType: 'success', sampleMessage: 'Order processed successfully!' },
+  { id: 'pos_add_to_cart', label: 'Item added to cart', description: 'Shown when a product is added to the cart.', toastType: 'success', sampleMessage: 'Added Product Name to cart' },
+  { id: 'pos_discount', label: 'Discount applied', description: 'Shown when a discount or tip is applied.', toastType: 'success', sampleMessage: 'Discount applied: $5.00' },
+  { id: 'pos_register_closed', label: 'Register closed warning', description: 'Shown when trying to ring up with register closed.', toastType: 'warning', sampleMessage: 'Register is closed.' },
+  { id: 'pos_customer', label: 'Customer updated', description: 'Shown when customer info is saved at checkout.', toastType: 'success', sampleMessage: 'Customer updated' },
+  { id: 'pos_store_credit', label: 'Store credit / exchange', description: 'Shown when store credit or exchange is applied.', toastType: 'success', sampleMessage: 'Store credit $10.00 added to cart' },
+  { id: 'pos_errors', label: 'POS errors', description: 'Cart empty, permission denied, or payment errors.', toastType: 'error', sampleMessage: 'Cart is empty' },
+  { id: 'recent_new_order', label: 'New order (integrations)', description: 'Popup when a new DoorDash, Uber Eats, or Shopify order arrives.', toastType: 'success', sampleMessage: 'Order #1234 from DoorDash' },
+  { id: 'recent_status', label: 'Order status updated', description: 'Shown when order status is changed on Recent Orders.', toastType: 'success', sampleMessage: 'Status updated' },
+  { id: 'recent_return', label: 'Return processed', description: 'Shown after a return is completed.', toastType: 'success', sampleMessage: 'Return processed successfully! Return #: R-001' },
+  { id: 'recent_errors', label: 'Recent Orders errors', description: 'Scan not found, update failed, etc.', toastType: 'error', sampleMessage: 'Order or product with barcode not found' },
+  { id: 'cash_register', label: 'Register open / close', description: 'When opening or closing the cash register.', toastType: 'success', sampleMessage: 'Register opened successfully!' },
+  { id: 'cash_drop', label: 'Cash drop / take out', description: 'When recording a cash drop or money taken out.', toastType: 'success', sampleMessage: 'Cash drop saved successfully!' },
+  { id: 'cash_errors', label: 'Cash Register errors', description: 'Failed to open, close, or save cash actions.', toastType: 'error', sampleMessage: 'Failed to open register' },
+  { id: 'customers', label: 'Customer list updates', description: 'Customer created, updated, deleted, or points changed.', toastType: 'success', sampleMessage: 'Customer updated' },
+  { id: 'customers_errors', label: 'Customers errors', description: 'Validation or save failures on Customers page.', toastType: 'error', sampleMessage: 'Customer name is required' },
+  { id: 'settings_integration', label: 'Integration saved', description: 'When saving Shopify, DoorDash, or Uber Eats settings.', toastType: 'success', sampleMessage: 'Integration saved' },
+  { id: 'shipment_created', label: 'Shipment created', description: 'When a new shipment is created or draft confirmed on Shipments page.', toastType: 'success', sampleMessage: 'Shipment created successfully! 5 items added.' },
+  { id: 'shipment_draft_saved', label: 'Shipment draft saved', description: 'When a shipment draft is saved.', toastType: 'success', sampleMessage: 'Draft saved successfully' },
+  { id: 'shipment_preview_error', label: 'Shipment preview / upload errors', description: 'Invalid file type, preview failed, or upload errors.', toastType: 'error', sampleMessage: 'Invalid file type. Use PDF, Excel, CSV, Word, or image.' },
+  { id: 'shipment_create_errors', label: 'Shipment create / confirm errors', description: 'Failed to create shipment, confirm draft, or save draft.', toastType: 'error', sampleMessage: 'Failed to create shipment' },
+  { id: 'shipment_validation', label: 'Shipment validation', description: 'Please select a vendor, select a document, or no items to save.', toastType: 'error', sampleMessage: 'Please select a vendor' },
+  { id: 'shipment_load_error', label: 'Shipment load error', description: 'Failed to load draft or shipment details.', toastType: 'error', sampleMessage: 'Error loading draft' },
+  { id: 'general_success', label: 'General success toasts', description: 'Any other success messages in the app.', toastType: 'success', sampleMessage: 'Saved successfully' },
+  { id: 'general_warning', label: 'General warning toasts', description: 'Warnings (e.g. validation hints).', toastType: 'warning', sampleMessage: 'Please check your input' },
+  { id: 'general_error', label: 'General error toasts', description: 'Any other error messages in the app.', toastType: 'error', sampleMessage: 'Something went wrong' }
+]
+
+const NEW_ORDER_TOAST_OPTIONS_KEY = 'pos_new_order_toast_options'
+const DEFAULT_NEW_ORDER_TOAST_OPTIONS = {
+  play_sound: true,
+  auto_dismiss_sec: 0, // 0 = only when clicked, 4 = auto after 4 sec
+  click_action: 'go_to_order' // 'go_to_order' | 'print_receipt' | 'dismiss_only'
+}
+
+async function playNewOrderSound() {
+  try {
+    const Ctx = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)
+    if (!Ctx) return
+    const ctx = new Ctx()
+    if (ctx.state === 'suspended') await ctx.resume()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.frequency.value = 800
+    osc.type = 'sine'
+    gain.gain.setValueAtTime(0.15, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2)
+    osc.start(ctx.currentTime)
+    osc.stop(ctx.currentTime + 0.2)
+  } catch (_) {}
+}
+
 function Settings() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { themeMode, themeColor } = useTheme()
@@ -1206,6 +1261,12 @@ function Settings() {
       setActiveTab(allowed ? tab : 'location')
     }
   }, [searchParams, hasAdminAccess])
+  const DEFAULT_DISCOUNT_PRESETS = [
+    { id: 'student', label: 'Student', percent: 10 },
+    { id: 'employee', label: 'Employee', percent: 15 },
+    { id: 'senior', label: 'Senior', percent: 10 },
+    { id: 'military', label: 'Military', percent: 10 }
+  ]
   const [posSettings, setPosSettings] = useState({
     num_registers: 1,
     register_type: 'one_screen',
@@ -1213,7 +1274,8 @@ function Settings() {
     return_tip_refund: false,
     require_signature_for_return: false,
     transaction_fee_mode: 'additional',
-    transaction_fee_charge_cash: false
+    transaction_fee_charge_cash: false,
+    discount_presets: [...DEFAULT_DISCOUNT_PRESETS]
   })
   const [deliveryPayOnDeliveryCashOnly, setDeliveryPayOnDeliveryCashOnly] = useState(false)
   const [allowDelivery, setAllowDelivery] = useState(true)
@@ -1313,7 +1375,9 @@ function Settings() {
       })
       const data = await res.json()
       if (data.success) {
-        showToast('Integration saved', 'success')
+        const integrationLogos = { doordash: { src: '/doordash-logo.svg', alt: 'DoorDash' }, uber_eats: { src: '/uber-eats-logo.svg', alt: 'Uber Eats' }, shopify: { src: '/shopify-logo.svg', alt: 'Shopify' } }
+        const icon = integrationLogos[provider]
+        showToast(icon ? `${icon.alt} saved` : 'Integration saved', 'success', icon ? { icon } : undefined)
       } else {
         showToast(data.message || 'Failed to save', 'error')
       }
@@ -1329,6 +1393,7 @@ function Settings() {
       setReceiptUndoStack([])
       setReceiptRedoStack([])
       loadReceiptTemplates()
+      setActiveReceiptSection('header')
     }
   }, [receiptEditModalOpen])
   useEffect(() => {
@@ -1531,6 +1596,38 @@ function Settings() {
       return s ? JSON.parse(s) : []
     } catch { return [] }
   })
+  const [notificationSettings, setNotificationSettings] = useState(() => {
+    try {
+      const s = localStorage.getItem('pos_notification_settings')
+      if (s) {
+        const parsed = JSON.parse(s)
+        return NOTIFICATION_OPTIONS.reduce((acc, opt) => ({ ...acc, [opt.id]: parsed[opt.id] !== false }), {})
+      }
+    } catch (_) {}
+    return NOTIFICATION_OPTIONS.reduce((acc, opt) => ({ ...acc, [opt.id]: true }), {})
+  })
+  const persistNotificationSettings = (next) => {
+    setNotificationSettings(next)
+    try {
+      localStorage.setItem('pos_notification_settings', JSON.stringify(next))
+    } catch (_) {}
+  }
+  const [newOrderToastOptions, setNewOrderToastOptions] = useState(() => {
+    try {
+      const s = localStorage.getItem(NEW_ORDER_TOAST_OPTIONS_KEY)
+      if (s) {
+        const parsed = JSON.parse(s)
+        return { ...DEFAULT_NEW_ORDER_TOAST_OPTIONS, ...parsed }
+      }
+    } catch (_) {}
+    return { ...DEFAULT_NEW_ORDER_TOAST_OPTIONS }
+  })
+  const persistNewOrderToastOptions = (next) => {
+    setNewOrderToastOptions(next)
+    try {
+      localStorage.setItem(NEW_ORDER_TOAST_OPTIONS_KEY, JSON.stringify(next))
+    } catch (_) {}
+  }
   const [showCreateCampaignModal, setShowCreateCampaignModal] = useState(false)
   const [showProductPickerModal, setShowProductPickerModal] = useState(false)
   const [showBarcodeInPicker, setShowBarcodeInPicker] = useState(false)
@@ -1903,6 +2000,9 @@ function Settings() {
     }
     if (data.pos_settings) {
       const mode = data.pos_settings.transaction_fee_mode || 'additional'
+      const presets = Array.isArray(data.pos_settings.discount_presets) && data.pos_settings.discount_presets.length > 0
+        ? data.pos_settings.discount_presets
+        : DEFAULT_DISCOUNT_PRESETS
       setPosSettings({
         num_registers: data.pos_settings.num_registers || 1,
         register_type: data.pos_settings.register_type || 'one_screen',
@@ -1910,7 +2010,8 @@ function Settings() {
         return_tip_refund: !!data.pos_settings.return_tip_refund,
         require_signature_for_return: !!data.pos_settings.require_signature_for_return,
         transaction_fee_mode: ['additional', 'included', 'none'].includes(mode) ? mode : 'additional',
-        transaction_fee_charge_cash: !!data.pos_settings.transaction_fee_charge_cash
+        transaction_fee_charge_cash: !!data.pos_settings.transaction_fee_charge_cash,
+        discount_presets: presets
       })
     }
     if (data.cash_settings) {
@@ -2279,6 +2380,9 @@ function Settings() {
       const data = await response.json()
       if (data.success && data.settings) {
         const mode = data.settings.transaction_fee_mode || 'additional'
+        const presets = Array.isArray(data.settings.discount_presets) && data.settings.discount_presets.length > 0
+          ? data.settings.discount_presets
+          : DEFAULT_DISCOUNT_PRESETS
         setPosSettings({
           num_registers: data.settings.num_registers || 1,
           register_type: data.settings.register_type || 'one_screen',
@@ -2286,7 +2390,8 @@ function Settings() {
           return_tip_refund: !!data.settings.return_tip_refund,
           require_signature_for_return: !!data.settings.require_signature_for_return,
           transaction_fee_mode: ['additional', 'included', 'none'].includes(mode) ? mode : 'additional',
-          transaction_fee_charge_cash: !!data.settings.transaction_fee_charge_cash
+          transaction_fee_charge_cash: !!data.settings.transaction_fee_charge_cash,
+          discount_presets: presets
         })
       }
     } catch (error) {
@@ -2810,7 +2915,8 @@ function Settings() {
           return_tip_refund: !!posSettings.return_tip_refund,
           require_signature_for_return: !!posSettings.require_signature_for_return,
           transaction_fee_mode: posSettings.transaction_fee_mode || 'additional',
-          transaction_fee_charge_cash: !!posSettings.transaction_fee_charge_cash
+          transaction_fee_charge_cash: !!posSettings.transaction_fee_charge_cash,
+          discount_presets: Array.isArray(posSettings.discount_presets) ? posSettings.discount_presets : []
         })
       })
 
@@ -4667,6 +4773,122 @@ function Settings() {
                   </label>
                 </div>
               </div>
+
+              {/* Discount presets: customize labels and percentages shown in POS discount modal */}
+              <div style={{ marginTop: '24px' }}>
+                <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '4px', fontSize: '15px', fontWeight: 600 }}>
+                  Discount presets
+                </FormTitle>
+                <p style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '14px', marginTop: 0 }}>
+                  Edit the discount types and percentages shown in the POS discount modal. These appear as quick-select buttons (e.g. Student 10%, Employee 15%).
+                </p>
+                <style>{`
+                  .discount-preset-percent-input::-webkit-outer-spin-button,
+                  .discount-preset-percent-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+                  .discount-preset-percent-input { -moz-appearance: textfield; appearance: textfield; }
+                `}</style>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {(posSettings.discount_presets || []).map((preset, index) => (
+                    <div
+                      key={preset.id + String(index)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        flexWrap: 'wrap'
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={preset.label}
+                        onChange={(e) => {
+                          const next = [...(posSettings.discount_presets || [])]
+                          next[index] = { ...next[index], label: e.target.value }
+                          setPosSettings({ ...posSettings, discount_presets: next })
+                        }}
+                        placeholder="Label"
+                        style={{
+                          ...inputBaseStyle(isDarkMode, themeColorRgb),
+                          width: '140px',
+                          maxWidth: '180px'
+                        }}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                      />
+                      <input
+                        type="number"
+                        className="discount-preset-percent-input"
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        value={preset.percent}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value)
+                          if (Number.isNaN(v)) return
+                          const next = [...(posSettings.discount_presets || [])]
+                          next[index] = { ...next[index], percent: Math.max(0, Math.min(100, v)) }
+                          setPosSettings({ ...posSettings, discount_presets: next })
+                        }}
+                        placeholder="%"
+                        style={{
+                          ...inputBaseStyle(isDarkMode, themeColorRgb),
+                          width: '72px',
+                          boxSizing: 'border-box'
+                        }}
+                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                      />
+                      <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary)' : '#666' }}>%</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = (posSettings.discount_presets || []).filter((_, i) => i !== index)
+                          setPosSettings({ ...posSettings, discount_presets: next })
+                        }}
+                        style={{
+                          padding: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          borderRadius: '4px'
+                        }}
+                        aria-label="Remove discount"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const presets = posSettings.discount_presets || []
+                    const usedIds = new Set(presets.map(p => (p.id || '').toLowerCase()))
+                    let id = 'custom'
+                    let n = 1
+                    while (usedIds.has(id)) { id = `custom_${n}`; n++ }
+                    setPosSettings({
+                      ...posSettings,
+                      discount_presets: [...presets, { id, label: 'New discount', percent: 10 }]
+                    })
+                  }}
+                  style={{
+                    marginTop: '12px',
+                    padding: '8px 14px',
+                    fontSize: '14px',
+                    borderRadius: '6px',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #444)' : '#ccc'}`,
+                    backgroundColor: 'transparent',
+                    color: isDarkMode ? 'var(--text-primary)' : '#333',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Add discount
+                </button>
+              </div>
+
               <div style={{
                 marginTop: '12px',
                 display: 'flex',
@@ -5067,18 +5289,22 @@ function Settings() {
             {/* Checkout UI Edit modal – left: controls, right: exact checkout preview */}
             {checkoutUiEditModalOpen && (
               <div
-                style={{
-                  position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(0,0,0,0.5)', padding: '24px'
-                }}
+                style={{ ...modalOverlayStyle(isDarkMode, 99999), padding: '24px' }}
                 onClick={() => setCheckoutUiEditModalOpen(false)}
               >
                 <div
                   style={{
-                    background: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
-                    borderRadius: '12px', maxWidth: '95vw', width: 360 + (CHECKOUT_PREVIEW_WIDTH * 0.75) + 32, height: '72vh', maxHeight: '90vh',
-                    display: 'flex', flexDirection: 'column', overflow: 'hidden',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+                    ...modalContentStyle(isDarkMode, {
+                      borderRadius: '12px',
+                      maxWidth: '95vw',
+                      width: 360 + (CHECKOUT_PREVIEW_WIDTH * 0.75) + 32,
+                      height: '72vh',
+                      maxHeight: '90vh',
+                      padding: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      overflow: 'hidden'
+                    }),
                     border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd'
                   }}
                   onClick={e => e.stopPropagation()}
@@ -5783,18 +6009,22 @@ function Settings() {
             {/* Receipt Edit modal – same style as Checkout UI: left controls, right preview */}
             {receiptEditModalOpen && (
               <div
-                style={{
-                  position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(0,0,0,0.5)', padding: '24px'
-                }}
+                style={{ ...modalOverlayStyle(isDarkMode, 99999), padding: '24px' }}
                 onClick={() => setReceiptEditModalOpen(false)}
               >
                 <div
                   style={{
-                    background: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
-                    borderRadius: '12px', maxWidth: '95vw', width: '720px', height: '72vh', maxHeight: '90vh',
-                    display: 'flex', flexDirection: 'column', overflow: 'hidden',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+                    ...modalContentStyle(isDarkMode, {
+                      borderRadius: '12px',
+                      maxWidth: '95vw',
+                      width: '720px',
+                      height: '72vh',
+                      maxHeight: '90vh',
+                      padding: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      overflow: 'hidden'
+                    }),
                     border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd'
                   }}
                   onClick={e => e.stopPropagation()}
@@ -6692,12 +6922,174 @@ function Settings() {
 
       {/* Notifications Tab */}
       {activeTab === 'notifications' && (
-        <div style={{ maxWidth: '480px' }}>
-          <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
+        <div style={{ maxWidth: '560px' }}>
+          <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px' }}>
             Notifications
           </FormTitle>
+          <p style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '20px' }}>
+            Turn specific in-app notifications on or off. Use the Test button to see how each notification looks.
+          </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {/* Blank tab - content can be added later */}
+            {NOTIFICATION_OPTIONS.map((opt) => (
+              <div
+                key={opt.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  flexWrap: 'wrap',
+                  padding: '14px 16px',
+                  borderRadius: '12px',
+                  border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
+                  backgroundColor: isDarkMode ? 'var(--bg-secondary)' : '#fafafa'
+                }}
+              >
+                <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary)' : '#333', marginBottom: '2px' }}>
+                    {opt.label}
+                  </div>
+                  <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary)' : '#666' }}>
+                    {opt.description}
+                  </div>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none', flexShrink: 0 }}>
+                  <div className="checkbox-wrapper-2">
+                    <input
+                      type="checkbox"
+                      className="sc-gJwTLC ikxBAC"
+                      checked={notificationSettings[opt.id] !== false}
+                      onChange={(e) => persistNotificationSettings({ ...notificationSettings, [opt.id]: e.target.checked })}
+                    />
+                  </div>
+                  <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary)' : '#666' }}>
+                    {notificationSettings[opt.id] !== false ? 'On' : 'Off'}
+                  </span>
+                </label>
+                {opt.id === 'recent_new_order' ? (
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {[
+                      { id: 'doordash', label: 'DoorDash', src: '/doordash-logo.svg', alt: 'DoorDash' },
+                      { id: 'uber_eats', label: 'Uber Eats', src: '/uber-eats-logo.svg', alt: 'Uber Eats' },
+                      { id: 'shopify', label: 'Shopify', src: '/shopify-logo.svg', alt: 'Shopify' }
+                    ].map((int) => (
+                      <button
+                        key={int.id}
+                        type="button"
+                        onClick={async () => {
+                          if (newOrderToastOptions.play_sound) await playNewOrderSound()
+                          showToast(`Order #${Math.floor(1000 + Math.random() * 9000)} from ${int.alt}`, 'success', { icon: { src: int.src, alt: int.alt } })
+                        }}
+                        style={{
+                          padding: '8px 12px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          borderRadius: '8px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: isDarkMode ? 'var(--bg-tertiary)' : '#e5e7eb',
+                          color: isDarkMode ? 'var(--text-primary)' : '#374151',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <img src={int.src} alt="" style={{ height: '16px', width: 'auto', maxWidth: '48px', objectFit: 'contain' }} />
+                        Test
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => showToast(opt.sampleMessage, opt.toastType)}
+                    style={{
+                      padding: '8px 14px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      borderRadius: '8px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      backgroundColor: isDarkMode ? 'var(--bg-tertiary)' : '#e5e7eb',
+                      color: isDarkMode ? 'var(--text-primary)' : '#374151'
+                    }}
+                  >
+                    Test
+                  </button>
+                )}
+              </div>
+            ))}
+            {/* New order (integrations) options - only when that notification is on */}
+            {notificationSettings.recent_new_order !== false && (
+              <div
+                style={{
+                  marginTop: '8px',
+                  padding: '16px',
+                  borderRadius: '12px',
+                  border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
+                  backgroundColor: isDarkMode ? 'var(--bg-tertiary)' : '#f5f5f5'
+                }}
+              >
+                <div style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary)' : '#333', marginBottom: '12px' }}>
+                  New order notification options
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none' }}>
+                    <div className="checkbox-wrapper-2">
+                      <input
+                        type="checkbox"
+                        className="sc-gJwTLC ikxBAC"
+                        checked={newOrderToastOptions.play_sound}
+                        onChange={(e) => persistNewOrderToastOptions({ ...newOrderToastOptions, play_sound: e.target.checked })}
+                      />
+                    </div>
+                    <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>Play sound when a new order arrives</span>
+                  </label>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#555', marginBottom: '6px' }}>Dismiss</div>
+                    <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="new_order_dismiss"
+                          checked={newOrderToastOptions.auto_dismiss_sec === 0}
+                          onChange={() => persistNewOrderToastOptions({ ...newOrderToastOptions, auto_dismiss_sec: 0 })}
+                        />
+                        <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>Only when I click</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="new_order_dismiss"
+                          checked={newOrderToastOptions.auto_dismiss_sec === 4}
+                          onChange={() => persistNewOrderToastOptions({ ...newOrderToastOptions, auto_dismiss_sec: 4 })}
+                        />
+                        <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>Auto-dismiss after 4 seconds</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#555', marginBottom: '6px' }}>When I click the notification</div>
+                    <select
+                      value={newOrderToastOptions.click_action}
+                      onChange={(e) => persistNewOrderToastOptions({ ...newOrderToastOptions, click_action: e.target.value })}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: isDarkMode ? '1px solid var(--border-color)' : '1px solid #ddd',
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary)' : '#fff',
+                        color: isDarkMode ? 'var(--text-primary)' : '#333',
+                        fontSize: '14px',
+                        minWidth: '200px'
+                      }}
+                    >
+                      <option value="go_to_order">Go to order in Recent Orders</option>
+                      <option value="print_receipt">Print receipt</option>
+                      <option value="dismiss_only">Just dismiss</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -7372,27 +7764,11 @@ function Settings() {
           
           {/* Open Register Modal */}
           {showOpenModal && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0,0,0,0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 1000
-            }}>
-              <div style={{
-                backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                padding: '30px',
-                borderRadius: '8px',
-                width: '90%',
-                maxWidth: '600px',
-                maxHeight: '90vh',
-                overflowY: 'auto'
-              }}>
+            <div style={modalOverlayStyle(isDarkMode, 1000)} onClick={() => setShowOpenModal(false)}>
+              <div
+                style={modalContentStyle(isDarkMode, { padding: '30px', width: '90%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' })}
+                onClick={e => e.stopPropagation()}
+              >
                 <h2 style={{
                   marginTop: 0,
                   color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
@@ -7638,27 +8014,11 @@ function Settings() {
           
           {/* Close Register Modal */}
           {showCloseModal && currentSession && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0,0,0,0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 1000
-            }}>
-              <div style={{
-                backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                padding: '30px',
-                borderRadius: '8px',
-                width: '90%',
-                maxWidth: '600px',
-                maxHeight: '90vh',
-                overflowY: 'auto'
-              }}>
+            <div style={modalOverlayStyle(isDarkMode, 1000)} onClick={() => setShowCloseModal(false)}>
+              <div
+                style={modalContentStyle(isDarkMode, { padding: '30px', width: '90%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' })}
+                onClick={e => e.stopPropagation()}
+              >
                 <h2 style={{
                   marginTop: 0,
                   color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
@@ -8017,25 +8377,11 @@ function Settings() {
           
           {/* Take Out Money Modal */}
           {showTakeOutModal && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0,0,0,0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 1000
-            }}>
-              <div style={{
-                backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                padding: '30px',
-                borderRadius: '8px',
-                width: '90%',
-                maxWidth: '500px'
-              }}>
+            <div style={modalOverlayStyle(isDarkMode, 1000)} onClick={() => setShowTakeOutModal(false)}>
+              <div
+                style={modalContentStyle(isDarkMode, { padding: '30px', width: '90%', maxWidth: '500px' })}
+                onClick={e => e.stopPropagation()}
+              >
                 <h2 style={{
                   marginTop: 0,
                   color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
@@ -8130,27 +8476,11 @@ function Settings() {
           
           {/* Count Drop Modal */}
           {showCountDropModal && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0,0,0,0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 1000
-            }}>
-              <div style={{
-                backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : 'white',
-                padding: '30px',
-                borderRadius: '8px',
-                width: '90%',
-                maxWidth: '600px',
-                maxHeight: '90vh',
-                overflowY: 'auto'
-              }}>
+            <div style={modalOverlayStyle(isDarkMode, 1000)} onClick={() => setShowCountDropModal(false)}>
+              <div
+                style={modalContentStyle(isDarkMode, { padding: '30px', width: '90%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' })}
+                onClick={e => e.stopPropagation()}
+              >
                 <h2 style={{
                   marginTop: 0,
                   color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'

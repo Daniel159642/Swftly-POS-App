@@ -2500,6 +2500,15 @@ def api_delete_receipt_template(template_id):
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 
+def _default_discount_presets():
+    return [
+        {'id': 'student', 'label': 'Student', 'percent': 10},
+        {'id': 'employee', 'label': 'Employee', 'percent': 15},
+        {'id': 'senior', 'label': 'Senior', 'percent': 10},
+        {'id': 'military', 'label': 'Military', 'percent': 10},
+    ]
+
+
 @app.route('/api/pos-settings', methods=['GET'])
 def api_get_pos_settings():
     """Get POS settings (PostgreSQL)"""
@@ -2514,6 +2523,21 @@ def api_get_pos_settings():
                 mode = (raw_mode if isinstance(raw_mode, str) and raw_mode else 'additional').strip().lower()
                 if mode not in ('additional', 'included', 'none'):
                     mode = 'additional'
+                raw_presets = row.get('discount_presets')
+                if raw_presets and isinstance(raw_presets, str):
+                    try:
+                        import json
+                        presets = json.loads(raw_presets)
+                        if isinstance(presets, list) and len(presets) > 0:
+                            discount_presets = presets
+                        else:
+                            discount_presets = _default_discount_presets()
+                    except Exception:
+                        discount_presets = _default_discount_presets()
+                elif isinstance(raw_presets, list) and len(raw_presets) > 0:
+                    discount_presets = raw_presets
+                else:
+                    discount_presets = _default_discount_presets()
                 settings = {
                     'num_registers': row.get('num_registers', 1),
                     'register_type': row.get('register_type', 'one_screen'),
@@ -2521,10 +2545,11 @@ def api_get_pos_settings():
                     'return_tip_refund': bool(row.get('return_tip_refund', False)),
                     'require_signature_for_return': bool(row.get('require_signature_for_return', False)),
                     'transaction_fee_mode': mode,
-                    'transaction_fee_charge_cash': bool(row.get('transaction_fee_charge_cash', False))
+                    'transaction_fee_charge_cash': bool(row.get('transaction_fee_charge_cash', False)),
+                    'discount_presets': discount_presets
                 }
             else:
-                settings = {'num_registers': 1, 'register_type': 'one_screen', 'return_transaction_fee_take_loss': False, 'return_tip_refund': False, 'require_signature_for_return': False, 'transaction_fee_mode': 'additional', 'transaction_fee_charge_cash': False}
+                settings = {'num_registers': 1, 'register_type': 'one_screen', 'return_transaction_fee_take_loss': False, 'return_tip_refund': False, 'require_signature_for_return': False, 'transaction_fee_mode': 'additional', 'transaction_fee_charge_cash': False, 'discount_presets': _default_discount_presets()}
             return jsonify({'success': True, 'settings': settings})
         finally:
             conn.close()
@@ -2558,11 +2583,34 @@ def api_update_pos_settings():
         if transaction_fee_mode not in ('additional', 'included', 'none'):
             transaction_fee_mode = 'additional'
         transaction_fee_charge_cash = bool(data.get('transaction_fee_charge_cash', False))
+        # discount_presets: list of {id, label, percent}; store as JSON string
+        raw_presets = data.get('discount_presets')
+        if isinstance(raw_presets, list) and len(raw_presets) > 0:
+            import json
+            normalized = []
+            for i, p in enumerate(raw_presets):
+                if not isinstance(p, dict):
+                    continue
+                pid = (p.get('id') or '').strip() or f'preset_{i}'
+                label = (p.get('label') or '').strip() or pid
+                try:
+                    percent = float(p.get('percent', 0))
+                    percent = max(0, min(100, percent))
+                except (TypeError, ValueError):
+                    percent = 0
+                normalized.append({'id': pid, 'label': label, 'percent': percent})
+            discount_presets_json = json.dumps(normalized) if normalized else None
+        else:
+            discount_presets_json = None
         conn, cursor = _pg_conn()
         try:
             # Ensure require_signature_for_return column exists so the setting saves
             try:
                 cursor.execute("ALTER TABLE pos_settings ADD COLUMN IF NOT EXISTS require_signature_for_return BOOLEAN DEFAULT false")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE pos_settings ADD COLUMN IF NOT EXISTS discount_presets TEXT")
             except Exception:
                 pass
             cursor.execute("""
@@ -2628,6 +2676,14 @@ def api_update_pos_settings():
                 """, (require_signature_for_return,))
             except Exception:
                 pass
+            if discount_presets_json is not None:
+                try:
+                    cursor.execute("""
+                        UPDATE pos_settings SET discount_presets = %s, updated_at = NOW()
+                        WHERE id = (SELECT id FROM pos_settings ORDER BY id DESC LIMIT 1)
+                    """, (discount_presets_json,))
+                except Exception:
+                    pass
             conn.commit()
             return jsonify({'success': True, 'message': 'POS settings updated successfully'})
         finally:
@@ -2663,6 +2719,18 @@ def api_pos_bootstrap():
                 mode = (raw_mode if isinstance(raw_mode, str) and raw_mode else 'additional').strip().lower()
                 if mode not in ('additional', 'included', 'none'):
                     mode = 'additional'
+                raw_presets = row.get('discount_presets')
+                if raw_presets and isinstance(raw_presets, str):
+                    try:
+                        import json
+                        presets = json.loads(raw_presets)
+                        discount_presets = presets if isinstance(presets, list) and len(presets) > 0 else _default_discount_presets()
+                    except Exception:
+                        discount_presets = _default_discount_presets()
+                elif isinstance(raw_presets, list) and len(raw_presets) > 0:
+                    discount_presets = raw_presets
+                else:
+                    discount_presets = _default_discount_presets()
                 pos_settings = {
                     'num_registers': row.get('num_registers', 1),
                     'register_type': row.get('register_type', 'one_screen'),
@@ -2670,10 +2738,11 @@ def api_pos_bootstrap():
                     'return_tip_refund': bool(row.get('return_tip_refund', False)),
                     'require_signature_for_return': bool(row.get('require_signature_for_return', False)),
                     'transaction_fee_mode': mode,
-                    'transaction_fee_charge_cash': bool(row.get('transaction_fee_charge_cash', False))
+                    'transaction_fee_charge_cash': bool(row.get('transaction_fee_charge_cash', False)),
+                    'discount_presets': discount_presets
                 }
             else:
-                pos_settings = {'num_registers': 1, 'register_type': 'one_screen', 'return_transaction_fee_take_loss': False, 'return_tip_refund': False, 'require_signature_for_return': False, 'transaction_fee_mode': 'additional', 'transaction_fee_charge_cash': False}
+                pos_settings = {'num_registers': 1, 'register_type': 'one_screen', 'return_transaction_fee_take_loss': False, 'return_tip_refund': False, 'require_signature_for_return': False, 'transaction_fee_mode': 'additional', 'transaction_fee_charge_cash': False, 'discount_presets': _default_discount_presets()}
 
             # 2) Customer rewards settings (ensure table exists)
             cursor.execute("""
@@ -8319,6 +8388,18 @@ def api_settings_bootstrap():
                     mode = (raw_mode if isinstance(raw_mode, str) and raw_mode else 'additional').strip().lower()
                     if mode not in ('additional', 'included', 'none'):
                         mode = 'additional'
+                    raw_presets = row.get('discount_presets')
+                    if raw_presets and isinstance(raw_presets, str):
+                        try:
+                            import json
+                            presets = json.loads(raw_presets)
+                            discount_presets = presets if isinstance(presets, list) and len(presets) > 0 else _default_discount_presets()
+                        except Exception:
+                            discount_presets = _default_discount_presets()
+                    elif isinstance(raw_presets, list) and len(raw_presets) > 0:
+                        discount_presets = raw_presets
+                    else:
+                        discount_presets = _default_discount_presets()
                     out['pos_settings'] = {
                         'num_registers': row.get('num_registers', 1),
                         'register_type': row.get('register_type', 'one_screen'),
@@ -8326,10 +8407,11 @@ def api_settings_bootstrap():
                         'return_tip_refund': bool(row.get('return_tip_refund', False)),
                         'require_signature_for_return': bool(row.get('require_signature_for_return', False)),
                         'transaction_fee_mode': mode,
-                        'transaction_fee_charge_cash': bool(row.get('transaction_fee_charge_cash', False))
+                        'transaction_fee_charge_cash': bool(row.get('transaction_fee_charge_cash', False)),
+                        'discount_presets': discount_presets
                     }
                 else:
-                    out['pos_settings'] = {'num_registers': 1, 'register_type': 'one_screen', 'return_transaction_fee_take_loss': False, 'return_tip_refund': False, 'require_signature_for_return': False, 'transaction_fee_mode': 'additional', 'transaction_fee_charge_cash': False}
+                    out['pos_settings'] = {'num_registers': 1, 'register_type': 'one_screen', 'return_transaction_fee_take_loss': False, 'return_tip_refund': False, 'require_signature_for_return': False, 'transaction_fee_mode': 'additional', 'transaction_fee_charge_cash': False, 'discount_presets': _default_discount_presets()}
             finally:
                 conn.close()
         except Exception as e:
