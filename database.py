@@ -12029,3 +12029,836 @@ def get_daily_cash_counts(
         import traceback
         traceback.print_exc()
         return []
+
+
+def get_employee_activity_summary(
+    employee_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Aggregate activity for one or all employees: orders, cash register, time clock,
+    shipments/inventory, customers, schedule changes. Date range applied where applicable.
+    """
+    from psycopg2.extras import RealDictCursor
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    out = {
+        'employees': [],
+        'by_employee': {},
+        'start_date': start_date,
+        'end_date': end_date
+    }
+    try:
+        if employee_id:
+            cursor.execute("""
+                SELECT employee_id, first_name || ' ' || COALESCE(last_name, '') AS name
+                FROM employees WHERE active = 1 AND employee_id = %s
+            """, (employee_id,))
+        else:
+            cursor.execute("""
+                SELECT employee_id, first_name || ' ' || COALESCE(last_name, '') AS name
+                FROM employees WHERE active = 1 ORDER BY name
+            """)
+        employees = [dict(r) for r in cursor.fetchall()]
+        if not employees:
+            conn.close()
+            return out
+
+        emp_ids = [e['employee_id'] for e in employees]
+        out['employees'] = employees
+
+        date_cond = ""
+        params_base = list(emp_ids)
+        if start_date:
+            date_cond += " AND DATE(o.order_date) >= %s"
+            params_base.append(start_date)
+        if end_date:
+            date_cond += " AND DATE(o.order_date) <= %s"
+            params_base.append(end_date)
+
+        for emp in employees:
+            eid = emp['employee_id']
+            per_emp = {
+                'employee_id': eid,
+                'employee_name': emp['name'],
+                'orders': {'total': 0, 'by_type': {}, 'tip_total': 0, 'tip_count': 0, 'tip_avg': 0,
+                           'discount_total': 0, 'discount_count': 0},
+                'cash_register': {'opens': 0, 'closes': 0, 'drops': 0, 'drops_total': 0,
+                                  'cash_out_count': 0, 'cash_out_total': 0, 'cash_out_reasons': [],
+                                  'cash_in_count': 0, 'cash_in_total': 0, 'close_details': []},
+                'time_clock': {'entries': [], 'total_entries': 0, 'late_count': 0, 'on_time_count': 0,
+                               'early_count': 0, 'leave_late_count': 0, 'leave_on_time_count': 0, 'leave_early_count': 0},
+                'shipments': {'created': 0},
+                'customers': {'new_customers': 0, 'checkouts_with_customer': 0, 'checkouts_without_customer': 0},
+                'schedule_changes': [],
+                'returns': {'count': 0, 'total_amount': 0, 'exchanges_count': 0, 'refunds_count': 0}
+            }
+            out['by_employee'][eid] = per_emp
+
+        placeholders = ', '.join(['%s'] * len(emp_ids))
+        cursor.execute("""
+            SELECT employee_id, COUNT(*) AS cnt,
+                   COALESCE(SUM(tip), 0) AS tip_sum,
+                   SUM(CASE WHEN COALESCE(tip, 0) > 0 THEN 1 ELSE 0 END) AS tip_cnt,
+                   COALESCE(SUM(discount), 0) AS discount_sum,
+                   SUM(CASE WHEN COALESCE(discount, 0) > 0 THEN 1 ELSE 0 END) AS discount_cnt
+            FROM orders o
+            WHERE o.employee_id IN (""" + placeholders + """)
+              AND o.order_status = 'completed'
+              """ + date_cond + """
+            GROUP BY employee_id
+        """, params_base)
+        for row in cursor.fetchall():
+            eid = row['employee_id']
+            if eid in out['by_employee']:
+                out['by_employee'][eid]['orders']['total'] = row['cnt'] or 0
+                out['by_employee'][eid]['orders']['tip_total'] = float(row['tip_sum'] or 0)
+                out['by_employee'][eid]['orders']['tip_count'] = row['tip_cnt'] or 0
+                tcnt = row['tip_cnt'] or 0
+                out['by_employee'][eid]['orders']['tip_avg'] = float(row['tip_sum'] or 0) / tcnt if tcnt else 0
+                out['by_employee'][eid]['orders']['discount_total'] = float(row['discount_sum'] or 0)
+                out['by_employee'][eid]['orders']['discount_count'] = row['discount_cnt'] or 0
+
+        cursor.execute("""
+            SELECT employee_id, LOWER(COALESCE(NULLIF(TRIM(order_type), ''), 'in-person')) AS ot, COUNT(*) AS cnt
+            FROM orders o
+            WHERE o.employee_id IN (""" + placeholders + """)
+              AND o.order_status = 'completed'
+              """ + date_cond + """
+            GROUP BY employee_id, LOWER(COALESCE(NULLIF(TRIM(order_type), ''), 'in-person'))
+        """, params_base)
+        for row in cursor.fetchall():
+            eid = row['employee_id']
+            if eid in out['by_employee']:
+                out['by_employee'][eid]['orders']['by_type'][row['ot']] = row['cnt']
+
+        cursor.execute("""
+            SELECT employee_id,
+                   SUM(CASE WHEN customer_id IS NOT NULL THEN 1 ELSE 0 END) AS with_cust,
+                   SUM(CASE WHEN customer_id IS NULL THEN 1 ELSE 0 END) AS without_cust
+            FROM orders o
+            WHERE o.employee_id IN (""" + placeholders + """)
+              AND o.order_status = 'completed'
+              """ + date_cond + """
+            GROUP BY employee_id
+        """, params_base)
+        for row in cursor.fetchall():
+            eid = row['employee_id']
+            if eid in out['by_employee']:
+                out['by_employee'][eid]['customers']['checkouts_with_customer'] = row['with_cust'] or 0
+                out['by_employee'][eid]['customers']['checkouts_without_customer'] = row['without_cust'] or 0
+
+        # Returns / refunds / exchanges (pending_returns: employee_id = who processed, status = 'approved')
+        ret_params = list(emp_ids)
+        ret_date = ""
+        if start_date:
+            ret_date += " AND COALESCE(pr.approved_date, pr.return_date)::date >= %s"
+            ret_params.append(start_date)
+        if end_date:
+            ret_date += " AND COALESCE(pr.approved_date, pr.return_date)::date <= %s"
+            ret_params.append(end_date)
+        try:
+            cursor.execute("""
+                SELECT pr.employee_id,
+                       COUNT(*) AS cnt,
+                       COALESCE(SUM(pr.total_refund_amount), 0) AS total_amt
+                FROM pending_returns pr
+                WHERE pr.status = 'approved'
+                  AND pr.employee_id IN (""" + placeholders + """)
+                  """ + ret_date + """
+                GROUP BY pr.employee_id
+            """, ret_params)
+            for row in cursor.fetchall():
+                eid = row['employee_id']
+                if eid in out['by_employee']:
+                    out['by_employee'][eid]['returns']['count'] = row['cnt'] or 0
+                    out['by_employee'][eid]['returns']['total_amount'] = float(row['total_amt'] or 0)
+            # Exchanges: count where exchange_transaction_id IS NOT NULL (if column exists)
+            try:
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'pending_returns' AND column_name = 'exchange_transaction_id'
+                """)
+                has_exchange_col = cursor.fetchone() is not None
+                if has_exchange_col:
+                    cursor.execute("""
+                        SELECT employee_id,
+                               SUM(CASE WHEN pr.exchange_transaction_id IS NOT NULL THEN 1 ELSE 0 END) AS exchanges,
+                               SUM(CASE WHEN pr.exchange_transaction_id IS NULL THEN 1 ELSE 0 END) AS refunds
+                        FROM pending_returns pr
+                        WHERE pr.status = 'approved'
+                          AND pr.employee_id IN (""" + placeholders + """)
+                          """ + ret_date + """
+                        GROUP BY pr.employee_id
+                    """, ret_params)
+                    for row in cursor.fetchall():
+                        eid = row['employee_id']
+                        if eid in out['by_employee']:
+                            out['by_employee'][eid]['returns']['exchanges_count'] = row['exchanges'] or 0
+                            out['by_employee'][eid]['returns']['refunds_count'] = row['refunds'] or 0
+                else:
+                    for eid in out['by_employee']:
+                        out['by_employee'][eid]['returns']['refunds_count'] = out['by_employee'][eid]['returns']['count']
+            except Exception:
+                for eid in out['by_employee']:
+                    out['by_employee'][eid]['returns']['refunds_count'] = out['by_employee'][eid]['returns']['count']
+        except Exception:
+            pass
+
+        cr_date = ""
+        cr_params = list(emp_ids)
+        if start_date:
+            cr_date += " AND DATE(crs.opened_at) >= %s"
+            cr_params.append(start_date)
+        if end_date:
+            cr_date += " AND DATE(crs.opened_at) <= %s"
+            cr_params.append(end_date)
+        cursor.execute("""
+            SELECT employee_id, COUNT(*) AS cnt
+            FROM cash_register_sessions crs
+            WHERE employee_id IN (""" + placeholders + """) """ + cr_date + """
+            GROUP BY employee_id
+        """, cr_params)
+        for row in cursor.fetchall():
+            eid = row['employee_id']
+            if eid in out['by_employee']:
+                out['by_employee'][eid]['cash_register']['opens'] = row['cnt']
+
+        close_date = ""
+        close_params = list(emp_ids)
+        if start_date:
+            close_date += " AND DATE(crs.closed_at) >= %s"
+            close_params.append(start_date)
+        if end_date:
+            close_date += " AND DATE(crs.closed_at) <= %s"
+            close_params.append(end_date)
+        cursor.execute("""
+            SELECT crs.closed_by AS employee_id, COUNT(*) AS cnt,
+                   COALESCE(SUM(crs.ending_cash), 0) AS ending_total,
+                   COALESCE(SUM(crs.expected_cash), 0) AS expected_total,
+                   COALESCE(SUM(crs.discrepancy), 0) AS discrepancy_total
+            FROM cash_register_sessions crs
+            WHERE crs.status = 'closed' AND crs.closed_at IS NOT NULL
+              AND crs.closed_by IN (""" + placeholders + ") " + close_date + """
+            GROUP BY crs.closed_by
+        """, close_params)
+        for row in cursor.fetchall():
+            eid = row['employee_id']
+            if eid and eid in out['by_employee']:
+                out['by_employee'][eid]['cash_register']['closes'] = row['cnt']
+
+        cursor.execute("""
+            SELECT crs.register_session_id, crs.closed_by, crs.closed_at, crs.ending_cash, crs.expected_cash, crs.discrepancy, crs.notes
+            FROM cash_register_sessions crs
+            WHERE crs.status = 'closed' AND crs.closed_at IS NOT NULL AND crs.closed_by IN (""" + placeholders + """) """ + close_date + """
+            ORDER BY crs.closed_at DESC
+            LIMIT 100
+        """, close_params)
+        for r in cursor.fetchall():
+            cby = r['closed_by']
+            if cby and cby in out['by_employee']:
+                lst = out['by_employee'][cby]['cash_register']['close_details']
+                if len(lst) < 25:
+                    lst.append({
+                        'session_id': r['register_session_id'], 'closed_at': str(r['closed_at']) if r.get('closed_at') else None,
+                        'ending_cash': float(r['ending_cash'] or 0), 'expected_cash': float(r['expected_cash'] or 0),
+                        'discrepancy': float(r['discrepancy'] or 0), 'notes': (r.get('notes') or '')[:500]
+                    })
+
+        dc_params = list(emp_ids)
+        if start_date:
+            dc_params.append(start_date)
+        if end_date:
+            dc_params.append(end_date)
+        cursor.execute("""
+            SELECT counted_by AS employee_id, COUNT(*) AS cnt, COALESCE(SUM(total_amount), 0) AS total
+            FROM daily_cash_counts
+            WHERE count_type = 'drop' AND counted_by IN (""" + placeholders + """)
+              """ + (" AND count_date >= %s" if start_date else "") + (" AND count_date <= %s" if end_date else "") + """
+            GROUP BY counted_by
+        """, dc_params)
+        for row in cursor.fetchall():
+            eid = row['employee_id']
+            if eid in out['by_employee']:
+                out['by_employee'][eid]['cash_register']['drops'] = row['cnt']
+                out['by_employee'][eid]['cash_register']['drops_total'] = float(row['total'] or 0)
+
+        ct_params = list(emp_ids)
+        if start_date:
+            ct_params.append(start_date)
+        if end_date:
+            ct_params.append(end_date)
+        cursor.execute("""
+            SELECT employee_id, transaction_type, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS total
+            FROM cash_transactions ct
+            WHERE employee_id IN (""" + placeholders + """)
+              """ + (" AND DATE(transaction_date) >= %s" if start_date else "") + (" AND DATE(transaction_date) <= %s" if end_date else "") + """
+            GROUP BY employee_id, transaction_type
+        """, ct_params)
+        for row in cursor.fetchall():
+            eid = row['employee_id']
+            if eid not in out['by_employee']:
+                continue
+            if row['transaction_type'] in ('cash_out', 'withdrawal'):
+                out['by_employee'][eid]['cash_register']['cash_out_count'] = row['cnt']
+                out['by_employee'][eid]['cash_register']['cash_out_total'] = float(row['total'] or 0)
+            elif row['transaction_type'] in ('cash_in', 'deposit'):
+                out['by_employee'][eid]['cash_register']['cash_in_count'] = row['cnt']
+                out['by_employee'][eid]['cash_register']['cash_in_total'] = float(row['total'] or 0)
+
+        cursor.execute("""
+            SELECT employee_id, amount, reason, notes, transaction_date
+            FROM cash_transactions
+            WHERE employee_id IN (""" + placeholders + """) AND transaction_type IN ('cash_out', 'withdrawal')
+              """ + (" AND DATE(transaction_date) >= %s" if start_date else "") + (" AND DATE(transaction_date) <= %s" if end_date else "") + """
+            ORDER BY transaction_date DESC
+            LIMIT 30
+        """, ct_params)
+        for row in cursor.fetchall():
+            eid = row['employee_id']
+            if eid in out['by_employee']:
+                out['by_employee'][eid]['cash_register']['cash_out_reasons'].append({
+                    'amount': float(row['amount'] or 0), 'reason': row.get('reason'), 'notes': row.get('notes'),
+                    'date': str(row['transaction_date']) if row.get('transaction_date') else None
+                })
+
+        tc_params = list(emp_ids)
+        if start_date:
+            tc_params.append(start_date)
+        if end_date:
+            tc_params.append(end_date)
+        cursor.execute("""
+            SELECT time_entry_id, employee_id, clock_in, clock_out, total_hours, status
+            FROM time_clock
+            WHERE employee_id IN (""" + placeholders + """)
+              """ + (" AND DATE(clock_in) >= %s" if start_date else "") + (" AND DATE(clock_in) <= %s" if end_date else "") + """
+            ORDER BY clock_in DESC
+            LIMIT 200
+        """, tc_params)
+        for row in cursor.fetchall():
+            eid = row['employee_id']
+            if eid in out['by_employee']:
+                per_emp = out['by_employee'][eid]['time_clock']
+                per_emp['total_entries'] += 1
+                entry = {
+                    'time_entry_id': row['time_entry_id'], 'clock_in': str(row['clock_in']) if row.get('clock_in') else None,
+                    'clock_out': str(row['clock_out']) if row.get('clock_out') else None,
+                    'total_hours': float(row['total_hours']) if row.get('total_hours') is not None else None,
+                    'status': row.get('status')
+                }
+                per_emp['entries'].append(entry)
+                if len(per_emp['entries']) > 50:
+                    per_emp['entries'] = per_emp['entries'][:50]
+
+        try:
+            cursor.execute("""
+                SELECT tc.employee_id, tc.clock_in, tc.clock_out, ss.start_time, ss.end_time
+                FROM time_clock tc
+                LEFT JOIN scheduled_shifts ss ON ss.employee_id = tc.employee_id AND ss.shift_date = DATE(tc.clock_in)
+                WHERE tc.employee_id IN (""" + placeholders + """)
+                  """ + (" AND DATE(tc.clock_in) >= %s" if start_date else "") + (" AND DATE(tc.clock_in) <= %s" if end_date else "") + """
+                ORDER BY tc.clock_in DESC
+                LIMIT 150
+            """, tc_params)
+            for row in cursor.fetchall():
+                eid = row['employee_id']
+                if eid not in out['by_employee']:
+                    continue
+                per_emp = out['by_employee'][eid]['time_clock']
+                clock_in = row.get('clock_in')
+                start_t = row.get('start_time')
+                end_t = row.get('end_time')
+                clock_out = row.get('clock_out')
+                if clock_in and start_t:
+                    from datetime import datetime as dt
+                    try:
+                        ci = clock_in if hasattr(clock_in, 'date') else dt.fromisoformat(str(clock_in).replace('Z', '+00:00'))
+                        if isinstance(start_t, str):
+                            st = dt.strptime(start_t[:5], '%H:%M').time()
+                        else:
+                            st = start_t
+                        combined = dt.combine(ci.date(), st)
+                        diff_mins = (ci - combined).total_seconds() / 60
+                        if diff_mins > 5:
+                            per_emp['late_count'] += 1
+                        elif diff_mins < -5:
+                            per_emp['early_count'] += 1
+                        else:
+                            per_emp['on_time_count'] += 1
+                    except (TypeError, ValueError, AttributeError):
+                        pass
+                if clock_out and end_t:
+                    from datetime import datetime as dt
+                    try:
+                        co = clock_out if hasattr(clock_out, 'date') else dt.fromisoformat(str(clock_out).replace('Z', '+00:00'))
+                        if isinstance(end_t, str):
+                            et = dt.strptime(end_t[:5], '%H:%M').time()
+                        else:
+                            et = end_t
+                        combined_end = dt.combine(co.date(), et)
+                        diff_mins_out = (co - combined_end).total_seconds() / 60
+                        if diff_mins_out > 5:
+                            per_emp['leave_late_count'] += 1
+                        elif diff_mins_out < -5:
+                            per_emp['leave_early_count'] += 1
+                        else:
+                            per_emp['leave_on_time_count'] += 1
+                    except (TypeError, ValueError, AttributeError):
+                        pass
+        except Exception:
+            pass
+
+        cursor.execute("""
+            SELECT uploaded_by AS employee_id, COUNT(*) AS cnt
+            FROM pending_shipments
+            WHERE uploaded_by IS NOT NULL AND uploaded_by IN (""" + placeholders + """)
+              """ + (" AND upload_timestamp::date >= %s" if start_date else "") + (" AND upload_timestamp::date <= %s" if end_date else "") + """
+            GROUP BY uploaded_by
+        """, emp_ids + ([start_date] if start_date else []) + ([end_date] if end_date else []))
+        for row in cursor.fetchall():
+            eid = row['employee_id']
+            if eid in out['by_employee']:
+                out['by_employee'][eid]['shipments']['created'] = row['cnt']
+
+        try:
+            sc_params = list(emp_ids)
+            if start_date:
+                sc_params.append(start_date)
+            if end_date:
+                sc_params.append(end_date)
+            cursor.execute("""
+                SELECT change_id, period_id, scheduled_shift_id, change_type, changed_by, changed_at
+                FROM schedule_changes
+                WHERE changed_by IN (""" + placeholders + """)
+                  """ + (" AND changed_at::date >= %s" if start_date else "") + (" AND changed_at::date <= %s" if end_date else "") + """
+                ORDER BY changed_at DESC
+                LIMIT 50
+            """, sc_params)
+            for row in cursor.fetchall():
+                cby = row['changed_by']
+                if cby in out['by_employee']:
+                    out['by_employee'][cby]['schedule_changes'].append({
+                        'change_id': row['change_id'], 'change_type': row.get('change_type'),
+                        'changed_at': str(row['changed_at']) if row.get('changed_at') else None,
+                        'period_id': row.get('period_id'), 'scheduled_shift_id': row.get('scheduled_shift_id')
+                    })
+        except Exception:
+            pass
+
+        try:
+            cursor.execute("""
+                SELECT employee_id, COUNT(*) AS cnt
+                FROM audit_log
+                WHERE table_name = 'customers' AND action_type = 'INSERT' AND employee_id IS NOT NULL
+                  AND employee_id IN (""" + placeholders + """)
+                  """ + (" AND action_timestamp::date >= %s" if start_date else "") + (" AND action_timestamp::date <= %s" if end_date else "") + """
+                GROUP BY employee_id
+            """, emp_ids + ([start_date] if start_date else []) + ([end_date] if end_date else []))
+            for row in cursor.fetchall():
+                eid = row['employee_id']
+                if eid in out['by_employee']:
+                    out['by_employee'][eid]['customers']['new_customers'] = row['cnt']
+        except Exception:
+            pass
+
+        conn.close()
+        return out
+    except Exception as e:
+        if conn:
+            conn.close()
+        import traceback
+        traceback.print_exc()
+        raise
+
+
+def get_employee_activity_detail(
+    employee_id: int,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    data_type: str = 'orders'
+) -> Dict[str, Any]:
+    """
+    Return detailed rows for one activity type for use in a modal table.
+    data_type: orders, returns, cash_opens, cash_closes, cash_drops, cash_out, cash_in,
+               time_clock, schedule_changes, shipments
+    Returns: { columns: [{'key': str, 'label': str}], data: [dict, ...] }
+    """
+    from psycopg2.extras import RealDictCursor
+    conn = get_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    out = {'columns': [], 'data': []}
+    try:
+        date_cond = ""
+        params = [employee_id]
+        if start_date:
+            date_cond += " AND DATE(o.order_date) >= %s"
+            params.append(start_date)
+        if end_date:
+            date_cond += " AND DATE(o.order_date) <= %s"
+            params.append(end_date)
+
+        if data_type == 'orders':
+            cursor.execute("""
+                SELECT o.order_id, o.order_number, o.order_date, o.order_type, o.subtotal, o.discount, o.tax_amount, o.total,
+                       o.tip, o.payment_method, o.order_status, c.customer_name
+                FROM orders o
+                LEFT JOIN customers c ON o.customer_id = c.customer_id
+                WHERE o.employee_id = %s AND o.order_status = 'completed'
+                """ + date_cond + """
+                ORDER BY o.order_date DESC
+                LIMIT 500
+            """, params)
+            out['columns'] = [
+                {'key': 'order_number', 'label': 'Order #'},
+                {'key': 'order_date', 'label': 'Date'},
+                {'key': 'order_type', 'label': 'Type'},
+                {'key': 'total', 'label': 'Total'},
+                {'key': 'tip', 'label': 'Tip'},
+                {'key': 'discount', 'label': 'Discount'},
+                {'key': 'payment_method', 'label': 'Payment'},
+                {'key': 'customer_name', 'label': 'Customer'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                for k in ('order_date',):
+                    if row.get(k): row[k] = str(row[k])[:19]
+                for k in ('subtotal', 'total', 'tip', 'discount', 'tax_amount'):
+                    if row.get(k) is not None: row[k] = f"{float(row[k]):.2f}"
+                out['data'].append(row)
+
+        elif data_type == 'returns':
+            ret_params = [employee_id]
+            ret_date = ""
+            if start_date:
+                ret_date += " AND COALESCE(pr.approved_date, pr.return_date)::date >= %s"
+                ret_params.append(start_date)
+            if end_date:
+                ret_date += " AND COALESCE(pr.approved_date, pr.return_date)::date <= %s"
+                ret_params.append(end_date)
+            try:
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'pending_returns' AND column_name = 'exchange_transaction_id'
+                """)
+                has_exc = cursor.fetchone() is not None
+            except Exception:
+                has_exc = False
+            if has_exc:
+                cursor.execute("""
+                    SELECT pr.return_id, pr.return_number, pr.order_id, pr.return_date, pr.approved_date,
+                           pr.total_refund_amount, pr.reason, pr.status,
+                           CASE WHEN pr.exchange_transaction_id IS NOT NULL THEN 'Exchange' ELSE 'Refund' END AS return_kind
+                    FROM pending_returns pr
+                    WHERE pr.employee_id = %s AND pr.status = 'approved'
+                    """ + ret_date + """
+                    ORDER BY COALESCE(pr.approved_date, pr.return_date) DESC
+                    LIMIT 500
+                """, ret_params)
+            else:
+                cursor.execute("""
+                    SELECT pr.return_id, pr.return_number, pr.order_id, pr.return_date, pr.approved_date,
+                           pr.total_refund_amount, pr.reason, pr.status, 'Refund' AS return_kind
+                    FROM pending_returns pr
+                    WHERE pr.employee_id = %s AND pr.status = 'approved'
+                    """ + ret_date + """
+                    ORDER BY COALESCE(pr.approved_date, pr.return_date) DESC
+                    LIMIT 500
+                """, ret_params)
+            out['columns'] = [
+                {'key': 'return_number', 'label': 'Return #'},
+                {'key': 'order_id', 'label': 'Order ID'},
+                {'key': 'return_date', 'label': 'Date'},
+                {'key': 'total_refund_amount', 'label': 'Amount'},
+                {'key': 'return_kind', 'label': 'Kind'},
+                {'key': 'reason', 'label': 'Reason'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                for k in ('return_date', 'approved_date'):
+                    if row.get(k): row[k] = str(row[k])[:19]
+                if row.get('total_refund_amount') is not None:
+                    row['total_refund_amount'] = f"{float(row['total_refund_amount']):.2f}"
+                out['data'].append(row)
+
+        elif data_type == 'cash_opens':
+            p = [employee_id]
+            d = ""
+            if start_date: d += " AND DATE(crs.opened_at) >= %s"; p.append(start_date)
+            if end_date: d += " AND DATE(crs.opened_at) <= %s"; p.append(end_date)
+            cursor.execute("""
+                SELECT crs.register_session_id, crs.register_id, crs.opened_at, crs.starting_cash, crs.notes
+                FROM cash_register_sessions crs
+                WHERE crs.employee_id = %s
+                """ + d + """
+                ORDER BY crs.opened_at DESC
+                LIMIT 200
+            """, p)
+            out['columns'] = [
+                {'key': 'register_session_id', 'label': 'Session ID'},
+                {'key': 'register_id', 'label': 'Register'},
+                {'key': 'opened_at', 'label': 'Opened'},
+                {'key': 'starting_cash', 'label': 'Starting cash'},
+                {'key': 'notes', 'label': 'Notes'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                if row.get('opened_at'): row['opened_at'] = str(row['opened_at'])[:19]
+                if row.get('starting_cash') is not None: row['starting_cash'] = f"{float(row['starting_cash']):.2f}"
+                out['data'].append(row)
+
+        elif data_type == 'cash_closes':
+            p = [employee_id]
+            d = ""
+            if start_date: d += " AND DATE(crs.closed_at) >= %s"; p.append(start_date)
+            if end_date: d += " AND DATE(crs.closed_at) <= %s"; p.append(end_date)
+            cursor.execute("""
+                SELECT crs.register_session_id, crs.closed_at, crs.ending_cash, crs.expected_cash, crs.discrepancy, crs.notes
+                FROM cash_register_sessions crs
+                WHERE crs.closed_by = %s AND crs.status = 'closed'
+                """ + d + """
+                ORDER BY crs.closed_at DESC
+                LIMIT 200
+            """, p)
+            out['columns'] = [
+                {'key': 'register_session_id', 'label': 'Session ID'},
+                {'key': 'closed_at', 'label': 'Closed'},
+                {'key': 'ending_cash', 'label': 'Ending cash'},
+                {'key': 'expected_cash', 'label': 'Expected'},
+                {'key': 'discrepancy', 'label': 'Discrepancy'},
+                {'key': 'notes', 'label': 'Notes'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                if row.get('closed_at'): row['closed_at'] = str(row['closed_at'])[:19]
+                for k in ('ending_cash', 'expected_cash', 'discrepancy'):
+                    if row.get(k) is not None: row[k] = f"{float(row[k]):.2f}"
+                out['data'].append(row)
+
+        elif data_type == 'cash_drops':
+            p = [employee_id]
+            if start_date: p.append(start_date)
+            if end_date: p.append(end_date)
+            cursor.execute("""
+                SELECT dc.count_id, dc.count_date, dc.total_amount, dc.counted_at, dc.notes
+                FROM daily_cash_counts dc
+                WHERE dc.counted_by = %s AND dc.count_type = 'drop'
+                  """ + (" AND dc.count_date >= %s" if start_date else "") + (" AND dc.count_date <= %s" if end_date else "") + """
+                ORDER BY dc.counted_at DESC
+                LIMIT 200
+            """, p)
+            out['columns'] = [
+                {'key': 'count_date', 'label': 'Date'},
+                {'key': 'total_amount', 'label': 'Amount'},
+                {'key': 'counted_at', 'label': 'Counted at'},
+                {'key': 'notes', 'label': 'Notes'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                if row.get('counted_at'): row['counted_at'] = str(row['counted_at'])[:19]
+                if row.get('total_amount') is not None: row['total_amount'] = f"{float(row['total_amount']):.2f}"
+                out['data'].append(row)
+
+        elif data_type == 'cash_out':
+            p = [employee_id]
+            d = ""
+            if start_date: d += " AND DATE(ct.transaction_date) >= %s"; p.append(start_date)
+            if end_date: d += " AND DATE(ct.transaction_date) <= %s"; p.append(end_date)
+            cursor.execute("""
+                SELECT ct.transaction_id, ct.transaction_date, ct.amount, ct.reason, ct.notes
+                FROM cash_transactions ct
+                WHERE ct.employee_id = %s AND ct.transaction_type IN ('cash_out', 'withdrawal')
+                """ + d + """
+                ORDER BY ct.transaction_date DESC
+                LIMIT 200
+            """, p)
+            out['columns'] = [
+                {'key': 'transaction_date', 'label': 'Date'},
+                {'key': 'amount', 'label': 'Amount'},
+                {'key': 'reason', 'label': 'Reason'},
+                {'key': 'notes', 'label': 'Notes'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                if row.get('transaction_date'): row['transaction_date'] = str(row['transaction_date'])[:19]
+                if row.get('amount') is not None: row['amount'] = f"{float(row['amount']):.2f}"
+                out['data'].append(row)
+
+        elif data_type == 'cash_in':
+            p = [employee_id]
+            d = ""
+            if start_date: d += " AND DATE(ct.transaction_date) >= %s"; p.append(start_date)
+            if end_date: d += " AND DATE(ct.transaction_date) <= %s"; p.append(end_date)
+            cursor.execute("""
+                SELECT ct.transaction_id, ct.transaction_date, ct.amount, ct.reason, ct.notes
+                FROM cash_transactions ct
+                WHERE ct.employee_id = %s AND ct.transaction_type IN ('cash_in', 'deposit')
+                """ + d + """
+                ORDER BY ct.transaction_date DESC
+                LIMIT 200
+            """, p)
+            out['columns'] = [
+                {'key': 'transaction_date', 'label': 'Date'},
+                {'key': 'amount', 'label': 'Amount'},
+                {'key': 'reason', 'label': 'Reason'},
+                {'key': 'notes', 'label': 'Notes'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                if row.get('transaction_date'): row['transaction_date'] = str(row['transaction_date'])[:19]
+                if row.get('amount') is not None: row['amount'] = f"{float(row['amount']):.2f}"
+                out['data'].append(row)
+
+        elif data_type == 'time_clock':
+            p = [employee_id]
+            if start_date: p.append(start_date)
+            if end_date: p.append(end_date)
+            cursor.execute("""
+                SELECT time_entry_id, clock_in, clock_out, total_hours, status
+                FROM time_clock
+                WHERE employee_id = %s
+                  """ + (" AND DATE(clock_in) >= %s" if start_date else "") + (" AND DATE(clock_in) <= %s" if end_date else "") + """
+                ORDER BY clock_in DESC
+                LIMIT 200
+            """, p)
+            out['columns'] = [
+                {'key': 'clock_in', 'label': 'Clock in'},
+                {'key': 'clock_out', 'label': 'Clock out'},
+                {'key': 'total_hours', 'label': 'Hours'},
+                {'key': 'status', 'label': 'Status'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                if row.get('clock_in'): row['clock_in'] = str(row['clock_in'])[:19]
+                if row.get('clock_out'): row['clock_out'] = str(row['clock_out'])[:19]
+                if row.get('total_hours') is not None: row['total_hours'] = f"{float(row['total_hours']):.2f}"
+                out['data'].append(row)
+
+        elif data_type == 'schedule_changes':
+            p = [employee_id]
+            if start_date: p.append(start_date)
+            if end_date: p.append(end_date)
+            cursor.execute("""
+                SELECT change_id, period_id, scheduled_shift_id, change_type, changed_at
+                FROM schedule_changes
+                WHERE changed_by = %s
+                  """ + (" AND changed_at::date >= %s" if start_date else "") + (" AND changed_at::date <= %s" if end_date else "") + """
+                ORDER BY changed_at DESC
+                LIMIT 200
+            """, p)
+            out['columns'] = [
+                {'key': 'change_type', 'label': 'Type'},
+                {'key': 'changed_at', 'label': 'When'},
+                {'key': 'period_id', 'label': 'Period ID'},
+                {'key': 'scheduled_shift_id', 'label': 'Shift ID'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                if row.get('changed_at'): row['changed_at'] = str(row['changed_at'])[:19]
+                out['data'].append(row)
+
+        elif data_type == 'shipments':
+            p = [employee_id]
+            if start_date: p.append(start_date)
+            if end_date: p.append(end_date)
+            cursor.execute("""
+                SELECT ps.pending_shipment_id, ps.upload_timestamp, ps.status, ps.purchase_order_number, v.vendor_name
+                FROM pending_shipments ps
+                LEFT JOIN vendors v ON ps.vendor_id = v.vendor_id
+                WHERE ps.uploaded_by = %s
+                  """ + (" AND ps.upload_timestamp::date >= %s" if start_date else "") + (" AND ps.upload_timestamp::date <= %s" if end_date else "") + """
+                ORDER BY ps.upload_timestamp DESC
+                LIMIT 200
+            """, p)
+            out['columns'] = [
+                {'key': 'pending_shipment_id', 'label': 'Shipment ID'},
+                {'key': 'upload_timestamp', 'label': 'Uploaded'},
+                {'key': 'status', 'label': 'Status'},
+                {'key': 'vendor_name', 'label': 'Vendor'},
+                {'key': 'purchase_order_number', 'label': 'PO #'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                if row.get('upload_timestamp'): row['upload_timestamp'] = str(row['upload_timestamp'])[:19]
+                out['data'].append(row)
+
+        elif data_type == 'new_customers':
+            p = [employee_id]
+            if start_date: p.append(start_date)
+            if end_date: p.append(end_date)
+            try:
+                cursor.execute("""
+                    SELECT al.audit_id, al.action_timestamp, al.record_id AS customer_id, c.customer_name, c.email, c.phone
+                    FROM audit_log al
+                    LEFT JOIN customers c ON c.customer_id = al.record_id
+                    WHERE al.table_name = 'customers' AND al.action_type = 'INSERT' AND al.employee_id = %s
+                      """ + (" AND al.action_timestamp::date >= %s" if start_date else "") + (" AND al.action_timestamp::date <= %s" if end_date else "") + """
+                    ORDER BY al.action_timestamp DESC
+                    LIMIT 500
+                """, p)
+                out['columns'] = [
+                    {'key': 'action_timestamp', 'label': 'Added'},
+                    {'key': 'customer_id', 'label': 'Customer ID'},
+                    {'key': 'customer_name', 'label': 'Name'},
+                    {'key': 'email', 'label': 'Email'},
+                    {'key': 'phone', 'label': 'Phone'}
+                ]
+                for r in cursor.fetchall():
+                    row = dict(r)
+                    if row.get('action_timestamp'): row['action_timestamp'] = str(row['action_timestamp'])[:19]
+                    out['data'].append(row)
+            except Exception:
+                pass
+
+        elif data_type == 'checkouts_with_customer':
+            cursor.execute("""
+                SELECT o.order_id, o.order_number, o.order_date, o.total, o.payment_method, c.customer_name, c.email
+                FROM orders o
+                LEFT JOIN customers c ON o.customer_id = c.customer_id
+                WHERE o.employee_id = %s AND o.order_status = 'completed' AND o.customer_id IS NOT NULL
+                """ + date_cond + """
+                ORDER BY o.order_date DESC
+                LIMIT 500
+            """, params)
+            out['columns'] = [
+                {'key': 'order_number', 'label': 'Order #'},
+                {'key': 'order_date', 'label': 'Date'},
+                {'key': 'total', 'label': 'Total'},
+                {'key': 'customer_name', 'label': 'Customer'},
+                {'key': 'payment_method', 'label': 'Payment'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                if row.get('order_date'): row['order_date'] = str(row['order_date'])[:19]
+                if row.get('total') is not None: row['total'] = f"{float(row['total']):.2f}"
+                out['data'].append(row)
+
+        elif data_type == 'checkouts_without_customer':
+            cursor.execute("""
+                SELECT o.order_id, o.order_number, o.order_date, o.total, o.payment_method
+                FROM orders o
+                WHERE o.employee_id = %s AND o.order_status = 'completed' AND o.customer_id IS NULL
+                """ + date_cond + """
+                ORDER BY o.order_date DESC
+                LIMIT 500
+            """, params)
+            out['columns'] = [
+                {'key': 'order_number', 'label': 'Order #'},
+                {'key': 'order_date', 'label': 'Date'},
+                {'key': 'total', 'label': 'Total'},
+                {'key': 'payment_method', 'label': 'Payment'}
+            ]
+            for r in cursor.fetchall():
+                row = dict(r)
+                if row.get('order_date'): row['order_date'] = str(row['order_date'])[:19]
+                if row.get('total') is not None: row['total'] = f"{float(row['total']):.2f}"
+                out['data'].append(row)
+
+        conn.close()
+        return out
+    except Exception as e:
+        if conn:
+            conn.close()
+        import traceback
+        traceback.print_exc()
+        raise

@@ -40,7 +40,7 @@ from database import (
     clock_in, clock_out, get_current_clock_status, get_schedule,
     get_store_location_settings, update_store_location_settings,
     get_customer_rewards_settings, update_customer_rewards_settings, calculate_rewards,
-    get_register_cash_settings, get_daily_cash_counts,
+    get_register_cash_settings, get_daily_cash_counts, get_employee_activity_summary, get_employee_activity_detail,
     add_customer, get_customer, update_customer, delete_customer, add_customer_points, search_customers, get_customer_rewards_detail,
     # Accounting / store settings
     get_establishment_settings, update_establishment_settings, get_labor_summary,
@@ -6720,6 +6720,35 @@ def api_activity_log():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/employee_activity', methods=['GET'])
+def api_employee_activity():
+    """Get aggregated employee activity for monitoring (orders, cash, time clock, shipments, customers, schedule)."""
+    try:
+        employee_id = request.args.get('employee_id', type=int)
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        result = get_employee_activity_summary(employee_id=employee_id, start_date=start_date, end_date=end_date)
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/employee_activity_detail', methods=['GET'])
+def api_employee_activity_detail():
+    """Get detail rows for one activity type (for modal table). Requires employee_id, data_type; optional start_date, end_date."""
+    try:
+        employee_id = request.args.get('employee_id', type=int)
+        data_type = request.args.get('data_type', 'orders')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        if not employee_id:
+            return jsonify({'success': False, 'error': 'employee_id required'}), 400
+        result = get_employee_activity_detail(employee_id=employee_id, start_date=start_date, end_date=end_date, data_type=data_type)
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ============================================================================
 # EMPLOYEE MANAGEMENT API ENDPOINTS (Admin Only)

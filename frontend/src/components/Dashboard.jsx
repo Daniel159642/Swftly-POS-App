@@ -197,7 +197,7 @@ function Dashboard() {
                   className="magic-bento-card__label"
                   style={{
                     fontFamily: '-apple-system, "system-ui", "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
-                    fontSize: '18px'
+                    fontSize: '24px'
                   }}
                 >
                   {box.title}
@@ -221,7 +221,7 @@ function Dashboard() {
               className="magic-bento-card__label"
               style={{
                 fontFamily: '-apple-system, "system-ui", "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif',
-                fontSize: '18px'
+                fontSize: '24px'
               }}
             >
               {box.title}
