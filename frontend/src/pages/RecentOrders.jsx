@@ -789,6 +789,12 @@ function RecentOrders() {
         dasher_status: row.dasher_status ?? null,
         dasher_status_at: row.dasher_status_at ?? null,
         dasher_info: row.dasher_info ?? null,
+        exchange_return_id: row.exchange_return_id ?? null,
+        external_order_id: row.external_order_id ?? null,
+        integration_experience: row.integration_experience ?? null,
+        doordash_promo_details: row.doordash_promo_details ?? null,
+        doordash_total_merchant_funded_discount_cents: row.doordash_total_merchant_funded_discount_cents ?? null,
+        doordash_total_doordash_funded_discount_cents: row.doordash_total_doordash_funded_discount_cents ?? null,
         items: orderItems
       }
       if (!isNaN(normalizedOrderId) && orderItems.length > 0) {
@@ -1294,8 +1300,8 @@ function RecentOrders() {
     }
   }
 
-  // Fields to hide from main table (shown in dropdown); order_status/payment_* combined into Status column
-  const hiddenFields = ['order_id', 'orderId', 'employee_id', 'employeeId', 'customer_id', 'customerId', 'subtotal', 'tax_rate', 'tax_amount', 'tax', 'discount', 'discount_type', 'transaction_fee', 'notes', 'tip', 'receipt_type', 'receipt_email', 'receipt_phone', 'establishment_id', 'employee_name', 'order_status', 'payment_status', 'payment_method', 'order_source', 'orderSource']
+  // Fields to hide from main table (shown in row dropdown); order_status/payment_* combined into Status column
+  const hiddenFields = ['order_id', 'orderId', 'employee_id', 'employeeId', 'customer_id', 'customerId', 'subtotal', 'tax_rate', 'tax_amount', 'tax', 'discount', 'discount_type', 'transaction_fee', 'notes', 'tip', 'receipt_type', 'receipt_email', 'receipt_phone', 'establishment_id', 'employee_name', 'order_status', 'payment_status', 'payment_method', 'order_source', 'orderSource', 'exchange_return_id', 'prepare_by', 'external_order_id', 'integration_experience', 'doordash_promo_details', 'doordash_total_merchant_funded_discount_cents', 'doordash_total_doordash_funded_discount_cents', 'dasher_status', 'dasher_status_at', 'dasher_info']
   
   // Status: In Progress (pickup/delivery when placed/being_made), Ready, Out for delivery (delivery only), Completed (in-person always; pickup/delivery when done)
   const getStatusLabel = (orderStatus, orderType) => {
@@ -1449,14 +1455,57 @@ function RecentOrders() {
     return formatted
   }
 
-  // Order source logo for DoorDash / Shopify / Uber Eats (order_source from API)
+  // Order source logo for DoorDash / Shopify / Uber Eats; Home icon for in-person / no source. All use same slot width for alignment.
+  const ORDER_SOURCE_LOGO_WIDTH = 36
   const getOrderSourceLogo = (row) => {
     const raw = row?.order_source ?? row?.orderSource ?? (row && row['order_source']) ?? ''
     const source = String(raw).toLowerCase().trim().replace(/\s+/g, '_')
     if (source === 'doordash') return { src: '/doordash-logo.svg', alt: 'DoorDash', textOnly: false }
     if (source === 'shopify') return { src: '/shopify-logo.svg', alt: 'Shopify', textOnly: false }
     if (source === 'uber_eats' || source === 'ubereats') return { src: '/uber-eats-logo.svg', alt: 'Uber Eats', textOnly: false }
-    return null
+    // In-person / no source: show home icon so spacing is consistent and order numbers align
+    return { icon: 'home', alt: 'In-store' }
+  }
+
+  // Row gradient + logo for table: by order source (red DoorDash, green Shopify, light black Uber Eats, blue in-store)
+  const getRowGradientAndLogo = (row) => {
+    const logo = getOrderSourceLogo(row)
+    const raw = row?.order_source ?? row?.orderSource ?? ''
+    const source = String(raw).toLowerCase().trim().replace(/\s+/g, '_')
+    if (source === 'doordash') {
+      return {
+        gradient: isDarkMode
+          ? 'linear-gradient(90deg, rgba(200, 50, 50, 0.25) 0%, rgba(120, 30, 30, 0.12) 50%, transparent 100%)'
+          : 'linear-gradient(90deg, rgba(254, 202, 202, 0.5) 0%, rgba(254, 226, 226, 0.25) 50%, transparent 100%)',
+        logoSrc: logo?.src ?? null
+      }
+    }
+    if (source === 'shopify') {
+      return {
+        gradient: isDarkMode
+          ? 'linear-gradient(90deg, rgba(50, 160, 80, 0.22) 0%, rgba(30, 100, 50, 0.1) 50%, transparent 100%)'
+          : 'linear-gradient(90deg, rgba(187, 247, 208, 0.5) 0%, rgba(209, 250, 229, 0.25) 50%, transparent 100%)',
+        logoSrc: logo?.src ?? null
+      }
+    }
+    if (source === 'uber_eats' || source === 'ubereats') {
+      return {
+        gradient: isDarkMode
+          ? 'linear-gradient(90deg, rgba(40, 40, 40, 0.2) 0%, rgba(30, 30, 30, 0.08) 50%, transparent 100%)'
+          : 'linear-gradient(90deg, rgba(0, 0, 0, 0.06) 0%, rgba(0, 0, 0, 0.02) 50%, transparent 100%)',
+        logoSrc: logo?.src ?? null
+      }
+    }
+    // In-person / no source (home): blue gradient
+    if (source === 'in-person' || source === 'inperson' || source === '' || !source) {
+      return {
+        gradient: isDarkMode
+          ? 'linear-gradient(90deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.08) 50%, transparent 100%)'
+          : 'linear-gradient(90deg, rgba(191, 219, 254, 0.5) 0%, rgba(219, 234, 254, 0.25) 50%, transparent 100%)',
+        logoSrc: null
+      }
+    }
+    return { gradient: null, logoSrc: null }
   }
 
   // DoorDash Dasher Status webhook: human-readable label for dasher_status
@@ -2246,11 +2295,14 @@ function RecentOrders() {
                         <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px', color: isDarkMode ? 'var(--text-primary)' : '#333', minWidth: 0 }}>
                           {(() => {
                             const logo = getOrderSourceLogo(row)
+                            if (logo?.icon === 'home') {
+                              return <Home key={`home-${normalizedOrderId}`} size={18} style={{ flexShrink: 0, color: cardThemeColor, display: 'block' }} />
+                            }
                             if (logo) {
                               if (logo.textOnly) {
                                 return <span key={`src-${normalizedOrderId}`} style={{ flexShrink: 0, fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#666' }}>{logo.alt}</span>
                               }
-                              return <img key={`logo-${normalizedOrderId}`} src={logo.src} alt={logo.alt} style={{ height: '18px', width: 'auto', maxWidth: '80px', minWidth: '20px', objectFit: 'contain', flexShrink: 0, display: 'block' }} />
+                              if (logo.src) return <img key={`logo-${normalizedOrderId}`} src={logo.src} alt={logo.alt} style={{ height: '18px', width: 'auto', maxWidth: '80px', minWidth: '20px', objectFit: 'contain', flexShrink: 0, display: 'block' }} />
                             }
                             if (isInhouseCard) {
                               return <Home key={`home-${normalizedOrderId}`} size={18} style={{ flexShrink: 0, color: cardThemeColor, display: 'block' }} />
@@ -2475,9 +2527,10 @@ function RecentOrders() {
                           <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '16px', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>
                             {(() => {
                               const logo = getOrderSourceLogo(row)
+                              if (logo?.icon === 'home') return <Home size={18} style={{ flexShrink: 0, color: cardThemeColor }} />
                               if (logo) {
                                 if (logo.textOnly) return <span style={{ flexShrink: 0 }}>{logo.alt}</span>
-                                return <img src={logo.src} alt={logo.alt} style={{ height: '18px', width: 'auto', maxWidth: '80px', objectFit: 'contain', flexShrink: 0 }} />
+                                if (logo.src) return <img src={logo.src} alt={logo.alt} style={{ height: '18px', width: 'auto', maxWidth: '80px', objectFit: 'contain', flexShrink: 0 }} />
                               }
                               if (isInhouseCard) return <Home size={18} style={{ flexShrink: 0, color: cardThemeColor }} />
                               return null
@@ -2619,16 +2672,17 @@ function RecentOrders() {
               width: '100%'
             }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 'max-content' }}>
-                <thead>
-                  <tr style={{ backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa' }}>
+                <thead style={{
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 10
+                }}>
+                  <tr>
                     {columnsWithActions.map(col => (
                       <th
                         key={col}
                         style={{
-                          position: 'sticky',
-                          top: 0,
-                          zIndex: 1,
-                          padding: '12px',
+                          padding: 0,
                           textAlign: 'left',
                           fontWeight: 600,
                           borderBottom: '2px solid #dee2e6',
@@ -2636,11 +2690,23 @@ function RecentOrders() {
                           fontSize: '13px',
                           textTransform: 'uppercase',
                           letterSpacing: '0.5px',
-                          backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f8f9fa',
-                          boxShadow: '0 1px 0 0 #dee2e6'
+                          boxShadow: '0 1px 0 0 #dee2e6',
+                          verticalAlign: 'middle'
                         }}
                       >
-                        {getColumnHeaderLabel(col)}
+                        <div
+                          style={{
+                            padding: '12px',
+                            backgroundColor: isDarkMode ? 'rgba(26, 26, 26, 0.88)' : 'rgba(248, 249, 250, 0.88)',
+                            backdropFilter: 'blur(6px) saturate(130%)',
+                            WebkitBackdropFilter: 'blur(6px) saturate(130%)',
+                            minHeight: '44px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                        >
+                          {getColumnHeaderLabel(col)}
+                        </div>
                       </th>
                     ))}
                   </tr>
@@ -2652,6 +2718,8 @@ function RecentOrders() {
                     const isExpanded = expandedRow === normalizedOrderId
                     const details = orderDetails[normalizedOrderId]
                     const isLoading = loadingDetails[normalizedOrderId]
+                    const rowStyle = getRowGradientAndLogo(row)
+                    const baseRowBg = idx % 2 === 0 ? (isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff') : (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#fafafa')
                     return (
                       <Fragment key={`order-${normalizedOrderId ?? 'n/a'}-${idx}`}>
                         <tr 
@@ -2662,13 +2730,17 @@ function RecentOrders() {
                           }}
                           onClick={() => handleRowClick(row)}
                           style={{ 
-                            backgroundColor: idx % 2 === 0 ? (isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff') : (isDarkMode ? 'var(--bg-tertiary, #3a3a3a)' : '#fafafa'),
+                            background: rowStyle.gradient ? `${rowStyle.gradient}, ${baseRowBg}` : baseRowBg,
                             cursor: 'pointer',
                             border: 'none',
-                            transition: 'all 0.3s ease'
+                            transition: 'all 0.3s ease',
+                            position: 'relative',
+                            overflow: 'hidden'
                           }}
                         >
-                          {visibleColumns.map(col => {
+                          {visibleColumns.map((col, colIdx) => {
+                            const isFirstCol = colIdx === 0
+                            const showBlurredLogo = isFirstCol && rowStyle.logoSrc
                             if (col === 'Status') {
                               const nextPhase = getNextPhase(row)
                               return (
@@ -2679,7 +2751,9 @@ function RecentOrders() {
                                     borderBottom: '1px solid #eee',
                                     fontSize: '14px',
                                     textAlign: 'left',
-                                    cursor: nextPhase ? 'pointer' : 'default'
+                                    cursor: nextPhase ? 'pointer' : 'default',
+                                    position: 'relative',
+                                    zIndex: 1
                                   }}
                                   onClick={nextPhase ? (e) => openStatusPhaseModal(row, e) : undefined}
                                   role={nextPhase ? 'button' : undefined}
@@ -2715,24 +2789,57 @@ function RecentOrders() {
                                   borderBottom: '1px solid #eee',
                                   fontSize: '14px',
                                   textAlign: (col.includes('price') || col.includes('cost') || col.includes('total') ||
-                                             col.includes('amount') || col.includes('fee')) ? 'right' : 'left'
+                                             col.includes('amount') || col.includes('fee')) ? 'right' : 'left',
+                                  position: 'relative',
+                                  zIndex: 1
                                 }}
                               >
-                                {sourceLogo ? (
-                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                                    {sourceLogo.textOnly ? (
-                                      <span style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#666' }}>{sourceLogo.alt}</span>
-                                    ) : (
-                                      <img src={sourceLogo.src} alt={sourceLogo.alt} style={{ height: '18px', width: 'auto', maxWidth: '80px', objectFit: 'contain' }} />
-                                    )}
-                                    {formattedValue}
-                                  </span>
-                                ) : (
-                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: (col.includes('price') || col.includes('cost') || col.includes('total') || col.includes('amount') || col.includes('fee')) ? 'flex-end' : 'flex-start' }}>
-                                    {formattedValue}
-                                    {unpaidLabel && <span style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary)' : '#888' }}>{unpaidLabel}</span>}
-                                  </span>
+                                {showBlurredLogo && (
+                                  <div
+                                    aria-hidden
+                                    style={{
+                                      position: 'absolute',
+                                      left: 0,
+                                      top: 0,
+                                      bottom: 0,
+                                      width: '300%',
+                                      maxWidth: '1200px',
+                                      backgroundImage: `url(${rowStyle.logoSrc})`,
+                                      backgroundSize: 'contain',
+                                      backgroundPosition: 'left center',
+                                      backgroundRepeat: 'no-repeat',
+                                      filter: 'blur(14px)',
+                                      opacity: isDarkMode ? 0.2 : 0.35,
+                                      pointerEvents: 'none',
+                                      zIndex: 0
+                                    }}
+                                  />
                                 )}
+                                <span style={{ position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: (col.includes('price') || col.includes('cost') || col.includes('total') || col.includes('amount') || col.includes('fee')) ? 'flex-end' : 'flex-start' }}>
+                                  {col === 'order_number' && (
+                                    <span
+                                      style={{
+                                        width: ORDER_SOURCE_LOGO_WIDTH,
+                                        minWidth: ORDER_SOURCE_LOGO_WIDTH,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'flex-start',
+                                        flexShrink: 0
+                                      }}
+                                      title={sourceLogo?.alt}
+                                    >
+                                      {sourceLogo?.icon === 'home' ? (
+                                        <Home size={18} style={{ color: isDarkMode ? 'var(--text-secondary)' : '#666' }} />
+                                      ) : sourceLogo?.textOnly ? (
+                                        <span style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#666' }}>{sourceLogo.alt}</span>
+                                      ) : sourceLogo?.src ? (
+                                        <img src={sourceLogo.src} alt={sourceLogo.alt} style={{ height: '18px', width: 'auto', maxWidth: '28px', objectFit: 'contain' }} />
+                                      ) : null}
+                                    </span>
+                                  )}
+                                  {formattedValue}
+                                  {unpaidLabel && <span style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary)' : '#888' }}>{unpaidLabel}</span>}
+                                </span>
                               </td>
                             )
                           })}
@@ -2915,9 +3022,61 @@ function RecentOrders() {
                                     <div>
                                       <strong>Tip:</strong> ${(parseFloat(details.tip) || 0).toFixed(2)}
                                     </div>
+                                    {(details.exchange_return_id != null && details.exchange_return_id !== '') && (
+                                      <div>
+                                        <strong>Exchange return ID:</strong> {String(details.exchange_return_id)}
+                                      </div>
+                                    )}
                                     {details.prepare_by && (
-                                      <div style={{ gridColumn: '1 / -1' }}>
+                                      <div>
                                         <strong>Prepare by:</strong> {formatOrderDate(details.prepare_by)}
+                                      </div>
+                                    )}
+                                    {(details.external_order_id != null && details.external_order_id !== '') && (
+                                      <div>
+                                        <strong>External order ID:</strong> {String(details.external_order_id)}
+                                      </div>
+                                    )}
+                                    {(details.integration_experience != null && details.integration_experience !== '') && (
+                                      <div>
+                                        <strong>Integration experience:</strong> {String(details.integration_experience)}
+                                      </div>
+                                    )}
+                                    {(details.doordash_promo_details != null && Object.keys(details.doordash_promo_details || {}).length > 0) && (
+                                      <div style={{ gridColumn: '1 / -1' }}>
+                                        <strong>DoorDash promo details:</strong>{' '}
+                                        {typeof details.doordash_promo_details === 'object' ? JSON.stringify(details.doordash_promo_details) : String(details.doordash_promo_details)}
+                                      </div>
+                                    )}
+                                    {(details.doordash_total_merchant_funded_discount_cents != null && details.doordash_total_merchant_funded_discount_cents !== '') && (
+                                      <div>
+                                        <strong>DoorDash total merchant funded discount (¢):</strong> {Number(details.doordash_total_merchant_funded_discount_cents)}
+                                      </div>
+                                    )}
+                                    {(details.doordash_total_doordash_funded_discount_cents != null && details.doordash_total_doordash_funded_discount_cents !== '') && (
+                                      <div>
+                                        <strong>DoorDash total DoorDash funded discount (¢):</strong> {Number(details.doordash_total_doordash_funded_discount_cents)}
+                                      </div>
+                                    )}
+                                    {(details.dasher_status != null && details.dasher_status !== '') && (
+                                      <div>
+                                        <strong>Dasher status:</strong> {getDasherStatusLabel(details.dasher_status)}
+                                      </div>
+                                    )}
+                                    {details.dasher_status_at && (
+                                      <div>
+                                        <strong>Dasher status at:</strong> {formatOrderDate(details.dasher_status_at)}
+                                      </div>
+                                    )}
+                                    {(details.dasher_info != null && typeof details.dasher_info === 'object' && Object.keys(details.dasher_info || {}).length > 0) && (
+                                      <div style={{ gridColumn: '1 / -1' }}>
+                                        <strong>Dasher info:</strong>{' '}
+                                        {(details.dasher_info?.first_name || details.dasher_info?.last_name)
+                                          ? [details.dasher_info.first_name, details.dasher_info.last_name].filter(Boolean).join(' ')
+                                          : null}
+                                        {details.dasher_info?.phone_number && ` · ${details.dasher_info.phone_number}`}
+                                        {(details.dasher_info?.vehicle?.make || details.dasher_info?.vehicle?.model) && ` · ${[details.dasher_info.vehicle.make, details.dasher_info.vehicle.model].filter(Boolean).join(' ')}`}
+                                        {!(details.dasher_info?.first_name || details.dasher_info?.last_name || details.dasher_info?.phone_number || details.dasher_info?.vehicle?.make || details.dasher_info?.vehicle?.model) && JSON.stringify(details.dasher_info)}
                                       </div>
                                     )}
                                     {(details.order_source || details.orderSource)?.toString().toLowerCase().trim() === 'doordash' && (details.dasher_status || details.dasher_info) && (
