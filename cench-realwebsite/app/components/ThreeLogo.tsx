@@ -49,17 +49,14 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
     useEffect(() => {
         if (!groupRef.current || forceDock) return;
 
-        // Setup stable VH for Safari
-        const snapVH = window.innerHeight;
-
         const ctx = gsap.context(() => {
             // First transition: Dock into navbar
             const tl = gsap.timeline({
                 scrollTrigger: {
                     trigger: "body",
                     start: "top top",
-                    end: () => snapVH,
-                    scrub: 0.4,
+                    end: () => window.innerHeight,
+                    scrub: 0.4, // Slightly smoother scrub for better performance
                     onUpdate: (self) => {
                         onScrollProgress(self.progress);
                     }
@@ -82,66 +79,66 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
 
             tl.to(groupRef.current!.rotation, {
                 x: 0,
-                y: Math.PI * 2,
+                y: Math.PI * 2, // 1 full spin during dock, lands completely flat
                 z: 0,
                 ease: "power2.inOut"
             }, 0);
 
-            // Second transition: Extra spin
+            // Second transition: Extra spin when scrolling down the next section
             gsap.to(groupRef.current!.rotation, {
-                y: Math.PI * 4,
+                y: Math.PI * 4, // 1 more full spin, landing flat again
                 ease: "power2.inOut",
                 scrollTrigger: {
                     trigger: "body",
-                    start: () => snapVH,
-                    end: () => snapVH * 2,
+                    start: () => window.innerHeight,
+                    end: () => window.innerHeight * 2,
                     scrub: 0.2
                 }
             });
 
-            // Third transition: Extra spin
+            // Third transition: Extra spin when scrolling past that
             gsap.to(groupRef.current!.rotation, {
-                y: Math.PI * 6,
+                y: Math.PI * 6, // 1 more full spin, landing flat again
                 ease: "power2.inOut",
                 scrollTrigger: {
                     trigger: "body",
-                    start: () => snapVH * 2,
-                    end: () => snapVH * 3,
+                    start: () => window.innerHeight * 2,
+                    end: () => window.innerHeight * 3,
                     scrub: 0.2
                 }
             });
 
             // Final transition: Move from navbar to center of '#final-cta'
             const isMobile = size.width < 768;
-            const finalScale = isMobile ? 0.4 : 1.8;
-            const finalX = isMobile ? 0 : -30;
-            const finalY = isMobile ? 18 : 0;
+            const finalScale = isMobile ? 0.35 : 1.8;
+            const finalX = isMobile ? -7 : -30; // Better balance between -2 and -12
+            const finalY = isMobile ? 12 : 0;   // Lift slightly for mobile viewport alignment
 
             const finalTl = gsap.timeline({
                 scrollTrigger: {
                     trigger: "#final-cta",
                     start: "top bottom",
-                    end: isMobile ? "top 10%" : "center center",
-                    scrub: isMobile ? 0.5 : 1
+                    end: "top 40%", // Complete the move earlier for a 'locked' feel
+                    scrub: 0.5
                 }
             });
 
             finalTl.to(groupRef.current!.position, {
                 x: finalX,
                 y: finalY,
-                ease: "power3.out"
+                ease: "expo.out" // Snappier landing
             }, 0);
 
             finalTl.to(groupRef.current!.scale, {
                 x: finalScale,
                 y: finalScale,
                 z: finalScale,
-                ease: "power3.out"
+                ease: "expo.out"
             }, 0);
 
             finalTl.to(groupRef.current!.rotation, {
                 y: Math.PI * 8, // Finish with another elegant rotation
-                ease: "power3.out"
+                ease: "power2.inOut"
             }, 0);
         });
 

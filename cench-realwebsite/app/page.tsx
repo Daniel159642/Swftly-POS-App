@@ -117,27 +117,7 @@ export default function Home() {
   const mobileVideoRef = useRef<HTMLVideoElement>(null);
   const finalGetRef = useRef<HTMLHeadingElement>(null);
   const finalSwftlyRef = useRef<HTMLHeadingElement>(null);
-  const [vh, setVh] = useState('100vh');
   const [showHeavyAssets, setShowHeavyAssets] = useState(false);
-
-  useEffect(() => {
-    const updateVh = () => {
-      const height = window.innerHeight;
-      setVh(`${height}px`);
-      document.documentElement.style.setProperty('--vh', `${height}px`);
-    };
-
-    updateVh();
-
-    let resizeTimer: NodeJS.Timeout;
-    const handleResize = () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(updateVh, 250);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   useEffect(() => {
     // Show background/bags almost immediately for a complete initial scene
@@ -512,13 +492,12 @@ export default function Home() {
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      const isMobile = window.innerWidth < 768;
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: "#final-cta",
-          start: "top bottom",
-          end: isMobile ? "top 10%" : "center center",
-          scrub: isMobile ? 0.5 : 1,
+          start: "top 30%",
+          end: "center center",
+          scrub: 1,
         }
       });
 
@@ -596,7 +575,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="bg-white" style={{ minHeight: vh }}>
+    <div className="min-h-screen bg-white">
       <GradualBlur
         target="page"
         position="bottom"
@@ -805,11 +784,11 @@ export default function Home() {
 
       {/* Scroll-Driven Storytelling Section (Desktop) */}
       <section id="software-section" ref={stickySectionRef} className="hidden md:block relative w-full min-h-[1800vh] bg-white z-20">
-        <div className="sticky top-0 w-full flex items-center overflow-hidden px-4 md:px-12" style={{ height: vh }}>
+        <div className="sticky top-0 h-screen w-full flex items-center overflow-hidden px-4 md:px-12">
           <div className="w-full max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-20 items-center">
 
             {/* Left Column: Master Timeline Stack */}
-            <div className="relative flex flex-col justify-start overflow-hidden pl-4" style={{ height: vh }}>
+            <div className="relative h-screen flex flex-col justify-start overflow-hidden pl-4">
               <div
                 ref={scrollingContentRef}
                 className="flex flex-col gap-[30vh] py-0 pr-8" // Adding right padding to prevent cutoffs
@@ -1028,7 +1007,7 @@ export default function Home() {
       </section>
 
       {/* Scroll-Driven Storytelling Section (Mobile) */}
-      <section id="mobile-software-section" className="md:hidden flex flex-col bg-white pt-24 pb-12 px-6" style={{ minHeight: vh }}>
+      <section id="mobile-software-section" className="md:hidden flex flex-col min-h-screen bg-white pt-24 pb-12 px-6">
         {/* Mobile Video on Top */}
         <div className="w-full aspect-video relative rounded-3xl overflow-hidden shadow-2xl border border-gray-100 mb-8">
           <video
@@ -1298,30 +1277,25 @@ export default function Home() {
       </section>
 
       {/* Final CTA Section */}
-      <section id="final-cta" className="relative w-full bg-white overflow-hidden" style={{ height: `calc(${vh} * 3)` }}>
-        <div className="sticky top-0 w-full flex flex-col items-center justify-center overflow-hidden" style={{ height: vh }}>
-          <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-center">
-            {/* Mobile Logo Spacer - Reservations space above the text */}
-            <div id="logo-final-anchor" className="md:hidden w-32 h-32 mb-4" />
-
-            <div className="flex items-center justify-center gap-4 md:gap-16">
-              <h2
-                ref={finalGetRef}
-                className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
-                style={{ fontFamily: 'Zodiak, serif' }}
-              >
-                Get
-              </h2>
-              {/* Desktop Logo Spacer - Reservations space between the words */}
-              <div className="hidden md:block w-[220px]" />
-              <h2
-                ref={finalSwftlyRef}
-                className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
-                style={{ fontFamily: 'Zodiak, serif' }}
-              >
-                Swftly.
-              </h2>
-            </div>
+      <section id="final-cta" className="relative w-full h-screen flex flex-col bg-white overflow-hidden">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-8 md:gap-16 mt-20">
+            <h2
+              ref={finalGetRef}
+              className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
+              style={{ fontFamily: 'Zodiak, serif' }}
+            >
+              Get
+            </h2>
+            {/* Central space reserved for the 3D logo via ThreeLogo override */}
+            <div className="w-12 md:w-[220px]" />
+            <h2
+              ref={finalSwftlyRef}
+              className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
+              style={{ fontFamily: 'Zodiak, serif' }}
+            >
+              Swftly.
+            </h2>
           </div>
         </div>
 
