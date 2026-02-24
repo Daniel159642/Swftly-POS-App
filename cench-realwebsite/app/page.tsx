@@ -738,10 +738,8 @@ export default function Home() {
             <motion.div
               key={i}
               className="absolute pointer-events-none will-change-transform"
-              style={{ top: bag.top, left: bag.left, zIndex: 1 }}
-              initial={{ opacity: 0, y: 40, rotate: bag.rotate, scale: bag.scale }}
-              whileInView={{ opacity: 0.35, y: 0 }}
-              viewport={{ once: true }}
+              style={{ top: bag.top, left: bag.left, zIndex: 10 }}
+              initial={{ opacity: 0.4, y: 0, rotate: bag.rotate, scale: bag.scale }}
               animate={{
                 y: [0, -25, 0],
                 rotate: [bag.rotate, bag.rotate + 5, bag.rotate]
@@ -750,14 +748,13 @@ export default function Home() {
                 duration: 1.2,
                 delay: bag.delay,
                 y: { duration: 8 + (i % 4), repeat: Infinity, ease: "easeInOut" },
-                rotate: { duration: 9 + (i % 5), repeat: Infinity, ease: "easeInOut" },
-                opacity: { duration: 1.2, delay: bag.delay }
+                rotate: { duration: 9 + (i % 5), repeat: Infinity, ease: "easeInOut" }
               }}
             >
               <img
                 src="/bagg.png"
                 alt="bag"
-                className="w-[400px] h-[400px] filter brightness-0 invert opacity-40"
+                className="w-[300px] h-[300px] md:w-[400px] md:h-[400px] object-contain opacity-60"
                 loading="eager"
               />
             </motion.div>
