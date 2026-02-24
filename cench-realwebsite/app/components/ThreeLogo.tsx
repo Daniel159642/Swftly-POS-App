@@ -203,8 +203,8 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
     return (
         <group
             ref={groupRef}
-            position={isStatic ? [5, -10, 0] : (forceDock ? [targetX, targetY, 0] : [0, 40, 0])}
-            scale={isStatic ? [0.8, 0.8, 0.8] : (forceDock ? [targetScale, targetScale, targetScale] : [1.4, 1.4, 1.4])}
+            position={isStatic ? [7, -2, 0] : (forceDock ? [targetX, targetY, 0] : [0, 40, 0])}
+            scale={isStatic ? [0.85, 0.85, 0.85] : (forceDock ? [targetScale, targetScale, targetScale] : [1.4, 1.4, 1.4])}
         >
             <group ref={entryRef} position={(forceDock || isStatic) ? [0, 0, 0] : [-1500, 0, 0]} rotation={(forceDock || isStatic) ? [0, 0, 0] : [0, -Math.PI * 6, 0]}>
                 <group ref={innerRef}>
@@ -214,15 +214,15 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
                                 <mesh key={index} castShadow receiveShadow>
                                     <extrudeGeometry args={[item.shape, extrudeSettings]} />
                                     <meshPhysicalMaterial
-                                        color="#2c19fc"
-                                        metalness={0.1}
-                                        roughness={0.05}
-                                        envMapIntensity={2.5}
+                                        color="#ffffff"
+                                        metalness={1}
+                                        roughness={0.1}
+                                        envMapIntensity={3.5}
                                         clearcoat={1}
                                         clearcoatRoughness={0}
-                                        reflectivity={0.9}
-                                        ior={1.5}
-                                        specularIntensity={1.2}
+                                        reflectivity={1}
+                                        ior={2.5}
+                                        specularIntensity={1.5}
                                     />
                                 </mesh>
                             ))}
