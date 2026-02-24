@@ -110,15 +110,15 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
 
             // Final transition: Move from navbar to center of '#final-cta'
             const isMobile = size.width < 768;
-            const finalScale = isMobile ? 0.45 : 1.8;
+            const finalScale = isMobile ? 0.4 : 1.8;
             const finalX = isMobile ? 0 : -30;
-            const finalY = isMobile ? -6 : 0;   // Corrected unit for Three.js viewport space to match CSS pb-[20dvh]
+            const finalY = isMobile ? 15 : 0;   // In Three.js units, +15 moves it UP above the center
 
             const finalTl = gsap.timeline({
                 scrollTrigger: {
                     trigger: "#final-cta",
-                    start: "top top",
-                    end: "+=200%",
+                    start: "top bottom",
+                    end: "center center",
                     scrub: 1
                 }
             });

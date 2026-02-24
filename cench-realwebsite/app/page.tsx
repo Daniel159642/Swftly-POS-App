@@ -495,12 +495,9 @@ export default function Home() {
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: "#final-cta",
-          start: "top top",
-          end: "+=200%",
+          start: "top bottom",
+          end: "center center",
           scrub: 1,
-          pin: true,
-          pinSpacing: true,
-          anticipatePin: 1
         }
       });
 
@@ -1280,30 +1277,35 @@ export default function Home() {
       </section>
 
       {/* Final CTA Section */}
-      <section id="final-cta" className="relative w-full h-[300vh] bg-white">
-        <div className="sticky top-0 w-full h-[100dvh] flex flex-col items-center justify-center overflow-hidden pb-[20dvh] md:pb-0">
-          <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-6 md:gap-16">
-            <h2
-              ref={finalGetRef}
-              className="text-[11vw] md:text-[120px] font-bold text-black tracking-tight"
-              style={{ fontFamily: 'Zodiak, serif' }}
-            >
-              Get
-            </h2>
-            {/* Central space reserved for the 3D logo via ThreeLogo override */}
-            <div className="w-24 md:w-[220px]" />
-            <h2
-              ref={finalSwftlyRef}
-              className="text-[11vw] md:text-[120px] font-bold text-black tracking-tight"
-              style={{ fontFamily: 'Zodiak, serif' }}
-            >
-              Swftly.
-            </h2>
+      <section id="final-cta" className="relative w-full h-screen flex flex-col bg-white overflow-hidden">
+        <div className="flex-1 flex flex-col items-center justify-center">
+          <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-center">
+            {/* Mobile Logo Spacer - Reservations space above the text */}
+            <div className="md:hidden w-32 h-32 mb-4" />
+
+            <div className="flex items-center justify-center gap-4 md:gap-16">
+              <h2
+                ref={finalGetRef}
+                className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
+                style={{ fontFamily: 'Zodiak, serif' }}
+              >
+                Get
+              </h2>
+              {/* Desktop Logo Spacer - Reservations space between the words */}
+              <div className="hidden md:block w-[220px]" />
+              <h2
+                ref={finalSwftlyRef}
+                className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
+                style={{ fontFamily: 'Zodiak, serif' }}
+              >
+                Swftly.
+              </h2>
+            </div>
           </div>
         </div>
 
-        {/* Integrated Footer - Absolute at the very bottom of the 300vh stretch */}
-        <div className="absolute bottom-0 w-full pt-8 pb-16 px-4 z-10 bg-white">
+        {/* Integrated Footer */}
+        <div className="w-full pt-8 pb-16 px-4 relative z-10 bg-white">
           <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-2 border-t border-gray-50 pt-8">
             <div className="flex items-center">
               <span className="text-[10px] md:text-sm text-gray-400 font-medium whitespace-nowrap">© 2024 Swftly.</span>
