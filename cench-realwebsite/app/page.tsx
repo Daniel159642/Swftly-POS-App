@@ -492,12 +492,16 @@ export default function Home() {
 
   useEffect(() => {
     const ctx = gsap.context(() => {
+      const isMobile = window.innerWidth < 768;
+
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: "#final-cta",
-          start: "top 30%",
-          end: "center center",
+          start: isMobile ? "top top" : "top 30%",
+          end: isMobile ? "+=100%" : "center center",
           scrub: 1,
+          pin: isMobile,
+          pinSpacing: isMobile
         }
       });
 
