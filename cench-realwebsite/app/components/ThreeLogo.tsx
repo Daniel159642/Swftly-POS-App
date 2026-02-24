@@ -118,8 +118,8 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
                 scrollTrigger: {
                     trigger: "#final-cta",
                     start: "top bottom",
-                    end: "center center",
-                    scrub: 1
+                    end: "top 10%",
+                    scrub: 0.5
                 }
             });
 
