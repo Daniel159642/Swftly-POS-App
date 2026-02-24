@@ -306,7 +306,7 @@ export function StaticLogo({ className }: { className?: string }) {
             <Canvas
                 shadows
                 dpr={typeof window !== 'undefined' ? Math.min(window.devicePixelRatio, 2) : 1}
-                camera={{ position: [0, 0, 150], fov: 45 }}
+                camera={{ position: [0, 0, 110], fov: 45 }}
                 gl={{
                     antialias: true,
                     alpha: true,
