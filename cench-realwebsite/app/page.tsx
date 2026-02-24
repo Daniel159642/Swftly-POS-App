@@ -105,6 +105,7 @@ export default function Home() {
   const heroTextRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hasVideoPlayed = useRef(false);
+  const hasMobileVideoPlayed = useRef(false);
   const hasHitTargetTime = useRef(false);
   const [showVideoInfo, setShowVideoInfo] = useState(false);
   const [videoInfoStep, setVideoInfoStep] = useState(0);
@@ -114,6 +115,8 @@ export default function Home() {
   const stickySectionRef = useRef<HTMLElement>(null);
   const scrollingContentRef = useRef<HTMLDivElement>(null);
   const mobileVideoRef = useRef<HTMLVideoElement>(null);
+  const finalGetRef = useRef<HTMLHeadingElement>(null);
+  const finalSwftlyRef = useRef<HTMLHeadingElement>(null);
   const [showHeavyAssets, setShowHeavyAssets] = useState(false);
 
   useEffect(() => {
@@ -488,6 +491,33 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const ctx = gsap.context(() => {
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: "#final-cta",
+          start: "top 30%",
+          end: "center center",
+          scrub: 1,
+        }
+      });
+
+      tl.fromTo(finalGetRef.current,
+        { x: -500, opacity: 0, filter: 'blur(10px)' },
+        { x: 0, opacity: 1, filter: 'blur(0px)', ease: "power3.out" },
+        0
+      );
+
+      tl.fromTo(finalSwftlyRef.current,
+        { x: 500, opacity: 0, filter: 'blur(10px)' },
+        { x: 0, opacity: 1, filter: 'blur(0px)', ease: "power3.out" },
+        0
+      );
+    });
+
+    return () => ctx.revert();
+  }, []);
+
+  useEffect(() => {
     const timer = setTimeout(() => {
       ScrollTrigger.refresh();
     }, 1000);
@@ -496,22 +526,28 @@ export default function Home() {
 
   useEffect(() => {
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !hasVideoPlayed.current && videoRef.current) {
-          setTimeout(() => {
-            if (videoRef.current) {
-              videoRef.current.play();
+      (entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            const video = entry.target as HTMLVideoElement;
+            const isMobile = video === mobileVideoRef.current;
+            const hasPlayed = isMobile ? hasMobileVideoPlayed.current : hasVideoPlayed.current;
+
+            if (!hasPlayed) {
+              setTimeout(() => {
+                video.play().catch(e => console.log("Video play failed:", e));
+                if (isMobile) hasMobileVideoPlayed.current = true;
+                else hasVideoPlayed.current = true;
+              }, 1000);
             }
-          }, 1000);
-          hasVideoPlayed.current = true;
-        }
+          }
+        });
       },
-      { threshold: 0.2 }
+      { threshold: 0.1 }
     );
 
-    if (videoRef.current) {
-      observer.observe(videoRef.current);
-    }
+    if (videoRef.current) observer.observe(videoRef.current);
+    if (mobileVideoRef.current) observer.observe(mobileVideoRef.current);
 
     return () => observer.disconnect();
   }, []);
@@ -612,7 +648,7 @@ export default function Home() {
       <section className="relative w-full min-h-[300vh] bg-white overflow-hidden pb-32">
         {/* Main Hero White Content Area */}
         <div className="relative w-full z-20 pointer-events-none">
-          <div ref={heroTextRef} className="w-full max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center pt-[15vh] px-4 md:px-12 relative z-10 md:mt-4">
+          <div ref={heroTextRef} className="w-full max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center pt-[15vh] px-2 md:px-12 relative z-10 md:mt-4">
             {/* Split Desktop Layout */}
             <div className="hidden md:flex flex-1 justify-end pr-4 md:pr-12">
               <BlurText
@@ -636,7 +672,7 @@ export default function Home() {
                 animateBy="words"
                 direction="top"
                 once={true}
-                className="text-lg font-bold text-black text-center font-zodiak"
+                className="text-[15px] font-bold text-black text-center font-zodiak whitespace-nowrap"
               />
             </div>
 
@@ -980,6 +1016,7 @@ export default function Home() {
             className="w-full h-full object-cover"
             muted
             playsInline
+            preload="auto"
           />
           {/* Hotspot Highlight on Mobile */}
           <motion.div
@@ -1243,28 +1280,22 @@ export default function Home() {
       <section id="final-cta" className="relative w-full h-screen flex flex-col bg-white overflow-hidden">
         <div className="flex-1 flex items-center justify-center">
           <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-8 md:gap-16 mt-20">
-            <motion.h2
-              initial={{ opacity: 0, x: -100 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 1, delay: 0.2 }}
+            <h2
+              ref={finalGetRef}
               className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
               style={{ fontFamily: 'Zodiak, serif' }}
             >
               Get
-            </motion.h2>
+            </h2>
             {/* Central space reserved for the 3D logo via ThreeLogo override */}
             <div className="w-12 md:w-[220px]" />
-            <motion.h2
-              initial={{ opacity: 0, x: 100 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 1, delay: 0.2 }}
+            <h2
+              ref={finalSwftlyRef}
               className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
               style={{ fontFamily: 'Zodiak, serif' }}
             >
               Swftly.
-            </motion.h2>
+            </h2>
           </div>
         </div>
 
