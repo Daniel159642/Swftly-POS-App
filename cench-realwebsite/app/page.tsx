@@ -117,7 +117,27 @@ export default function Home() {
   const mobileVideoRef = useRef<HTMLVideoElement>(null);
   const finalGetRef = useRef<HTMLHeadingElement>(null);
   const finalSwftlyRef = useRef<HTMLHeadingElement>(null);
+  const [vh, setVh] = useState('100vh');
   const [showHeavyAssets, setShowHeavyAssets] = useState(false);
+
+  useEffect(() => {
+    const updateVh = () => {
+      const height = window.innerHeight;
+      setVh(`${height}px`);
+      document.documentElement.style.setProperty('--vh', `${height}px`);
+    };
+
+    updateVh();
+
+    let resizeTimer: NodeJS.Timeout;
+    const handleResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(updateVh, 250);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     // Show background/bags almost immediately for a complete initial scene
@@ -575,7 +595,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="bg-white" style={{ minHeight: vh }}>
       <GradualBlur
         target="page"
         position="bottom"
@@ -784,11 +804,11 @@ export default function Home() {
 
       {/* Scroll-Driven Storytelling Section (Desktop) */}
       <section id="software-section" ref={stickySectionRef} className="hidden md:block relative w-full min-h-[1800vh] bg-white z-20">
-        <div className="sticky top-0 h-screen w-full flex items-center overflow-hidden px-4 md:px-12">
+        <div className="sticky top-0 w-full flex items-center overflow-hidden px-4 md:px-12" style={{ height: vh }}>
           <div className="w-full max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-20 items-center">
 
             {/* Left Column: Master Timeline Stack */}
-            <div className="relative h-screen flex flex-col justify-start overflow-hidden pl-4">
+            <div className="relative flex flex-col justify-start overflow-hidden pl-4" style={{ height: vh }}>
               <div
                 ref={scrollingContentRef}
                 className="flex flex-col gap-[30vh] py-0 pr-8" // Adding right padding to prevent cutoffs
@@ -1007,7 +1027,7 @@ export default function Home() {
       </section>
 
       {/* Scroll-Driven Storytelling Section (Mobile) */}
-      <section id="mobile-software-section" className="md:hidden flex flex-col min-h-screen bg-white pt-24 pb-12 px-6">
+      <section id="mobile-software-section" className="md:hidden flex flex-col bg-white pt-24 pb-12 px-6" style={{ minHeight: vh }}>
         {/* Mobile Video on Top */}
         <div className="w-full aspect-video relative rounded-3xl overflow-hidden shadow-2xl border border-gray-100 mb-8">
           <video
@@ -1277,8 +1297,8 @@ export default function Home() {
       </section>
 
       {/* Final CTA Section */}
-      <section id="final-cta" className="relative w-full h-[100dvh] flex flex-col bg-white overflow-hidden">
-        <div className="flex-1 flex flex-col items-center justify-center">
+      <section id="final-cta" className="relative w-full bg-white overflow-hidden" style={{ height: `calc(${vh} * 3)` }}>
+        <div className="sticky top-0 w-full flex flex-col items-center justify-center overflow-hidden" style={{ height: vh }}>
           <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-center">
             {/* Mobile Logo Spacer - Reservations space above the text */}
             <div id="logo-final-anchor" className="md:hidden w-32 h-32 mb-4" />

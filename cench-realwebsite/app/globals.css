@@ -23,6 +23,7 @@
 html {
   overflow-x: hidden;
   overscroll-behavior: none;
+  height: -webkit-fill-available;
 }
 
 body {
@@ -32,6 +33,7 @@ body {
   margin: 0;
   padding: 0;
   overscroll-behavior: none;
+  min-height: -webkit-fill-available;
 }
 
 .font-zodiak {
