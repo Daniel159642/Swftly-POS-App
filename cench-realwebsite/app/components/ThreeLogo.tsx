@@ -22,7 +22,12 @@ if (typeof window !== 'undefined') {
     });
 }
 
-const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: string, onScrollProgress: (p: number) => void, forceDock?: boolean }) => {
+const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = false }: {
+    url: string,
+    onScrollProgress: (p: number) => void,
+    forceDock?: boolean,
+    isStatic?: boolean
+}) => {
     const groupRef = useRef<THREE.Group>(null);
     const entryRef = useRef<THREE.Group>(null);
     const innerRef = useRef<THREE.Group>(null);
@@ -37,17 +42,17 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
 
     useEffect(() => {
         // If already scrolled, skip fly-in
-        if (window.scrollY > 50) {
+        if (window.scrollY > 50 || isStatic) {
             setHasEntered(true);
             return;
         }
         // Delay the fly-in animation until after the canvas is stable
         const timer = setTimeout(() => setHasEntered(true), 50);
         return () => clearTimeout(timer);
-    }, []);
+    }, [isStatic]);
 
     useEffect(() => {
-        if (!groupRef.current || forceDock) return;
+        if (!groupRef.current || forceDock || isStatic) return;
 
         const ctx = gsap.context(() => {
             // First transition: Dock into navbar
@@ -145,13 +150,13 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
         });
 
         return () => ctx.revert();
-    }, [viewport, size, onScrollProgress, forceDock, targetX, targetY, targetScale]);
+    }, [viewport, size, onScrollProgress, forceDock, targetX, targetY, targetScale, isStatic]);
 
     useFrame((state, delta) => {
         const scrollProgress = !forceDock ? (ScrollTrigger.getAll()[0]?.progress || 0) : 0;
 
         // Separation of concerns: Entry animation handles fly-in independently from GSAP group
-        if (entryRef.current && !forceDock) {
+        if (entryRef.current && !(forceDock || isStatic)) {
             if (!hasEntered) {
                 entryRef.current.position.x = -1500;
                 entryRef.current.rotation.y = -Math.PI * 6;
@@ -163,7 +168,7 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
         }
 
         // Subtle mouse reactivity on the inner logo component - always active once entered
-        if (innerRef.current && (hasEntered || forceDock)) {
+        if (innerRef.current && (hasEntered || forceDock || isStatic)) {
             // Use global mouse state since R3F internal pointer is cut off by pointer-events: none
             const targetRotX = -gMouse.y * 0.2;
             const targetRotY = gMouse.x * 0.2;
@@ -198,10 +203,10 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
     return (
         <group
             ref={groupRef}
-            position={forceDock ? [targetX, targetY, 0] : [0, 40, 0]}
-            scale={forceDock ? [targetScale, targetScale, targetScale] : [1.4, 1.4, 1.4]}
+            position={isStatic ? [5, -10, 0] : (forceDock ? [targetX, targetY, 0] : [0, 40, 0])}
+            scale={isStatic ? [0.8, 0.8, 0.8] : (forceDock ? [targetScale, targetScale, targetScale] : [1.4, 1.4, 1.4])}
         >
-            <group ref={entryRef} position={forceDock ? [0, 0, 0] : [-1500, 0, 0]} rotation={forceDock ? [0, 0, 0] : [0, -Math.PI * 6, 0]}>
+            <group ref={entryRef} position={(forceDock || isStatic) ? [0, 0, 0] : [-1500, 0, 0]} rotation={(forceDock || isStatic) ? [0, 0, 0] : [0, -Math.PI * 6, 0]}>
                 <group ref={innerRef}>
                     <Center>
                         <group scale={0.8} rotation={[Math.PI, 0, 0]}>
@@ -306,7 +311,7 @@ export function StaticLogo({ className }: { className?: string }) {
             <Canvas
                 shadows
                 dpr={typeof window !== 'undefined' ? Math.min(window.devicePixelRatio, 2) : 1}
-                camera={{ position: [0, 0, 110], fov: 45 }}
+                camera={{ position: [0, 0, 80], fov: 45 }}
                 gl={{
                     antialias: true,
                     alpha: true,
@@ -319,11 +324,10 @@ export function StaticLogo({ className }: { className?: string }) {
                 <spotLight position={[-100, 100, 100]} angle={0.15} penumbra={1} intensity={1} />
 
                 <React.Suspense fallback={null}>
-                    <ExtrudedLogo url="/Swftly.svg" onScrollProgress={() => { }} forceDock={true} />
+                    <ExtrudedLogo url="/Swftly.svg" onScrollProgress={() => { }} isStatic={true} />
                     <Environment preset="city" />
                 </React.Suspense>
             </Canvas>
         </div>
     );
 }
-
