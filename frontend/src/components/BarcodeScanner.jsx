@@ -18,7 +18,7 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
     return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
   }
-  
+
   const themeColorRgb = hexToRgb(themeColor)
 
   const handleBarcodeScanned = async (barcode) => {
@@ -27,15 +27,15 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
       console.log('Scan ignored - cooldown active')
       return
     }
-    
+
     console.log('Processing scan:', barcode)
-    
+
     // Set cooldown FIRST - before anything else - to block all subsequent scans
     scanCooldownRef.current = true
-    
+
     // Show green (accepted) status
     setScanStatus('accepted')
-    
+
     // Call the scan handler - don't wait for it, let it process asynchronously
     // This ensures the scanner keeps running and doesn't get stuck
     if (onScan) {
@@ -44,12 +44,12 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
         console.error('Error in scan handler:', err)
       })
     }
-    
+
     // Switch to red (cooldown) after brief green flash
     setTimeout(() => {
       setScanStatus('cooldown')
     }, 200)
-    
+
     // Reset cooldown after 0.8 seconds - ready for next scan
     setTimeout(() => {
       scanCooldownRef.current = false
@@ -81,10 +81,21 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
     setIsScanning(false)
   }
 
+  const isScanningRef = useRef(false)
+  const isStartingRef = useRef(false)
+
+  // Sync state to ref
+  useEffect(() => {
+    isScanningRef.current = isScanning
+  }, [isScanning])
+
   const startCameraScan = async () => {
+    if (isStartingRef.current) return
+    isStartingRef.current = true
+
     try {
       setError(null)
-      
+
       // Check if html5-qrcode is available
       let Html5Qrcode
       if (typeof window !== 'undefined' && window.Html5Qrcode) {
@@ -100,24 +111,54 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
           }
         } catch (err) {
           console.error('Failed to load html5-qrcode:', err)
-          setError('Camera scanning library not available. Install: npm install html5-qrcode')
+          setError('Camera scanning library not available.')
           setIsScanning(false)
           return
         }
       }
 
+      // Ensure the element exists in DOM
+      const checkElement = async (retries = 5) => {
+        for (let i = 0; i < retries; i++) {
+          const el = document.getElementById('barcode-scanner-camera')
+          if (el) return el
+          console.log(`Waiting for camera element... retry ${i + 1}`)
+          await new Promise(r => setTimeout(r, 100))
+        }
+        return null
+      }
+
+      const element = await checkElement()
+      if (!element) {
+        throw new Error('Camera element not found in DOM')
+      }
+
       const html5QrCode = new Html5Qrcode('barcode-scanner-camera')
+      console.log('Starting camera scan initialization...')
 
       // Inline (mobile): show library qrbox. Modal: no qrbox — we draw our own centered overlay.
       const qrboxConfig = inline
         ? (viewfinderWidth, viewfinderHeight) => {
-            const width = Math.floor(viewfinderWidth * 0.96)
-            const height = Math.floor(width * 0.38)
-            return { width, height }
-          }
+          const width = Math.floor(viewfinderWidth * 0.96)
+          const height = Math.floor(width * 0.38)
+          return { width, height }
+        }
         : undefined
 
-      // Optimize scanner settings for Code128 linear barcodes (faster scanning)
+      console.log('Querying available cameras...')
+      scannerRef.current = html5QrCode
+
+      console.log('Querying available cameras...')
+      const cameras = await Html5Qrcode.getCameras().catch(err => {
+        console.error('Error getting cameras:', err)
+        return []
+      })
+      console.log(`Found ${cameras.length} cameras:`, cameras)
+
+      if (cameras.length === 0) {
+        throw new Error('No cameras found. Please check permissions.')
+      }
+
       const config = {
         fps: 15,
         ...(qrboxConfig != null && { qrbox: qrboxConfig }),
@@ -134,26 +175,69 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
           ]
         } : {})
       }
-      
-      await html5QrCode.start(
-        { facingMode: 'environment' }, // Use back camera on mobile
-        config,
-        (decodedText) => {
-          // Success callback - handleBarcodeScanned will process without stopping camera
-          handleBarcodeScanned(decodedText)
-        },
-        (errorMessage) => {
-          // Error callback (ignore, just keep scanning)
+
+      // If only one camera, use it directly to avoid issues with facingMode on desktop
+      if (cameras.length === 1) {
+        console.log('Single camera detected, starting with ID:', cameras[0].id)
+        await html5QrCode.start(
+          cameras[0].id,
+          config,
+          (decodedText) => handleBarcodeScanned(decodedText),
+          (errorMessage) => { /* ignore scan errors */ }
+        )
+      } else {
+        // Try environment facing mode first, then fall back
+        try {
+          console.log('Multiple cameras detected, trying environment facing mode...')
+          await html5QrCode.start(
+            { facingMode: 'environment' },
+            config,
+            (decodedText) => handleBarcodeScanned(decodedText),
+            (errorMessage) => { /* ignore scan errors */ }
+          )
+        } catch (startErr) {
+          if (!isScanningRef.current) throw startErr
+          console.warn('Failed with environment mode, falling back to first camera:', startErr)
+          await html5QrCode.start(
+            cameras[0].id,
+            config,
+            (decodedText) => handleBarcodeScanned(decodedText),
+            (errorMessage) => { /* ignore scan errors */ }
+          )
         }
-      )
-      
-      scannerRef.current = html5QrCode
+      }
+
+      // Final check: if scanning was turned off while we were starting, stop it now
+      if (!isScanningRef.current) {
+        stopCameraScan()
+      }
     } catch (err) {
-      console.error('Camera scan error:', err)
-      setError(`Camera error: ${err.message}`)
-      setIsScanning(false)
+      if (isScanningRef.current) {
+        console.error('Camera scan error:', err)
+        let errorMsg = 'Unknown camera error'
+        if (typeof err === 'string') {
+          errorMsg = err
+        } else if (err instanceof Error) {
+          errorMsg = err.message || err.name || 'Error starting camera'
+        } else if (err && typeof err === 'object') {
+          errorMsg = err.message || err.name || JSON.stringify(err)
+        }
+
+        // Check for specific common browser errors
+        if (errorMsg.includes('NotAllowedError') || errorMsg.includes('Permission denied')) {
+          errorMsg = 'Camera access denied. Please check your system settings.'
+        } else if (errorMsg.includes('NotFoundError')) {
+          errorMsg = 'No camera hardware detected.'
+        }
+
+        setError(`Camera error: ${errorMsg}`)
+        setIsScanning(false)
+      }
+    } finally {
+      isStartingRef.current = false
     }
   }
+
 
   // Auto-start camera scanning when component mounts
   useEffect(() => {
@@ -199,11 +283,11 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
       if (isDragging) {
         const newX = e.clientX - dragOffset.x
         const newY = e.clientY - dragOffset.y
-        
+
         // Keep modal within viewport bounds
         const maxX = window.innerWidth - (modalRef.current?.offsetWidth || 500)
         const maxY = window.innerHeight - (modalRef.current?.offsetHeight || 400)
-        
+
         setPosition({
           x: Math.max(0, Math.min(newX, maxX)),
           y: Math.max(0, Math.min(newY, maxY))
@@ -254,8 +338,8 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
             border: scanStatus === 'accepted'
               ? '4px solid #4caf50'
               : scanStatus === 'cooldown'
-              ? '4px solid #f44336'
-              : 'none',
+                ? '4px solid #f44336'
+                : 'none',
             transition: 'border-color 0.2s ease',
             boxSizing: 'border-box'
           }}
@@ -362,8 +446,8 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
             border: scanStatus === 'accepted'
               ? '2px solid #4caf50'
               : scanStatus === 'cooldown'
-              ? '2px solid #f44336'
-              : 'none',
+                ? '2px solid #f44336'
+                : 'none',
             transition: 'border-color 0.2s ease',
             boxSizing: 'border-box',
             flexShrink: 0
@@ -375,8 +459,8 @@ function BarcodeScanner({ onScan, onClose, onImageScan, themeColor = '#8400ff', 
             const cornerColor = scanStatus === 'accepted'
               ? '#4caf50'
               : scanStatus === 'cooldown'
-              ? '#f44336'
-              : 'rgba(255,255,255,0.9)'
+                ? '#f44336'
+                : 'rgba(255,255,255,0.9)'
             const cornerStyle = (top, left, right, bottom) => ({
               position: 'absolute',
               width: '36px',

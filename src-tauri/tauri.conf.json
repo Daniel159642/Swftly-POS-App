@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Delancey",
+  "productName": "Swftly",
   "version": "1.0.0",
   "identifier": "com.pos.desktop",
   "build": {
@@ -29,20 +29,39 @@
         "resizable": true,
         "fullscreen": false,
         "titleBarStyle": "Overlay",
-        "trafficLightPosition": { "x": 12, "y": 28 }
+        "trafficLightPosition": {
+          "x": 12,
+          "y": 30
+        }
       }
     ]
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "macOS": {
-      "minimumSystemVersion": "10.13"
+      "minimumSystemVersion": "10.13",
+      "infoPlist": "Info.plist",
+      "entitlements": "entitlements.plist"
     },
     "shortDescription": "Point of Sale Desktop App",
     "longDescription": "POS system desktop application. Start the backend server (python3 web_viewer.py) before using the app.",
     "category": "Business"
   },
-  "plugins": { "deep-link": { "desktop": { "schemes": ["pos"] } } }
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "pos"
+        ]
+      }
+    }
+  }
 }

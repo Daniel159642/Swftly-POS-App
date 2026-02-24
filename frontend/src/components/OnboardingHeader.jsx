@@ -20,12 +20,12 @@ function OnboardingHeader({ step = 1, direction = 'forward' }) {
   }
 
   const themeColorRgb = hexToRgb(themeColor)
-  
+
   // Get text for current step
   const currentText = STEP_TEXTS[Math.min(step - 1, STEP_TEXTS.length - 1)] || STEP_TEXTS[0]
 
   return (
-    <h2 style={{ 
+    <h2 style={{
       marginBottom: '30px',
       fontSize: '48px',
       fontWeight: 700,
@@ -38,7 +38,7 @@ function OnboardingHeader({ step = 1, direction = 'forward' }) {
       alignItems: 'center',
       gap: '20px'
     }}>
-      <span style={{ color: themeColor }}>Swyft</span>
+      <span style={{ color: themeColor }}>Swftly</span>
       <div style={{
         backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
         backdropFilter: 'blur(10px)',
@@ -61,14 +61,14 @@ function OnboardingHeader({ step = 1, direction = 'forward' }) {
             initial={{ y: direction === 'backward' ? -50 : 50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: direction === 'backward' ? 50 : -50, opacity: 0 }}
-            transition={{ 
-              type: "spring", 
-              damping: 30, 
+            transition={{
+              type: "spring",
+              damping: 30,
               stiffness: 400,
               duration: 0.3
             }}
-            style={{ 
-              color: '#fff', 
+            style={{
+              color: '#fff',
               whiteSpace: 'nowrap',
               display: 'inline-block'
             }}

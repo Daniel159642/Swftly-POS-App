@@ -289,7 +289,7 @@ function Login({ onLogin }) {
           })
             .then((r) => (r.ok ? r.json() : null))
             .then((result) => { if (result?.success) onLogin(result) })
-            .catch(() => {})
+            .catch(() => { })
         }
         return
       }
@@ -334,7 +334,7 @@ function Login({ onLogin }) {
         try {
           const pinHash = await hashPin(password)
           if (pinHash) setOfflinePinHash(result.employee_id, pinHash)
-        } catch (_) {}
+        } catch (_) { }
         onLogin(result)
       } else {
         setError('')
@@ -373,7 +373,7 @@ function Login({ onLogin }) {
     if (e.target.closest('button')) return
     try {
       getCurrentWindow().startDragging()
-    } catch (_) {}
+    } catch (_) { }
   }
 
   return (
@@ -417,90 +417,155 @@ function Login({ onLogin }) {
           justifyContent: 'center'
         }}
       >
-      <h1
-        style={{
-          fontSize: '22px',
-          fontWeight: 600,
-          color: '#111',
-          marginBottom: '8px',
-          textAlign: 'center'
-        }}
-      >
-        Sign in to Delancey
-      </h1>
-      <p
-        style={{
-          fontSize: '14px',
-          color: '#555',
-          marginBottom: '24px',
-          textAlign: 'center'
-        }}
-      >
-        Select employee and enter password
-      </p>
-
-      <form ref={formRef} onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', maxWidth: '320px' }}>
-        <div style={{ marginBottom: '20px', width: '100%' }}>
-          <CustomDropdown
-            value={employeeCode}
-            onChange={(e) => setEmployeeCode(e.target.value)}
-            options={loadingEmployees ? [] : employees.map((emp) => ({
-              value: emp.username || emp.employee_code,
-              label: [emp.first_name, emp.last_name].filter(Boolean).join(' ').trim() || emp.username || emp.employee_code || String(emp.employee_id)
-            }))}
-            placeholder={loadingEmployees ? 'Loading employees...' : 'Select an employee...'}
-            isDarkMode={false}
-            themeColorRgb={themeColorRgb}
-            style={{ width: '100%' }}
-          />
-        </div>
-
-        <div
+        <h1
           style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'flex-end',
-            minHeight: '50px',
-            marginBottom: '15px',
-            paddingBottom: '8px',
-            borderBottom: '2px solid #333',
-            width: '100%',
-            maxWidth: '200px'
+            fontSize: '22px',
+            fontWeight: 600,
+            color: '#111',
+            marginBottom: '8px',
+            textAlign: 'center'
           }}
         >
-          <span
-            className={passwordJitter ? 'password-jitter' : ''}
+          Sign in to Swftly
+        </h1>
+        <p
+          style={{
+            fontSize: '14px',
+            color: '#555',
+            marginBottom: '24px',
+            textAlign: 'center'
+          }}
+        >
+          Select employee and enter password
+        </p>
+
+        <form ref={formRef} onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', maxWidth: '320px' }}>
+          <div style={{ marginBottom: '20px', width: '100%' }}>
+            <CustomDropdown
+              value={employeeCode}
+              onChange={(e) => setEmployeeCode(e.target.value)}
+              options={loadingEmployees ? [] : employees.map((emp) => ({
+                value: emp.username || emp.employee_code,
+                label: [emp.first_name, emp.last_name].filter(Boolean).join(' ').trim() || emp.username || emp.employee_code || String(emp.employee_id)
+              }))}
+              placeholder={loadingEmployees ? 'Loading employees...' : 'Select an employee...'}
+              isDarkMode={false}
+              themeColorRgb={themeColorRgb}
+              style={{ width: '100%' }}
+            />
+          </div>
+
+          <div
             style={{
-              fontFamily: 'monospace',
-              fontSize: '28px',
-              letterSpacing: '8px',
-              color: '#111',
-              textAlign: 'center',
-              display: 'inline-block'
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'flex-end',
+              minHeight: '50px',
+              marginBottom: '15px',
+              paddingBottom: '8px',
+              borderBottom: '2px solid #333',
+              width: '100%',
+              maxWidth: '200px'
             }}
           >
-            {password.split('').map((char, i) =>
-              i === password.length - 1 && revealLastDigit ? char : '•'
-            ).join('')}
-          </span>
-        </div>
+            <span
+              className={passwordJitter ? 'password-jitter' : ''}
+              style={{
+                fontFamily: 'monospace',
+                fontSize: '28px',
+                letterSpacing: '8px',
+                color: '#111',
+                textAlign: 'center',
+                display: 'inline-block'
+              }}
+            >
+              {password.split('').map((char, i) =>
+                i === password.length - 1 && revealLastDigit ? char : '•'
+              ).join('')}
+            </span>
+          </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: '8px',
-            marginTop: '15px',
-            marginBottom: '8px',
-            width: '100%',
-            maxWidth: '264px'
-          }}
-        >
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '8px',
+              marginTop: '15px',
+              marginBottom: '8px',
+              width: '100%',
+              maxWidth: '264px'
+            }}
+          >
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+              <button
+                key={num}
+                type="button"
+                onClick={() => handleNumpadClick(num.toString())}
+                style={{
+                  width: '80px',
+                  height: '80px',
+                  padding: 0,
+                  fontSize: '28px',
+                  fontWeight: 600,
+                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                  backdropFilter: 'blur(10px)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                  color: '#fff',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  borderRadius: '50%',
+                  cursor: 'pointer',
+                  boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                  transition: 'all 0.3s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.85)`
+                  e.target.style.transform = 'scale(0.95)'
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+                  e.target.style.transform = 'scale(1)'
+                }}
+              >
+                {num}
+              </button>
+            ))}
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '8px',
+              marginBottom: '20px',
+              width: '100%',
+              maxWidth: '264px'
+            }}
+          >
             <button
-              key={num}
               type="button"
-              onClick={() => handleNumpadClick(num.toString())}
+              onClick={() => handleNumpadClick('backspace')}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                fontSize: '24px',
+                fontWeight: 500,
+                color: '#111',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto'
+              }}
+            >
+              ⌫
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNumpadClick('0')}
               style={{
                 width: '80px',
                 height: '80px',
@@ -530,95 +595,30 @@ function Login({ onLogin }) {
                 e.target.style.transform = 'scale(1)'
               }}
             >
-              {num}
+              0
             </button>
-          ))}
-        </div>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: '8px',
-            marginBottom: '20px',
-            width: '100%',
-            maxWidth: '264px'
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => handleNumpadClick('backspace')}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              fontSize: '24px',
-              fontWeight: 500,
-              color: '#111',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto'
-            }}
-          >
-            ⌫
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNumpadClick('0')}
-            style={{
-              width: '80px',
-              height: '80px',
-              padding: 0,
-              fontSize: '28px',
-              fontWeight: 600,
-              backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-              color: '#fff',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              borderRadius: '50%',
-              cursor: 'pointer',
-              boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-              transition: 'all 0.3s ease',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.85)`
-              e.target.style.transform = 'scale(0.95)'
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
-              e.target.style.transform = 'scale(1)'
-            }}
-          >
-            0
-          </button>
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              fontSize: '16px',
-              fontWeight: 500,
-              color: loading ? '#999' : '#111',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto'
-            }}
-          >
-            {loading ? '...' : 'Login'}
-          </button>
-        </div>
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                fontSize: '16px',
+                fontWeight: 500,
+                color: loading ? '#999' : '#111',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto'
+              }}
+            >
+              {loading ? '...' : 'Login'}
+            </button>
+          </div>
 
-      </form>
+        </form>
       </div>
     </div>
   )

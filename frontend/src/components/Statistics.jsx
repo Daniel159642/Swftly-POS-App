@@ -46,29 +46,29 @@ function Statistics({ compact = false }) {
   const [statOpen, setStatOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('charts') // 'charts' | 'reports'
   const dropdownRef = useRef(null)
-  
+
   // Convert hex to RGB for rgba usage
   const hexToRgb = (hex) => {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
     return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '132, 0, 255'
   }
-  
+
   const themeColorRgb = hexToRgb(themeColor)
-  
+
   // Update dark mode state when theme changes
   useEffect(() => {
     const checkDarkMode = () => {
       setIsDarkMode(document.documentElement.classList.contains('dark-theme'))
     }
-    
+
     checkDarkMode()
-    
+
     const observer = new MutationObserver(checkDarkMode)
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['class']
     })
-    
+
     return () => observer.disconnect()
   }, [themeMode])
 
@@ -98,7 +98,7 @@ function Statistics({ compact = false }) {
   const loadStats = async () => {
     setLoading(true)
     setError(null)
-    
+
     try {
       const response = await fetch('/api/dashboard/statistics')
       if (!response.ok) {
@@ -128,7 +128,7 @@ function Statistics({ compact = false }) {
     const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
     const textColor = isDarkMode ? '#ffffff' : '#1a1a1a'
     const subtitleColor = isDarkMode ? '#999' : '#666'
-    
+
     return (
       <div style={{
         backgroundColor: cardBg,
@@ -184,11 +184,18 @@ function Statistics({ compact = false }) {
   }
 
   const renderWeeklyChart = (titleBelowAxis = null) => {
-    if (!stats?.weekly_revenue || stats.weekly_revenue.length === 0) {
-      return <div style={{ padding: '20px', textAlign: 'center', color: isDarkMode ? '#999' : '#999' }}>No revenue data</div>
-    }
+    const fakeData = [
+      { day: 'Mon', revenue: 1250, date: '2026-02-16' },
+      { day: 'Tue', revenue: 2100, date: '2026-02-17' },
+      { day: 'Wed', revenue: 1800, date: '2026-02-18' },
+      { day: 'Thu', revenue: 3200, date: '2026-02-19' },
+      { day: 'Fri', revenue: 4500, date: '2026-02-20' },
+      { day: 'Sat', revenue: 6100, date: '2026-02-21' },
+      { day: 'Sun', revenue: 5300, date: '2026-02-22' }
+    ];
+    const weeklyData = fakeData;
 
-    const maxRevenue = Math.max(...stats.weekly_revenue.map(d => d.revenue), 1)
+    const maxRevenue = Math.max(...weeklyData.map(d => d.revenue), 1)
     const isCompact = !!titleBelowAxis
     const chartHeight = isCompact ? 120 : 180
     const axisColor = isDarkMode ? '#444' : '#ddd'
@@ -204,7 +211,7 @@ function Statistics({ compact = false }) {
     return (
       <div style={{ padding: containerPadding, height: '100%', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: `${chartHeight}px`, gap: '4px', overflow: 'hidden' }}>
-          {stats.weekly_revenue.map((day, index) => {
+          {weeklyData.map((day, index) => {
             const barHeight = maxRevenue > 0 ? (day.revenue / effectiveMax) * chartHeight : 0
             const isEven = index % 2 === 0
             const currentBarColor = isEven ? barColor1 : barColor2
@@ -263,7 +270,7 @@ function Statistics({ compact = false }) {
     const lineColor = `rgba(${themeColorRgb}, ${isDarkMode ? '0.8' : '0.7'})`
     const fillColor = `rgba(${themeColorRgb}, ${isDarkMode ? '0.15' : '0.1'})`
     const monthLabelColor = isDarkMode ? '#999' : '#666'
-    
+
     const points = stats.monthly_revenue.map((month, index) => {
       const x = (index / (stats.monthly_revenue.length - 1)) * chartWidth
       const y = chartHeight - (month.revenue / maxRevenue) * chartHeight
@@ -312,7 +319,7 @@ function Statistics({ compact = false }) {
 
     const statuses = Object.entries(stats.order_status_breakdown)
     const total = statuses.reduce((sum, [, count]) => sum + count, 0)
-    
+
     if (total === 0) {
       return <div style={{ padding: '20px', textAlign: 'center', color: isDarkMode ? '#999' : '#999' }}>No orders</div>
     }
@@ -337,7 +344,7 @@ function Statistics({ compact = false }) {
           {statuses.map(([status, count], index) => {
             const percentage = ((count / total) * 100).toFixed(1)
             const color = colors[index % colors.length]
-            
+
             return (
               <div key={status} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -827,10 +834,10 @@ function Statistics({ compact = false }) {
 
   if (loading) {
     return (
-      <div style={{ 
-        height: '100%', 
-        display: 'flex', 
-        alignItems: 'center', 
+      <div style={{
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
         justifyContent: 'center',
         color: isDarkMode ? '#fff' : '#999'
       }}>
@@ -843,10 +850,10 @@ function Statistics({ compact = false }) {
 
   if (error) {
     return (
-      <div style={{ 
-        height: '100%', 
-        display: 'flex', 
-        alignItems: 'center', 
+      <div style={{
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
         justifyContent: 'center',
         color: isDarkMode ? '#ff4444' : '#cc0000'
       }}>
@@ -863,20 +870,23 @@ function Statistics({ compact = false }) {
   const borderColor = isDarkMode ? '#3a3a3a' : '#e0e0e0'
 
   if (compact) {
-    const maxRevenue = Math.max(...(stats?.weekly_revenue || []).map(d => d.revenue), 1)
+    const fakeData = [
+      { day: 'Mon', revenue: 1250, date: '2026-02-16' },
+      { day: 'Tue', revenue: 2100, date: '2026-02-17' },
+      { day: 'Wed', revenue: 1800, date: '2026-02-18' },
+      { day: 'Thu', revenue: 3200, date: '2026-02-19' },
+      { day: 'Fri', revenue: 4500, date: '2026-02-20' },
+      { day: 'Sat', revenue: 6100, date: '2026-02-21' },
+      { day: 'Sun', revenue: 5300, date: '2026-02-22' }
+    ];
+    const weeklyData = fakeData;
+
+    const maxRevenue = Math.max(...weeklyData.map(d => d.revenue), 1)
     const barScale = 0.65
     const effectiveMax = maxRevenue / barScale
     const dayLabelColor = isDarkMode ? '#999' : '#666'
     const barColor1 = `rgba(${themeColorRgb}, ${isDarkMode ? '0.7' : '0.6'})`
     const barColor2 = `rgba(${themeColorRgb}, ${isDarkMode ? '0.5' : '0.4'})`
-
-    if (!stats?.weekly_revenue || stats.weekly_revenue.length === 0) {
-      return (
-        <div style={{ padding: '12px', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isDarkMode ? '#999' : '#666', fontSize: '14px' }}>
-          No revenue data
-        </div>
-      )
-    }
 
     return (
       <div style={{
@@ -888,7 +898,7 @@ function Statistics({ compact = false }) {
         padding: '6px 10px 6px'
       }}>
         <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-end', gap: '4px' }}>
-          {stats.weekly_revenue.map((day, index) => {
+          {weeklyData.map((day, index) => {
             const barPct = maxRevenue > 0 ? Math.min(100, (day.revenue / effectiveMax) * 100) : 0
             const isEven = index % 2 === 0
             const barColor = isEven ? barColor1 : barColor2
@@ -1008,200 +1018,200 @@ function Statistics({ compact = false }) {
         renderReportsTab()
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      {/* Today's Stats Row */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(2, 1fr)',
-        gap: '20px'
-      }}>
-        <StatCard
-          title="Today's Revenue"
-          value={formatCurrency(stats.revenue?.today || 0)}
-          icon={<DollarSign size={32} />}
-          color={`rgba(${themeColorRgb}, 1)`}
-        />
-        <StatCard
-          title="Today's Returns"
-          value={stats.returns?.today || 0}
-          subtitle={stats.returns?.today_amount ? `Amount: ${formatCurrency(stats.returns.today_amount)}` : undefined}
-          icon={<RotateCcw size={32} />}
-          color={`rgba(${themeColorRgb}, 1)`}
-        />
-      </div>
-
-      {/* Weekly Revenue Chart */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr',
-        gap: '24px'
-      }}>
-        <div style={{
-          backgroundColor: cardBg,
-          border: `1px solid ${borderColor}`,
-          borderRadius: '12px',
-          boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-          minHeight: '280px',
-          overflow: 'hidden'
-        }}>
-          {renderWeeklyChart()}
-        </div>
-      </div>
-
-      <div style={{
-        marginTop: '32px',
-        paddingTop: '28px',
-        borderTop: `1px solid ${borderColor}`
-      }}>
-        <h2 style={{
-          fontSize: '18px',
-          fontWeight: 600,
-          color: isDarkMode ? '#fff' : '#1a1a1a',
-          marginBottom: '20px',
-          letterSpacing: '0.3px'
-        }}>
-          Customizable dashboard
-        </h2>
-        <div ref={dropdownRef} style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: '12px',
-          marginBottom: '20px'
-        }}>
-          <div style={{ position: 'relative' }}>
-            <label style={{ fontSize: '12px', fontWeight: 500, color: isDarkMode ? '#999' : '#666', display: 'block', marginBottom: '4px' }}>Statistic</label>
-            <button
-              type="button"
-              onClick={() => { setStatOpen((o) => !o); setFormatOpen(false) }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                minWidth: '220px',
-                padding: '10px 14px',
-                backgroundColor: isDarkMode ? '#2a2a2a' : '#fff',
-                border: `1px solid ${borderColor}`,
-                borderRadius: '10px',
-                color: isDarkMode ? '#fff' : '#333',
-                fontSize: '14px',
-                cursor: 'pointer',
-                textAlign: 'left',
-                boxShadow: isDarkMode ? 'none' : '0 1px 3px rgba(0,0,0,0.06)'
-              }}
-            >
-              {STAT_OPTIONS.find((o) => o.id === selectedStat)?.label ?? 'Select'}
-              <ChevronDown size={16} style={{ marginLeft: 'auto', opacity: 0.7, transform: statOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-            </button>
-            {statOpen && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                marginTop: '4px',
-                minWidth: '220px',
-                backgroundColor: isDarkMode ? '#2a2a2a' : '#fff',
-                border: `1px solid ${borderColor}`,
-                borderRadius: '10px',
-                boxShadow: isDarkMode ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.12)',
-                zIndex: 100,
-                overflow: 'hidden'
-              }}>
-                {STAT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => { setSelectedStat(opt.id); setStatOpen(false) }}
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      padding: '10px 14px',
-                      backgroundColor: selectedStat === opt.id ? (isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)') : 'transparent',
-                      border: 'none',
-                      color: isDarkMode ? '#fff' : '#333',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            )}
+          {/* Today's Stats Row */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: '20px'
+          }}>
+            <StatCard
+              title="Today's Revenue"
+              value={formatCurrency(stats.revenue?.today || 0)}
+              icon={<DollarSign size={32} />}
+              color={`rgba(${themeColorRgb}, 1)`}
+            />
+            <StatCard
+              title="Today's Returns"
+              value={stats.returns?.today || 0}
+              subtitle={stats.returns?.today_amount ? `Amount: ${formatCurrency(stats.returns.today_amount)}` : undefined}
+              icon={<RotateCcw size={32} />}
+              color={`rgba(${themeColorRgb}, 1)`}
+            />
           </div>
-          <div style={{ position: 'relative' }}>
-            <label style={{ fontSize: '12px', fontWeight: 500, color: isDarkMode ? '#999' : '#666', display: 'block', marginBottom: '4px' }}>Format</label>
-            <button
-              type="button"
-              onClick={() => { setFormatOpen((o) => !o); setStatOpen(false) }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                minWidth: '160px',
-                padding: '10px 14px',
-                backgroundColor: isDarkMode ? '#2a2a2a' : '#fff',
-                border: `1px solid ${borderColor}`,
-                borderRadius: '10px',
-                color: isDarkMode ? '#fff' : '#333',
-                fontSize: '14px',
-                cursor: 'pointer',
-                textAlign: 'left',
-                boxShadow: isDarkMode ? 'none' : '0 1px 3px rgba(0,0,0,0.06)'
-              }}
-            >
-              {formatOptions.find((o) => o.id === selectedFormat)?.label ?? 'Select'}
-              <ChevronDown size={16} style={{ marginLeft: 'auto', opacity: 0.7, transform: formatOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-            </button>
-            {formatOpen && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                marginTop: '4px',
-                minWidth: '160px',
-                backgroundColor: isDarkMode ? '#2a2a2a' : '#fff',
-                border: `1px solid ${borderColor}`,
-                borderRadius: '10px',
-                boxShadow: isDarkMode ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.12)',
-                zIndex: 100,
-                overflow: 'hidden'
-              }}>
-                {formatOptions.map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => { setSelectedFormat(opt.id); setFormatOpen(false) }}
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      padding: '10px 14px',
-                      backgroundColor: selectedFormat === opt.id ? (isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)') : 'transparent',
-                      border: 'none',
-                      color: isDarkMode ? '#fff' : '#333',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            )}
+
+          {/* Weekly Revenue Chart */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr',
+            gap: '24px'
+          }}>
+            <div style={{
+              backgroundColor: cardBg,
+              border: `1px solid ${borderColor}`,
+              borderRadius: '12px',
+              boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+              minHeight: '280px',
+              overflow: 'hidden'
+            }}>
+              {renderWeeklyChart()}
+            </div>
           </div>
-        </div>
-        <div style={{
-          backgroundColor: cardBg,
-          border: `1px solid ${borderColor}`,
-          borderRadius: '12px',
-          boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
-          minHeight: '320px',
-          overflow: 'hidden'
-        }}>
-          {renderCustomView()}
-        </div>
-      </div>
+
+          <div style={{
+            marginTop: '32px',
+            paddingTop: '28px',
+            borderTop: `1px solid ${borderColor}`
+          }}>
+            <h2 style={{
+              fontSize: '18px',
+              fontWeight: 600,
+              color: isDarkMode ? '#fff' : '#1a1a1a',
+              marginBottom: '20px',
+              letterSpacing: '0.3px'
+            }}>
+              Customizable dashboard
+            </h2>
+            <div ref={dropdownRef} style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: '12px',
+              marginBottom: '20px'
+            }}>
+              <div style={{ position: 'relative' }}>
+                <label style={{ fontSize: '12px', fontWeight: 500, color: isDarkMode ? '#999' : '#666', display: 'block', marginBottom: '4px' }}>Statistic</label>
+                <button
+                  type="button"
+                  onClick={() => { setStatOpen((o) => !o); setFormatOpen(false) }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    minWidth: '220px',
+                    padding: '10px 14px',
+                    backgroundColor: isDarkMode ? '#2a2a2a' : '#fff',
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: '10px',
+                    color: isDarkMode ? '#fff' : '#333',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: isDarkMode ? 'none' : '0 1px 3px rgba(0,0,0,0.06)'
+                  }}
+                >
+                  {STAT_OPTIONS.find((o) => o.id === selectedStat)?.label ?? 'Select'}
+                  <ChevronDown size={16} style={{ marginLeft: 'auto', opacity: 0.7, transform: statOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                </button>
+                {statOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    marginTop: '4px',
+                    minWidth: '220px',
+                    backgroundColor: isDarkMode ? '#2a2a2a' : '#fff',
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: '10px',
+                    boxShadow: isDarkMode ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.12)',
+                    zIndex: 100,
+                    overflow: 'hidden'
+                  }}>
+                    {STAT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => { setSelectedStat(opt.id); setStatOpen(false) }}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          padding: '10px 14px',
+                          backgroundColor: selectedStat === opt.id ? (isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)') : 'transparent',
+                          border: 'none',
+                          color: isDarkMode ? '#fff' : '#333',
+                          fontSize: '14px',
+                          textAlign: 'left',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ position: 'relative' }}>
+                <label style={{ fontSize: '12px', fontWeight: 500, color: isDarkMode ? '#999' : '#666', display: 'block', marginBottom: '4px' }}>Format</label>
+                <button
+                  type="button"
+                  onClick={() => { setFormatOpen((o) => !o); setStatOpen(false) }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    minWidth: '160px',
+                    padding: '10px 14px',
+                    backgroundColor: isDarkMode ? '#2a2a2a' : '#fff',
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: '10px',
+                    color: isDarkMode ? '#fff' : '#333',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: isDarkMode ? 'none' : '0 1px 3px rgba(0,0,0,0.06)'
+                  }}
+                >
+                  {formatOptions.find((o) => o.id === selectedFormat)?.label ?? 'Select'}
+                  <ChevronDown size={16} style={{ marginLeft: 'auto', opacity: 0.7, transform: formatOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                </button>
+                {formatOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    marginTop: '4px',
+                    minWidth: '160px',
+                    backgroundColor: isDarkMode ? '#2a2a2a' : '#fff',
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: '10px',
+                    boxShadow: isDarkMode ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.12)',
+                    zIndex: 100,
+                    overflow: 'hidden'
+                  }}>
+                    {formatOptions.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => { setSelectedFormat(opt.id); setFormatOpen(false) }}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          padding: '10px 14px',
+                          backgroundColor: selectedFormat === opt.id ? (isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)') : 'transparent',
+                          border: 'none',
+                          color: isDarkMode ? '#fff' : '#333',
+                          fontSize: '14px',
+                          textAlign: 'left',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div style={{
+              backgroundColor: cardBg,
+              border: `1px solid ${borderColor}`,
+              borderRadius: '12px',
+              boxShadow: isDarkMode ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.08)',
+              minHeight: '320px',
+              overflow: 'hidden'
+            }}>
+              {renderCustomView()}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -19,12 +19,12 @@ function DeepLinkHandler() {
         const path = rest.split('?')[0] || '/'
         const search = rest.includes('?') ? '?' + rest.split('?').slice(1).join('?') : ''
         navigate((path.startsWith('/') ? path : '/' + path) + search, { replace: true })
-      } catch (_) {}
+      } catch (_) { }
     }
     import('@tauri-apps/plugin-deep-link').then(({ onOpenUrl, getCurrent }) => {
       onOpenUrl((urls) => { if (urls && urls[0]) handleUrl(urls[0]) }).then((fn) => { unlisten = fn })
-      getCurrent().then((urls) => { if (urls && urls[0]) handleUrl(urls[0]) }).catch(() => {})
-    }).catch(() => {})
+      getCurrent().then((urls) => { if (urls && urls[0]) handleUrl(urls[0]) }).catch(() => { })
+    }).catch(() => { })
     return () => { if (unlisten && typeof unlisten === 'function') unlisten() }
   }, [navigate])
   return null
@@ -175,171 +175,171 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
     <>
       <DeepLinkHandler />
       <Routes>
-      <Route path="/login" element={
-        sessionToken && employee ? (
-          <Navigate to="/dashboard" replace />
-        ) : sessionToken && sessionVerifying ? (
-          <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
-            <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>Loading session...</div>
-          </div>
-        ) : (
-          <Login onLogin={onLogin} />
-        )
-      } />
-      <Route path="/dashboard" element={
-        sessionToken && employee ? (
+        <Route path="/login" element={
+          sessionToken && employee ? (
+            <Navigate to="/dashboard" replace />
+          ) : sessionToken && sessionVerifying ? (
+            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
+              <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>Loading session...</div>
+            </div>
+          ) : (
+            <Login onLogin={onLogin} />
+          )
+        } />
+        <Route path="/dashboard" element={
+          sessionToken && employee ? (
+            <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+              <Layout employee={employee} onLogout={onLogout}>
+                <Dashboard />
+              </Layout>
+            </ProtectedRoute>
+          ) : sessionToken && sessionVerifying ? (
+            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
+              <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>Loading session...</div>
+            </div>
+          ) : (
+            <Login onLogin={onLogin} />
+          )
+        } />
+        <Route path="/pos" element={
           <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
             <Layout employee={employee} onLogout={onLogout}>
-              <Dashboard />
+              <POS employeeId={employee?.employee_id} employeeName={employee?.employee_name} />
             </Layout>
           </ProtectedRoute>
-        ) : sessionToken && sessionVerifying ? (
-          <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
-            <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>Loading session...</div>
-          </div>
-        ) : (
-          <Login onLogin={onLogin} />
-        )
-      } />
-      <Route path="/pos" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <POS employeeId={employee?.employee_id} employeeName={employee?.employee_name} />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/tables" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <AdminOnlyRedirect>
-              <Tables />
-            </AdminOnlyRedirect>
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/recent-orders" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <RecentOrders />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/inventory" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <Inventory />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/calendar" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <Calendar employee={employee} />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/calendar-subscription" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <CalendarSubscription />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/employee-management" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <EmployeeManagement />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/profile" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <Profile employeeId={employee?.employee_id} employeeName={employee?.employee_name} />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/shipment-verification" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <ShipmentVerification />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/shipment-verification/:id" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <ShipmentVerification />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/statistics" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <StatisticsPage />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/settings" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <SettingsPage />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/accounting" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <PermissionRedirect permission="view_financial_reports">
-              <Suspense fallback={<div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary, #666)' }}>Loading…</div>}>
-                <Accounting />
-              </Suspense>
-            </PermissionRedirect>
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/cash-register" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <CashRegister />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/customers" element={
-        <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
-          <Layout employee={employee} onLogout={onLogout}>
-            <Customers />
-          </Layout>
-        </ProtectedRoute>
-      } />
-      <Route path="/" element={
-        sessionToken && employee ? (
-          <Navigate to="/dashboard" replace />
-        ) : sessionToken && sessionVerifying ? (
-          <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
-            <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>Loading session...</div>
-          </div>
-        ) : (
-          <Navigate to="/login" replace />
-        )
-      } />
-      <Route path="/onboarding" element={<Navigate to="/login" replace />} />
-      <Route path="/onboarding/*" element={<Navigate to="/login" replace />} />
-      <Route path="/employee-onboarding" element={<Navigate to="/login" replace />} />
-      <Route path="/master-login" element={<Navigate to="/login" replace />} />
-      <Route path="/sign-up" element={<Navigate to="/login" replace />} />
-      <Route path="*" element={
-        sessionToken && employee ? (
-          <Navigate to="/dashboard" replace />
-        ) : sessionToken && sessionVerifying ? (
-          <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
-            <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>Loading session...</div>
-          </div>
-        ) : (
-          <Navigate to="/login" replace />
-        )
-      } />
-    </Routes>
+        } />
+        <Route path="/tables" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <AdminOnlyRedirect>
+                <Tables />
+              </AdminOnlyRedirect>
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/recent-orders" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <RecentOrders />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/inventory" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <Inventory />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/calendar" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <Calendar employee={employee} />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/calendar-subscription" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <CalendarSubscription />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/employee-management" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <EmployeeManagement />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/profile" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <Profile employeeId={employee?.employee_id} employeeName={employee?.employee_name} />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/shipment-verification" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <ShipmentVerification />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/shipment-verification/:id" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <ShipmentVerification />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/statistics" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <StatisticsPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/settings" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <SettingsPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/accounting" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <PermissionRedirect permission="view_financial_reports">
+                <Suspense fallback={<div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary, #666)' }}>Loading…</div>}>
+                  <Accounting />
+                </Suspense>
+              </PermissionRedirect>
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/cash-register" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <CashRegister />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/customers" element={
+          <ProtectedRoute sessionToken={sessionToken} employee={employee} sessionVerifying={sessionVerifying}>
+            <Layout employee={employee} onLogout={onLogout}>
+              <Customers />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        <Route path="/" element={
+          sessionToken && employee ? (
+            <Navigate to="/dashboard" replace />
+          ) : sessionToken && sessionVerifying ? (
+            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
+              <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>Loading session...</div>
+            </div>
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        } />
+        <Route path="/onboarding" element={<Navigate to="/login" replace />} />
+        <Route path="/onboarding/*" element={<Navigate to="/login" replace />} />
+        <Route path="/employee-onboarding" element={<Navigate to="/login" replace />} />
+        <Route path="/master-login" element={<Navigate to="/login" replace />} />
+        <Route path="/sign-up" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={
+          sessionToken && employee ? (
+            <Navigate to="/dashboard" replace />
+          ) : sessionToken && sessionVerifying ? (
+            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-secondary, #f5f5f5)' }}>
+              <div style={{ fontSize: '18px', color: 'var(--text-secondary, #666)' }}>Loading session...</div>
+            </div>
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        } />
+      </Routes>
     </>
   )
 }
@@ -365,19 +365,19 @@ function Layout({ children, employee, onLogout }) {
   useEffect(() => {
     if (!navigator.onLine) return
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('sessionToken') : null
-    cachedFetch('/api/inventory?limit=50&offset=0').then(() => {}).catch(() => {})
-    cachedFetch('/api/inventory?item_type=product&include_variants=1').then(() => {}).catch(() => {})
-    cachedFetch('/api/vendors').then(() => {}).catch(() => {})
-    cachedFetch('/api/categories').then(() => {}).catch(() => {})
-    cachedFetch('/api/pos-bootstrap').then(() => {}).catch(() => {})
-    cachedFetch('/api/settings-bootstrap', { headers: { 'X-Session-Token': token || '' } }).then(() => {}).catch(() => {})
-    cachedFetch('/api/receipt-settings').then(() => {}).catch(() => {})
-    cachedFetch('/api/pos-settings').then(() => {}).catch(() => {})
-    cachedFetch('/api/store-location-settings').then(() => {}).catch(() => {})
+    cachedFetch('/api/inventory?limit=50&offset=0').then(() => { }).catch(() => { })
+    cachedFetch('/api/inventory?item_type=product&include_variants=1').then(() => { }).catch(() => { })
+    cachedFetch('/api/vendors').then(() => { }).catch(() => { })
+    cachedFetch('/api/categories').then(() => { }).catch(() => { })
+    cachedFetch('/api/pos-bootstrap').then(() => { }).catch(() => { })
+    cachedFetch('/api/settings-bootstrap', { headers: { 'X-Session-Token': token || '' } }).then(() => { }).catch(() => { })
+    cachedFetch('/api/receipt-settings').then(() => { }).catch(() => { })
+    cachedFetch('/api/pos-settings').then(() => { }).catch(() => { })
+    cachedFetch('/api/store-location-settings').then(() => { }).catch(() => { })
     if (token) {
-      cachedFetch('/api/order-delivery-settings', { headers: { 'X-Session-Token': token } }).then(() => {}).catch(() => {})
-      cachedFetch(`/api/register/session?session_token=${token}`).then(() => {}).catch(() => {})
-      cachedFetch(`/api/register/session?status=open&session_token=${token}`).then(() => {}).catch(() => {})
+      cachedFetch('/api/order-delivery-settings', { headers: { 'X-Session-Token': token } }).then(() => { }).catch(() => { })
+      cachedFetch(`/api/register/session?session_token=${token}`).then(() => { }).catch(() => { })
+      cachedFetch(`/api/register/session?status=open&session_token=${token}`).then(() => { }).catch(() => { })
     }
   }, [])
 
@@ -441,15 +441,15 @@ function Layout({ children, employee, onLogout }) {
               backgroundColor: 'transparent',
               border: 'none',
               cursor: 'pointer',
-              fontSize: '24px',
-              fontWeight: 500,
-              fontStyle: 'italic',
-              fontFamily: 'Georgia, "Times New Roman", serif',
-              color: '#6ba3f0',
+              fontSize: '26px',
+              fontWeight: 400,
+              fontFamily: 'Tanker, sans-serif',
+              letterSpacing: '1px',
+              color: '#4a90e2',
               lineHeight: 1.2
             }}
           >
-            Swyftly
+            SWFTLY
           </button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -683,18 +683,18 @@ function App() {
       <ThemeProvider>
         <ToastProvider>
           <PageScrollProvider>
-          <NotificationProvider>
-          <PermissionProvider initialEmployee={employee}>
-            <AppContent
-            sessionToken={sessionToken}
-            setSessionToken={setSessionToken}
-            employee={employee}
-            setEmployee={setEmployee}
-            onLogout={handleLogout}
-            sessionVerifying={sessionVerifying}
-          />
-          </PermissionProvider>
-          </NotificationProvider>
+            <NotificationProvider>
+              <PermissionProvider initialEmployee={employee}>
+                <AppContent
+                  sessionToken={sessionToken}
+                  setSessionToken={setSessionToken}
+                  employee={employee}
+                  setEmployee={setEmployee}
+                  onLogout={handleLogout}
+                  sessionVerifying={sessionVerifying}
+                />
+              </PermissionProvider>
+            </NotificationProvider>
           </PageScrollProvider>
         </ToastProvider>
       </ThemeProvider>
