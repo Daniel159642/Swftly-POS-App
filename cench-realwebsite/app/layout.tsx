@@ -12,9 +12,25 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+import { TransitionProvider } from "./TransitionContext";
+import { Analytics } from "@vercel/analytics/react";
+
 export const metadata: Metadata = {
-  title: "Swftly",
-  description: "Advanced POS Hub",
+  title: "Swftly | Advanced POS Hub",
+  description: "The all-in-one software suite that automates your retail or restaurant business with AI-driven insights.",
+  openGraph: {
+    title: "Swftly | Advanced POS Hub",
+    description: "The all-in-one software suite that automates your retail or restaurant business with AI-driven insights.",
+    url: "https://swftly.com",
+    siteName: "Swftly",
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Swftly | Advanced POS Hub",
+    description: "The all-in-one software suite that automates your retail or restaurant business with AI-driven insights.",
+  },
 };
 
 export default function RootLayout({
@@ -31,7 +47,10 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
       >
-        {children}
+        <TransitionProvider>
+          {children}
+        </TransitionProvider>
+        <Analytics />
       </body>
     </html>
   );

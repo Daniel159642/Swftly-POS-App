@@ -1,15 +1,21 @@
 'use client';
 
 import { motion } from 'motion/react';
-import { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Check, Send, ChevronRight, Loader2, ArrowUpRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ArrowLeft, Check, ChevronRight, Loader2, ArrowUpRight } from 'lucide-react';
 import Link from 'next/link';
 import ThreeLogo from '../components/ThreeLogo';
 import Grainient from '../components/Grainient';
+import { useTransition } from '../TransitionContext';
 
 export default function BookADemo() {
+    const { navigate } = useTransition();
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+
+    useEffect(() => {
+        window.scrollTo(0, 0);
+    }, []);
 
     const NavButton = ({ children, className, isBold = false, onClick }: { children: React.ReactNode; className?: string; isBold?: boolean; onClick?: () => void }) => {
         const [isHovered, setIsHovered] = useState(false);
@@ -17,7 +23,7 @@ export default function BookADemo() {
 
         return (
             <motion.button
-                className={`relative group py-1 text-sm ${isBold ? 'font-semibold' : 'font-medium'} text-black overflow-hidden flex items-center gap-1.5 ${className || ''}`}
+                className={`relative group py-1 text-[11px] md:text-sm ${isBold ? 'font-semibold' : 'font-medium'} text-black overflow-hidden flex items-center gap-1 ${className || ''}`}
                 onMouseEnter={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
                     const x = e.clientX - rect.left;
@@ -41,14 +47,40 @@ export default function BookADemo() {
         );
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const [formData, setFormData] = useState({
+        firstName: '',
+        lastName: '',
+        email: '',
+        businessType: '',
+        message: ''
+    });
+    const [error, setError] = useState<string | null>(null);
+
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
-        // Simulate API call
-        setTimeout(() => {
-            setIsLoading(false);
+        setError(null);
+
+        try {
+            const response = await fetch('/api/contact', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(formData),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to send request');
+            }
+
             setIsSubmitted(true);
-        }, 1500);
+        } catch (err) {
+            setError('Something went wrong. Please try again later.');
+            console.error(err);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -56,29 +88,25 @@ export default function BookADemo() {
             {/* Header - Matching main page */}
             <motion.header
                 className="fixed top-2 left-4 right-4 z-[1001]"
-                initial={{ opacity: 0, y: -20 }}
+                initial={false}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.8 }}
             >
                 <div className="max-w-7xl mx-auto px-4 py-1.5 flex items-center justify-between relative z-10">
-                    <Link href="/" className="flex items-center gap-4 relative w-12 h-12 group">
+                    <button onClick={() => navigate('/')} className="flex items-center gap-4 relative w-12 h-12 group focus:outline-none">
                         <motion.span
-                            className="absolute left-[90px] text-sm font-medium text-black px-3 py-1 drop-shadow-[0_0_8px_rgba(44,25,252,0.15)]"
+                            className="absolute left-[90px] text-sm font-medium text-black px-3 py-1 drop-shadow-[0_0_8px_rgba(44,25,252,0.15)] hidden md:block"
                         >
                             Swftly
                         </motion.span>
-                    </Link>
-                    <div className="flex items-center gap-10">
-                        <Link href="/#software-section">
-                            <NavButton>Software</NavButton>
-                        </Link>
-                        <Link href="/#pricing-section">
-                            <NavButton>Pricing</NavButton>
-                        </Link>
+                    </button>
+                    <div className="flex items-center gap-4 md:gap-10">
+                        <NavButton onClick={() => navigate('/#software-section')}>Software</NavButton>
+                        <NavButton onClick={() => navigate('/#pricing-section')}>Pricing</NavButton>
                         <NavButton className="text-[#2c19fc]">
-                            Book A Demo
+                            <span className="md:hidden">Demo</span>
+                            <span className="hidden md:inline">Book A Demo</span>
                         </NavButton>
-                        <NavButton isBold>
+                        <NavButton isBold onClick={() => navigate('/book-a-demo')}>
                             Get Started
                             <ArrowUpRight className="w-4 h-4 relative z-10" />
                         </NavButton>
@@ -105,9 +133,8 @@ export default function BookADemo() {
 
                 <div className="relative z-10 w-full max-w-2xl">
                     <motion.div
-                        initial={{ opacity: 0, y: 20 }}
+                        initial={false}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.8, delay: 0.2 }}
                         className="text-center mb-12"
                     >
                         <h1 className="text-5xl md:text-6xl font-black text-black tracking-tighter mb-4" style={{ fontFamily: 'Zodiak, serif' }}>
@@ -123,9 +150,8 @@ export default function BookADemo() {
                     </motion.div>
 
                     <motion.div
-                        initial={{ opacity: 0, scale: 0.95 }}
+                        initial={false}
                         animate={{ opacity: 1, scale: 1 }}
-                        transition={{ duration: 0.8, delay: 0.4 }}
                         className="relative"
                     >
                         {/* Form Container with Premium Styling */}
@@ -136,12 +162,19 @@ export default function BookADemo() {
 
                             {!isSubmitted ? (
                                 <form onSubmit={handleSubmit} className="space-y-6">
+                                    {error && (
+                                        <div className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-2xl text-sm font-medium animate-shake">
+                                            {error}
+                                        </div>
+                                    )}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div className="space-y-2">
                                             <label className="text-xs font-bold uppercase tracking-widest text-gray-400 ml-1">First Name</label>
                                             <input
                                                 required
                                                 type="text"
+                                                value={formData.firstName}
+                                                onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
                                                 className="w-full bg-white/50 border border-gray-200 rounded-2xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-[#2c19fc]/20 focus:border-[#2c19fc] transition-all text-black font-medium"
                                                 placeholder="First"
                                             />
@@ -151,6 +184,8 @@ export default function BookADemo() {
                                             <input
                                                 required
                                                 type="text"
+                                                value={formData.lastName}
+                                                onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                                                 className="w-full bg-white/50 border border-gray-200 rounded-2xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-[#2c19fc]/20 focus:border-[#2c19fc] transition-all text-black font-medium"
                                                 placeholder="Last"
                                             />
@@ -162,6 +197,8 @@ export default function BookADemo() {
                                         <input
                                             required
                                             type="email"
+                                            value={formData.email}
+                                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                                             className="w-full bg-white/50 border border-gray-200 rounded-2xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-[#2c19fc]/20 focus:border-[#2c19fc] transition-all text-black font-medium"
                                             placeholder="Email"
                                         />
@@ -172,6 +209,8 @@ export default function BookADemo() {
                                         <input
                                             required
                                             type="text"
+                                            value={formData.businessType}
+                                            onChange={(e) => setFormData({ ...formData, businessType: e.target.value })}
                                             className="w-full bg-white/50 border border-gray-200 rounded-2xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-[#2c19fc]/20 focus:border-[#2c19fc] transition-all text-black font-medium"
                                             placeholder="Retail, Restaurant, etc."
                                         />
@@ -180,9 +219,23 @@ export default function BookADemo() {
                                     <div className="space-y-2">
                                         <label className="text-xs font-bold uppercase tracking-widest text-gray-400 ml-1">Message (Optional)</label>
                                         <textarea
+                                            value={formData.message}
+                                            onChange={(e) => setFormData({ ...formData, message: e.target.value })}
                                             className="w-full bg-white/50 border border-gray-200 rounded-2xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-[#2c19fc]/20 focus:border-[#2c19fc] transition-all text-black font-medium min-h-[120px]"
                                             placeholder="Tell us about your needs..."
                                         ></textarea>
+                                    </div>
+
+                                    {/* Honeypot field for bot protection */}
+                                    <div className="hidden" aria-hidden="true">
+                                        <input
+                                            type="text"
+                                            name="website"
+                                            tabIndex={-1}
+                                            autoComplete="off"
+                                            value={(formData as any).website || ''}
+                                            onChange={(e) => setFormData({ ...formData, [e.target.name]: e.target.value })}
+                                        />
                                     </div>
 
                                     <button
@@ -218,12 +271,13 @@ export default function BookADemo() {
                                     <p className="text-gray-500 font-medium mb-8 max-w-xs">
                                         We've sent a confirmation to your email. One of our specialists will be in touch shortly.
                                     </p>
-                                    <Link href="/">
-                                        <button className="flex items-center gap-2 text-[#2c19fc] font-bold hover:gap-3 transition-all underline underline-offset-4">
-                                            <ArrowLeft className="w-4 h-4" />
-                                            Return Home
-                                        </button>
-                                    </Link>
+                                    <button
+                                        onClick={() => navigate('/')}
+                                        className="flex items-center gap-2 text-[#2c19fc] font-bold hover:gap-3 transition-all underline underline-offset-4"
+                                    >
+                                        <ArrowLeft className="w-4 h-4" />
+                                        Return Home
+                                    </button>
                                 </motion.div>
                             )}
                         </div>
@@ -238,7 +292,7 @@ export default function BookADemo() {
                         <span className="text-sm text-gray-500">© 2024 Swftly. All rights reserved.</span>
                     </div>
                     <div className="flex items-center gap-6">
-                        <a href="#" className="text-sm text-gray-500 hover:text-[#2c19fc] transition-colors">Instagram</a>
+                        <a href="https://instagram.com/getswftly" target="_blank" rel="noopener noreferrer" className="text-sm text-gray-500 hover:text-[#2c19fc] transition-colors">Instagram</a>
                         <a href="#" className="text-sm text-gray-500 hover:text-[#2c19fc] transition-colors">X</a>
                         <a href="#" className="text-sm text-gray-500 hover:text-[#2c19fc] transition-colors">Contact</a>
                     </div>

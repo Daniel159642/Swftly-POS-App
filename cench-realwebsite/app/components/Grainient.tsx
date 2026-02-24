@@ -142,7 +142,7 @@ const Grainient = ({
             webgl: 2,
             alpha: true,
             antialias: false,
-            dpr: Math.min(window.devicePixelRatio || 1, 2)
+            dpr: 1.0
         });
 
         const gl = renderer.gl;

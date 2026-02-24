@@ -11,7 +11,7 @@ if (typeof window !== 'undefined') {
 }
 import BlurText from './components/BlurText';
 import LogoLoop from './components/LogoLoop';
-import { ArrowUpRight, Settings, User, LogOut, Bell, Camera, CreditCard, Search, Check } from 'lucide-react';
+import { ArrowUpRight, Settings, User, LogOut, Bell, Camera, CreditCard, Search, Check, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import ThreeLogo from './components/ThreeLogo';
 import GradualBlur from './components/GradualBlur';
@@ -23,15 +23,15 @@ const BrandIcon = ({ name }: { name: string }) => {
   const cn = "inline-block h-5 w-auto mx-1.5 align-middle mb-0.5 filter drop-shadow-sm";
   switch (name) {
     case 'Google': return <img src="https://www.vectorlogo.zone/logos/google/google-icon.svg" className={cn} alt="Google" />;
-    case 'Apple': return <img src="https://www.vectorlogo.zone/logos/apple/apple-icon.svg" className={cn} alt="Apple" style={{ filter: 'brightness(0) invert(1) drop-shadow(0 0 2px rgba(255,255,255,0.2))' }} />;
+    case 'Apple': return <img src="https://www.vectorlogo.zone/logos/apple/apple-icon.svg" className={cn + " relative -top-0.5"} alt="Apple" style={{ filter: 'brightness(0) invert(1) drop-shadow(0 2px 4px rgba(0,0,0,0.2))' }} />;
     case 'Calendly': return <img src="/calendly.svg" className={cn} alt="Calendly" style={{ filter: 'drop-shadow(0 0 2px rgba(255,255,255,0.1))' }} />;
     case 'Outlook': return <img src="/outlook.svg" className={cn} alt="Outlook" style={{ filter: 'drop-shadow(0 0 2px rgba(255,255,255,0.1))' }} />;
     case 'Stripe': return <img src="/stripe.svg" className="inline-block h-5 w-auto mx-0.5 align-middle mb-0.5 filter drop-shadow-sm" alt="Stripe" style={{ filter: 'brightness(1.1)' }} />;
     case 'Shopify': return <img src="/shopify.svg" className={cn} alt="Shopify" style={{ filter: 'brightness(1.1)' }} />;
     case 'DoorDash': return <img src="/doordash.svg" className={cn} alt="DoorDash" style={{ filter: 'brightness(1.1)' }} />;
     case 'UberEats': return <img src="/ubereats.svg" className={cn} alt="Uber Eats" style={{ filter: 'brightness(1.1)' }} />;
-    case 'ApplePay': return <img src="/apple-pay.svg" className={cn} alt="Apple Pay" style={{ filter: 'brightness(1.1)' }} />;
-    case 'GooglePay': return <img src="/google-pay.svg" className={cn} alt="Google Pay" style={{ filter: 'brightness(1.1)' }} />;
+    case 'ApplePay': return <img src="/apple-pay.svg" className={cn.replace('h-5', 'h-7')} alt="Apple Pay" style={{ filter: 'brightness(1.1) drop-shadow(0 2px 4px rgba(0,0,0,0.2))' }} />;
+    case 'GooglePay': return <img src="/google-pay.svg" className={cn.replace('h-5', 'h-7')} alt="Google Pay" style={{ filter: 'brightness(1.1) drop-shadow(0 2px 4px rgba(0,0,0,0.2))' }} />;
     case 'QuickBooks': return <img src="/quickbooks.svg" className={cn} alt="QuickBooks" style={{ filter: 'brightness(1.1)' }} />;
     case 'Camera': return <Camera size={16} className="inline-block mx-1.5 align-middle mb-0.5 text-[#2c19fc] drop-shadow-[0_0_8px_rgba(44,25,252,0.4)]" />;
     case 'Wallet': return <CreditCard size={16} className="inline-block mx-1.5 align-middle mb-0.5 text-[#2c19fc] drop-shadow-[0_0_8px_rgba(44,25,252,0.4)]" />;
@@ -53,14 +53,17 @@ const PointText = ({ text }: { text: string }) => {
   );
 };
 
+import { useTransition } from './TransitionContext';
+
 export default function Home() {
+  const { navigate } = useTransition();
   const NavButton = ({ children, className, isBold = false, onClick }: { children: React.ReactNode; className?: string; isBold?: boolean; onClick?: () => void }) => {
     const [isHovered, setIsHovered] = useState(false);
     const [entrySide, setEntrySide] = useState<'left' | 'right'>('left');
 
     return (
       <motion.button
-        className={`relative group py-1 text-sm ${isBold ? 'font-semibold' : 'font-medium'} text-black overflow-hidden flex items-center gap-1.5 ${className || ''}`}
+        className={`relative group py-1 text-[11px] md:text-sm ${isBold ? 'font-semibold' : 'font-medium'} text-black overflow-hidden flex items-center gap-1 ${className || ''}`}
         onMouseEnter={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           const x = e.clientX - rect.left;
@@ -92,6 +95,7 @@ export default function Home() {
   const [selectedContext, setSelectedContext] = useState<string | null>(null);
   const [typedText, setTypedText] = useState('');
   const [isNavigating, setIsNavigating] = useState(false);
+  const [mobileStep, setMobileStep] = useState(0);
   const [isThirdSectionInView, setIsThirdSectionInView] = useState(false);
   const agentDropdownRef = useRef<HTMLDivElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
@@ -109,6 +113,52 @@ export default function Home() {
   const [stickyStep, setStickyStep] = useState(0);
   const stickySectionRef = useRef<HTMLElement>(null);
   const scrollingContentRef = useRef<HTMLDivElement>(null);
+  const mobileVideoRef = useRef<HTMLVideoElement>(null);
+  const [showHeavyAssets, setShowHeavyAssets] = useState(false);
+
+  useEffect(() => {
+    // Show background/bags almost immediately for a complete initial scene
+    const timer = setTimeout(() => setShowHeavyAssets(true), 100);
+    const handleScroll = () => {
+      if (window.scrollY > 50) {
+        setShowHeavyAssets(true);
+        window.removeEventListener('scroll', handleScroll);
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleHashJump = () => {
+      if (window.location.hash) {
+        const id = window.location.hash.substring(1);
+        const el = document.getElementById(id);
+        if (el) {
+          // Instant jump
+          el.scrollIntoView({ behavior: 'auto', block: 'start' });
+          // Ensure it sticks (sometimes hydration can reset scroll)
+          setTimeout(() => el.scrollIntoView({ behavior: 'auto', block: 'start' }), 50);
+        }
+      }
+    };
+
+    // Run on mount and after a short delay for reliability
+    handleHashJump();
+    const timer = setTimeout(() => {
+      handleHashJump();
+      ScrollTrigger.refresh();
+    }, 200);
+
+    window.addEventListener('hashchange', handleHashJump);
+    return () => {
+      window.removeEventListener('hashchange', handleHashJump);
+      clearTimeout(timer);
+    };
+  }, []);
 
   const videoHotspots = [
     {
@@ -272,7 +322,7 @@ export default function Home() {
       ? "make a skyline shot of nyc for the outro"
       : selectedAgent === 'Plan'
         ? "Lets make a plan for my last to leave the circle video like Mr Beast"
-        : "Create a title that says Cench to the Mooon\nin red";
+        : "Create a title that says Swftly to the Moon\nin blue";
     let currentIndex = 0;
     setTypedText('');
     let typingInterval: NodeJS.Timeout | null = null;
@@ -292,9 +342,7 @@ export default function Home() {
     };
   }, [selectedAgent]);
 
-  const handleAnimationComplete = () => {
-    console.log('Animation completed!');
-  };
+
 
   const [isScrolled, setIsScrolled] = useState(false);
 
@@ -349,11 +397,12 @@ export default function Home() {
   useEffect(() => {
     if (!stickySectionRef.current || !scrollingContentRef.current) return;
 
+    const mm = gsap.matchMedia();
     const content = scrollingContentRef.current;
     const items = content.querySelectorAll('.story-item');
     if (items.length === 0) return;
 
-    const ctx = gsap.context(() => {
+    mm.add("(min-width: 768px)", () => {
       // MASTER SCROLL TRIGGER: Handles Snapping and Hotspot State
       ScrollTrigger.create({
         trigger: stickySectionRef.current,
@@ -366,12 +415,9 @@ export default function Home() {
           // Video Speed/Scrub Logic
           if (videoRef.current && !hasHitTargetTime.current) {
             const firstStepEnd = 1 / items.length;
-            // Map progress of the first step to the 3.0 second mark
-            // If they scroll past intro, we ensure the video reaches 3.0s by the end of step 0
             const scrollTargetTime = (progress / firstStepEnd) * 3;
 
             if (videoRef.current.currentTime < 3) {
-              // Ensure we don't move backwards, but catch up if scrolling faster
               if (scrollTargetTime > videoRef.current.currentTime) {
                 videoRef.current.currentTime = Math.min(scrollTargetTime, 3);
               }
@@ -384,11 +430,9 @@ export default function Home() {
             }
           }
 
-          // Dynamically map progress to steps for 11 items
           const step = Math.min(Math.floor(progress * items.length), items.length - 1);
           setStickyStep(step);
 
-          // Updated Indices: Intro(4), Stats(4), POS(6), Orders(7), Customers(8), Calendar(5), Accounting(10), Shipments(9), Inventory(11), Tables(12), Settings(1), Profile(2)
           const hotspotIndices = [4, 4, 6, 7, 8, 5, 10, 9, 11, 12, 1, 2];
           setVideoInfoStep(hotspotIndices[step] || 4);
         }
@@ -397,8 +441,6 @@ export default function Home() {
       // MOVEMENT: Pull the content UP as the user scrolls DOWN
       const firstItem = items[0] as HTMLElement;
       const lastItem = items[items.length - 1] as HTMLElement;
-
-      // Use 0.55 to shift the focal center lower on the screen
       const startY = (window.innerHeight * 0.55) - (firstItem.offsetTop + firstItem.offsetHeight / 2);
       const endY = (window.innerHeight * 0.55) - (lastItem.offsetTop + lastItem.offsetHeight / 2);
 
@@ -416,7 +458,7 @@ export default function Home() {
         }
       );
 
-      // REVEAL TIMELINE: Handles individual item entrance/exit (blur/opacity)
+      // REVEAL TIMELINE
       const revealTl = gsap.timeline({
         scrollTrigger: {
           trigger: stickySectionRef.current,
@@ -426,35 +468,23 @@ export default function Home() {
         }
       });
 
-      // REVEAL TIMELINE: Dynamic scaling for any number of items
       items.forEach((item, i) => {
         const snapPoint = i / (items.length - 1);
-
         if (i === 0) {
           gsap.set(item, { opacity: 1, filter: 'blur(0px)', y: 0 });
-          revealTl.to(item, {
-            opacity: 0, filter: 'blur(20px)', y: -50, duration: 0.1, ease: "none"
-          }, 0.15);
+          revealTl.to(item, { opacity: 0, filter: 'blur(20px)', y: -50, duration: 0.1, ease: "none" }, 0.15);
         } else if (i === items.length - 1) {
           gsap.set(item, { opacity: 0, filter: 'blur(20px)', y: 50 });
-          revealTl.to(item, {
-            opacity: 1, filter: 'blur(0px)', y: 0, duration: 0.1, ease: "none"
-          }, 0.85);
+          revealTl.to(item, { opacity: 1, filter: 'blur(0px)', y: 0, duration: 0.1, ease: "none" }, 0.85);
         } else {
           gsap.set(item, { opacity: 0, filter: 'blur(20px)', y: 50 });
-          revealTl.to(item, {
-            opacity: 1, filter: 'blur(0px)', y: 0, duration: 0.1, ease: "none"
-          }, snapPoint - 0.1)
-            .to(item, {
-              opacity: 0, filter: 'blur(20px)', y: -50, duration: 0.1, ease: "none"
-            }, snapPoint + 0.1);
+          revealTl.to(item, { opacity: 1, filter: 'blur(0px)', y: 0, duration: 0.1, ease: "none" }, snapPoint - 0.1)
+            .to(item, { opacity: 0, filter: 'blur(20px)', y: -50, duration: 0.1, ease: "none" }, snapPoint + 0.1);
         }
       });
-
-      // Anchor the timeline duration to exactly 1.0
-      revealTl.to({}, { duration: 0.1 }, 1.0);
     });
-    return () => ctx.revert();
+
+    return () => mm.revert();
   }, []);
 
   useEffect(() => {
@@ -515,29 +545,29 @@ export default function Home() {
         position="bottom"
         height="4rem"
         strength={5}
-        divCount={30}
+        divCount={15}
         curve="bezier"
         exponential={true}
         opacity={0.85}
       />
       {/* Header */}
       <motion.header
-        className="fixed top-2 left-4 right-4 z-[1001]"
+        className="fixed top-2 left-4 right-4 z-[1001] will-change-transform"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 1.0, delay: 1.8 }}
+        transition={{ duration: 1.0, delay: 0.5 }}
       >
         <div className="max-w-7xl mx-auto px-4 py-1.5 flex items-center justify-between relative z-10">
           <div className="flex items-center gap-4 relative w-12 h-12">
             {/* 3D Logo docks here on scroll */}
             <motion.span
               ref={swftlyTextRef}
-              className="absolute left-0 text-sm font-medium text-black px-3 py-1 drop-shadow-[0_0_8px_rgba(44,25,252,0.15)]"
+              className="absolute left-0 text-sm font-medium text-black px-3 py-1 drop-shadow-[0_0_8px_rgba(44,25,252,0.15)] hidden md:block"
             >
               Swftly
             </motion.span>
           </div>
-          <div className="flex items-center gap-10">
+          <div className="flex items-center gap-4 md:gap-10">
             {['Software', 'Pricing', 'Book A Demo'].map((item) => {
               const button = (
                 <NavButton
@@ -548,29 +578,29 @@ export default function Home() {
                     setTimeout(() => setIsNavigating(false), 1200);
                   } : item === 'Software' ? () => {
                     setIsNavigating(true);
-                    document.getElementById('software-section')?.scrollIntoView({ behavior: 'smooth' });
+                    const isMobile = window.innerWidth < 768;
+                    const targetId = isMobile ? 'mobile-software-section' : 'software-section';
+                    document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth' });
                     setTimeout(() => setIsNavigating(false), 1200);
+                  } : item === 'Book A Demo' ? () => {
+                    navigate('/book-a-demo');
                   } : undefined}
                 >
-                  {item}
+                  {item === 'Book A Demo' ? (
+                    <>
+                      <span className="md:hidden">Demo</span>
+                      <span className="hidden md:inline">Book A Demo</span>
+                    </>
+                  ) : item}
                 </NavButton>
               );
 
-              if (item === 'Book A Demo') {
-                return (
-                  <Link key={item} href="/book-a-demo">
-                    {button}
-                  </Link>
-                );
-              }
               return button;
             })}
-            <Link href="/book-a-demo">
-              <NavButton isBold>
-                Get Started
-                <ArrowUpRight className="w-4 h-4 relative z-10" />
-              </NavButton>
-            </Link>
+            <NavButton isBold onClick={() => navigate('/book-a-demo')}>
+              Get Started
+              <ArrowUpRight className="w-4 h-4 relative z-10" />
+            </NavButton>
           </div>
         </div>
       </motion.header>
@@ -582,31 +612,42 @@ export default function Home() {
       <section className="relative w-full min-h-[300vh] bg-white overflow-hidden pb-32">
         {/* Main Hero White Content Area */}
         <div className="relative w-full z-20 pointer-events-none">
-          <div ref={heroTextRef} className="w-full max-w-7xl mx-auto flex justify-between items-center pt-[15vh] px-4 md:px-12 relative z-10 md:mt-4">
-            {/* Left Text */}
-            <div className="flex-1 flex justify-end pr-4 md:pr-12">
+          <div ref={heroTextRef} className="w-full max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center pt-[15vh] px-4 md:px-12 relative z-10 md:mt-4">
+            {/* Split Desktop Layout */}
+            <div className="hidden md:flex flex-1 justify-end pr-4 md:pr-12">
               <BlurText
                 text="Everything you need."
-                delay={800}
+                delay={1200}
                 animateBy="words"
                 direction="top"
                 once={true}
-                className="text-2xl md:text-3xl font-semibold text-black text-right"
+                className="text-2xl md:text-3xl font-bold text-black text-right font-zodiak"
               />
             </div>
 
             {/* Middle Spacer for Logo */}
-            <div className="w-[120px] md:w-[240px] h-[300px]"></div>
+            <div className="w-[120px] md:w-[240px] h-32 md:h-[300px]"></div>
 
-            {/* Right Text */}
-            <div className="flex-1 flex justify-start pl-8 md:pl-24">
+            {/* Mobile Centered Layout */}
+            <div className="md:hidden flex flex-col items-center mt-[30vh]">
               <BlurText
-                text="All in one place."
-                delay={1500}
+                text="Everything you need. All in one place."
+                delay={1200}
                 animateBy="words"
                 direction="top"
                 once={true}
-                className="text-2xl md:text-3xl font-semibold text-black text-left"
+                className="text-lg font-bold text-black text-center font-zodiak"
+              />
+            </div>
+
+            <div className="hidden md:flex flex-1 justify-start pl-8 md:pl-24">
+              <BlurText
+                text="All in one place."
+                delay={1800}
+                animateBy="words"
+                direction="top"
+                once={true}
+                className="text-2xl md:text-3xl font-bold text-black text-left font-zodiak"
               />
             </div>
           </div>
@@ -615,31 +656,77 @@ export default function Home() {
         {/* Animated Grainient Background Container - Starts lower to show white section first */}
         <div className="absolute top-[65vh] left-0 w-full min-h-[235vh] z-0 flex flex-col items-center">
           <div className="absolute inset-0 z-0">
-            <Grainient
-              color1="#5e30eb"
-              color2="#371a94"
-              color3="#ffffff"
-              timeSpeed={0.25}
-              colorBalance={0}
-              warpStrength={1}
-              warpFrequency={5}
-              warpSpeed={2}
-              warpAmplitude={50}
-              blendAngle={0}
-              blendSoftness={0.05}
-              rotationAmount={500}
-              noiseScale={2}
-              grainAmount={0.1}
-              grainScale={2}
-              grainAnimated={false}
-              contrast={1.5}
-              gamma={1}
-              saturation={1}
-              centerX={0}
-              centerY={0}
-              zoom={0.9}
-            />
+            {showHeavyAssets && (
+              <Grainient
+                color1="#5e30eb"
+                color2="#371a94"
+                color3="#ffffff"
+                timeSpeed={0.25}
+                colorBalance={0}
+                warpStrength={1}
+                warpFrequency={5}
+                warpSpeed={2}
+                warpAmplitude={50}
+                blendAngle={0}
+                blendSoftness={0.05}
+                rotationAmount={500}
+                noiseScale={2}
+                grainAmount={0.1}
+                grainScale={2}
+                grainAnimated={false}
+                contrast={1.5}
+                gamma={1}
+                saturation={1}
+                centerX={0}
+                centerY={0}
+                zoom={0.9}
+              />
+            )}
           </div>
+
+          {/* Floating Bags Scattered Across the Entire Background */}
+          {[
+            { top: '5%', left: '5%', rotate: -15, scale: 0.4, delay: 0 },
+            { top: '25%', left: '85%', rotate: 20, scale: 0.35, delay: 0.5 },
+            { top: '45%', left: '10%', rotate: 10, scale: 0.3, delay: 1 },
+            { top: '65%', left: '75%', rotate: -10, scale: 0.25, delay: 1.5 },
+            { top: '85%', left: '20%', rotate: -5, scale: 0.45, delay: 2 },
+            { top: '15%', left: '90%', rotate: 15, scale: 0.38, delay: 2.5 },
+            { top: '35%', left: '5%', rotate: -20, scale: 0.32, delay: 3 },
+            { top: '55%', left: '80%', rotate: 25, scale: 0.42, delay: 3.5 },
+            { top: '75%', left: '15%', rotate: -12, scale: 0.28, delay: 4 },
+            { top: '95%', left: '85%', rotate: 18, scale: 0.36, delay: 4.5 },
+            { top: '40%', left: '92%', rotate: -8, scale: 0.22, delay: 1.2 },
+            { top: '60%', left: '4%', rotate: 30, scale: 0.34, delay: 2.2 },
+          ].map((bag, i) => (
+            <motion.div
+              key={i}
+              className="absolute pointer-events-none will-change-transform"
+              style={{ top: bag.top, left: bag.left, zIndex: 1 }}
+              initial={{ opacity: 0, y: 40, rotate: bag.rotate, scale: bag.scale }}
+              whileInView={{ opacity: 0.35, y: 0 }}
+              viewport={{ once: true }}
+              animate={{
+                y: [0, -25, 0],
+                rotate: [bag.rotate, bag.rotate + 5, bag.rotate]
+              }}
+              transition={{
+                duration: 1.2,
+                delay: bag.delay,
+                y: { duration: 8 + (i % 4), repeat: Infinity, ease: "easeInOut" },
+                rotate: { duration: 9 + (i % 5), repeat: Infinity, ease: "easeInOut" },
+                opacity: { duration: 1.2, delay: bag.delay }
+              }}
+            >
+              <Image
+                src="/bagg.png"
+                alt="bag"
+                width={400}
+                height={400}
+                className="filter brightness-0 invert opacity-40"
+              />
+            </motion.div>
+          ))}
 
           {/* Bottom Fade to White */}
           <div className="absolute bottom-0 left-0 w-full h-[30vh] bg-gradient-to-t from-white to-transparent z-[5] md:h-[40vh] pointer-events-none" />
@@ -654,51 +741,13 @@ export default function Home() {
               }}
             >
               <span className="text-white relative z-10" style={{ fontFamily: 'Zodiak, serif', fontWeight: 700 }}>SWFTLY</span>
-
-              {/* Floating Bags Scattered Around SWFTLY */}
-              {[
-                { top: '-40%', left: '5%', rotate: -15, scale: 0.4, delay: 0 },
-                { top: '20%', left: '-10%', rotate: 10, scale: 0.3, delay: 0.5 },
-                { top: '-25%', left: '85%', rotate: 20, scale: 0.35, delay: 1 },
-                { top: '40%', left: '95%', rotate: -10, scale: 0.25, delay: 1.5 },
-                { top: '70%', left: '15%', rotate: -5, scale: 0.45, delay: 2 },
-                { top: '60%', left: '80%', rotate: 15, scale: 0.38, delay: 2.5 }
-              ].map((bag, i) => (
-                <motion.div
-                  key={i}
-                  className="absolute pointer-events-none z-0"
-                  style={{ top: bag.top, left: bag.left }}
-                  initial={{ opacity: 0, y: 40, rotate: bag.rotate, scale: bag.scale }}
-                  whileInView={{ opacity: 0.4, y: 0 }}
-                  transition={{ duration: 1.2, delay: bag.delay }}
-                  animate={{
-                    y: [0, -30, 0],
-                    rotate: [bag.rotate, bag.rotate + 8, bag.rotate]
-                  }}
-                  transition={{
-                    y: { duration: 6 + i, repeat: Infinity, ease: "easeInOut" },
-                    rotate: { duration: 7 + i, repeat: Infinity, ease: "easeInOut" },
-                    opacity: { duration: 1.2, delay: bag.delay }
-                  }}
-                >
-                  <Image
-                    src="/bagg.png"
-                    alt="bag"
-                    width={500}
-                    height={500}
-                    className="filter brightness-0 invert opacity-40 blur-[1px] md:blur-[2px]"
-                  />
-                </motion.div>
-              ))}
             </div>
-
-
           </div>
         </div>
       </section>
 
-      {/* Scroll-Driven Storytelling Section */}
-      <section id="software-section" ref={stickySectionRef} className="relative w-full min-h-[1800vh] bg-white z-20">
+      {/* Scroll-Driven Storytelling Section (Desktop) */}
+      <section id="software-section" ref={stickySectionRef} className="hidden md:block relative w-full min-h-[1800vh] bg-white z-20">
         <div className="sticky top-0 h-screen w-full flex items-center overflow-hidden px-4 md:px-12">
           <div className="w-full max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-20 items-center">
 
@@ -710,14 +759,14 @@ export default function Home() {
               >
                 {/* Intro Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     Automate the boring stuff.
                   </h2>
                 </div>
 
                 {/* Statistics Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     AI-driven insights.
                   </h2>
                   <ul className="space-y-4">
@@ -732,7 +781,7 @@ export default function Home() {
 
                 {/* POS Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     Checkout in seconds.
                   </h2>
                   <ul className="space-y-4">
@@ -747,7 +796,7 @@ export default function Home() {
 
                 {/* Orders Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     Universal Fulfillment.
                   </h2>
                   <ul className="space-y-4">
@@ -762,7 +811,7 @@ export default function Home() {
 
                 {/* Customers Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     Know your regulars.
                   </h2>
                   <ul className="space-y-4">
@@ -777,7 +826,7 @@ export default function Home() {
 
                 {/* Calendar Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     Smarter scheduling.
                   </h2>
                   <ul className="space-y-4">
@@ -792,7 +841,7 @@ export default function Home() {
 
                 {/* Accounting Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     Ledger on autopilot.
                   </h2>
                   <ul className="space-y-4">
@@ -807,7 +856,7 @@ export default function Home() {
 
                 {/* Shipments Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     Seamless Logistics.
                   </h2>
                   <ul className="space-y-4">
@@ -822,7 +871,7 @@ export default function Home() {
 
                 {/* Inventory Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     Real-time stock.
                   </h2>
                   <ul className="space-y-4">
@@ -837,7 +886,7 @@ export default function Home() {
 
                 {/* Tables Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     Raw Data Control.
                   </h2>
                   <ul className="space-y-4">
@@ -852,7 +901,7 @@ export default function Home() {
 
                 {/* Settings Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
-                  <h2 className="text-black text-6xl md:text-7xl font-bold leading-[1.1]">
+                  <h2 className="text-black text-6xl md:text-7xl font-bold font-tanker leading-[0.9] tracking-tight uppercase">
                     Customized Control.
                   </h2>
                   <ul className="space-y-4">
@@ -896,7 +945,7 @@ export default function Home() {
                   src="/pt2DASH.mp4"
                   muted
                   playsInline
-                  preload="auto"
+                  preload="metadata"
                   className="w-full h-full object-cover"
                 />
 
@@ -916,6 +965,145 @@ export default function Home() {
 
                 <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />
               </motion.div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Scroll-Driven Storytelling Section (Mobile) */}
+      <section id="mobile-software-section" className="md:hidden flex flex-col min-h-screen bg-white pt-24 pb-12 px-6">
+        {/* Mobile Video on Top */}
+        <div className="w-full aspect-video relative rounded-3xl overflow-hidden shadow-2xl border border-gray-100 mb-8">
+          <video
+            ref={mobileVideoRef}
+            src="/pt2DASH.mp4"
+            className="w-full h-full object-cover"
+            muted
+            playsInline
+          />
+          {/* Hotspot Highlight on Mobile */}
+          <motion.div
+            className="absolute border-2 border-[#2c19fc] rounded-xl shadow-[0_0_30px_rgba(44,25,252,0.3)] bg-[#2c19fc]/5 z-50 pointer-events-none"
+            initial={{ opacity: 0 }}
+            animate={{
+              top: videoHotspots[videoInfoStep].top,
+              left: videoHotspots[videoInfoStep].left,
+              width: videoHotspots[videoInfoStep].width,
+              height: videoHotspots[videoInfoStep].height,
+              opacity: mobileStep === 0 ? 0 : 1,
+            }}
+            transition={{ type: "spring", damping: 25, stiffness: 120 }}
+          />
+        </div>
+
+        {/* Mobile Info Carousel Below */}
+        <div className="flex-1 flex flex-col relative">
+          <div className="flex-1 relative mt-4">
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={mobileStep}
+                initial={{ opacity: 0, x: 50 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -50 }}
+                transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                className="h-full flex flex-col px-4"
+                drag="x"
+                dragConstraints={{ left: 0, right: 0 }}
+                onDragEnd={(_, info) => {
+                  if (info.offset.x < -50 && mobileStep < 11) {
+                    const newStep = mobileStep + 1;
+                    setMobileStep(newStep);
+                    const hotspotIndices = [4, 4, 6, 7, 8, 5, 10, 9, 11, 12, 1, 2];
+                    setVideoInfoStep(hotspotIndices[newStep]);
+                    if (mobileVideoRef.current) {
+                      mobileVideoRef.current.currentTime = 4;
+                      mobileVideoRef.current.pause();
+                    }
+                  } else if (info.offset.x > 50 && mobileStep > 0) {
+                    const newStep = mobileStep - 1;
+                    setMobileStep(newStep);
+                    const hotspotIndices = [4, 4, 6, 7, 8, 5, 10, 9, 11, 12, 1, 2];
+                    setVideoInfoStep(hotspotIndices[newStep]);
+                    if (mobileVideoRef.current) {
+                      mobileVideoRef.current.currentTime = newStep === 0 ? 0 : 4;
+                      mobileVideoRef.current.pause();
+                    }
+                  }
+                }}
+              >
+                <h2 className="text-black text-3xl font-bold font-tanker leading-[0.9] tracking-tight uppercase mb-4 min-h-[4rem] px-2 flex items-center">
+                  {mobileStep === 0 ? "Automate the boring stuff." :
+                    mobileStep === 1 ? "AI-driven insights." :
+                      mobileStep === 2 ? "Checkout in seconds." :
+                        mobileStep === 3 ? "Universal Fulfillment." :
+                          mobileStep === 4 ? "Know your regulars." :
+                            mobileStep === 5 ? "Smarter scheduling." :
+                              mobileStep === 6 ? "Ledger on autopilot." :
+                                mobileStep === 7 ? "Seamless Logistics." :
+                                  mobileStep === 8 ? "Real-time stock." :
+                                    mobileStep === 9 ? "Raw Data Control." :
+                                      mobileStep === 10 ? "Customized Control." : "Personalized Access."}
+                </h2>
+
+                <div className="flex-1 overflow-y-auto pr-2 scrollbar-hide py-2">
+                  {mobileStep !== 0 && (
+                    <ul className="space-y-3 px-2">
+                      {videoHotspots[videoInfoStep].points?.map((point, i) => (
+                        <li key={i} className="text-gray-500 text-sm font-medium leading-relaxed flex items-start gap-4">
+                          <span className="mt-2 w-1.5 h-1.5 rounded-full bg-[#2c19fc]/30 shrink-0" />
+                          <span><PointText text={point} /></span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </motion.div>
+            </AnimatePresence>
+
+            {/* Side Arrows */}
+            <button
+              onClick={() => {
+                const newStep = Math.max(0, mobileStep - 1);
+                setMobileStep(newStep);
+                const hotspotIndices = [4, 4, 6, 7, 8, 5, 10, 9, 11, 12, 1, 2];
+                setVideoInfoStep(hotspotIndices[newStep]);
+                if (mobileVideoRef.current) {
+                  mobileVideoRef.current.currentTime = newStep === 0 ? 0 : 4;
+                  mobileVideoRef.current.pause();
+                }
+              }}
+              disabled={mobileStep === 0}
+              className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 w-10 h-10 rounded-full border border-gray-100 flex items-center justify-center bg-white/80 backdrop-blur-sm shadow-sm disabled:opacity-0 active:scale-95 transition-all z-10"
+            >
+              <ChevronRight className="w-5 h-5 rotate-180 text-black" />
+            </button>
+            <button
+              onClick={() => {
+                const newStep = Math.min(11, mobileStep + 1);
+                setMobileStep(newStep);
+                const hotspotIndices = [4, 4, 6, 7, 8, 5, 10, 9, 11, 12, 1, 2];
+                setVideoInfoStep(hotspotIndices[newStep]);
+                if (mobileVideoRef.current) {
+                  mobileVideoRef.current.currentTime = 4;
+                  mobileVideoRef.current.pause();
+                }
+              }}
+              disabled={mobileStep === 11}
+              className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 w-10 h-10 rounded-full bg-black/80 backdrop-blur-sm flex items-center justify-center shadow-lg disabled:opacity-0 active:scale-95 transition-all z-10"
+            >
+              <ChevronRight className="w-5 h-5 text-white" />
+            </button>
+          </div>
+
+          {/* Mobile Progress Indicator */}
+          <div className="flex items-center justify-center pt-8">
+            <div className="flex gap-1.5">
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div
+                  key={i}
+                  className={`h-1 rounded-full transition-all duration-300 ${mobileStep === i ? 'w-6 bg-[#2c19fc]' : 'w-2 bg-gray-200'}`}
+                />
+              ))}
             </div>
           </div>
         </div>
@@ -946,7 +1134,7 @@ export default function Home() {
               <div className="absolute inset-0 bg-white/90 rounded-[40px]" />
 
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 0 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 className="relative pos-card-glass-inhouse rounded-[40px] pt-6 px-6 pb-8 shadow-[0_40px_100px_rgba(44,25,252,0.15)] overflow-hidden flex flex-col group transition-all duration-500 h-full"
@@ -994,16 +1182,17 @@ export default function Home() {
                   ))}
                 </div>
 
-                <Link href="/book-a-demo">
-                  <button className="button-7 button-7--blue !mt-6 w-full !mx-0 !mb-0 flex justify-center items-center">
-                    <span className="text">Switch to Swftly</span>
-                  </button>
-                </Link>
+                <button
+                  onClick={() => navigate('/book-a-demo')}
+                  className="button-7 button-7--blue !mt-6 w-full !mx-0 !mb-0 flex justify-center items-center"
+                >
+                  <span className="text">Switch to Swftly</span>
+                </button>
               </motion.div>
             </div>
 
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 0 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: 0.1 }}
@@ -1050,19 +1239,51 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Footer */}
-      < footer className="bg-white/80 backdrop-blur-md border-t border-gray-200 py-6 px-4" >
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-600">© 2024 Cench. All rights reserved.</span>
-          </div>
-          <div className="flex items-center gap-6">
-            <a href="#" className="text-sm text-gray-600 hover:text-black transition-colors">Instagram</a>
-            <a href="#" className="text-sm text-gray-600 hover:text-black transition-colors">X</a>
-            <a href="#" className="text-sm text-gray-600 hover:text-black transition-colors">Contact</a>
+      {/* Final CTA Section */}
+      <section id="final-cta" className="relative w-full h-screen flex flex-col bg-white overflow-hidden">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-8 md:gap-16 mt-20">
+            <motion.h2
+              initial={{ opacity: 0, x: -100 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 1, delay: 0.2 }}
+              className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
+              style={{ fontFamily: 'Zodiak, serif' }}
+            >
+              Get
+            </motion.h2>
+            {/* Central space reserved for the 3D logo via ThreeLogo override */}
+            <div className="w-12 md:w-[220px]" />
+            <motion.h2
+              initial={{ opacity: 0, x: 100 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 1, delay: 0.2 }}
+              className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
+              style={{ fontFamily: 'Zodiak, serif' }}
+            >
+              Swftly.
+            </motion.h2>
           </div>
         </div>
-      </footer >
+
+        {/* Integrated Footer */}
+        <div className="w-full pt-8 pb-16 px-4 relative z-10 bg-white">
+          <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-2 border-t border-gray-50 pt-8">
+            <div className="flex items-center">
+              <span className="text-[10px] md:text-sm text-gray-400 font-medium whitespace-nowrap">© 2024 Swftly.</span>
+            </div>
+            <div className="flex items-center gap-2 md:gap-10">
+              <NavButton className="text-[10px] md:text-sm" onClick={() => window.open('https://instagram.com/getswftly', '_blank')}>Instagram</NavButton>
+              <NavButton className="text-[10px] md:text-sm" onClick={() => window.open('https://x.com', '_blank')}>X</NavButton>
+              <NavButton className="text-[10px] md:text-sm" onClick={() => window.open('mailto:contact@swftly.com')}>Contact</NavButton>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
     </div >
   );
 }

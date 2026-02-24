@@ -62,7 +62,7 @@ export default function BlurText({
             onAnimationComplete={
               index === words.length - 1 ? onAnimationComplete : undefined
             }
-            className="inline-block mr-2"
+            className="inline-block mr-2 will-change-[transform,opacity,filter]"
           >
             {word}
           </motion.span>

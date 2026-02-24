@@ -21,8 +21,8 @@
 }
 
 html {
-  scroll-behavior: smooth;
   overflow-x: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -31,6 +31,15 @@ body {
   font-family: Arial, Helvetica, sans-serif;
   margin: 0;
   padding: 0;
+  overscroll-behavior: none;
+}
+
+.font-zodiak {
+  font-family: 'Zodiak', serif;
+}
+
+.font-tanker {
+  font-family: 'Tanker', sans-serif;
 }
 
 .snap-container {

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useRef, useMemo, useState, useEffect } from 'react';
+import { motion } from 'motion/react';
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
@@ -28,31 +29,25 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
     const svgData = useLoader(SVGLoader, url);
     const [hasEntered, setHasEntered] = useState(false);
     const { viewport, size } = useThree();
+    const pixelToUnit = viewport.width / size.width;
+    const paddingX = size.width > 1280 ? (size.width - 1280) / 2 + 16 : 16;
+    const targetX = -viewport.width / 2 + (paddingX + 32) * pixelToUnit;
+    const targetY = viewport.height / 2 - (16 + 12 + 33) * pixelToUnit;
+    const targetScale = 0.45;
 
     useEffect(() => {
-        const timer = setTimeout(() => setHasEntered(true), 100);
+        // If already scrolled, skip fly-in
+        if (window.scrollY > 50) {
+            setHasEntered(true);
+            return;
+        }
+        // Delay the fly-in animation until after the canvas is stable
+        const timer = setTimeout(() => setHasEntered(true), 50);
         return () => clearTimeout(timer);
     }, []);
 
     useEffect(() => {
-        if (!groupRef.current) return;
-
-        const pixelToUnit = viewport.width / size.width;
-        const paddingX = size.width > 1280 ? (size.width - 1280) / 2 + 16 : 16;
-        const targetX = -viewport.width / 2 + (paddingX + 32) * pixelToUnit;
-        const targetY = viewport.height / 2 - (16 + 12 + 33) * pixelToUnit;
-        const targetScale = 0.45;
-
-        if (forceDock) {
-            groupRef.current.position.set(targetX, targetY, 0);
-            groupRef.current.scale.set(targetScale, targetScale, targetScale);
-            groupRef.current.rotation.set(0, 0, 0);
-            return;
-        }
-
-        const initialY = 40;
-        groupRef.current.position.y = initialY;
-        groupRef.current.scale.set(1.4, 1.4, 1.4);
+        if (!groupRef.current || forceDock) return;
 
         const ctx = gsap.context(() => {
             // First transition: Dock into navbar
@@ -61,7 +56,7 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
                     trigger: "body",
                     start: "top top",
                     end: () => window.innerHeight,
-                    scrub: 0.2, // Tighter scrub for better sync with CSS snapping
+                    scrub: 0.4, // Slightly smoother scrub for better performance
                     onUpdate: (self) => {
                         onScrollProgress(self.progress);
                     }
@@ -112,19 +107,45 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
                     scrub: 0.2
                 }
             });
+
+            // Final transition: Move from navbar to center of '#final-cta'
+            const isMobile = size.width < 768;
+            const finalScale = isMobile ? 0.45 : 1.8;
+            const finalX = isMobile ? -8 : -30;
+            const finalY = isMobile ? 10 : 0;
+
+            const finalTl = gsap.timeline({
+                scrollTrigger: {
+                    trigger: "#final-cta",
+                    start: "top bottom",
+                    end: "center center",
+                    scrub: 0.8
+                }
+            });
+
+            finalTl.to(groupRef.current!.position, {
+                x: finalX,
+                y: finalY,
+                ease: "power2.inOut"
+            }, 0);
+
+            finalTl.to(groupRef.current!.scale, {
+                x: finalScale,
+                y: finalScale,
+                z: finalScale,
+                ease: "power2.inOut"
+            }, 0);
+
+            finalTl.to(groupRef.current!.rotation, {
+                y: Math.PI * 8, // Finish with another elegant rotation
+                ease: "power2.inOut"
+            }, 0);
         });
 
         return () => ctx.revert();
-    }, [viewport, size, onScrollProgress, forceDock]);
+    }, [viewport, size, onScrollProgress, forceDock, targetX, targetY, targetScale]);
 
     useFrame((state, delta) => {
-        if (forceDock) {
-            if (entryRef.current) {
-                entryRef.current.position.x = 0;
-                entryRef.current.rotation.y = 0;
-            }
-        }
-
         const scrollProgress = !forceDock ? (ScrollTrigger.getAll()[0]?.progress || 0) : 0;
 
         // Separation of concerns: Entry animation handles fly-in independently from GSAP group
@@ -133,9 +154,9 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
                 entryRef.current.position.x = -1500;
                 entryRef.current.rotation.y = -Math.PI * 6;
             } else {
-                // Smoothly arrive at center without interfering with `groupRef` (which handles GSAP scroll position)
-                entryRef.current.position.x = THREE.MathUtils.lerp(entryRef.current.position.x, 0, delta * 5);
-                entryRef.current.rotation.y = THREE.MathUtils.lerp(entryRef.current.rotation.y, 0, delta * 5);
+                // Much smoother arrive at center (lower lerp factor)
+                entryRef.current.position.x = THREE.MathUtils.lerp(entryRef.current.position.x, 0, delta * 2.5);
+                entryRef.current.rotation.y = THREE.MathUtils.lerp(entryRef.current.rotation.y, 0, delta * 2.5);
             }
         }
 
@@ -163,18 +184,22 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
 
     const extrudeSettings = {
         steps: 1,
-        depth: 10,
+        depth: 8,
         bevelEnabled: true,
-        bevelThickness: 2,
-        bevelSize: 2,
+        bevelThickness: 4,
+        bevelSize: 3,
         bevelOffset: 0,
-        bevelSegments: 8,
-        curveSegments: 32,
+        bevelSegments: 10,
+        curveSegments: 64,
     };
 
     return (
-        <group ref={groupRef}>
-            <group ref={entryRef}>
+        <group
+            ref={groupRef}
+            position={forceDock ? [targetX, targetY, 0] : [0, 40, 0]}
+            scale={forceDock ? [targetScale, targetScale, targetScale] : [1.4, 1.4, 1.4]}
+        >
+            <group ref={entryRef} position={forceDock ? [0, 0, 0] : [-1500, 0, 0]} rotation={forceDock ? [0, 0, 0] : [0, -Math.PI * 6, 0]}>
                 <group ref={innerRef}>
                     <Center>
                         <group scale={0.8} rotation={[Math.PI, 0, 0]}>
@@ -182,13 +207,15 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
                                 <mesh key={index} castShadow receiveShadow>
                                     <extrudeGeometry args={[item.shape, extrudeSettings]} />
                                     <meshPhysicalMaterial
-                                        color="#4169e1"
-                                        metalness={0.9}
-                                        roughness={0.1}
-                                        envMapIntensity={1.5}
+                                        color="#2c19fc"
+                                        metalness={0.1}
+                                        roughness={0.05}
+                                        envMapIntensity={2.5}
                                         clearcoat={1}
-                                        clearcoatRoughness={0.1}
-                                        reflectivity={1}
+                                        clearcoatRoughness={0}
+                                        reflectivity={0.9}
+                                        ior={1.5}
+                                        specularIntensity={1.2}
                                     />
                                 </mesh>
                             ))}
@@ -228,26 +255,45 @@ const ThreeLogoInner = ({ forceDock }: { forceDock?: boolean }) => {
 export default function ThreeLogo({ forceDock = false }: { forceDock?: boolean }) {
     const [mounted, setMounted] = useState(false);
     useEffect(() => {
-        setMounted(true);
+        if (forceDock) {
+            setMounted(true);
+            ScrollTrigger.refresh();
+            return;
+        }
+        // Longer delay to let the initial text animations start smoothly
+        const timer = setTimeout(() => setMounted(true), 100);
         // Force scroll trigger refresh
-        setTimeout(() => ScrollTrigger.refresh(), 100);
-    }, []);
+        setTimeout(() => ScrollTrigger.refresh(), 500);
+        return () => clearTimeout(timer);
+    }, [forceDock]);
 
     if (!mounted) return null;
 
     return (
-        <div className="fixed inset-0 w-full h-full pointer-events-none z-[1005]">
+        <motion.div
+            className="fixed inset-0 w-full h-full pointer-events-none z-[1005]"
+            initial={forceDock ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={forceDock ? { duration: 0 } : { duration: 0.8, ease: "easeOut" }}
+        >
             <Canvas
                 shadows
-                camera={{ position: [0, 0, 300], fov: 50 }}
-                gl={{ antialias: true, alpha: true }}
+                dpr={typeof window !== 'undefined' ? Math.min(window.devicePixelRatio, 2) : 1}
+                camera={{ position: [0, 0, 300], fov: 45 }}
+                gl={{
+                    antialias: true,
+                    alpha: true,
+                    powerPreference: "high-performance",
+                    precision: "mediump"
+                }}
                 style={{ pointerEvents: 'none' }}
+                performance={{ min: 0.5 }}
             >
                 <React.Suspense fallback={null}>
                     <ThreeLogoInner forceDock={forceDock} />
                 </React.Suspense>
             </Canvas>
-        </div>
+        </motion.div>
     );
 }
 
