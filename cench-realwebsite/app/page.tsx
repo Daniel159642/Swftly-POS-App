@@ -754,12 +754,11 @@ export default function Home() {
                 opacity: { duration: 1.2, delay: bag.delay }
               }}
             >
-              <Image
+              <img
                 src="/bagg.png"
                 alt="bag"
-                width={400}
-                height={400}
-                className="filter brightness-0 invert opacity-40"
+                className="w-[400px] h-[400px] filter brightness-0 invert opacity-40"
+                loading="eager"
               />
             </motion.div>
           ))}
