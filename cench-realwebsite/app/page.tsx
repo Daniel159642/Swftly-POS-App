@@ -751,12 +751,16 @@ export default function Home() {
                 rotate: { duration: 9 + (i % 5), repeat: Infinity, ease: "easeInOut" }
               }}
             >
-              <img
-                src="/bagg.png"
-                alt="bag"
-                className="w-[300px] h-[300px] md:w-[400px] md:h-[400px] object-contain opacity-60"
-                loading="eager"
-              />
+              <div className="relative w-[280px] h-[280px] md:w-[400px] md:h-[400px]">
+                <Image
+                  src="/bagg.png"
+                  alt=""
+                  fill
+                  priority
+                  unoptimized
+                  className="object-contain opacity-60"
+                />
+              </div>
             </motion.div>
           ))}
 
