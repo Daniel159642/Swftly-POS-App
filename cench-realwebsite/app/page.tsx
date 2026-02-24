@@ -1281,20 +1281,11 @@ export default function Home() {
 
       {/* Final CTA Section */}
       <section id="final-cta" className="relative w-full h-[300vh] bg-white">
-        <div className="sticky top-0 w-full h-screen flex flex-col items-center justify-center overflow-hidden">
-          {/* Debug/Target Container - Semi-transparent ring to show intended landing zone */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="w-[80vw] h-[20vh] border-2 border-dashed border-[#2c19fc]/10 rounded-[40px] flex items-center justify-center gap-6">
-              <div className="w-1/3 h-1 bg-[#2c19fc]/5 rounded-full" />
-              <div className="w-24 h-24 border-2 border-[#2c19fc]/10 rounded-full" />
-              <div className="w-1/3 h-1 bg-[#2c19fc]/5 rounded-full" />
-            </div>
-          </div>
-
+        <div className="sticky top-0 w-full h-[100dvh] flex flex-col items-center justify-center overflow-hidden pb-[20dvh] md:pb-0">
           <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-6 md:gap-16">
             <h2
               ref={finalGetRef}
-              className="text-[9vw] md:text-[120px] font-bold text-black tracking-tight"
+              className="text-[11vw] md:text-[120px] font-bold text-black tracking-tight"
               style={{ fontFamily: 'Zodiak, serif' }}
             >
               Get
@@ -1303,7 +1294,7 @@ export default function Home() {
             <div className="w-24 md:w-[220px]" />
             <h2
               ref={finalSwftlyRef}
-              className="text-[9vw] md:text-[120px] font-bold text-black tracking-tight"
+              className="text-[11vw] md:text-[120px] font-bold text-black tracking-tight"
               style={{ fontFamily: 'Zodiak, serif' }}
             >
               Swftly.
