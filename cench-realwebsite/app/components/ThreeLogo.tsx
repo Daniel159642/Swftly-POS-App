@@ -111,17 +111,38 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false }: { url: strin
             // Final transition: Move from navbar to center of '#final-cta'
             const isMobile = size.width < 768;
             const finalScale = isMobile ? 0.4 : 1.8;
-            const finalX = isMobile ? 0 : -30;
-            const finalY = isMobile ? 15 : 0;   // In Three.js units, +15 moves it UP above the center
 
             const finalTl = gsap.timeline({
                 scrollTrigger: {
                     trigger: "#final-cta",
                     start: "top bottom",
-                    end: "top 10%",
-                    scrub: 0.5
+                    end: "top 20%",
+                    scrub: 0.5,
+                    onRefresh: () => {
+                        // Re-calculate goal position whenever Safari UI shifts or screen resizes
+                        const anchor = document.getElementById('logo-final-anchor');
+                        if (anchor && isMobile) {
+                            const rect = anchor.getBoundingClientRect();
+                            const centerX = (rect.left + rect.width / 2);
+                            const centerY = (rect.top + rect.height / 2);
+
+                            // Map screen pixels to Three.js units
+                            const targetXFinal = (centerX / size.width) * viewport.width - viewport.width / 2;
+                            const targetYFinal = -(centerY / size.height) * viewport.height + viewport.height / 2;
+
+                            gsap.to(groupRef.current!.position, {
+                                x: targetXFinal,
+                                y: targetYFinal,
+                                overwrite: 'auto',
+                                duration: 0.5
+                            });
+                        }
+                    }
                 }
             });
+
+            const finalX = isMobile ? 0 : -30;
+            const finalY = isMobile ? 15 : 0;   // In Three.js units, +15 moves it UP above the center
 
             finalTl.to(groupRef.current!.position, {
                 x: finalX,

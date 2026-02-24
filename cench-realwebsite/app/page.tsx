@@ -1277,11 +1277,11 @@ export default function Home() {
       </section>
 
       {/* Final CTA Section */}
-      <section id="final-cta" className="relative w-full h-screen flex flex-col bg-white overflow-hidden">
+      <section id="final-cta" className="relative w-full h-[100dvh] flex flex-col bg-white overflow-hidden">
         <div className="flex-1 flex flex-col items-center justify-center">
           <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-center">
             {/* Mobile Logo Spacer - Reservations space above the text */}
-            <div className="md:hidden w-32 h-32 mb-4" />
+            <div id="logo-final-anchor" className="md:hidden w-32 h-32 mb-4" />
 
             <div className="flex items-center justify-center gap-4 md:gap-16">
               <h2
