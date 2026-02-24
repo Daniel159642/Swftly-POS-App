@@ -1282,7 +1282,7 @@ export default function Home() {
           <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-8 md:gap-16 mt-20">
             <h2
               ref={finalGetRef}
-              className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight md:-translate-x-24"
+              className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight md:-translate-x-40"
               style={{ fontFamily: 'Zodiak, serif' }}
             >
               Get
