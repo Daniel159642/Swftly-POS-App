@@ -239,7 +239,7 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
     return (
         <group
             ref={groupRef}
-            position={isStatic ? [7, 0, 0] : (forceDock ? [targetX, targetY, 0] : [0, 40, 0])}
+            position={isStatic ? [2, 0, 0] : (forceDock ? [targetX, targetY, 0] : [0, 40, 0])}
             scale={isStatic ? [0.75, 0.75, 0.75] : (forceDock ? [targetScale, targetScale, targetScale] : [1.4, 1.4, 1.4])}
         >
             <group ref={entryRef} position={(forceDock || isStatic) ? [0, 0, 0] : [-1500, 0, 0]} rotation={(forceDock || isStatic) ? [0, 0, 0] : [0, -Math.PI * 6, 0]}>
