@@ -236,7 +236,7 @@ class CalendarIntegrationSystem:
                         end_dt = datetime.fromisoformat(end_dt_str.replace('Z', '+00:00'))
                     else:
                         end_dt = datetime.strptime(end_dt_str, '%Y-%m-%d %H:%M:%S')
-                except:
+                except Exception:
                     # Fallback parsing
                     start_dt = datetime.strptime(start_dt_str.split('.')[0], '%Y-%m-%d %H:%M:%S')
                     end_dt = datetime.strptime(end_dt_str.split('.')[0], '%Y-%m-%d %H:%M:%S')
