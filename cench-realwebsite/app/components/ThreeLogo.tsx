@@ -113,6 +113,42 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
                 }
             });
 
+            // Fourth transition: Continue spinning for mobile/long scrolls
+            gsap.to(groupRef.current!.rotation, {
+                y: Math.PI * 8,
+                ease: "power2.inOut",
+                scrollTrigger: {
+                    trigger: "body",
+                    start: () => window.innerHeight * 3,
+                    end: () => window.innerHeight * 4,
+                    scrub: 0.2
+                }
+            });
+
+            // Fifth transition: Continue spinning
+            gsap.to(groupRef.current!.rotation, {
+                y: Math.PI * 10,
+                ease: "power2.inOut",
+                scrollTrigger: {
+                    trigger: "body",
+                    start: () => window.innerHeight * 4,
+                    end: () => window.innerHeight * 5,
+                    scrub: 0.2
+                }
+            });
+
+            // Sixth transition: Final nav spin
+            gsap.to(groupRef.current!.rotation, {
+                y: Math.PI * 12,
+                ease: "power2.inOut",
+                scrollTrigger: {
+                    trigger: "body",
+                    start: () => window.innerHeight * 5,
+                    end: () => window.innerHeight * 6,
+                    scrub: 0.2
+                }
+            });
+
             // Final transition: Move from navbar to center of '#final-cta'
             const isMobile = size.width < 768;
             const finalScale = isMobile ? 0.35 : 1.8;
