@@ -583,7 +583,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-dvh bg-white">
+    <div className="min-h-dvh overflow-x-hidden">
       <GradualBlur
         target="page"
         position="bottom"
@@ -653,7 +653,7 @@ export default function Home() {
       <ThreeLogo />
 
       {/* Hero Section */}
-      <section className="relative w-full min-h-[300dvh] bg-[#2c19fc] overflow-hidden pb-32">
+      <section className="relative w-full min-h-[300dvh] bg-[#2c19fc] overflow-hidden pb-32 [transform:translate3d(0,0,0)] [backface-visibility:hidden]">
         <div className="absolute top-0 left-0 w-full h-[120dvh] bg-gradient-to-b from-[#2c19fc] to-[#1a0fb3] z-0" />
         {/* Main Hero White Content Area */}
         <div className="relative w-full z-20 pointer-events-none">
@@ -705,7 +705,7 @@ export default function Home() {
               <Grainient
                 color1="#5e30eb"
                 color2="#371a94"
-                color3="#ffffff"
+                color3="#d0c4ff"
                 timeSpeed={0.25}
                 colorBalance={0}
                 warpStrength={1}
