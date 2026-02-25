@@ -31,6 +31,9 @@ export const metadata: Metadata = {
     title: "Swftly | Advanced POS Hub",
     description: "The all-in-one software suite that automates your retail or restaurant business with AI-driven insights.",
   },
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
