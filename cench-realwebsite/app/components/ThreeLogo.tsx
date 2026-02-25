@@ -97,14 +97,14 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
             // Final transition: Move from navbar to center of '#final-cta'
             const isMobile = size.width < 768;
             const finalScale = isMobile ? 0.7 : 1.8;
-            const finalX = isMobile ? -5 : -45; // Slight left nudge
-            const finalY = 0;                   // Keep centered vertically for stability
+            const finalX = isMobile ? -5 : -45;
+            const finalY = isMobile ? 8 : 10;
 
             const finalTl = gsap.timeline({
                 scrollTrigger: {
                     trigger: "#final-cta",
                     start: isMobile ? "top 95%" : "top 110%",
-                    end: "bottom 95%", // Complete just before absolute bottom to avoid Safari bounce issues
+                    end: "bottom bottom",
                     scrub: isMobile ? 0.6 : 1.5
                 }
             });
@@ -272,7 +272,7 @@ export default function ThreeLogo({ forceDock = false }: { forceDock?: boolean }
 
     return (
         <motion.div
-            className="fixed top-0 left-0 w-screen h-[100lvh] pointer-events-none z-[1005]"
+            className={`absolute inset-0 pointer-events-none z-[1005] ${forceDock ? 'h-full' : 'fixed inset-0 h-screen'}`}
             initial={forceDock ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={forceDock ? { duration: 0 } : { duration: 0.8, ease: "easeOut" }}
@@ -287,7 +287,7 @@ export default function ThreeLogo({ forceDock = false }: { forceDock?: boolean }
                     powerPreference: "high-performance",
                     precision: "mediump"
                 }}
-                style={{ pointerEvents: 'none', height: '100lvh' }}
+                style={{ pointerEvents: 'none' }}
                 performance={{ min: 0.5 }}
             >
                 <React.Suspense fallback={null}>
