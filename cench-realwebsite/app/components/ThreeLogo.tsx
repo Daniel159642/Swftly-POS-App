@@ -63,7 +63,7 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
                     trigger: "body",
                     start: "top top",
                     end: "bottom bottom",
-                    scrub: size.width < 768 ? 0.05 : 0.1 // Ultra responsive logic for mobile
+                    scrub: size.width < 768 ? 0.05 : 0.8 // Smoother momentum for desktop
                 }
             });
 
@@ -73,7 +73,7 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
                     trigger: "body",
                     start: "top top",
                     end: () => window.innerHeight,
-                    scrub: 0.4,
+                    scrub: 0.8,
                     onUpdate: (self) => {
                         onScrollProgress(self.progress);
                     }
@@ -105,28 +105,28 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
             const finalTl = gsap.timeline({
                 scrollTrigger: {
                     trigger: "#final-cta",
-                    start: "top bottom",
-                    end: "top 40%", // Complete the move earlier for a 'locked' feel
-                    scrub: 0.5
+                    start: "top 110%", // Start slightly earlier
+                    end: "top 20%",   // Give it more vertical space to travel
+                    scrub: 1.5        // High momentum for smooth catch-up
                 }
             });
 
             finalTl.to(groupRef.current!.position, {
                 x: finalX,
                 y: finalY,
-                ease: "expo.out" // Snappier landing
+                ease: "none" // In scrubbed timelines, ease: "none" is better for linear scroll tracking
             }, 0);
 
             finalTl.to(groupRef.current!.scale, {
                 x: finalScale,
                 y: finalScale,
                 z: finalScale,
-                ease: "expo.out"
+                ease: "none"
             }, 0);
 
             finalTl.to(groupRef.current!.rotation, {
-                y: Math.PI * 8, // Finish with another elegant rotation
-                ease: "power2.inOut"
+                y: Math.PI * 8,
+                ease: "none"
             }, 0);
         });
 
