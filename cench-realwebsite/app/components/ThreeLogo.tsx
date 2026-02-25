@@ -96,25 +96,23 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
 
             // Final transition: Move from navbar to center of '#final-cta'
             const isMobile = size.width < 768;
-            const finalScale = isMobile ? 0.35 : 1.8;
-            const finalX = isMobile ? -7 : -30; // Better balance between -2 and -12
-            const finalY = isMobile ? 12 : 0;   // Lift slightly for mobile viewport alignment
-
-            if (isMobile) return;
+            const finalScale = isMobile ? 0.7 : 1.8;
+            const finalX = isMobile ? 0 : -30; // Centered on mobile
+            const finalY = isMobile ? 0 : 0;   // Centered vertically
 
             const finalTl = gsap.timeline({
                 scrollTrigger: {
                     trigger: "#final-cta",
-                    start: "top 110%", // Start slightly earlier
-                    end: "top 20%",   // Give it more vertical space to travel
-                    scrub: 1.5        // High momentum for smooth catch-up
+                    start: isMobile ? "top 90%" : "top 110%", // Adjust start for mobile viewport
+                    end: "top 20%",
+                    scrub: isMobile ? 0.8 : 1.5
                 }
             });
 
             finalTl.to(groupRef.current!.position, {
                 x: finalX,
                 y: finalY,
-                ease: "none" // In scrubbed timelines, ease: "none" is better for linear scroll tracking
+                ease: "none"
             }, 0);
 
             finalTl.to(groupRef.current!.scale, {
@@ -124,8 +122,26 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
                 ease: "none"
             }, 0);
 
+            // Animate color to white/silver on landing
+            const materialColor = { value: "#2c19fc" };
+            const shapesGroup = groupRef.current!.getObjectByName("shapes-wrapper");
+
+            finalTl.to(materialColor, {
+                value: "#ffffff",
+                onUpdate: () => {
+                    if (shapesGroup) {
+                        shapesGroup.traverse((child) => {
+                            if ((child as THREE.Mesh).isMesh) {
+                                ((child as THREE.Mesh).material as THREE.MeshPhysicalMaterial).color.set(materialColor.value);
+                            }
+                        });
+                    }
+                },
+                ease: "none"
+            }, 0);
+
             finalTl.to(groupRef.current!.rotation, {
-                y: Math.PI * 8,
+                y: isMobile ? Math.PI * 4 : Math.PI * 8,
                 ease: "none"
             }, 0);
         });
@@ -190,7 +206,7 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
             <group ref={entryRef} position={(forceDock || isStatic) ? [0, 0, 0] : [-1500, 0, 0]} rotation={(forceDock || isStatic) ? [0, 0, 0] : [0, -Math.PI * 6, 0]}>
                 <group ref={innerRef}>
                     <Center>
-                        <group scale={0.8} rotation={[Math.PI, 0, 0]}>
+                        <group name="shapes-wrapper" scale={0.8} rotation={[Math.PI, 0, 0]}>
                             {shapes.map((item, index) => (
                                 <mesh key={index} castShadow receiveShadow>
                                     <extrudeGeometry args={[item.shape, extrudeSettings]} />

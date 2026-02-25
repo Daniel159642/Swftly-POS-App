@@ -1287,10 +1287,8 @@ export default function Home() {
             >
               Get
             </h2>
-            {/* Static logo for mobile, 3D logo docks to nav on desktop */}
-            <div className="w-40 h-40 md:w-[220px] flex items-center justify-center -mx-8 relative">
-              <StaticLogo className="w-64 h-64 md:hidden absolute" />
-            </div>
+            {/* Gap for 3D logo to land in */}
+            <div className="w-24 h-24 md:w-[220px]"></div>
             <h2
               ref={finalSwftlyRef}
               className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight"
