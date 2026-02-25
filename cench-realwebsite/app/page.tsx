@@ -583,7 +583,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-dvh overflow-x-hidden">
+    <div className="min-h-screen bg-white">
       <GradualBlur
         target="page"
         position="bottom"
@@ -653,11 +653,10 @@ export default function Home() {
       <ThreeLogo />
 
       {/* Hero Section */}
-      <section className="relative w-full min-h-[300dvh] bg-[#2c19fc] overflow-hidden pb-32 [transform:translate3d(0,0,0)] [backface-visibility:hidden]">
-        <div className="absolute top-0 left-0 w-full h-[120dvh] bg-gradient-to-b from-[#2c19fc] to-[#1a0fb3] z-0" />
+      <section className="relative w-full min-h-[300vh] bg-white overflow-hidden pb-32">
         {/* Main Hero White Content Area */}
         <div className="relative w-full z-20 pointer-events-none">
-          <div ref={heroTextRef} className="w-full max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center pt-[15dvh] px-2 md:px-12 relative z-10 md:mt-4">
+          <div ref={heroTextRef} className="w-full max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center pt-[15vh] px-2 md:px-12 relative z-10 md:mt-4">
             {/* Split Desktop Layout */}
             <div className="hidden md:flex flex-1 justify-end pr-4 md:pr-12">
               <BlurText
@@ -666,7 +665,7 @@ export default function Home() {
                 animateBy="words"
                 direction="top"
                 once={true}
-                className="text-2xl md:text-3xl font-bold text-white text-right font-zodiak"
+                className="text-2xl md:text-3xl font-bold text-black text-right font-zodiak"
               />
             </div>
 
@@ -674,14 +673,14 @@ export default function Home() {
             <div className="w-[120px] md:w-[240px] h-32 md:h-[300px]"></div>
 
             {/* Mobile Centered Layout */}
-            <div className="md:hidden flex flex-col items-center mt-[30dvh]">
+            <div className="md:hidden flex flex-col items-center mt-[30vh]">
               <BlurText
                 text="Everything you need. All in one place."
                 delay={1200}
                 animateBy="words"
                 direction="top"
                 once={true}
-                className="text-[15px] font-bold text-white text-center font-zodiak whitespace-nowrap"
+                className="text-[15px] font-bold text-black text-center font-zodiak whitespace-nowrap"
               />
             </div>
 
@@ -692,20 +691,20 @@ export default function Home() {
                 animateBy="words"
                 direction="top"
                 once={true}
-                className="text-2xl md:text-3xl font-bold text-white text-left font-zodiak"
+                className="text-2xl md:text-3xl font-bold text-black text-left font-zodiak"
               />
             </div>
           </div>
         </div>
 
-        {/* Animated Grainient Background Container - Starts lower to show blue intro section first */}
-        <div className="absolute top-[65dvh] left-0 w-full min-h-[235dvh] z-0 flex flex-col items-center bg-[#371a94]">
+        {/* Animated Grainient Background Container - Starts lower to show white section first */}
+        <div className="absolute top-[65vh] left-0 w-full min-h-[235vh] z-0 flex flex-col items-center">
           <div className="absolute inset-0 z-0">
             {showHeavyAssets && (
               <Grainient
                 color1="#5e30eb"
                 color2="#371a94"
-                color3="#d0c4ff"
+                color3="#ffffff"
                 timeSpeed={0.25}
                 colorBalance={0}
                 warpStrength={1}
@@ -774,7 +773,7 @@ export default function Home() {
           ))}
 
           {/* Bottom Fade to White */}
-          <div className="absolute bottom-0 left-0 w-full h-[30dvh] bg-gradient-to-t from-white to-transparent z-[5] md:h-[40dvh] pointer-events-none" />
+          <div className="absolute bottom-0 left-0 w-full h-[30vh] bg-gradient-to-t from-white to-transparent z-[5] md:h-[40vh] pointer-events-none" />
 
           <div className="relative w-full flex flex-col items-center pt-6 md:pt-12 pb-24 z-10 pointer-events-none">
             {/* SWFTLY Title - Pushed down to appear after logo section */}
@@ -793,14 +792,14 @@ export default function Home() {
 
       {/* Scroll-Driven Storytelling Section (Desktop) */}
       <section id="software-section" ref={stickySectionRef} className="hidden md:block relative w-full min-h-[1800vh] bg-white z-20">
-        <div className="sticky top-0 h-dvh w-full flex items-center overflow-hidden px-4 md:px-12">
+        <div className="sticky top-0 h-screen w-full flex items-center overflow-hidden px-4 md:px-12">
           <div className="w-full max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-20 items-center">
 
             {/* Left Column: Master Timeline Stack */}
-            <div className="relative h-dvh flex flex-col justify-start overflow-hidden pl-4">
+            <div className="relative h-screen flex flex-col justify-start overflow-hidden pl-4">
               <div
                 ref={scrollingContentRef}
-                className="flex flex-col gap-[30dvh] py-0 pr-8" // Adding right padding to prevent cutoffs
+                className="flex flex-col gap-[30vh] py-0 pr-8" // Adding right padding to prevent cutoffs
               >
                 {/* Intro Block */}
                 <div className="story-item opacity-0 flex flex-col gap-6">
@@ -1016,7 +1015,7 @@ export default function Home() {
       </section>
 
       {/* Scroll-Driven Storytelling Section (Mobile) */}
-      <section id="mobile-software-section" className="md:hidden flex flex-col min-h-dvh bg-white pt-24 pb-12 px-6">
+      <section id="mobile-software-section" className="md:hidden flex flex-col min-h-screen bg-white pt-24 pb-12 px-6">
         {/* Mobile Video on Top */}
         <div className="w-full aspect-video relative rounded-3xl overflow-hidden shadow-2xl border border-gray-100 mb-8">
           <video
@@ -1163,7 +1162,7 @@ export default function Home() {
         </div>
 
         {/* Top Fade from White */}
-        <div className="absolute top-0 left-0 w-full h-[20dvh] bg-gradient-to-b from-white to-transparent z-[1] pointer-events-none" />
+        <div className="absolute top-0 left-0 w-full h-[20vh] bg-gradient-to-b from-white to-transparent z-[1] pointer-events-none" />
 
         <div className="max-w-4xl mx-auto px-4 md:px-12 flex justify-center relative z-10">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center w-full">
@@ -1278,7 +1277,7 @@ export default function Home() {
       </section>
 
       {/* Final CTA Section */}
-      <section id="final-cta" className="relative w-full h-dvh flex flex-col bg-white overflow-hidden">
+      <section id="final-cta" className="relative w-full h-screen flex flex-col bg-white overflow-hidden">
         <div className="flex-1 flex items-center justify-center">
           <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-8 md:gap-32 mt-20">
             <h2
