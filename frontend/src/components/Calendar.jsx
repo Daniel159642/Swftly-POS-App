@@ -360,14 +360,15 @@ function Calendar({ employee }) {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showFilterDropdown, showScheduleDropdown, showLinkDropdown])
 
-  // Fetch calendar subscription URLs when link dropdown is opened
+  // Fetch calendar subscription URLs once (on mount / login) so the Link menu is instant
   useEffect(() => {
-    if (!showLinkDropdown) return
     const token = localStorage.getItem('sessionToken')
     if (!token) {
       setSubscriptionUrls(null)
       return
     }
+    // Already loaded or currently loading: don't refetch
+    if (subscriptionUrls || loadingSubscriptionUrls) return
     setLoadingSubscriptionUrls(true)
     apiFetch('/api/calendar/subscription/urls', { headers: { Authorization: `Bearer ${token}` } })
       .then(async (r) => {
@@ -417,7 +418,7 @@ function Calendar({ employee }) {
         showToast('Failed to load calendar subscription link', 'error')
       })
       .finally(() => setLoadingSubscriptionUrls(false))
-  }, [showLinkDropdown, showToast])
+  }, [subscriptionUrls, loadingSubscriptionUrls, showToast])
 
   useEffect(() => {
     const token = localStorage.getItem('sessionToken')
@@ -1728,24 +1729,17 @@ function Calendar({ employee }) {
           </div>
 
           {/* FullCalendar always visible; fade overlay when loading (like Profile weekly schedule) */}
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }} aria-busy={loading} aria-label={loading ? 'Loading calendar events' : 'Calendar'}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }} aria-busy={loading} aria-label="Calendar">
             {loading && (
               <div
                 style={{
                   position: 'absolute',
                   inset: 0,
                   borderRadius: '8px',
-                  backgroundColor: isDarkMode ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 10,
-                  fontSize: '14px',
-                  color: 'var(--text-primary, #333)'
+                  backgroundColor: isDarkMode ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.55)',
+                  zIndex: 10
                 }}
-              >
-                Loading…
-              </div>
+              />
             )}
             <FullCalendar
               key={showScheduleBuilder && isAdmin && !draftSchedule ? `sb-${sbStartDate || ''}-${sbEndDate || ''}` : `default-${draftScheduleVersion}-${draftShiftsFingerprint}`}
@@ -2279,32 +2273,31 @@ function Calendar({ employee }) {
                       top: '100%',
                       left: 0,
                       marginTop: '4px',
-                      padding: '8px 0',
+                      padding: '6px 0 8px',
                       backgroundColor: 'var(--bg-primary)',
                       border: '1px solid var(--border-color)',
                       borderRadius: '8px',
                       boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                       zIndex: 1000,
-                      minWidth: '260px',
-                      maxWidth: '320px',
+                      minWidth: '220px',
+                      maxWidth: '260px',
                       whiteSpace: 'normal'
                     }}
                   >
-                    {loadingSubscriptionUrls ? (
-                      <div style={{ padding: '12px 14px', fontSize: '14px', color: 'var(--text-secondary)' }}>Loading...</div>
-                    ) : subscriptionUrls ? (
-                      <>
+                    {/* Buttons are always present; they simply fade/disable while URLs are loading */}
+                    <>
                         <div style={{ padding: '6px 14px 8px', fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>Sync to calendar</div>
                         <button
                           type="button"
-                          onClick={() => {
-                            setShowLinkDropdown(false)
-                            if (!googleCalendarConnected) {
-                              openGoogleCalendarConnect()
-                            } else {
-                              openExternalUrl(subscriptionUrls.google_url)
-                            }
-                          }}
+                        onClick={() => {
+                          if (loadingSubscriptionUrls || !subscriptionUrls) return
+                          setShowLinkDropdown(false)
+                          if (!googleCalendarConnected) {
+                            openGoogleCalendarConnect()
+                          } else {
+                            openExternalUrl(subscriptionUrls.google_url)
+                          }
+                        }}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -2317,8 +2310,9 @@ function Calendar({ employee }) {
                             borderRadius: 0,
                             fontSize: '14px',
                             fontWeight: 500,
-                            color: 'var(--text-primary)',
-                            cursor: 'pointer',
+                          color: 'var(--text-primary)',
+                          opacity: (loadingSubscriptionUrls || !subscriptionUrls) ? 0.6 : 1,
+                          cursor: (loadingSubscriptionUrls || !subscriptionUrls) ? 'default' : 'pointer',
                             textAlign: 'left'
                           }}
                           onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)' }}
@@ -2334,7 +2328,12 @@ function Calendar({ employee }) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => { copySubscriptionLink(subscriptionUrls.ical_url); showToast('Paste this link in Outlook: Add calendar → Subscribe from web', 'success'); setShowLinkDropdown(false) }}
+                        onClick={() => {
+                          if (loadingSubscriptionUrls || !subscriptionUrls) return
+                          copySubscriptionLink(subscriptionUrls.ical_url)
+                          showToast('Paste this link in Outlook: Add calendar → Subscribe from web', 'success')
+                          setShowLinkDropdown(false)
+                        }}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -2347,8 +2346,9 @@ function Calendar({ employee }) {
                             borderRadius: 0,
                             fontSize: '14px',
                             fontWeight: 500,
-                            color: 'var(--text-primary)',
-                            cursor: 'pointer',
+                          color: 'var(--text-primary)',
+                          opacity: (loadingSubscriptionUrls || !subscriptionUrls) ? 0.6 : 1,
+                          cursor: (loadingSubscriptionUrls || !subscriptionUrls) ? 'default' : 'pointer',
                             textAlign: 'left'
                           }}
                           onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)' }}
@@ -2361,7 +2361,11 @@ function Calendar({ employee }) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => { openExternalUrl(subscriptionUrls.webcal_url || subscriptionUrls.ical_url); setShowLinkDropdown(false) }}
+                        onClick={() => {
+                          if (loadingSubscriptionUrls || !subscriptionUrls) return
+                          openExternalUrl(subscriptionUrls.webcal_url || subscriptionUrls.ical_url)
+                          setShowLinkDropdown(false)
+                        }}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -2374,8 +2378,9 @@ function Calendar({ employee }) {
                             borderRadius: 0,
                             fontSize: '14px',
                             fontWeight: 500,
-                            color: 'var(--text-primary)',
-                            cursor: 'pointer',
+                          color: 'var(--text-primary)',
+                          opacity: (loadingSubscriptionUrls || !subscriptionUrls) ? 0.6 : 1,
+                          cursor: (loadingSubscriptionUrls || !subscriptionUrls) ? 'default' : 'pointer',
                             textAlign: 'left'
                           }}
                           onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)' }}
@@ -2388,7 +2393,12 @@ function Calendar({ employee }) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => { copySubscriptionLink(subscriptionUrls.ical_url); showToast('Link copied. Add it in Calendly or any app that supports calendar subscription URL.', 'success'); setShowLinkDropdown(false) }}
+                        onClick={() => {
+                          if (loadingSubscriptionUrls || !subscriptionUrls) return
+                          copySubscriptionLink(subscriptionUrls.ical_url)
+                          showToast('Link copied. Add it in Calendly or any app that supports calendar subscription URL.', 'success')
+                          setShowLinkDropdown(false)
+                        }}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -2401,8 +2411,9 @@ function Calendar({ employee }) {
                             borderRadius: 0,
                             fontSize: '14px',
                             fontWeight: 500,
-                            color: 'var(--text-primary)',
-                            cursor: 'pointer',
+                          color: 'var(--text-primary)',
+                          opacity: (loadingSubscriptionUrls || !subscriptionUrls) ? 0.6 : 1,
+                          cursor: (loadingSubscriptionUrls || !subscriptionUrls) ? 'default' : 'pointer',
                             textAlign: 'left'
                           }}
                           onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)' }}
@@ -2413,10 +2424,12 @@ function Calendar({ employee }) {
                           </svg>
                           Calendly / Copy link
                         </button>
-                      </>
-                    ) : (
-                      <div style={{ padding: '12px 14px', fontSize: '14px', color: 'var(--text-secondary)' }}>Could not load subscription link. Try again.</div>
-                    )}
+                      {!loadingSubscriptionUrls && !subscriptionUrls && (
+                        <div style={{ padding: '6px 14px 2px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          Could not load subscription link. Try again.
+                        </div>
+                      )}
+                    </>
                   </div>
                 )}
               </div>

@@ -5,6 +5,7 @@ import { useToast } from '../contexts/ToastContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { UserPlus, MoreVertical, Trash2 } from 'lucide-react'
 import { formLabelStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel, modalOverlayStyle, modalContentStyle } from '../components/FormStyles'
+import CampaignsPanel from '../components/CampaignsPanel'
 
 const isDark = () => document.documentElement.classList.contains('dark-theme')
 
@@ -21,6 +22,7 @@ export default function Customers() {
   const PAGE_SIZE = 50
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
+  const [activeTab, setActiveTab] = useState('list') // 'list' | 'campaigns'
   const [selected, setSelected] = useState(null)
   const [modal, setModal] = useState(null) // 'edit' | 'points'
   const [saving, setSaving] = useState(false)
@@ -295,8 +297,8 @@ export default function Customers() {
       }}
     >
       <div style={{ flexShrink: 0, marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
             <input
               type="text"
               placeholder="Search by name, email, or phone..."
@@ -313,51 +315,85 @@ export default function Customers() {
                 fontSize: '14px',
                 boxSizing: 'border-box',
                 fontFamily: '"Product Sans", sans-serif',
-                color: '#333'
+                color: isDark() ? '#e5e7eb' : '#333'
               }}
             />
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setEditForm({ customer_name: '', email: '', phone: '', address: '' })
-              setSelected(null)
-              setModal('edit')
-            }}
-            title="Add customer"
-            style={{
-              padding: '4px',
-              width: '40px',
-              height: '40px',
-              backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-              color: '#fff',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-              transition: 'all 0.3s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.8)`
-              e.currentTarget.style.boxShadow = `0 4px 20px rgba(${themeColorRgb}, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
-              e.currentTarget.style.boxShadow = `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
-            }}
-          >
-            <UserPlus size={18} />
-          </button>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ display: 'inline-flex', padding: '2px', borderRadius: '999px', backgroundColor: isDark() ? 'rgba(15,23,42,0.9)' : '#e5e7eb' }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('list')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '999px',
+                  border: 'none',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  backgroundColor: activeTab === 'list' ? (isDark() ? '#0f172a' : '#ffffff') : 'transparent',
+                  color: activeTab === 'list' ? (isDark() ? '#e5e7eb' : '#111827') : '#6b7280',
+                  boxShadow: activeTab === 'list' ? '0 2px 6px rgba(15,23,42,0.25)' : 'none'
+                }}
+              >
+                Customers
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('campaigns')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '999px',
+                  border: 'none',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  backgroundColor: activeTab === 'campaigns' ? (isDark() ? '#0f172a' : '#ffffff') : 'transparent',
+                  color: activeTab === 'campaigns' ? (isDark() ? '#e5e7eb' : '#111827') : '#6b7280',
+                  boxShadow: activeTab === 'campaigns' ? '0 2px 6px rgba(15,23,42,0.25)' : 'none'
+                }}
+              >
+                Campaigns
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setEditForm({ customer_name: '', email: '', phone: '', address: '' })
+                setSelected(null)
+                setModal('edit')
+              }}
+              title="Add customer"
+              style={{
+                padding: '4px',
+                width: '32px',
+                height: '32px',
+                backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+                color: '#fff',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                transition: 'all 0.3s ease'
+              }}
+            >
+              <UserPlus size={18} />
+            </button>
+          </div>
         </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+      {activeTab === 'campaigns' && <CampaignsPanel />}
+
+      <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', display: activeTab === 'list' ? 'flex' : 'none', flexDirection: 'column' }}>
         <div ref={tableContainerRef} style={{ backgroundColor: pageBg, borderRadius: '4px', boxShadow: isDark() ? '0 1px 3px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.1)', width: '100%', flex: 1, minHeight: 0, overflow: 'auto' }}>
         {loading ? (
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 'max-content' }} aria-busy="true" aria-label="Loading customers">

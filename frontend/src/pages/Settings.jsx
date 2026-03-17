@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, Fragment } from 'react'
+import { useMobileNav } from '../App'
 import { useQuery } from '@tanstack/react-query'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
@@ -39,7 +40,8 @@ import {
   Shield,
   Plug,
   Mail,
-  Truck
+  Truck,
+  Bell
 } from 'lucide-react'
 import BarcodeScanner from '../components/BarcodeScanner'
 import AdminDashboard from '../components/AdminDashboard'
@@ -1557,7 +1559,34 @@ function Settings() {
   const { show: showToast } = useToast()
   const hasAdminAccess = hasPermission('manage_permissions') || hasPermission('add_employee') || employee?.position?.toLowerCase() === 'admin'
   const [receiptSettings, setReceiptSettings] = useState(() => ({ ...DEFAULT_RECEIPT_TEMPLATE }))
+  const { setContextualNavItems } = useMobileNav()
   const [activeTab, setActiveTab] = useState('location') // 'location', 'pos', 'cash', 'notifications', 'rewards', or 'admin'
+
+  useEffect(() => {
+    if (setContextualNavItems) {
+      const tabs = [
+        { id: 'location', label: 'Store Location', icon: MapPin },
+        { id: 'pos', label: 'Checkout & POS', icon: Monitor },
+        { id: 'cash', label: 'Cash Register', icon: DollarSign },
+        { id: 'notifications', label: 'Notifications', icon: Bell },
+        { id: 'rewards', label: 'Rewards/Loyalty', icon: Gift },
+        { id: 'integrations', label: 'Integrations', icon: Plug },
+        { id: 'receipt', label: 'Receipts', icon: Printer },
+        { id: 'orders', label: 'Order Settings', icon: ShoppingCart },
+        { id: 'sms', label: 'SMS & Messaging', icon: MessageSquare },
+        { id: 'shipping', label: 'Shipping & Delivery', icon: Truck },
+        { id: 'returns', label: 'Returns & Refunds', icon: Undo2 },
+        { id: 'security', label: 'Security', icon: Shield },
+        { id: 'admin', label: 'Admin Dashboard', icon: PanelLeft }
+      ]
+      setContextualNavItems(tabs.map(t => ({
+        label: t.label,
+        active: activeTab === t.id,
+        onClick: () => setActiveTab(t.id),
+        icon: t.icon
+      })))
+    }
+  }, [activeTab, setContextualNavItems])
 
   // Open tab from URL ?tab=cash (e.g. from POS "Open Register" toast)
   useEffect(() => {
@@ -8178,394 +8207,68 @@ function Settings() {
                     persistNotificationSettings={persistNotificationSettings}
                     newOrderToastOptions={newOrderToastOptions}
                     persistNewOrderToastOptions={persistNewOrderToastOptions}
+                    clockinNotifSettings={clockinNotifSettings}
+                    setClockinNotifSettings={setClockinNotifSettings}
+                    registerNotifSettings={registerNotifSettings}
+                    setRegisterNotifSettings={setRegisterNotifSettings}
+                    scheduleNotifSettings={scheduleNotifSettings}
+                    setScheduleNotifSettings={setScheduleNotifSettings}
+                    clockinNotifSaving={clockinNotifSaving}
+                    registerNotifSaving={registerNotifSaving}
+                    scheduleNotifSaving={scheduleNotifSaving}
+                    onSaveClockin={async () => {
+                      setClockinNotifSaving(true)
+                      try {
+                        const token = localStorage.getItem('sessionToken') || ''
+                        const res = await fetch('/api/clockin-notification-settings', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'X-Session-Token': token },
+                          body: JSON.stringify({ store_id: 1, ...clockinNotifSettings })
+                        })
+                        const d = await res.json()
+                        showToast(d.success ? 'Clock-in notification settings saved' : (d.message || 'Failed to save'), d.success ? 'success' : 'error')
+                      } catch (e) {
+                        showToast(e?.message || 'Error saving', 'error')
+                      } finally {
+                        setClockinNotifSaving(false)
+                      }
+                    }}
+                    onSaveRegister={async () => {
+                      setRegisterNotifSaving(true)
+                      try {
+                        const token = localStorage.getItem('sessionToken') || ''
+                        const res = await fetch('/api/register-notification-settings', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'X-Session-Token': token },
+                          body: JSON.stringify({ store_id: 1, ...registerNotifSettings })
+                        })
+                        const d = await res.json()
+                        showToast(d.success ? 'Register notification settings saved' : (d.message || 'Failed to save'), d.success ? 'success' : 'error')
+                      } catch (e) {
+                        showToast(e?.message || 'Error saving', 'error')
+                      } finally {
+                        setRegisterNotifSaving(false)
+                      }
+                    }}
+                    onSaveSchedule={async () => {
+                      setScheduleNotifSaving(true)
+                      try {
+                        const token = localStorage.getItem('sessionToken') || ''
+                        const res = await fetch('/api/schedule-notification-settings', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json', 'X-Session-Token': token },
+                          body: JSON.stringify({ store_id: 1, ...scheduleNotifSettings })
+                        })
+                        const d = await res.json()
+                        showToast(d.success ? 'Schedule notification settings saved' : (d.message || 'Failed to save'), d.success ? 'success' : 'error')
+                      } catch (e) {
+                        showToast(e?.message || 'Error saving', 'error')
+                      } finally {
+                        setScheduleNotifSaving(false)
+                      }
+                    }}
                   />
 
-                  {/* ── Clock-In / Clock-Out Notification Settings ── */}
-                  <div style={{
-                    padding: '20px',
-                    borderRadius: '12px',
-                    border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #e3f2fd',
-                    backgroundColor: isDarkMode ? 'var(--bg-secondary)' : '#f5faff',
-                    marginBottom: '24px'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1565c0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                      <div style={{ fontSize: '15px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1565c0' }}>Clock-In / Clock-Out Notifications</div>
-                    </div>
-                    <p style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary)' : '#546e7a', marginBottom: '18px' }}>
-                      Receive email alerts when employees clock in or out, get notified if someone is running late, and flag overtime shifts automatically.
-                    </p>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-
-                      {/* ── Who gets notified ── */}
-                      <div style={{ padding: '14px 16px', borderRadius: '10px', border: isDarkMode ? '1px solid var(--border-color)' : '1px solid #bbdefb', backgroundColor: isDarkMode ? 'var(--bg-tertiary)' : '#fff' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#1565c0', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: '12px' }}>Notify on Clock Events</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          {[
-                            { key: 'notify_admin_on_clockin', label: 'Notify admin when employee clocks in', icon: '→' },
-                            { key: 'notify_admin_on_clockout', label: 'Notify admin when employee clocks out', icon: '←' },
-                            { key: 'notify_employee_self', label: 'Also notify the employee themselves', icon: '✉' },
-                          ].map(({ key, label, icon }) => (
-                            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none' }}>
-                              <div className="checkbox-wrapper-2">
-                                <input type="checkbox" className="sc-gJwTLC ikxBAC"
-                                  checked={!!clockinNotifSettings[key]}
-                                  onChange={e => setClockinNotifSettings(p => ({ ...p, [key]: e.target.checked }))} />
-                              </div>
-                              <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-primary)' : '#37474f' }}>{icon} {label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* ── Admin recipients ── */}
-                      <div style={{ padding: '14px 16px', borderRadius: '10px', border: isDarkMode ? '1px solid var(--border-color)' : '1px solid #bbdefb', backgroundColor: isDarkMode ? 'var(--bg-tertiary)' : '#fff' }}>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#1565c0', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: '10px' }}>Admin Recipients</div>
-                        <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary)' : '#78909c', marginBottom: '10px' }}>Select which employees receive admin clock-event emails (must have an email address).</p>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                          {(employeesWithEmail.length > 0 ? employeesWithEmail : []).map(emp => {
-                            const empId = emp.employee_id ?? emp.id
-                            const selected = (clockinNotifSettings.admin_email_ids || []).includes(empId)
-                            return (
-                              <button key={empId} type="button"
-                                onClick={() => setClockinNotifSettings(p => {
-                                  const ids = Array.isArray(p.admin_email_ids) ? p.admin_email_ids : []
-                                  return { ...p, admin_email_ids: selected ? ids.filter(i => i !== empId) : [...ids, empId] }
-                                })}
-                                style={{
-                                  padding: '6px 12px', fontSize: '12px', borderRadius: '20px', cursor: 'pointer',
-                                  border: selected ? '2px solid #1565c0' : `1px solid ${isDarkMode ? 'var(--border-color)' : '#bbdefb'}`,
-                                  background: selected ? 'rgba(21,101,192,.12)' : (isDarkMode ? 'var(--bg-secondary)' : '#f5faff'),
-                                  color: selected ? '#1565c0' : (isDarkMode ? 'var(--text-secondary)' : '#546e7a'),
-                                  fontWeight: selected ? 600 : 400
-                                }}>
-                                {selected && '✓ '}{emp.first_name || emp.name || `Employee #${empId}`}{emp.email ? ` (${emp.email})` : ''}
-                              </button>
-                            )
-                          })}
-                          {employeesWithEmail.length === 0 && (
-                            <span style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary)' : '#90a4ae', fontStyle: 'italic' }}>No employees with email addresses found.</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* ── Late Alert ── */}
-                      <div style={{ padding: '14px 16px', borderRadius: '10px', border: isDarkMode ? '1px solid var(--border-color)' : '1px solid #bbdefb', backgroundColor: isDarkMode ? 'var(--bg-tertiary)' : '#fff' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                          <div style={{ fontSize: '12px', fontWeight: 700, color: '#1565c0', textTransform: 'uppercase', letterSpacing: '.5px' }}>Late Alert</div>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none' }}>
-                            <div className="checkbox-wrapper-2">
-                              <input type="checkbox" className="sc-gJwTLC ikxBAC"
-                                checked={!!clockinNotifSettings.late_alert_enabled}
-                                onChange={e => setClockinNotifSettings(p => ({ ...p, late_alert_enabled: e.target.checked }))} />
-                            </div>
-                            <span style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary)' : '#546e7a' }}>Enabled</span>
-                          </label>
-                        </div>
-                        <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary)' : '#78909c', marginBottom: '12px' }}>
-                          Send an alert if an employee hasn't clocked in within the delay window after their scheduled start.
-                        </p>
-                        {clockinNotifSettings.late_alert_enabled && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            <div>
-                              <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#546e7a', marginBottom: '4px' }}>
-                                Send alert after <strong style={{ color: '#e65100' }}>{clockinNotifSettings.late_alert_delay_min} min</strong> past scheduled start
-                              </div>
-                              <input type="range" min="5" max="60" step="5"
-                                value={clockinNotifSettings.late_alert_delay_min}
-                                onChange={e => setClockinNotifSettings(p => ({ ...p, late_alert_delay_min: Number(e.target.value) }))}
-                                style={{ width: '100%', accentColor: '#1565c0' }} />
-                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: isDarkMode ? 'var(--text-tertiary)' : '#90a4ae' }}><span>5 min</span><span>60 min</span></div>
-                            </div>
-                            <div>
-                              <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#546e7a', marginBottom: '4px' }}>
-                                Late threshold (grace): <strong style={{ color: '#e65100' }}>{clockinNotifSettings.late_alert_threshold_min} min</strong>
-                              </div>
-                              <input type="range" min="1" max="30" step="1"
-                                value={clockinNotifSettings.late_alert_threshold_min}
-                                onChange={e => setClockinNotifSettings(p => ({ ...p, late_alert_threshold_min: Number(e.target.value) }))}
-                                style={{ width: '100%', accentColor: '#1565c0' }} />
-                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: isDarkMode ? 'var(--text-tertiary)' : '#90a4ae' }}><span>1 min</span><span>30 min</span></div>
-                            </div>
-                            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                              {[{ key: 'late_alert_to_admin', label: 'Alert admin' }, { key: 'late_alert_to_employee', label: 'Alert employee' }].map(({ key, label }) => (
-                                <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none' }}>
-                                  <div className="checkbox-wrapper-2">
-                                    <input type="checkbox" className="sc-gJwTLC ikxBAC"
-                                      checked={!!clockinNotifSettings[key]}
-                                      onChange={e => setClockinNotifSettings(p => ({ ...p, [key]: e.target.checked }))} />
-                                  </div>
-                                  <span style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-primary)' : '#37474f' }}>{label}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* ── Overtime Alert ── */}
-                      <div style={{ padding: '14px 16px', borderRadius: '10px', border: isDarkMode ? '1px solid var(--border-color)' : '1px solid #bbdefb', backgroundColor: isDarkMode ? 'var(--bg-tertiary)' : '#fff' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                          <div style={{ fontSize: '12px', fontWeight: 700, color: '#1565c0', textTransform: 'uppercase', letterSpacing: '.5px' }}>Overtime Flag</div>
-                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none' }}>
-                            <div className="checkbox-wrapper-2">
-                              <input type="checkbox" className="sc-gJwTLC ikxBAC"
-                                checked={!!clockinNotifSettings.overtime_alert_enabled}
-                                onChange={e => setClockinNotifSettings(p => ({ ...p, overtime_alert_enabled: e.target.checked }))} />
-                            </div>
-                            <span style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-secondary)' : '#546e7a' }}>Enabled</span>
-                          </label>
-                        </div>
-                        {clockinNotifSettings.overtime_alert_enabled && (
-                          <div>
-                            <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? 'var(--text-secondary)' : '#546e7a', marginBottom: '4px' }}>
-                              Flag shifts over <strong style={{ color: '#c62828' }}>{clockinNotifSettings.overtime_threshold_hours}h</strong> as overtime in clock-out email
-                            </div>
-                            <input type="range" min="4" max="16" step="0.5"
-                              value={clockinNotifSettings.overtime_threshold_hours}
-                              onChange={e => setClockinNotifSettings(p => ({ ...p, overtime_threshold_hours: Number(e.target.value) }))}
-                              style={{ width: '100%', accentColor: '#c62828' }} />
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: isDarkMode ? 'var(--text-tertiary)' : '#90a4ae' }}><span>4h</span><span>16h</span></div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* ── Save button ── */}
-                      <button type="button" disabled={clockinNotifSaving}
-                        onClick={async () => {
-                          setClockinNotifSaving(true)
-                          try {
-                            const token = localStorage.getItem('sessionToken') || ''
-                            const res = await fetch('/api/clockin-notification-settings', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json', 'X-Session-Token': token },
-                              body: JSON.stringify({ store_id: 1, ...clockinNotifSettings })
-                            })
-                            const d = await res.json()
-                            showToast(d.success ? 'Clock-in notification settings saved' : (d.message || 'Failed to save'), d.success ? 'success' : 'error')
-                          } catch (e) {
-                            showToast(e?.message || 'Error saving', 'error')
-                          } finally {
-                            setClockinNotifSaving(false)
-                          }
-                        }}
-                        style={{ ...compactPrimaryButtonStyle(themeColorRgb), background: 'linear-gradient(135deg,#1976d2,#1565c0)', alignSelf: 'flex-start' }}>
-                        {clockinNotifSaving ? 'Saving…' : 'Save Clock-In Settings'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* ── Register Notification Settings ── */}
-                  <div style={{
-                    padding: '20px',
-                    borderRadius: '12px',
-                    border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
-                    backgroundColor: isDarkMode ? 'var(--bg-secondary)' : '#fafafa',
-                    marginBottom: '24px'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '18px' }}>💵</span>
-                      <div style={{ fontSize: '15px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#333' }}>
-                        Register Activity Emails
-                      </div>
-                    </div>
-                    <p style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '20px' }}>
-                      Get notified when cash is moved or registers are opened/closed.
-                    </p>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                      {/* Triggers */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary)' : '#444' }}>
-                          Email Triggers
-                        </div>
-                        {[
-                          { id: 'notify_admin_on_open', label: 'Register Open' },
-                          { id: 'notify_admin_on_close', label: 'Register Close/Summary' },
-                          { id: 'notify_admin_on_drop', label: 'Cash Drop' },
-                          { id: 'notify_admin_on_withdraw', label: 'Cash Withdrawal (Take-out)' },
-                        ].map(({ id, label }) => (
-                          <label key={id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>
-                            <input type="checkbox"
-                              checked={!!registerNotifSettings[id]}
-                              onChange={e => setRegisterNotifSettings(p => ({ ...p, [id]: e.target.checked }))}
-                              style={{ accentColor: themeColorRgb, width: '16px', height: '16px' }} />
-                            {label}
-                          </label>
-                        ))}
-                      </div>
-
-                      {/* Employee Self-copy */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '16px', borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary)' : '#444' }}>
-                          Employee Notification
-                        </div>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>
-                          <input type="checkbox"
-                            checked={!!registerNotifSettings.notify_employee_self}
-                            onChange={e => setRegisterNotifSettings(p => ({ ...p, notify_employee_self: e.target.checked }))}
-                            style={{ accentColor: themeColorRgb, width: '16px', height: '16px' }} />
-                          Always text/email CC the action performer (if they have an email)
-                        </label>
-                      </div>
-
-                      {/* Admin Recipients */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '16px', borderTop: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary)' : '#444' }}>
-                          Admin / Management Recipients
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                          {employeesWithEmail.map(emp => {
-                            const empId = Number(emp.employee_id)
-                            const selected = (registerNotifSettings.admin_email_ids || []).includes(empId)
-                            return (
-                              <button key={empId} type="button"
-                                onClick={() => setRegisterNotifSettings(p => {
-                                  const cur = p.admin_email_ids || []
-                                  return { ...p, admin_email_ids: selected ? cur.filter(id => id !== empId) : [...cur, empId] }
-                                })}
-                                style={{
-                                  padding: '6px 12px', fontSize: '13px', borderRadius: '20px', border: '1px solid',
-                                  backgroundColor: selected ? `${themeColorRgb}1A` : 'transparent',
-                                  borderColor: selected ? themeColorRgb : (isDarkMode ? 'var(--border-light)' : '#ccc'),
-                                  color: selected ? themeColorRgb : (isDarkMode ? 'var(--text-primary)' : '#444'),
-                                  cursor: 'pointer', transition: 'all 0.15s ease'
-                                }}>
-                                {emp.name} <span style={{ opacity: 0.6, fontSize: '11px' }}>({emp.email})</span>
-                              </button>
-                            )
-                          })}
-                          {employeesWithEmail.length === 0 && <span style={{ fontSize: '12px', color: '#999', fontStyle: 'italic' }}>No active employees with valid email addresses.</span>}
-                        </div>
-                      </div>
-
-                      {/* Save button */}
-                      <button type="button" disabled={registerNotifSaving}
-                        onClick={async () => {
-                          setRegisterNotifSaving(true)
-                          try {
-                            const token = localStorage.getItem('sessionToken') || ''
-                            const res = await fetch('/api/register-notification-settings', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json', 'X-Session-Token': token },
-                              body: JSON.stringify({ store_id: 1, ...registerNotifSettings })
-                            })
-                            const d = await res.json()
-                            showToast(d.success ? 'Register notification settings saved' : (d.message || 'Failed to save'), d.success ? 'success' : 'error')
-                          } catch (e) {
-                            showToast(e?.message || 'Error saving', 'error')
-                          } finally {
-                            setRegisterNotifSaving(false)
-                          }
-                        }}
-                        style={{ ...compactPrimaryButtonStyle(themeColorRgb), background: 'linear-gradient(135deg,#e65100,#ef6c00)', alignSelf: 'flex-start' }}>
-                        {registerNotifSaving ? 'Saving…' : 'Save Register Settings'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* ── Schedule Notification Settings ── */}
-                  <div style={{
-                    padding: '20px',
-                    borderRadius: '12px',
-                    border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #eee',
-                    backgroundColor: isDarkMode ? 'var(--bg-secondary)' : '#fafafa',
-                    marginBottom: '24px'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '18px' }}>📅</span>
-                      <div style={{ fontSize: '15px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#333' }}>
-                        Schedule Publishing & Email Alerts
-                      </div>
-                    </div>
-                    <p style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '20px' }}>
-                      Control how shift assignments are emailed to employees and who gets the full team schedule.
-                    </p>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                      {/* Toggles */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>
-                          <input type="checkbox"
-                            checked={!!scheduleNotifSettings.notify_on_edit}
-                            onChange={(e) => setScheduleNotifSettings({ ...scheduleNotifSettings, notify_on_edit: e.target.checked })}
-                            style={{ accentColor: themeColorRgb, width: '16px', height: '16px' }} />
-                          <strong>Notify on shift edits:</strong> Send email to affected employees when a published schedule is altered.
-                        </label>
-                      </div>
-
-                      {/* Employee View Strategy */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary)' : '#444' }}>
-                          Employee Shift Email Contents
-                        </div>
-                        <select
-                          value={scheduleNotifSettings.employee_schedule_view || 'shifts_only'}
-                          onChange={(e) => setScheduleNotifSettings({ ...scheduleNotifSettings, employee_schedule_view: e.target.value })}
-                          style={{
-                            padding: '10px', fontSize: '14px', borderRadius: '8px', border: isDarkMode ? '1px solid var(--border-light)' : '1px solid #ccc', backgroundColor: isDarkMode ? 'var(--input-bg)' : '#fff', color: isDarkMode ? 'var(--text-primary)' : '#000', width: '100%', maxWidth: '400px', cursor: 'pointer'
-                          }}>
-                          <option value="shifts_only">Shifts Only (employee only sees their scheduled shifts)</option>
-                          <option value="full_schedule">Full Schedule (employee sees their shifts AND the full team schedule)</option>
-                        </select>
-                      </div>
-
-                      {/* Admin Recipients */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary)' : '#444' }}>
-                          Admin Observers (always receive full schedule)
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                          {employeesWithEmail.map(emp => {
-                            const empId = Number(emp.employee_id)
-                            const selected = (scheduleNotifSettings.admin_email_ids || []).includes(empId)
-                            return (
-                              <button key={empId} type="button"
-                                onClick={() => {
-                                  const cur = scheduleNotifSettings.admin_email_ids || []
-                                  const next = selected ? cur.filter(id => id !== empId) : [...cur, empId]
-                                  setScheduleNotifSettings({ ...scheduleNotifSettings, admin_email_ids: next })
-                                }}
-                                style={{
-                                  padding: '6px 12px', fontSize: '13px', borderRadius: '20px', border: '1px solid',
-                                  backgroundColor: selected ? `${themeColorRgb}1A` : 'transparent',
-                                  borderColor: selected ? themeColorRgb : (isDarkMode ? 'var(--border-light)' : '#ccc'),
-                                  color: selected ? themeColorRgb : (isDarkMode ? 'var(--text-primary)' : '#444'),
-                                  cursor: 'pointer', transition: 'all 0.15s ease'
-                                }}>
-                                {emp.name} <span style={{ opacity: 0.6, fontSize: '11px' }}>({emp.email})</span>
-                              </button>
-                            )
-                          })}
-                          {employeesWithEmail.length === 0 && <span style={{ fontSize: '12px', color: '#999', fontStyle: 'italic' }}>No active employees with valid email addresses.</span>}
-                        </div>
-                      </div>
-
-                      {/* Save button */}
-                      <button type="button" disabled={scheduleNotifSaving}
-                        onClick={async () => {
-                          setScheduleNotifSaving(true)
-                          try {
-                            const token = localStorage.getItem('sessionToken') || ''
-                            const res = await fetch('/api/schedule-notification-settings', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json', 'X-Session-Token': token },
-                              body: JSON.stringify({ store_id: 1, ...scheduleNotifSettings })
-                            })
-                            const d = await res.json()
-                            showToast(d.success ? 'Schedule notification settings saved' : (d.message || 'Failed to save'), d.success ? 'success' : 'error')
-                          } catch (e) {
-                            showToast(e?.message || 'Error saving', 'error')
-                          } finally {
-                            setScheduleNotifSaving(false)
-                          }
-                        }}
-                        style={{ ...compactPrimaryButtonStyle(themeColorRgb), background: 'linear-gradient(135deg,#9c27b0,#7b1fa2)', alignSelf: 'flex-start' }}>
-                        {scheduleNotifSaving ? 'Saving…' : 'Save Schedule Settings'}
-                      </button>
-                    </div>
-                  </div>
 
                   </div>
                 </>

@@ -7809,6 +7809,7 @@ def verify_session(session_token: str) -> Dict[str, Any]:
             return {
                 'valid': True,
                 'employee_id': session_dict.get('employee_id'),
+                'establishment_id': session_dict.get('establishment_id'),
                 'employee_name': f"{session_dict.get('first_name', '')} {session_dict.get('last_name', '')}".strip(),
                 'position': session_dict.get('position', ''),
                 'email': session_dict.get('email', '')
@@ -8666,7 +8667,8 @@ def resolve_discrepancy(
                 journalize_damaged_goods_to_accounting(
                     discrepancy_id,
                     float(discrepancy.get('financial_impact', 0)),
-                    employee_id
+                    employee_id,
+                    establishment_id=discrepancy.get('establishment_id')
                 )
             except Exception as e:
                 print(f"Accounting journalize_damaged_goods error: {e}")
@@ -8678,7 +8680,8 @@ def resolve_discrepancy(
             journalize_vendor_credit_to_accounting(
                 discrepancy_id,
                 float(discrepancy.get('financial_impact', 0)),
-                employee_id
+                employee_id,
+                establishment_id=discrepancy.get('establishment_id')
             )
         except Exception as e:
             print(f"Accounting journalize_vendor_credit error: {e}")
@@ -13502,3 +13505,288 @@ def get_employee_activity_detail(
         import traceback
         traceback.print_exc()
         raise
+
+
+# ── Accounting-backed income helpers ─────────────────────────────────────────
+
+def get_income_summary(start_date, end_date, establishment_id=None) -> dict:
+    """
+    Aggregate posted ledger entries into an income summary for the given date range.
+    Scoped to establishment_id when provided (required for SaaS multi-tenant).
+
+    Returns:
+      gross_revenue   – credits on Revenue/Other Income accounts
+      discounts       – debits on Contra Revenue accounts (account 4020)
+      returns         – debits on Contra Revenue accounts (account 4010)
+      processor_fees  – debits on Expense accounts whose description contains 'fee'
+      taxes           – credits on 2040 Sales Tax Payable
+      cogs            – debits on COGS accounts
+      net_revenue     – gross - discounts - returns - processor_fees - cogs
+    """
+    conn = None
+    try:
+        from psycopg2.extras import RealDictCursor
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        est_filter = "AND tl.establishment_id = %(eid)s" if establishment_id is not None else ""
+
+        cur.execute(f"""
+            SELECT
+                -- Gross revenue: all Revenue/Other Income credits
+                COALESCE(SUM(CASE
+                    WHEN a.account_type IN ('Revenue', 'Other Income')
+                    THEN tl.credit_amount ELSE 0 END), 0)                   AS gross_revenue,
+
+                -- Discounts (4020)
+                COALESCE(SUM(CASE
+                    WHEN a.account_number = '4020'
+                    THEN tl.debit_amount ELSE 0 END), 0)                    AS discounts,
+
+                -- Returns / refunds (4010)
+                COALESCE(SUM(CASE
+                    WHEN a.account_number = '4010'
+                    THEN tl.debit_amount ELSE 0 END), 0)                    AS returns,
+
+                -- Processor fees (5290 + descriptions containing 'fee')
+                COALESCE(SUM(CASE
+                    WHEN a.account_number = '5290'
+                         OR (a.account_type IN ('Expense') AND tl.description ILIKE '%%fee%%')
+                    THEN tl.debit_amount ELSE 0 END), 0)                    AS processor_fees,
+
+                -- Platform / third-party commission (4080)
+                COALESCE(SUM(CASE
+                    WHEN a.account_number = '4080'
+                    THEN tl.debit_amount ELSE 0 END), 0)                    AS platform_fees,
+
+                -- Loyalty redemption expense (4090)
+                COALESCE(SUM(CASE
+                    WHEN a.account_number = '4090'
+                    THEN tl.debit_amount ELSE 0 END), 0)                    AS loyalty,
+
+                -- Sales tax collected (2040)
+                COALESCE(SUM(CASE
+                    WHEN a.account_number = '2040'
+                    THEN tl.credit_amount ELSE 0 END), 0)                   AS taxes,
+
+                -- Tips owed to employees (2210 credits = tips collected)
+                COALESCE(SUM(CASE
+                    WHEN a.account_number = '2210'
+                    THEN tl.credit_amount ELSE 0 END), 0)                   AS tips,
+
+                -- Cost of goods sold (any COGS account)
+                COALESCE(SUM(CASE
+                    WHEN a.account_type = 'COGS'
+                    THEN tl.debit_amount ELSE 0 END), 0)                    AS cogs
+            FROM accounting.transaction_lines tl
+            JOIN accounting.accounts       a  ON a.id  = tl.account_id
+            JOIN accounting.transactions   t  ON t.id  = tl.transaction_id
+            WHERE t.is_posted = TRUE
+              AND t.is_void   = FALSE
+              AND t.transaction_date BETWEEN %(start)s AND %(end)s
+              {est_filter}
+        """, {'start': str(start_date), 'end': str(end_date), 'eid': establishment_id})
+
+        row = cur.fetchone()
+        conn.close()
+
+        if not row:
+            row = {}
+
+        gross    = float(row.get('gross_revenue',  0) or 0)
+        disc     = float(row.get('discounts',       0) or 0)
+        ret      = float(row.get('returns',         0) or 0)
+        fees     = float(row.get('processor_fees',  0) or 0)
+        platform = float(row.get('platform_fees',   0) or 0)
+        loyalty  = float(row.get('loyalty',         0) or 0)
+        taxes    = float(row.get('taxes',           0) or 0)
+        tips     = float(row.get('tips',            0) or 0)
+        cogs     = float(row.get('cogs',            0) or 0)
+        net      = gross - disc - ret - fees - platform - loyalty - cogs
+
+        return {
+            'gross_revenue':  round(gross,    2),
+            'discounts':      round(disc,     2),
+            'returns':        round(ret,      2),
+            'processor_fees': round(fees,     2),
+            'platform_fees':  round(platform, 2),
+            'loyalty':        round(loyalty,  2),
+            'taxes':          round(taxes,    2),
+            'tips':           round(tips,     2),
+            'cogs':           round(cogs,     2),
+            'net_revenue':    round(net,      2),
+        }
+    except Exception as e:
+        if conn and not conn.closed:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        print(f"get_income_summary error: {e}")
+        return {
+            'gross_revenue': 0, 'discounts': 0, 'returns': 0,
+            'processor_fees': 0, 'platform_fees': 0, 'loyalty': 0,
+            'taxes': 0, 'tips': 0, 'cogs': 0, 'net_revenue': 0,
+        }
+
+
+def get_income_buckets(start_date, end_date, granularity='daily', establishment_id=None) -> list:
+    """
+    Return time-bucketed income data for charting.
+    Each bucket: { date, day, gross_revenue, net_revenue }
+
+    granularity: 'daily' | 'weekly' | 'monthly' | 'hourly'
+    """
+    trunc_map = {'hourly': 'hour', 'daily': 'day', 'weekly': 'week', 'monthly': 'month'}
+    trunc = trunc_map.get((granularity or 'daily').lower(), 'day')
+    est_filter = "AND tl.establishment_id = %(eid)s" if establishment_id is not None else ""
+
+    conn = None
+    try:
+        from psycopg2.extras import RealDictCursor
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        cur.execute(f"""
+            SELECT
+                DATE_TRUNC('{trunc}', t.transaction_date)::date AS bucket_date,
+                COALESCE(SUM(CASE
+                    WHEN a.account_type IN ('Revenue', 'Other Income')
+                    THEN tl.credit_amount ELSE 0 END), 0)        AS gross_revenue,
+                COALESCE(SUM(CASE
+                    WHEN a.account_type IN ('Revenue', 'Other Income')
+                    THEN tl.credit_amount ELSE 0 END), 0)
+                - COALESCE(SUM(CASE
+                    WHEN a.account_type = 'Contra Revenue'
+                    THEN tl.debit_amount ELSE 0 END), 0)
+                - COALESCE(SUM(CASE
+                    WHEN a.account_type = 'COGS'
+                    THEN tl.debit_amount ELSE 0 END), 0)          AS net_revenue
+            FROM accounting.transaction_lines tl
+            JOIN accounting.accounts       a  ON a.id  = tl.account_id
+            JOIN accounting.transactions   t  ON t.id  = tl.transaction_id
+            WHERE t.is_posted = TRUE
+              AND t.is_void   = FALSE
+              AND t.transaction_date BETWEEN %(start)s AND %(end)s
+              {est_filter}
+            GROUP BY DATE_TRUNC('{trunc}', t.transaction_date)
+            ORDER BY bucket_date ASC
+        """, {'start': str(start_date), 'end': str(end_date), 'eid': establishment_id})
+
+        rows = cur.fetchall()
+        conn.close()
+
+        buckets = []
+        for r in rows:
+            bd = r['bucket_date']
+            date_str = str(bd) if bd else ''
+            buckets.append({
+                'date':          date_str,
+                'day':           bd.strftime('%a') if hasattr(bd, 'strftime') else date_str,
+                'gross_revenue': round(float(r.get('gross_revenue', 0) or 0), 2),
+                'net_revenue':   round(float(r.get('net_revenue',   0) or 0), 2),
+            })
+        return buckets
+    except Exception as e:
+        if conn and not conn.closed:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        print(f"get_income_buckets error: {e}")
+        return []
+
+
+def get_reconciliation_report(start_date, end_date, establishment_id=None) -> dict:
+    """
+    Compare POS order totals vs accounting ledger totals for the same date range.
+    Returns a dict with:
+      - orders_total      : sum of orders.total in the date range
+      - orders_count      : number of completed orders
+      - ledger_gross      : sum of Revenue credits in accounting.transaction_lines
+      - ledger_tax        : sum of Sales Tax Payable credits (2040)
+      - ledger_cogs       : sum of COGS debits
+      - discrepancy       : ledger_gross – orders_total (should be near 0)
+      - unposted_orders   : order_ids that have no posted accounting transaction
+      - missing_ledger    : order_ids where bridging failed (no source_document match)
+    """
+    est_orders_filter = "AND o.establishment_id = %(eid)s" if establishment_id is not None else ""
+    est_ledger_filter = "AND tl.establishment_id = %(eid)s" if establishment_id is not None else ""
+
+    conn = None
+    try:
+        from psycopg2.extras import RealDictCursor
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # 1. POS order totals
+        cur.execute(f"""
+            SELECT
+                COUNT(*) AS orders_count,
+                COALESCE(SUM(o.total), 0) AS orders_total
+            FROM orders o
+            WHERE o.status = 'completed'
+              AND DATE(o.order_date) BETWEEN %(start)s AND %(end)s
+              {est_orders_filter}
+        """, {'start': str(start_date), 'end': str(end_date), 'eid': establishment_id})
+        pos_row = dict(cur.fetchone() or {})
+
+        # 2. Accounting ledger totals
+        cur.execute(f"""
+            SELECT
+                COALESCE(SUM(CASE WHEN a.account_type IN ('Revenue','Other Income')
+                               THEN tl.credit_amount ELSE 0 END), 0) AS ledger_gross,
+                COALESCE(SUM(CASE WHEN a.account_number = '2040'
+                               THEN tl.credit_amount ELSE 0 END), 0) AS ledger_tax,
+                COALESCE(SUM(CASE WHEN a.account_type = 'COGS'
+                               THEN tl.debit_amount  ELSE 0 END), 0) AS ledger_cogs
+            FROM accounting.transaction_lines tl
+            JOIN accounting.accounts     a ON a.id = tl.account_id
+            JOIN accounting.transactions t ON t.id = tl.transaction_id
+            WHERE t.is_posted = TRUE AND t.is_void = FALSE
+              AND t.transaction_type IN ('sales_receipt')
+              AND t.transaction_date BETWEEN %(start)s AND %(end)s
+              {est_ledger_filter}
+        """, {'start': str(start_date), 'end': str(end_date), 'eid': establishment_id})
+        ledger_row = dict(cur.fetchone() or {})
+
+        # 3. Orders with no matching posted accounting transaction
+        cur.execute(f"""
+            SELECT o.order_id
+            FROM orders o
+            WHERE o.status = 'completed'
+              AND DATE(o.order_date) BETWEEN %(start)s AND %(end)s
+              {est_orders_filter}
+              AND NOT EXISTS (
+                  SELECT 1 FROM accounting.transactions t
+                  WHERE t.source_document_id = o.order_id
+                    AND t.source_document_type = 'order'
+                    AND t.is_posted = TRUE
+                    AND t.is_void  = FALSE
+              )
+        """, {'start': str(start_date), 'end': str(end_date), 'eid': establishment_id})
+        unposted_rows = cur.fetchall()
+        conn.close()
+
+        orders_total = round(float(pos_row.get('orders_total') or 0), 2)
+        ledger_gross = round(float(ledger_row.get('ledger_gross') or 0), 2)
+
+        return {
+            'start_date':     str(start_date),
+            'end_date':       str(end_date),
+            'orders_count':   int(pos_row.get('orders_count') or 0),
+            'orders_total':   orders_total,
+            'ledger_gross':   ledger_gross,
+            'ledger_tax':     round(float(ledger_row.get('ledger_tax') or 0), 2),
+            'ledger_cogs':    round(float(ledger_row.get('ledger_cogs') or 0), 2),
+            'discrepancy':    round(ledger_gross - orders_total, 2),
+            'unposted_orders': [r['order_id'] for r in unposted_rows],
+        }
+    except Exception as e:
+        if conn and not conn.closed:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        print(f"get_reconciliation_report error: {e}")
+        return {'error': str(e)}

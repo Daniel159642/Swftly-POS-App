@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useMobileNav } from '../App'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useTheme } from '../contexts/ThemeContext'
 import { cachedFetch } from '../services/offlineSync'
@@ -17,10 +18,11 @@ import {
   compactPrimaryButtonStyle,
   CompactFormActions
 } from '../components/FormStyles'
-import { ScanBarcode, Plus, ChevronDown, Upload, Image as ImageIcon, Share2, Download, Printer, X, LayoutList, LayoutDashboard } from 'lucide-react'
+import { ScanBarcode, Plus, ChevronDown, Upload, Image as ImageIcon, Share2, Download, Printer, X, LayoutList, LayoutDashboard, Trash2, Package, ShoppingCart } from 'lucide-react'
 
 function Inventory() {
   const { themeColor, themeMode } = useTheme()
+  const { setContextualNavItems } = useMobileNav()
   
   // Convert hex to RGB for rgba usage
   const hexToRgb = (hex) => {
@@ -133,6 +135,23 @@ function Inventory() {
   const barcodeObjectUrlRef = useRef(null)
   const searchInputRef = useRef(null)
   const isArchivedView = inventoryFilter === 'archived'
+
+  useEffect(() => {
+    if (setContextualNavItems) {
+      const filters = [
+        { id: 'all', label: 'All Items', icon: LayoutList },
+        { id: 'product', label: 'Products', icon: Package },
+        { id: 'ingredient', label: 'Ingredients', icon: ShoppingCart },
+        { id: 'archived', label: 'Archived', icon: Trash2 }, // I'll assume Trash2 exists or use X
+      ]
+      setContextualNavItems(filters.map(f => ({
+        label: f.label,
+        active: inventoryFilter === f.id,
+        onClick: () => setInventoryFilter(f.id),
+        icon: f.icon
+      })))
+    }
+  }, [inventoryFilter, setContextualNavItems])
 
   // Determine if dark mode is active
   const [isDarkMode, setIsDarkMode] = useState(() => {

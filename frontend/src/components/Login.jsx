@@ -368,6 +368,13 @@ function Login({ onLogin }) {
     }
   }
 
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
   const isTauri = typeof window !== 'undefined' && (window.__TAURI__ || window.__TAURI_INTERNALS__)
   const handleHeaderDrag = (e) => {
     if (e.target.closest('button')) return
@@ -409,12 +416,12 @@ function Login({ onLogin }) {
         style={{
           flex: 1,
           width: '100%',
-          padding: '24px',
-          paddingTop: isTauri ? 76 : 24,
+          padding: isMobile ? '12px' : '24px',
+          paddingTop: isTauri ? 76 : (isMobile ? 12 : 24),
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center'
+          justifyContent: isMobile ? 'flex-start' : 'center'
         }}
       >
         <h1

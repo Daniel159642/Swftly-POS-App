@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useMobileNav } from '../App'
 import { useTheme } from '../contexts/ThemeContext'
 import Table from '../components/Table'
 import {
@@ -202,9 +203,22 @@ function Tables() {
   
   const themeColorRgb = hexToRgb(themeColor)
   
+  const { setContextualNavItems } = useMobileNav()
   const [categories] = useState(STATIC_CATEGORIES)
   const [activeCategory, setActiveCategory] = useState(() => getInitialCategoryAndTab().category)
   const [activeTab, setActiveTab] = useState(() => getInitialCategoryAndTab().tableId)
+
+  useEffect(() => {
+    if (setContextualNavItems) {
+      const items = Object.keys(categories).map(catId => ({
+        label: catId,
+        active: activeCategory === catId,
+        onClick: () => setActiveCategory(catId),
+        icon: Database // Generic icon for tables
+      }))
+      setContextualNavItems(items)
+    }
+  }, [activeCategory, categories, setContextualNavItems])
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -492,6 +506,7 @@ function Tables() {
       {/* Sidebar Navigation - 1/4 of page */}
       <div 
         ref={sidebarRef}
+        className="tables-sidebar"
         style={{
           position: 'fixed',
           left: 0,
@@ -686,6 +701,7 @@ function Tables() {
       {/* Main Content Area - 3/4 of page */}
       <div 
         ref={contentRef}
+        className="tables-content"
         style={{
           marginLeft: isInitialMount ? '25%' : (sidebarMinimized ? '60px' : '25%'),
           width: isInitialMount ? '75%' : (sidebarMinimized ? 'calc(100% - 60px)' : '75%'),

@@ -104,134 +104,162 @@ def _get_sms_settings(store_id: int = 1):
                     d.setdefault('email_provider', 'gmail')
                     d.setdefault('email_from_address', None)
                     d.setdefault('notification_preferences', {})
+                    d.setdefault('use_platform_aws', 0)
             return d
     except Exception as e:
         logger.warning("notification_service: could not load sms_settings: %s", e)
-    return None
+def _get_aws_credentials(s: Dict) -> tuple:
+    """Resolve AWS credentials. If use_platform_aws is set, pulls from environment."""
+    if s and (s.get('use_platform_aws') or os.environ.get('AWS_MANAGED_NOTIFICATIONS') == '1'):
+        return (
+            os.environ.get('AWS_ACCESS_KEY_ID'),
+            os.environ.get('AWS_SECRET_ACCESS_KEY'),
+            os.environ.get('AWS_REGION', 'us-east-1')
+        )
+    return (
+        s.get("aws_access_key_id") if s else None,
+        s.get("aws_secret_access_key") if s else None,
+        (s.get("aws_region") or "us-east-1") if s else "us-east-1"
+    )
 
 
-def get_notification_preferences(store_id: int = 1) -> Dict[str, Any]:
-    """Return merged preferences (DB + defaults).
+def get_notification_preferences(store_id: int) -> Dict[str, Dict[str, Any]]:
+    """Return the structured notification preferences for a store.
     
-    Boolean fields (email/sms toggles) are coerced to bool.
-    Extended fields (source_filter, recipient_employee_ids, email_enabled, etc.)
-    are passed through as-is so they are not destroyed.
-    """
-    s = _get_sms_settings(store_id)
-    prefs: Dict[str, Any] = {k: dict(v) for k, v in DEFAULT_PREFS.items()}
-    if s and s.get('notification_preferences'):
-        np = s['notification_preferences']
-        if isinstance(np, str):
-            try:
-                np_dict = json.loads(np) if np else {}
-            except json.JSONDecodeError:
-                np_dict = {}
-        elif np is None:
-            np_dict = {}
-        else:
-            np_dict = np
-            
-        for cat, chans in np_dict.items():
-            if not isinstance(chans, dict):
-                continue
-            cat_prefs = prefs.setdefault(cat, {})
-            for k, v in chans.items():
-                # Only coerce to bool for the two standard channel keys
-                if k in ('email', 'sms'):
-                    cat_prefs[k] = bool(v)
-                else:
-                    # Preserve lists, ints, strings as-is (e.g. source_filter, recipient_employee_ids)
-                    cat_prefs[k] = v
-    return prefs
-
-
-def should_send(store_id: int, category: str, channel: str) -> bool:
-    """Check if we should send this type of notification."""
-    prefs = get_notification_preferences(store_id)
-    return prefs.get(category, {}).get(channel, False)
-
-
-def get_order_email_recipients(store_id: int, order_source: str = '') -> List[str]:
-    """Return the list of email addresses to notify for a new order.
-
-    Honors the notification_preferences.orders extended settings:
-      - email_enabled (bool): overall kill-switch
-      - source_filter (list[str]): ['all'] or ['doordash', 'shopify', ...]; empty => all
-      - recipient_employee_ids (list[int]): specific employees to email; [] => use store email
-    Returns [] if email notifications are disabled or the source is filtered out.
+    Structure: {
+        'orders': {'email': bool, 'sms': bool, 'source_filter': list, 'recipient_employee_ids': list, ...},
+        'reports': {...},
+        ...
+    }
     """
     s = _get_sms_settings(store_id)
     if not s:
-        return []
+        return DEFAULT_PREFS
+        
     np_raw = s.get('notification_preferences') or {}
     if isinstance(np_raw, str):
         try:
             np_raw = json.loads(np_raw) if np_raw else {}
         except json.JSONDecodeError:
             np_raw = {}
-    order_prefs = np_raw.get('orders') or {}
-    if not isinstance(order_prefs, dict):
-        order_prefs = {}
+            
+    # Merge with defaults
+    prefs = DEFAULT_PREFS.copy()
+    if isinstance(np_raw, dict):
+        for k, v in np_raw.items():
+            if isinstance(v, dict):
+                if k not in prefs:
+                    prefs[k] = {}
+                prefs[k].update(v)
+            else:
+                # Legacy support for simple booleans
+                if k not in prefs:
+                    prefs[k] = {'email': bool(v), 'sms': False}
+                else:
+                    prefs[k]['email'] = bool(v)
+    return prefs
 
-    # Check kill-switch (email_enabled in the extended prefs; fall back to legacy 'email' bool)
-    email_enabled = order_prefs.get('email_enabled')
-    if email_enabled is None:
-        email_enabled = order_prefs.get('email', False)
+def should_send(store_id: int, category: str, channel: str, order_source: Optional[str] = None) -> bool:
+    """Check if a notification of a certain channel/category should be sent.
+    
+    Now optionally considers order_source for source filtering.
+    """
+    prefs = get_notification_preferences(store_id)
+    cat_prefs = prefs.get(category, {})
+    
+    # Check simple boolean check-switch
+    # React frontend might use 'email' or 'sms' keys
+    # or expanded ones like 'email_enabled'
+    enabled = cat_prefs.get(channel)
+    if enabled is None:
+        enabled = cat_prefs.get(f"{channel}_enabled")
+    
+    if not enabled:
+        return False
         
-    if not email_enabled:
-        return []
+    # Source filter (primarily for orders)
+    if category == 'orders' and order_source:
+        source_filter = cat_prefs.get('source_filter') or ['all']
+        if 'all' not in source_filter and source_filter:
+            normalized_source = str(order_source).strip().lower()
+            if normalized_source not in [str(f).lower() for f in source_filter]:
+                return False
+                
+    return True
 
-    # Source filter: ['all'] or specific sources
-    source_filter0 = order_prefs.get('source_filter')
-    source_filter = source_filter0 if isinstance(source_filter0, list) else ['all']
-    if 'all' not in source_filter and source_filter:
-        normalized_source = (order_source or '').strip().lower()
-        if normalized_source not in [str(f).lower() for f in source_filter]:
-            return []  # This source is filtered out
-
-    # Build recipient list from selected employees
-    employee_ids = order_prefs.get('recipient_employee_ids') or []
-    emails: List[str] = []
+def get_notification_recipients(store_id: int, category: str, channel: str) -> List[str]:
+    """Return a list of recipients (emails or phone numbers) for a given notification.
+    
+    Honors 'recipient_employee_ids' (for email) or 'recipient_employee_ids_sms' (for SMS).
+    Falls back to store_email or store_phone_number if no specific employees are selected.
+    """
+    prefs = get_notification_preferences(store_id)
+    cat_prefs = prefs.get(category, {})
+    
+    key = 'recipient_employee_ids' if channel == 'email' else 'recipient_employee_ids_sms'
+    employee_ids = cat_prefs.get(key) or []
+    
+    recipients = []
     if employee_ids:
         try:
             from database_postgres import get_connection
             conn = get_connection()
             cur = conn.cursor()
-            # Fetch email for each selected employee id
             placeholders = ','.join(['%s'] * len(employee_ids))
+            col = 'email' if channel == 'email' else 'phone'
             cur.execute(
-                f"SELECT email FROM employees WHERE employee_id IN ({placeholders}) AND email IS NOT NULL AND email <> ''",
+                f"SELECT {col} FROM employees WHERE employee_id IN ({placeholders}) AND {col} IS NOT NULL AND {col} <> ''",
                 employee_ids
             )
             rows = cur.fetchall()
             conn.close()
             for row in rows:
-                em = (row['email'] if hasattr(row, 'keys') else row[0] or '').strip()
-                if em and em not in emails:
-                    emails.append(em)
+                val = (row[col] if hasattr(row, 'keys') else row[0] or '').strip()
+                if val and val not in recipients:
+                    recipients.append(val)
         except Exception as e:
-            logger.warning("get_order_email_recipients: could not query employees: %s", e)
+            logger.warning("get_notification_recipients: could not query employees: %s", e)
 
-    # Fall back to store email if no employees configured
-    if not emails:
+    # Fallback to store-level settings if no employees configured OR if they happen to have empty values
+    if not recipients:
         try:
             from database_postgres import get_connection
             conn = get_connection()
             cur = conn.cursor()
+            col = 'store_email' if channel == 'email' else 'store_phone_number'
             cur.execute(
-                "SELECT store_email FROM store_location_settings WHERE store_id = %s LIMIT 1",
+                f"SELECT {col} FROM store_location_settings WHERE store_id = %s LIMIT 1",
                 (store_id,)
             )
             row = cur.fetchone()
+            if not row:
+                # Try sms_settings as fallback for phone
+                cur.execute("SELECT store_phone_number FROM sms_settings WHERE store_id = %s LIMIT 1", (store_id,))
+                row = cur.fetchone()
+                col = 'store_phone_number'
+                
             conn.close()
             if row:
-                em = (row['store_email'] if hasattr(row, 'keys') else row[0] or '').strip()
-                if em:
-                    emails.append(em)
+                val = (row[col] if hasattr(row, 'keys') else row[0] or '').strip()
+                if val:
+                    recipients.append(val)
         except Exception as e:
-            logger.warning("get_order_email_recipients: could not query store email: %s", e)
+            logger.warning("get_notification_recipients: could not query store settings: %s", e)
+            
+    return recipients
 
-    return emails
+def get_order_email_recipients(store_id: int, order_source: str = '') -> List[str]:
+    """Legacy wrapper for get_notification_recipients and source filtering check."""
+    if not should_send(store_id, 'orders', 'email', order_source):
+        return []
+    return get_notification_recipients(store_id, 'orders', 'email')
+
+
+def get_order_sms_recipients(store_id: int, order_source: str = '') -> List[str]:
+    """Wrapper for get_notification_recipients and source filtering check for SMS."""
+    if not should_send(store_id, 'orders', 'sms', order_source):
+        return []
+    return get_notification_recipients(store_id, 'orders', 'sms')
 
 
 
@@ -327,11 +355,10 @@ def _send_email_aws_ses(
     except ImportError:
         return {"success": False, "message": "boto3 not installed. pip install boto3", "provider": "aws_ses"}
 
-    ak = s.get("aws_access_key_id")
-    sk = s.get("aws_secret_access_key")
-    region = s.get("aws_region") or "us-east-1"
+    ak, sk, region = _get_aws_credentials(s)
+
     if not ak or not sk or sk == "***":
-        return {"success": False, "message": "AWS SES: Access key and secret required", "provider": "aws_ses"}
+        return {"success": False, "message": "AWS SES: Access key and secret required (or platform managed mode not configured)", "provider": "aws_ses"}
 
     try:
         client = boto3.client("ses", region_name=region, aws_access_key_id=ak, aws_secret_access_key=sk)
@@ -369,8 +396,10 @@ def _send_email_aws_ses(
                     "Body": body,
                 },
             )
+        print(f"✅ AWS SES: Email sent successfully to {to_addr}")
         return {"success": True, "message": "Email sent via AWS SES", "provider": "aws_ses"}
     except Exception as e:
+        print(f"❌ AWS SES send failed: {str(e)}")
         logger.exception("AWS SES send failed")
         return {"success": False, "message": str(e), "provider": "aws_ses"}
 
@@ -455,11 +484,9 @@ def _send_sms_aws_sns(
     except ImportError:
         return {"success": False, "message": "boto3 not installed. pip install boto3", "provider": "aws_sns", "message_id": None}
 
-    ak = s.get("aws_access_key_id")
-    sk = s.get("aws_secret_access_key")
-    region = s.get("aws_region") or "us-east-1"
+    ak, sk, region = _get_aws_credentials(s)
     if not ak or not sk or sk == "***":
-        return {"success": False, "message": "AWS SNS: Access key and secret required", "provider": "aws_sns", "message_id": None}
+        return {"success": False, "message": "AWS SNS: Access key and secret required (or platform managed mode not configured)", "provider": "aws_sns", "message_id": None}
 
     normalized = _normalize_phone(phone)
     if len(normalized) < 10:
@@ -1623,6 +1650,14 @@ def send_clockin_notification(
                + (f" — {minutes_late} min late" if is_late and minutes_late > 0 else "")
                + (f" — {overtime_hours:.1f}h overtime" if not is_in and overtime_hours and overtime_hours > 0 else ""))
 
+    is_in = (event_type == 'clock_in')
+    category = 'clockins'
+
+    subject = f"{employee_name} clocked {'in' if is_in else 'out'}"
+    if is_late and minutes_late > 0:
+        subject += f" ({minutes_late}m late)"
+    
+    # Text version for SMS/Simple email
     text = f"{subject}\n{store_name}\n\nEmployee: {employee_name}\nTime: {event_time_str}\n"
     if sched_str:
         text += f"Scheduled: {sched_str}\n"
@@ -1633,21 +1668,28 @@ def send_clockin_notification(
     if hours_worked is not None:
         text += f"Hours worked: {hours_worked:.2f}\n"
 
-    to_send = set()
+    results = {"email": [], "sms": []}
 
-    # Notify admin employees
-    notify_admin = settings.get('notify_admin_on_clockin' if is_in else 'notify_admin_on_clockout', False)
-    if notify_admin:
-        admin_emails = _get_admin_emails_for_clockin(store_id, settings)
-        to_send.update(admin_emails)
+    # 1. Email Notifications
+    if should_send(store_id, category, 'email'):
+        recipients = get_notification_recipients(store_id, category, 'email')
+        
+        # Optionally also notify the employee themselves if that's a sub-preference?
+        # For now, we follow the main recipient list.
+        # If the employee is in the list, they get it. 
+        # If notify_employee_self was a separate boolean in the old settings, 
+        # we can check it if we want, but the new UI uses a list of recipients.
+        
+        for addr in recipients:
+            r = send_email(addr, subject, html, text, store_id)
+            results["email"].append({"to": addr, **r})
 
-    # Notify employee themselves
-    if settings.get('notify_employee_self', False) and employee_email:
-        to_send.add(employee_email)
-
-    for addr in to_send:
-        r = send_email(addr, subject, html, text, store_id)
-        results["email"].append({"to": addr, **r})
+    # 2. SMS Notifications
+    if should_send(store_id, category, 'sms'):
+        sms_recipients = get_notification_recipients(store_id, category, 'sms')
+        for phone in sms_recipients:
+            r = send_sms(phone, text[:160], store_id, category)
+            results["sms"].append({"to": phone, **r})
 
     return results
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
+import { useMobileNav } from '../App'
 import { useTheme } from '../contexts/ThemeContext'
 import { cachedFetch } from '../services/offlineSync'
 import {
@@ -65,6 +66,8 @@ import LoadingSpinner from '../components/common/LoadingSpinner'
 import { useToast } from '../contexts/ToastContext'
 import AccountingDirectoryTab from './AccountingDirectoryTab'
 import Invoices from './Invoices'
+import PayrollTab from './PayrollTab'
+
 import {
   formTitleStyle,
   formLabelStyle,
@@ -175,7 +178,31 @@ function exportReportToPdf(rows, filename, rowTypes) {
 
 function Accounting() {
   const { themeMode, themeColor } = useTheme()
+  const { setContextualNavItems } = useMobileNav()
   const [activeTab, setActiveTab] = useState('dashboard')
+
+  const accountingSections = [
+    { id: 'dashboard', label: 'Directory', icon: FolderOpen },
+    { id: 'settings', label: 'Settings', icon: SettingsIcon },
+    { id: 'chart-of-accounts', label: 'Chart of Accounts', icon: BookOpen },
+    { id: 'transactions', label: 'Transactions', icon: ArrowLeftRight },
+    { id: 'general-ledger', label: 'Ledger', icon: Library },
+    { id: 'financial-statements', label: 'Statements', icon: FileBarChart },
+    { id: 'invoices', label: 'Invoices', icon: FileText },
+    { id: 'vendors', label: 'Vendors', icon: Truck },
+    { id: 'payroll', label: 'Payroll', icon: Users }
+  ]
+
+  useEffect(() => {
+    if (setContextualNavItems) {
+      setContextualNavItems(accountingSections.map(s => ({
+        label: s.label,
+        active: activeTab === s.id,
+        onClick: () => setActiveTab(s.id),
+        icon: s.icon
+      })))
+    }
+  }, [activeTab, setContextualNavItems])
   const [accountIdForLedgerModal, setAccountIdForLedgerModal] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -232,16 +259,6 @@ function Accounting() {
     }).format(amount || 0)
   }
 
-  const accountingSections = [
-    { id: 'dashboard', label: 'Directory', icon: FolderOpen },
-    { id: 'settings', label: 'Settings', icon: SettingsIcon },
-    { id: 'chart-of-accounts', label: 'Chart of Accounts', icon: BookOpen },
-    { id: 'transactions', label: 'Transactions', icon: ArrowLeftRight },
-    { id: 'general-ledger', label: 'Ledger', icon: Library },
-    { id: 'financial-statements', label: 'Financial Statements', icon: FileBarChart },
-    { id: 'invoices', label: 'Invoices', icon: FileText },
-    { id: 'vendors', label: 'Vendors', icon: Truck }
-  ]
 
   return (
     <div style={{
@@ -252,7 +269,7 @@ function Accounting() {
         : { minHeight: '100vh' })
     }}>
       {/* Sidebar Navigation - same as Profile */}
-      <div style={{
+      <div className="accounting-sidebar" style={{
         position: 'fixed',
         left: 0,
         top: '56px',
@@ -372,7 +389,7 @@ function Accounting() {
       </div>
 
       {/* Main Content - same as Profile */}
-      <div style={{
+      <div className="accounting-content" style={{
         marginLeft: sidebarMinimized ? '60px' : '25%',
         width: sidebarMinimized ? 'calc(100% - 60px)' : '75%',
         flex: 1,
@@ -463,6 +480,12 @@ function Accounting() {
             <VendorsTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} />
           </div>
         )}
+        {activeTab === 'payroll' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <PayrollTab formatCurrency={formatCurrency} getAuthHeaders={getAuthHeaders} isDarkMode={isDarkMode} />
+          </div>
+        )}
+
       </div>
     </div>
   )
@@ -2842,7 +2865,7 @@ function FinancialStatementsTab({ dateRange, formatCurrency, getAuthHeaders, set
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <div style={{ flexShrink: 0 }}>
         <div style={{ marginBottom: '24px' }}>
-          <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Financial Statements</h1>
+          <h1 style={{ fontSize: '16px', fontWeight: 500, color: _isDark ? '#9ca3af' : '#6b7280', margin: 0 }}>Statements</h1>
           <p style={{ fontSize: '14px', color: _isDark ? '#9ca3af' : '#6b7280', marginTop: '4px' }}>Profit & Loss, Balance Sheet, Cash Flow, Trial Balance</p>
         </div>
 

@@ -37,6 +37,7 @@ class Account:
         self.created_by = row.get('created_by')
         self.updated_by = row.get('updated_by')
         self.qbo_id = row.get('qbo_id')
+        self.establishment_id = row.get('establishment_id')
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert account to dictionary"""
@@ -58,7 +59,8 @@ class Account:
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'created_by': self.created_by,
             'updated_by': self.updated_by,
-            'qbo_id': self.qbo_id
+            'qbo_id': self.qbo_id,
+            'establishment_id': self.establishment_id
         }
 
 
@@ -67,7 +69,9 @@ class AccountRepository:
     
     @staticmethod
     def find_all(filters: Optional[Dict[str, Any]] = None) -> List[Account]:
-        """Get all accounts with optional filters"""
+        """Get all accounts with optional filters.
+        Scoped to establishment_id when provided; includes global templates (NULL) as fallback.
+        """
         cursor = get_cursor()
         try:
             query = """
@@ -75,27 +79,33 @@ class AccountRepository:
                 WHERE 1=1
             """
             params = []
-            
+
+            establishment_id = filters.get('establishment_id') if filters else None
+            if establishment_id is not None:
+                # Return accounts belonging to this tenant OR global templates
+                query += " AND (establishment_id = %s OR establishment_id IS NULL)"
+                params.append(establishment_id)
+
             if filters:
                 if filters.get('account_type'):
                     query += " AND account_type = %s"
                     params.append(filters['account_type'])
-                
+
                 if filters.get('is_active') is not None:
                     query += " AND is_active = %s"
                     params.append(filters['is_active'])
-                
+
                 if filters.get('parent_account_id') is not None:
                     query += " AND parent_account_id = %s"
                     params.append(filters['parent_account_id'])
-                
+
                 if filters.get('search'):
                     query += " AND (account_name ILIKE %s OR account_number ILIKE %s)"
                     search_term = f"%{filters['search']}%"
                     params.extend([search_term, search_term])
-            
+
             query += " ORDER BY account_number, account_name"
-            
+
             cursor.execute(query, params)
             rows = cursor.fetchall()
             return [Account(dict(row)) for row in rows]
@@ -114,11 +124,29 @@ class AccountRepository:
             cursor.close()
     
     @staticmethod
-    def find_by_account_number(account_number: str) -> Optional[Account]:
-        """Find account by account number"""
+    def find_by_account_number(account_number: str, establishment_id: Optional[int] = None) -> Optional[Account]:
+        """Find account by account number.
+        Prefers tenant-specific account; falls back to global template (establishment_id IS NULL).
+        """
         cursor = get_cursor()
         try:
-            cursor.execute("SELECT * FROM accounting.accounts WHERE account_number = %s", (account_number,))
+            if establishment_id is not None:
+                cursor.execute(
+                    """SELECT * FROM accounting.accounts
+                       WHERE account_number = %s AND establishment_id = %s
+                       LIMIT 1""",
+                    (account_number, establishment_id)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return Account(dict(row))
+            # Fall back to global template
+            cursor.execute(
+                """SELECT * FROM accounting.accounts
+                   WHERE account_number = %s AND establishment_id IS NULL
+                   LIMIT 1""",
+                (account_number,)
+            )
             row = cursor.fetchone()
             return Account(dict(row)) if row else None
         finally:

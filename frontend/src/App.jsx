@@ -1,5 +1,11 @@
-import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import React, { useState, useEffect, createContext, useContext } from 'react'
+
+export const MobileNavContext = createContext({
+  setContextualNavItems: () => {}
+})
+
+export const useMobileNav = () => useContext(MobileNavContext)
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { PermissionProvider, usePermissions } from './contexts/PermissionContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider, useToast } from './contexts/ToastContext'
@@ -29,7 +35,7 @@ function DeepLinkHandler() {
   }, [navigate])
   return null
 }
-import { Settings, User, LogOut, Bell } from 'lucide-react'
+import { Settings, User, LogOut, Bell, Menu } from 'lucide-react'
 import Login from './components/Login'
 import Dashboard from './components/Dashboard'
 import POS from './components/POS'
@@ -48,6 +54,7 @@ import CashRegister from './pages/CashRegister'
 import Customers from './pages/Customers'
 import OfflineBanner from './components/OfflineBanner'
 import NotificationPanel from './components/NotificationPanel'
+import MobileNavBar from './components/MobileNavBar'
 import { useOffline } from './contexts/OfflineContext'
 import { NotificationProvider, useNotifications } from './contexts/NotificationContext'
 import { cachedFetch } from './services/offlineSync'
@@ -346,6 +353,45 @@ function Layout({ children, employee, onLogout }) {
   const { notifications, notificationCount, dismissNotification } = useNotifications()
   const showBanner = !isOnline || isSyncing || pendingCount > 0
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
+  const [touchStart, setTouchStart] = useState(null)
+  const [touchEnd, setTouchEnd] = useState(null)
+
+  // Minimum swipe distance in pixels
+  const minSwipeDistance = 50
+
+  const onTouchStart = (e) => {
+    setTouchEnd(null)
+    setTouchStart(e.targetTouches[0].clientX)
+  }
+
+  const onTouchMove = (e) => setTouchEnd(e.targetTouches[0].clientX)
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return
+    const distance = touchStart - touchEnd
+    const isLeftSwipe = distance > minSwipeDistance
+    const isRightSwipe = distance < -minSwipeDistance
+    if (isLeftSwipe && sidebarOpen) {
+      setSidebarOpen(false)
+    } else if (isRightSwipe && notificationPanelOpen) {
+      setNotificationPanelOpen(false)
+    }
+  }
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const getInitials = (name) => {
+    if (!name) return '?'
+    const parts = name.split(' ')
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+    return name[0].toUpperCase()
+  }
 
   const handleNotificationClick = (notification) => {
     if (notification.type === 'shipment_issue' && notification.pending_shipment_id) {
@@ -383,6 +429,13 @@ function Layout({ children, employee, onLogout }) {
     getCurrentWindow().startDragging()
   }
 
+  const [contextualNavItems, setContextualNavItems] = useState([])
+  const location = useLocation()
+
+  useEffect(() => {
+    setContextualNavItems([])
+  }, [location.pathname])
+
   const headerHeight = 52
   const contentTop = showBanner ? 88 : headerHeight
 
@@ -393,62 +446,211 @@ function Layout({ children, employee, onLogout }) {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        backgroundColor: 'var(--bg-secondary, #f5f5f5)'
+        backgroundColor: 'var(--bg-secondary, #f5f5f5)',
+        position: 'relative'
       }}
     >
-      <div
+      {isMobile && (
+        <div className={`mobile-sidebar ${sidebarOpen ? 'open' : ''}`}>
+           <div className="mobile-sidebar-header">
+             <div className="mobile-sidebar-profile">
+               <div className="mobile-sidebar-avatar">
+                 {getInitials(employee?.employee_name)}
+               </div>
+               <div className="mobile-sidebar-user-info">
+                 <div className="mobile-sidebar-username">{employee?.employee_name || 'Guest'}</div>
+                 <div className="mobile-sidebar-role">{employee?.position || 'Staff'}</div>
+               </div>
+               <button 
+                 className="mobile-sidebar-logout"
+                 onClick={() => { onLogout(); setSidebarOpen(false); }}
+                 title="Logout"
+               >
+                 <LogOut size={18} />
+               </button>
+             </div>
+           </div>
+          <nav className="mobile-sidebar-nav">
+            {contextualNavItems.length > 0 ? (
+              <>
+                {contextualNavItems.map((item, idx) => (
+                  <button 
+                   key={idx} 
+                   onClick={() => { item.onClick(); setSidebarOpen(false); }}
+                   className={item.active ? 'active' : ''}
+                  >
+                    {item.icon && <item.icon size={18} style={{ marginRight: '10px' }} />}
+                    {item.label}
+                  </button>
+                ))}
+              </>
+            ) : (
+               <>
+                 <button className={window.location.pathname === '/dashboard' ? 'active' : ''} onClick={() => { navigate('/dashboard'); setSidebarOpen(false); }}>Dashboard</button>
+                 <button className={window.location.pathname === '/pos' ? 'active' : ''} onClick={() => { navigate('/pos'); setSidebarOpen(false); }}>Checkout</button>
+                 <button className={window.location.pathname === '/inventory' ? 'active' : ''} onClick={() => { navigate('/inventory'); setSidebarOpen(false); }}>Inventory</button>
+                 <button className={window.location.pathname === '/recent-orders' ? 'active' : ''} onClick={() => { navigate('/recent-orders'); setSidebarOpen(false); }}>Orders</button>
+                 <button className={window.location.pathname === '/customers' ? 'active' : ''} onClick={() => { navigate('/customers'); setSidebarOpen(false); }}>Customers</button>
+                 <button className={window.location.pathname === '/tables' ? 'active' : ''} onClick={() => { navigate('/tables'); setSidebarOpen(false); }}>Tables</button>
+                 <button className={window.location.pathname === '/accounting' ? 'active' : ''} onClick={() => { navigate('/accounting'); setSidebarOpen(false); }}>Accounting</button>
+                 <button className={window.location.pathname === '/settings' ? 'active' : ''} onClick={() => { navigate('/settings'); setSidebarOpen(false); }}>Settings</button>
+               </>
+             )}
+           </nav>
+        </div>
+      )}
+      {/* Mobile notifications menu (right side) */}
+      {isMobile && notificationPanelOpen && (
+        <>
+          <div
+            className="mobile-notifications-overlay"
+            onClick={() => setNotificationPanelOpen(false)}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+          />
+          <div
+            className="mobile-notifications"
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+          >
+            <div className="mobile-notifications-header">
+              <span className="mobile-notifications-title">Notifications</span>
+            </div>
+            <div className="mobile-notifications-list">
+              {notifications.length === 0 ? (
+                <div className="mobile-notifications-empty">
+                  No notifications yet
+                </div>
+              ) : (
+                notifications.map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    className="mobile-notifications-item"
+                    onClick={() => {
+                      handleNotificationClick(n)
+                      setNotificationPanelOpen(false)
+                    }}
+                  >
+                    <div className="mobile-notifications-item-main">
+                      <div className="mobile-notifications-item-title">
+                        {n.title}
+                      </div>
+                      {n.body && (
+                        <div className="mobile-notifications-item-body">
+                          {n.body}
+                        </div>
+                      )}
+                    </div>
+                    <div className="mobile-notifications-item-meta">
+                      {/* Simple relative time, reuse same formatting as NotificationPanel */}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+      <div 
+        className={`main-layout-wrapper ${sidebarOpen ? 'sidebar-open' : ''} ${isMobile && notificationPanelOpen ? 'notifications-open' : ''}`}
         style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          width: '100%',
-          zIndex: 1000,
-          flexShrink: 0,
-          backgroundColor: 'var(--bg-primary, #fff)',
-          borderBottom: '3px solid var(--border-color, #ddd)',
-          padding: '12px 20px',
-          paddingLeft: isTauri ? 72 : 20,
+          minHeight: '100vh',
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          transform: 'translateZ(0)'
+          flexDirection: 'column',
+          backgroundColor: 'var(--bg-secondary, #f5f5f5)',
+          transition: 'transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), border-radius 0.4s ease',
+          zIndex: 10,
+          boxShadow: (sidebarOpen || (isMobile && notificationPanelOpen)) ? '-10px 0 30px rgba(0,0,0,0.15)' : 'none',
+          position: 'relative'
         }}
       >
+        {isMobile && sidebarOpen && (
+          <div 
+            className="mobile-sidebar-overlay" 
+            onClick={() => setSidebarOpen(false)}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 9999, // Above everything in the wrapper
+              backgroundColor: 'transparent'
+            }}
+          />
+        )}
+        <div
+          className={isMobile ? 'mobile-header' : 'desktop-header'}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            width: '100%',
+            zIndex: 1000,
+            flexShrink: 0,
+            backgroundColor: isMobile ? 'transparent' : 'var(--bg-primary, #fff)',
+            borderBottom: isMobile ? 'none' : '3px solid var(--border-color, #ddd)',
+            padding: isMobile ? '8px 16px' : '12px 20px',
+            paddingLeft: !isMobile && isTauri ? 72 : (isMobile ? 12 : 20),
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            transform: 'translateZ(0)',
+            backdropFilter: isMobile ? 'blur(20px) saturate(180%)' : 'none',
+            WebkitBackdropFilter: isMobile ? 'blur(20px) saturate(180%)' : 'none',
+          }}
+        >
         <div
           data-tauri-drag-region
-          onMouseDown={isTauri ? handleHeaderDrag : undefined}
+          onMouseDown={!isMobile && isTauri ? handleHeaderDrag : undefined}
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '20px',
+            gap: isMobile ? '8px' : '20px',
             flex: 1,
             minWidth: 0,
             userSelect: 'none',
-            cursor: isTauri ? 'move' : undefined,
-            paddingLeft: '48px'
+            cursor: !isMobile && isTauri ? 'move' : undefined,
+            paddingLeft: isMobile ? '0' : '48px'
           }}
         >
-          <button
-            onClick={() => navigate('/dashboard')}
-            style={{
-              padding: '4px 12px 2px 12px',
-              backgroundColor: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '26px',
-              fontWeight: 400,
-              fontFamily: 'Tanker, sans-serif',
-              letterSpacing: '1px',
-              color: '#4a90e2',
-              lineHeight: 1.2
-            }}
-          >
-            SWFTLY
-          </button>
+          {isMobile && (
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="mobile-menu-button"
+            >
+              <Menu size={20} />
+            </button>
+          )}
+          {!isMobile && (
+            <button
+              onClick={() => navigate('/dashboard')}
+              style={{
+                padding: '4px 12px 2px 12px',
+                backgroundColor: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '26px',
+                fontWeight: 400,
+                fontFamily: 'Tanker, sans-serif',
+                letterSpacing: '1px',
+                color: '#4a90e2',
+                lineHeight: 1.2
+              }}
+            >
+              SWFTLY
+            </button>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {employee && (
+          {!isMobile && employee && (
             <>
               <button
                 type="button"
@@ -506,56 +708,82 @@ function Layout({ children, employee, onLogout }) {
               </button>
             </>
           )}
-          <button
-            type="button"
-            className="button-26 button-26--header"
-            role="button"
-            onClick={() => navigate('/profile')}
-            title="Profile"
-          >
-            <div className="button-26__content">
-              <User size={14} style={{ marginRight: '6px', color: '#888' }} />
-              <span className="button-26__text text">Profile</span>
-            </div>
-          </button>
-          <button
-            type="button"
-            className="button-26 button-26--header"
-            role="button"
-            onClick={onLogout}
-            title="Logout"
-            style={{ marginRight: '-6px' }}
-          >
-            <div className="button-26__content" style={{ paddingRight: '6px' }}>
-              <LogOut size={14} style={{ marginRight: '6px', color: '#888' }} />
-              <span className="button-26__text text">Logout</span>
-            </div>
-          </button>
+          {isMobile ? (
+             <div style={{ position: 'relative' }}>
+               <button
+                  onClick={() => setNotificationPanelOpen(true)}
+                  className="mobile-profile-circle"
+                  aria-label={notificationCount > 0 ? `Notifications (${notificationCount})` : 'Notifications'}
+                  title="Notifications"
+                >
+                  <Bell size={18} />
+                </button>
+                {notificationCount > 0 && (
+                  <span className="mobile-notification-badge" style={{ pointerEvents: 'none' }}>
+                    {notificationCount > 99 ? '99+' : notificationCount}
+                  </span>
+                )}
+             </div>
+          ) : (
+            <button
+              type="button"
+              className="button-26 button-26--header"
+              role="button"
+              onClick={() => navigate('/profile')}
+              title="Profile"
+            >
+              <div className="button-26__content">
+                <User size={14} style={{ marginRight: '6px', color: '#888' }} />
+                <span className="button-26__text text">Profile</span>
+              </div>
+            </button>
+          )}
+          {!isMobile && (
+            <button
+              type="button"
+              className="button-26 button-26--header"
+              role="button"
+              onClick={onLogout}
+              title="Logout"
+              style={{ marginRight: '-6px' }}
+            >
+              <div className="button-26__content" style={{ paddingRight: '6px' }}>
+                <LogOut size={14} style={{ marginRight: '6px', color: '#888' }} />
+                <span className="button-26__text text">Logout</span>
+              </div>
+            </button>
+          )}
         </div>
       </div>
-      <NotificationPanel
-        open={notificationPanelOpen}
-        onClose={() => setNotificationPanelOpen(false)}
-        notifications={notifications}
-        onNotificationClick={handleNotificationClick}
-        onDismissNotification={dismissNotification}
-      />
+      {!isMobile && (
+        <NotificationPanel
+          open={notificationPanelOpen}
+          onClose={() => setNotificationPanelOpen(false)}
+          notifications={notifications}
+          onNotificationClick={handleNotificationClick}
+          onDismissNotification={dismissNotification}
+        />
+      )}
       <OfflineBanner />
-      <main
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: disableScroll ? 'hidden' : 'auto',
-          overscrollBehavior: 'none',
-          WebkitOverflowScrolling: 'touch',
-          paddingTop: contentTop,
-          backgroundColor: 'var(--bg-secondary, #f5f5f5)'
-        }}
-      >
-        {children}
-      </main>
+      <MobileNavContext.Provider value={{ setContextualNavItems }}>
+        <main
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: disableScroll ? 'hidden' : 'auto',
+            overscrollBehavior: 'none',
+            WebkitOverflowScrolling: 'touch',
+            paddingTop: contentTop,
+            backgroundColor: 'var(--bg-secondary, #f5f5f5)'
+          }}
+        >
+          {children}
+        </main>
+      </MobileNavContext.Provider>
+      <MobileNavBar />
     </div>
-  )
+  </div>
+)
 }
 
 function App() {

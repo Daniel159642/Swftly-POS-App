@@ -11,7 +11,7 @@ try:
 except ImportError:
     print("Warning: python-dotenv not installed. Environment variables must be set manually.")
 
-from flask import Flask, render_template, jsonify, send_from_directory, request, Response, make_response, redirect
+from flask import Flask, render_template, jsonify, send_from_directory, request, Response, make_response, redirect, g
 from werkzeug.utils import secure_filename
 
 # Socket.IO support
@@ -131,6 +131,30 @@ def get_barcode_scanner():
     return _barcode_scanner
 
 app = Flask(__name__)
+
+
+@app.before_request
+def _start_request_timer():
+    """Record request start time for simple latency logging."""
+    try:
+        g._request_start_time = time.perf_counter()
+    except Exception:
+        g._request_start_time = None
+
+
+@app.after_request
+def _log_request_timing(response):
+    """Log method, path, status, and duration for each request."""
+    try:
+        start = getattr(g, '_request_start_time', None)
+        if start is not None:
+            duration_ms = (time.perf_counter() - start) * 1000.0
+            # Keep this concise so it’s useful when scanning logs
+            print(f"[TIMING] {request.method} {request.path} -> {response.status_code} in {duration_ms:.1f} ms")
+    except Exception:
+        # Never let timing logging break the response
+        pass
+    return response
 
 # ============================================================================
 # DATABASE CONNECTION - Initialize after database import
@@ -628,15 +652,14 @@ def _send_order_notification_async(order_info):
     print(f"[notification] queuing email for order {order_info.get('order_number')}", flush=True)
     def _do():
         try:
-            from notification_service import send_order_notification, get_order_email_recipients
+            from notification_service import send_order_notification, get_order_email_recipients, get_order_sms_recipients
             # Enrich order_info with full DB details before sending
             enriched = _enrich_order_info_for_notification(order_info)
             order_source = (enriched.get('order_source') or '').strip().lower()
-            print(f"[notification] checking order email for source='{order_source}' order={enriched.get('order_number')}", flush=True)
+            
             emails = get_order_email_recipients(1, order_source)
-            print(f"[notification] resolved emails: {emails}", flush=True)
-            store_settings = get_store_location_settings() or {}
-            phones = [p for p in [(store_settings.get('store_phone') or store_settings.get('store_phone_number') or '').replace('-', '').replace(' ', '').strip()] if p and len(p) >= 10]
+            phones = get_order_sms_recipients(1, order_source)
+            
             if emails or phones:
                 result = send_order_notification(1, enriched, emails, phones)
                 print(f"[notification] send result: {result}", flush=True)
@@ -1047,10 +1070,47 @@ def api_update_inventory(product_id):
         if not update_fields:
             return jsonify({'success': False, 'message': 'No fields to update'}), 400
         
+        # Capture old quantity before update (for accounting adjustment)
+        old_quantity = None
+        new_quantity = update_fields.get('current_quantity')
+        if new_quantity is not None:
+            try:
+                from database import get_connection as _gc
+                from psycopg2.extras import RealDictCursor as _RDC
+                _c = _gc()
+                _cur = _c.cursor(cursor_factory=_RDC)
+                _cur.execute("SELECT current_quantity, product_cost, establishment_id FROM inventory WHERE product_id = %s", (product_id,))
+                _r = _cur.fetchone()
+                _c.close()
+                if _r:
+                    old_quantity = float(_r.get('current_quantity') or 0)
+                    _inv_cost = float(_r.get('product_cost') or 0)
+                    _inv_est  = _r.get('establishment_id')
+            except Exception:
+                pass
+
         # Update product with audit logging
         from database import update_product
         success = update_product(product_id, employee_id=employee_id, **update_fields)
-        
+
+        # If quantity changed, post an inventory adjustment to accounting
+        if success and new_quantity is not None and old_quantity is not None:
+            try:
+                qty_diff = float(new_quantity) - old_quantity
+                if abs(qty_diff) >= 0.01 and _inv_cost > 0:
+                    cost_value = abs(qty_diff) * _inv_cost
+                    adjustment_reason = data.get('adjustment_reason') or 'correction'
+                    from pos_accounting_bridge import journalize_inventory_adjustment_to_accounting
+                    journalize_inventory_adjustment_to_accounting(
+                        adjustment_id=product_id,
+                        amount=cost_value if qty_diff < 0 else -cost_value,
+                        employee_id=employee_id,
+                        reason=adjustment_reason,
+                        establishment_id=session_result.get('establishment_id') or _inv_est,
+                    )
+            except Exception as ae:
+                print(f"Inventory adjustment accounting entry skipped: {ae}")
+
         if success:
             return jsonify({'success': True, 'message': 'Product updated successfully'})
         else:
@@ -1063,6 +1123,72 @@ def api_update_inventory(product_id):
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
+
+
+@app.route('/api/inventory/<int:product_id>/adjust', methods=['POST'])
+def api_inventory_adjust(product_id):
+    """
+    Explicit inventory quantity adjustment with a reason code.
+    Body: { quantity_change: <number>, reason: 'stolen'|'damaged'|'expired'|'correction'|..., session_token? }
+    Posts a journal entry to the appropriate expense account.
+    """
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        session_token = body.get('session_token') or request.headers.get('X-Session-Token') or request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        sess = verify_session(session_token)
+        if not sess.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        employee_id = sess.get('employee_id')
+        establishment_id = sess.get('establishment_id')
+
+        quantity_change = float(body.get('quantity_change') or 0)
+        if quantity_change == 0:
+            return jsonify({'success': False, 'message': 'quantity_change cannot be zero'}), 400
+        reason = (body.get('reason') or 'adjustment').strip()
+
+        # Fetch product cost and update quantity
+        from database import get_connection as _gc
+        from psycopg2.extras import RealDictCursor as _RDC
+        conn = _gc()
+        cur = conn.cursor(cursor_factory=_RDC)
+        cur.execute("SELECT current_quantity, product_cost, establishment_id FROM inventory WHERE product_id = %s", (product_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Product not found'}), 404
+        old_qty = float(row.get('current_quantity') or 0)
+        product_cost = float(row.get('product_cost') or 0)
+        est_id = establishment_id or row.get('establishment_id')
+        new_qty = old_qty + quantity_change
+        cur.execute("UPDATE inventory SET current_quantity = %s WHERE product_id = %s", (new_qty, product_id))
+        conn.commit()
+        conn.close()
+
+        # Journal entry
+        acct_result = {'skipped': True}
+        if product_cost > 0:
+            cost_value = abs(quantity_change) * product_cost
+            from pos_accounting_bridge import journalize_inventory_adjustment_to_accounting
+            acct_result = journalize_inventory_adjustment_to_accounting(
+                adjustment_id=product_id,
+                amount=cost_value if quantity_change < 0 else -cost_value,
+                employee_id=employee_id,
+                reason=reason,
+                establishment_id=est_id,
+            )
+        return jsonify({
+            'success': True,
+            'message': f'Quantity adjusted by {quantity_change:+g} ({reason})',
+            'old_quantity': old_qty,
+            'new_quantity': new_qty,
+            'accounting': acct_result,
+        }), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @app.route('/api/inventory/<int:product_id>', methods=['DELETE'])
@@ -3437,11 +3563,17 @@ def api_pos_bootstrap():
             ensure_metadata_tables()
             sql = """
                 SELECT i.*, v.vendor_name, pm.keywords, pm.tags, pm.attributes, pm.brand, pm.color, pm.size,
-                    pm.category_id as metadata_category_id, c.category_name as metadata_category_name, pm.category_confidence
+                    pm.category_id as metadata_category_id, c.category_name as metadata_category_name, pm.category_confidence,
+                    COALESCE(pop.sell_count, 0) as sell_count
                 FROM inventory i
                 LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
                 LEFT JOIN product_metadata pm ON i.product_id = pm.product_id
                 LEFT JOIN categories c ON pm.category_id = c.category_id
+                LEFT JOIN (
+                    SELECT product_id, SUM(quantity) as sell_count
+                    FROM order_items
+                    GROUP BY product_id
+                ) pop ON i.product_id = pop.product_id
                 WHERE 1=1
             """
             cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'inventory' AND column_name = 'archived'")
@@ -3450,9 +3582,10 @@ def api_pos_bootstrap():
             cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'inventory' AND column_name = 'item_type'")
             has_item_type = cursor.fetchone() is not None
             if has_item_type:
-                sql += " AND (i.item_type = 'product' OR i.item_type IS NULL) ORDER BY i.item_type NULLS LAST, i.product_name"
+                sql += " AND (i.item_type = 'product' OR i.item_type IS NULL) ORDER BY sell_count DESC, i.item_type NULLS LAST, i.product_name"
             else:
-                sql += " ORDER BY i.product_name"
+                sql += " ORDER BY sell_count DESC, i.product_name"
+
             cursor.execute(sql)
             rows = cursor.fetchall()
             columns = list(rows[0].keys()) if rows else []
@@ -7386,10 +7519,22 @@ def api_dashboard_statistics():
         from datetime import datetime, timedelta
         import sys
         
+        # Resolve establishment_id from session token (needed for per-tenant ledger queries)
+        stats_establishment_id = None
+        try:
+            session_token = request.headers.get('X-Session-Token') or request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+            if session_token:
+                from database import verify_session
+                sess = verify_session(session_token)
+                if sess.get('valid'):
+                    stats_establishment_id = sess.get('establishment_id')
+        except Exception:
+            pass
+
         # Get query parameters
         date_range = request.args.get('date_range', 'last_7_days').lower()
         granularity = request.args.get('granularity', 'daily').lower()
-        
+
         # Calculate date range
         today = datetime.now().date()
         if date_range == 'today':
@@ -8065,6 +8210,23 @@ def api_dashboard_statistics():
         # Don't close connection here - it's a global connection that should stay open
         # conn.close()  # Commented out to keep connection alive
         
+        # Accounting-backed income summary and buckets (per-tenant)
+        revenue_accounting = {}
+        accounting_buckets = []
+        try:
+            # Ensure schema + tenant provisioning before querying
+            from accounting_bootstrap import ensure_accounting_schema, ensure_establishment_accounting
+            ensure_accounting_schema()
+            if stats_establishment_id:
+                ensure_establishment_accounting(stats_establishment_id)
+            from database import get_income_summary, get_income_buckets
+            revenue_accounting = get_income_summary(start_date, today, establishment_id=stats_establishment_id)
+            accounting_buckets = get_income_buckets(start_date, today, granularity, establishment_id=stats_establishment_id)
+        except Exception as acc_err:
+            import traceback as _tb
+            print(f"Accounting income summary error: {acc_err}")
+            _tb.print_exc()
+
         # Ensure all values are JSON-serializable
         try:
             response_data = {
@@ -8098,7 +8260,9 @@ def api_dashboard_statistics():
                     'total_products': int(total_products) if total_products is not None else 0,
                     'low_stock': int(low_stock) if low_stock is not None else 0,
                     'total_value': float(inventory_value) if inventory_value is not None else 0.0
-                }
+                },
+                'revenue_accounting': revenue_accounting,
+                'accounting_buckets': accounting_buckets,
             }
             return jsonify(response_data)
         except Exception as json_err:
@@ -8998,8 +9162,32 @@ def api_apply_exchange_credit():
                 """, (return_id_linked, order_id))
             
             conn.commit()
+
+            # Journalize the store-credit liability reduction
+            try:
+                session_token = (
+                    request.headers.get('X-Session-Token') or
+                    request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+                )
+                _employee_id = data.get('employee_id') or 1
+                _establishment_id = None
+                if session_token:
+                    _sess = verify_session(session_token)
+                    if _sess.get('valid'):
+                        _employee_id = _sess.get('employee_id') or _employee_id
+                        _establishment_id = _sess.get('establishment_id')
+                from pos_accounting_bridge import journalize_exchange_credit_applied_to_accounting
+                journalize_exchange_credit_applied_to_accounting(
+                    exchange_credit_id=exchange_credit_id,
+                    amount=credit_amount,
+                    employee_id=_employee_id,
+                    establishment_id=_establishment_id,
+                )
+            except Exception as je:
+                print(f"Exchange credit accounting entry skipped: {je}")
+
             conn.close()
-            
+
             return jsonify({
                 'success': True,
                 'message': 'Exchange credit applied successfully',
@@ -12358,8 +12546,24 @@ def _save_sms_settings(store_id, data):
         try:
             cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_name = 'sms_settings' AND column_name = 'email_provider'")
             if cursor.fetchone():
-                updates.extend(['email_provider = %s', 'email_from_address = %s', 'notification_preferences = %s::jsonb'])
-                params.extend([(data.get('email_provider') or 'gmail'), data.get('email_from_address') or None, prefs_json])
+                col_updates = ['email_provider = %s', 'email_from_address = %s', 'notification_preferences = %s::jsonb']
+                col_params = [(data.get('email_provider') or 'gmail'), data.get('email_from_address') or None, prefs_json]
+                
+                # Check for use_platform_aws as well
+                cursor.execute("SELECT 1 FROM information_schema.columns WHERE table_name = 'sms_settings' AND column_name = 'use_platform_aws'")
+                if cursor.fetchone():
+                    col_updates.append('use_platform_aws = %s')
+                    col_params.append(1 if data.get('use_platform_aws') else 0)
+                else:
+                    # Auto-add column if not exists – SaaS convenience
+                    try:
+                        cursor.execute("ALTER TABLE sms_settings ADD COLUMN use_platform_aws integer DEFAULT 0")
+                        col_updates.append('use_platform_aws = %s')
+                        col_params.append(1 if data.get('use_platform_aws') else 0)
+                    except Exception: pass
+
+                updates.extend(col_updates)
+                params.extend(col_params)
         except Exception:
             conn.rollback()
 
@@ -12383,8 +12587,8 @@ def _save_sms_settings(store_id, data):
                 cursor.execute("""
                     INSERT INTO sms_settings (store_id, sms_provider, smtp_server, smtp_port, smtp_user, smtp_password,
                         smtp_use_tls, business_name, store_phone_number, aws_access_key_id, aws_secret_access_key,
-                        aws_region, email_provider, email_from_address, notification_preferences, auto_send_rewards_earned, auto_send_rewards_redeemed)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, 1, 1)
+                        aws_region, email_provider, email_from_address, notification_preferences, use_platform_aws, auto_send_rewards_earned, auto_send_rewards_redeemed)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, 1, 1)
                 """, (
                     store_id, data.get('sms_provider', 'email'),
                     data.get('smtp_server', 'smtp.gmail.com'), int(data.get('smtp_port', 587)),
@@ -12573,6 +12777,34 @@ def api_employees_with_email():
                 WHERE active = 1
                   AND email IS NOT NULL
                   AND TRIM(email) <> ''
+                ORDER BY first_name, last_name
+            """)
+            rows = cursor.fetchall()
+            return jsonify([dict(r) for r in rows] if rows else [])
+        finally:
+            conn.close()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/employees/with-phone', methods=['GET'])
+def api_employees_with_phone():
+    """Return all active employees that have a phone number set — used for SMS notification recipient selection."""
+    ok, err = _require_notification_auth()
+    if not ok:
+        return err
+    try:
+        conn, cursor = _pg_conn()
+        try:
+            cursor.execute("""
+                SELECT employee_id,
+                       TRIM(COALESCE(first_name || ' ' || last_name, first_name, last_name, employee_code, 'Employee')) AS name,
+                       phone,
+                       COALESCE(position, 'Employee') AS role
+                FROM employees
+                WHERE active = 1
+                  AND phone IS NOT NULL
+                  AND TRIM(phone) <> ''
                 ORDER BY first_name, last_name
             """)
             rows = cursor.fetchall()
@@ -13276,7 +13508,8 @@ def api_close_register():
                         employee_id,
                         float(result.get('expected_cash', 0)),
                         float(result.get('ending_cash', 0)),
-                        float(result['discrepancy'])
+                        float(result['discrepancy']),
+                        establishment_id=session_result.get('establishment_id')
                     )
                     if not jr.get('success'):
                         print(f"Accounting register close (session {session_id}): {jr.get('message', 'unknown')}")
@@ -13350,7 +13583,8 @@ def api_add_cash_transaction():
                     data.get('transaction_type', ''),
                     float(data.get('amount', 0)),
                     data.get('reason'),
-                    result.get('transaction_id')
+                    result.get('transaction_id'),
+                    establishment_id=session_result.get('establishment_id')
                 )
                 if not jr.get('success'):
                     print(f"Accounting cash transaction: {jr.get('message', 'unknown')}")
@@ -13670,7 +13904,8 @@ def api_daily_cash_count():
                             int(result['count_id']),
                             float(total_amount),
                             employee_id,
-                            reason=notes
+                            reason=notes,
+                            establishment_id=session_result.get('establishment_id')
                         )
                         if not jr.get('success') and jr.get('message'):
                             print(f"Accounting journalize_cash_drop error: {jr.get('message')}")
@@ -14524,6 +14759,1070 @@ def api_accounting_labor_summary():
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/accounting/payroll-summary', methods=['GET'])
+def api_accounting_payroll_summary():
+    """Detailed payroll summary: scheduled vs actual hours, tips, and total earned."""
+    try:
+        session_token = request.headers.get('X-Session-Token') or request.args.get('session_token')
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        session_result = verify_session(session_token)
+        if not session_result.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        
+        employee_id = session_result.get('employee_id')
+        role_info = get_employee_role(employee_id)
+        role_name = (role_info or {}).get('role_name') or ''
+        employee = get_employee(employee_id)
+        position = (employee or {}).get('position') or ''
+        if role_name.lower() not in ('manager', 'admin') and position.lower() not in ('manager', 'admin'):
+            return jsonify({'success': False, 'message': 'Manager or Admin required'}), 403
+
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        if not start_date or not end_date:
+            return jsonify({'success': False, 'message': 'start_date and end_date required'}), 400
+
+        # Get actual labor summary
+        labor = get_labor_summary(start_date, end_date, None)
+        labor_entries = {e['employee_id']: e for e in labor.get('entries', [])}
+
+        conn = get_connection()
+        from psycopg2.extras import RealDictCursor
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # 1. Get Scheduled Hours
+        # We need to sum up (end_time - start_time) from Scheduled_Shifts and employee_schedule
+        cursor.execute("""
+            SELECT employee_id, 
+                   SUM((EXTRACT(EPOCH FROM (end_time::time - start_time::time)) / 3600) - COALESCE(break_duration, 0)/60.0) as scheduled_hours
+            FROM (
+                SELECT employee_id, start_time, end_time, break_duration FROM employee_schedule 
+                WHERE schedule_date >= %s AND schedule_date <= %s
+                UNION ALL
+                SELECT ss.employee_id, ss.start_time, ss.end_time, ss.break_duration 
+                FROM Scheduled_Shifts ss
+                JOIN Schedule_Periods sp ON ss.period_id = sp.period_id
+                WHERE ss.shift_date >= %s AND ss.shift_date <= %s AND ss.is_draft = 0 AND sp.status = 'published'
+            ) combined
+            GROUP BY employee_id
+        """, (start_date, end_date, start_date, end_date))
+        scheduled_rows = cursor.fetchall()
+        scheduled_map = {r['employee_id']: float(r['scheduled_hours'] or 0) for r in scheduled_rows}
+
+        # 2. Get Tips from Orders
+        cursor.execute("""
+            SELECT employee_id, COALESCE(SUM(tip), 0) as total_tips, COUNT(*) as shift_count
+            FROM orders
+            WHERE order_date >= %s AND order_date <= %s AND order_status != 'voided'
+            GROUP BY employee_id
+        """, (start_date, end_date))
+        tips_rows = cursor.fetchall()
+        tips_map = {r['employee_id']: {
+            'total_tips': float(r['total_tips'] or 0),
+            'shift_count': int(r['shift_count'] or 0)
+        } for r in tips_rows}
+
+        # 3. Get all active employees to ensure we show everyone
+        cursor.execute("SELECT employee_id, first_name || ' ' || last_name as name, position, hourly_rate FROM employees WHERE active = 1")
+        all_emps = cursor.fetchall()
+
+        entries = []
+        total_tips = 0
+        total_labor_cost = 0
+        total_hours = 0
+
+        for emp in all_emps:
+            eid = emp['employee_id']
+            actual = labor_entries.get(eid, {})
+            sched_hours = scheduled_map.get(eid, 0)
+            tips_info = tips_map.get(eid, {'total_tips': 0, 'shift_count': 0})
+            
+            # Use data from labor summary if exists, otherwise defaults
+            actual_hours = float(actual.get('hours', 0))
+            hourly_rate = float(actual.get('hourly_rate', emp['hourly_rate'] or 0))
+            labor_cost = float(actual.get('labor_cost', actual_hours * hourly_rate))
+            tips = tips_info['total_tips']
+            
+            entries.append({
+                'employee_id': eid,
+                'employee_name': emp['name'],
+                'position': emp['position'],
+                'scheduled_hours': round(sched_hours, 2),
+                'actual_hours': round(actual_hours, 2),
+                'hourly_rate': hourly_rate,
+                'labor_cost': round(labor_cost, 2),
+                'tips': round(tips, 2),
+                'shift_count': tips_info['shift_count'],
+                'total_earned': round(labor_cost + tips, 2)
+            })
+
+            total_tips += tips
+            total_labor_cost += labor_cost
+            total_hours += actual_hours
+
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'summary': {
+                    'total_labor_cost': round(total_labor_cost, 2),
+                    'total_hours': round(total_hours, 2),
+                    'total_tips': round(total_tips, 2),
+                    'employee_count': len(all_emps)
+                },
+                'employees': entries
+            }
+        }), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/dashboard/popular-products', methods=['GET'])
+def api_dashboard_popular_products():
+    """
+    Comprehensive popularity scoring per product over the requested window.
+
+    Popularity score (0–100) weights:
+      40%  Sales velocity  – avg units sold per day
+      25%  Revenue density – avg daily revenue
+      20%  Consistency     – fraction of days in window that had at least one sale
+      15%  Turnover rate   – units sold / (units sold + avg current stock)
+
+    Expiration adjustment: score is penalised when the nearest expiring lot will
+    expire before the stock can be sold at current velocity, surfacing products
+    that are popular but carrying stale stock.
+
+    Query params:
+      days  – lookback window in days (default 30)
+    """
+    try:
+        session_token = (
+            request.headers.get('X-Session-Token') or
+            request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        )
+        establishment_id = None
+        if session_token:
+            sess = verify_session(session_token)
+            if sess.get('valid'):
+                establishment_id = sess.get('establishment_id')
+
+        days = int(request.args.get('days', 30))
+        est_filter_i  = "AND i.establishment_id  = %(eid)s" if establishment_id else ""
+        est_filter_o  = "AND o.establishment_id  = %(eid)s" if establishment_id else ""
+        est_filter_ps = "AND ps.establishment_id = %(eid)s" if establishment_id else ""
+
+        from database import get_connection as _gc
+        from psycopg2.extras import RealDictCursor as _RDC
+        conn = _gc()
+        cur  = conn.cursor(cursor_factory=_RDC)
+
+        cur.execute(f"""
+        WITH
+        -- ── Sales within window ──────────────────────────────────────────────────
+        sales AS (
+            SELECT
+                oi.product_id,
+                COUNT(DISTINCT o.order_id)            AS order_count,
+                COUNT(DISTINCT o.order_date::date)    AS active_days,
+                SUM(oi.quantity)                      AS units_sold,
+                SUM(oi.subtotal)                      AS revenue,
+                MIN(o.order_date)                     AS first_sale,
+                MAX(o.order_date)                     AS last_sale,
+                -- daily velocity: units per calendar day in the window
+                SUM(oi.quantity)::numeric / %(days)s  AS daily_velocity,
+                SUM(oi.subtotal)::numeric  / %(days)s AS daily_revenue
+            FROM order_items oi
+            JOIN orders o ON o.order_id = oi.order_id
+            WHERE o.order_date >= CURRENT_DATE - INTERVAL '{days} days'
+              AND o.order_status != 'voided'
+              {est_filter_o}
+            GROUP BY oi.product_id
+        ),
+        -- ── Latest lot expiration per product from verified shipments ────────────
+        expirations AS (
+            SELECT
+                psi.product_id,
+                MIN(psi.expiration_date::date)  AS nearest_expiry,
+                MAX(ps.completed_at::date)      AS last_shipment_date,
+                ROUND(AVG(psi.quantity_verified))::int AS avg_shipment_qty,
+                SUM(psi.quantity_verified)      AS total_received
+            FROM pending_shipment_items psi
+            JOIN pending_shipments ps ON ps.pending_shipment_id = psi.pending_shipment_id
+            WHERE psi.product_id IS NOT NULL
+              AND psi.expiration_date IS NOT NULL
+              AND psi.expiration_date != ''
+              AND ps.completed_at IS NOT NULL
+              {est_filter_ps}
+            GROUP BY psi.product_id
+        ),
+        -- ── Shipment history (all products, expiry nullable) ────────────────────
+        shipments AS (
+            SELECT
+                psi.product_id,
+                MAX(ps.completed_at::date)      AS last_shipment_date,
+                ROUND(AVG(psi.quantity_verified))::int AS avg_shipment_qty,
+                SUM(psi.quantity_verified)      AS total_received
+            FROM pending_shipment_items psi
+            JOIN pending_shipments ps ON ps.pending_shipment_id = psi.pending_shipment_id
+            WHERE psi.product_id IS NOT NULL
+              AND ps.completed_at IS NOT NULL
+              {est_filter_ps}
+            GROUP BY psi.product_id
+        ),
+        -- ── Max stats for normalisation ──────────────────────────────────────────
+        maxes AS (
+            SELECT
+                MAX(daily_velocity) AS max_vel,
+                MAX(daily_revenue)  AS max_rev,
+                MAX(active_days)    AS max_days
+            FROM sales
+        )
+        SELECT
+            i.product_id,
+            i.product_name,
+            i.sku,
+            i.category,
+            i.product_price,
+            i.product_cost,
+            i.current_quantity,
+            i.last_restocked,
+            COALESCE(s.units_sold, 0)       AS units_sold,
+            COALESCE(s.revenue, 0)          AS revenue,
+            COALESCE(s.order_count, 0)      AS order_count,
+            COALESCE(s.active_days, 0)      AS active_days,
+            COALESCE(s.daily_velocity, 0)   AS daily_velocity,
+            COALESCE(s.daily_revenue, 0)    AS daily_revenue,
+            s.first_sale,
+            s.last_sale,
+            -- Shipment history
+            COALESCE(sh.last_shipment_date, i.last_restocked::date) AS last_shipment_date,
+            COALESCE(sh.avg_shipment_qty, 0)  AS avg_shipment_qty,
+            COALESCE(sh.total_received, 0)    AS total_received,
+            -- Expiration
+            ex.nearest_expiry,
+            CASE
+                WHEN ex.nearest_expiry IS NOT NULL AND s.daily_velocity > 0
+                THEN ROUND((ex.nearest_expiry - CURRENT_DATE)::numeric / NULLIF(s.daily_velocity, 0))
+                ELSE NULL
+            END AS days_to_sell_expiring_stock,
+            -- Days of supply
+            CASE
+                WHEN s.daily_velocity > 0
+                THEN ROUND(i.current_quantity::numeric / s.daily_velocity)
+                ELSE NULL
+            END AS days_of_supply,
+            -- ── Popularity score (0–100) ──────────────────────────────────────
+            ROUND(LEAST(100,
+                COALESCE(
+                    (
+                      -- velocity component (40%)
+                      0.40 * LEAST(1, COALESCE(s.daily_velocity,0) / NULLIF(m.max_vel,0)) * 100
+                      -- revenue density (25%)
+                    + 0.25 * LEAST(1, COALESCE(s.daily_revenue,0) / NULLIF(m.max_rev,0)) * 100
+                      -- consistency (20%)
+                    + 0.20 * LEAST(1, COALESCE(s.active_days,0)::numeric / NULLIF(m.max_days,0)) * 100
+                      -- turnover (15%)
+                    + 0.15 * LEAST(1,
+                          COALESCE(s.units_sold,0)::numeric
+                          / NULLIF(COALESCE(s.units_sold,0) + GREATEST(1, i.current_quantity), 0)
+                      ) * 100
+                    ) * CASE
+                          -- Expiry penalty: multiply by 0.7 when stock will expire before it sells
+                          WHEN ex.nearest_expiry IS NOT NULL
+                           AND s.daily_velocity > 0
+                           AND (ex.nearest_expiry - CURRENT_DATE) < (i.current_quantity / s.daily_velocity)
+                          THEN 0.7
+                          -- Expiry penalty: expired stock on hand
+                          WHEN ex.nearest_expiry IS NOT NULL
+                           AND ex.nearest_expiry < CURRENT_DATE
+                          THEN 0.5
+                          ELSE 1.0 END,
+                    0
+                )
+            ))::int AS popularity_score,
+            -- Expiry warning flag
+            CASE
+                WHEN ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry <= CURRENT_DATE        THEN 'expired'
+                WHEN ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry <= CURRENT_DATE + 7    THEN 'expires_week'
+                WHEN ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry <= CURRENT_DATE + 30   THEN 'expires_month'
+                WHEN ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry <= CURRENT_DATE + 90   THEN 'expires_quarter'
+                ELSE NULL
+            END AS expiry_flag
+        FROM inventory i
+        CROSS JOIN maxes m
+        LEFT JOIN sales s       ON s.product_id  = i.product_id
+        LEFT JOIN shipments sh  ON sh.product_id = i.product_id
+        LEFT JOIN expirations ex ON ex.product_id = i.product_id
+        WHERE COALESCE(s.units_sold, 0) > 0   -- only products that sold something
+          {est_filter_i}
+        ORDER BY popularity_score DESC, units_sold DESC
+        LIMIT 30
+        """, {'days': days, 'eid': establishment_id})
+
+        rows = cur.fetchall()
+        conn.close()
+
+        products = []
+        for r in rows:
+            d = dict(r)
+            for k in ('product_price', 'product_cost', 'daily_velocity', 'daily_revenue', 'revenue'):
+                if d.get(k) is not None:
+                    d[k] = round(float(d[k]), 2)
+            for k in ('last_shipment_date', 'nearest_expiry', 'first_sale', 'last_sale', 'last_restocked'):
+                if d.get(k) is not None:
+                    d[k] = str(d[k])
+            products.append(d)
+
+        return jsonify({'success': True, 'products': products, 'days': days}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e), 'products': []}), 500
+
+
+@app.route('/api/dashboard/restock-recommendations', methods=['GET'])
+def api_dashboard_restock_recommendations():
+    """
+    Restock urgency scoring. Every product is scored 0-100 based on:
+
+      Urgency = weighted(days_of_supply, time_since_shipment, demand_trend, expiry_risk)
+
+      - days_of_supply:    current_quantity / daily_velocity  → lower = more urgent
+      - shipment_lag:      days since last shipment relative to typical reorder cycle
+      - demand_trend:      recent 7-day velocity vs 30-day velocity (accelerating demand)
+      - expiry_urgency:    stock expiring before it can sell at current velocity
+
+    Also computes a suggested_order_qty = max(0, par_level - current_quantity)
+    where par_level = ceil(daily_velocity * avg_lead_time_days * 1.25) safety stock.
+
+    Query params:
+      days     – velocity lookback window (default 30)
+      limit    – max products returned (default 25)
+    """
+    try:
+        session_token = (
+            request.headers.get('X-Session-Token') or
+            request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        )
+        establishment_id = None
+        if session_token:
+            sess = verify_session(session_token)
+            if sess.get('valid'):
+                establishment_id = sess.get('establishment_id')
+
+        days  = int(request.args.get('days', 30))
+        limit = int(request.args.get('limit', 25))
+        est_filter_i  = "AND i.establishment_id  = %(eid)s" if establishment_id else ""
+        est_filter_o  = "AND o.establishment_id  = %(eid)s" if establishment_id else ""
+        est_filter_ps = "AND ps.establishment_id = %(eid)s" if establishment_id else ""
+
+        from database import get_connection as _gc
+        from psycopg2.extras import RealDictCursor as _RDC
+        conn = _gc()
+        cur  = conn.cursor(cursor_factory=_RDC)
+
+        cur.execute(f"""
+        WITH
+        -- ── 30-day velocity ──────────────────────────────────────────────────────
+        vel30 AS (
+            SELECT oi.product_id,
+                   SUM(oi.quantity)::numeric / %(days)s AS daily_vel,
+                   SUM(oi.subtotal)                     AS revenue_30
+            FROM order_items oi
+            JOIN orders o ON o.order_id = oi.order_id
+            WHERE o.order_date >= CURRENT_DATE - INTERVAL '{days} days'
+              AND o.order_status != 'voided'
+              {est_filter_o}
+            GROUP BY oi.product_id
+        ),
+        -- ── 7-day velocity (trend) ───────────────────────────────────────────────
+        vel7 AS (
+            SELECT oi.product_id,
+                   SUM(oi.quantity)::numeric / 7 AS daily_vel_7
+            FROM order_items oi
+            JOIN orders o ON o.order_id = oi.order_id
+            WHERE o.order_date >= CURRENT_DATE - INTERVAL '7 days'
+              AND o.order_status != 'voided'
+              {est_filter_o}
+            GROUP BY oi.product_id
+        ),
+        -- ── Shipment history ─────────────────────────────────────────────────────
+        shipments AS (
+            SELECT
+                psi.product_id,
+                MAX(ps.completed_at)            AS last_shipment_ts,
+                MAX(ps.completed_at::date)      AS last_shipment_date,
+                ROUND(AVG(psi.quantity_verified))::int  AS avg_shipment_qty,
+                COUNT(DISTINCT ps.pending_shipment_id)  AS shipment_count,
+                -- average lead-time between consecutive shipments (days)
+                CASE WHEN COUNT(DISTINCT ps.pending_shipment_id) > 1
+                     THEN ROUND(
+                            EXTRACT(EPOCH FROM (MAX(ps.completed_at) - MIN(ps.completed_at)))
+                            / 86400.0
+                            / NULLIF(COUNT(DISTINCT ps.pending_shipment_id) - 1, 0)
+                          )
+                     ELSE 14   -- default 2-week assumption
+                END AS avg_lead_days
+            FROM pending_shipment_items psi
+            JOIN pending_shipments ps ON ps.pending_shipment_id = psi.pending_shipment_id
+            WHERE psi.product_id IS NOT NULL
+              AND ps.completed_at IS NOT NULL
+              {est_filter_ps}
+            GROUP BY psi.product_id
+        ),
+        -- ── Nearest expiry per product ───────────────────────────────────────────
+        expirations AS (
+            SELECT psi.product_id,
+                   MIN(psi.expiration_date::date) AS nearest_expiry
+            FROM pending_shipment_items psi
+            JOIN pending_shipments ps ON ps.pending_shipment_id = psi.pending_shipment_id
+            WHERE psi.product_id IS NOT NULL
+              AND psi.expiration_date IS NOT NULL AND psi.expiration_date != ''
+              AND ps.completed_at IS NOT NULL
+              {est_filter_ps}
+            GROUP BY psi.product_id
+        )
+        SELECT
+            i.product_id,
+            i.product_name,
+            i.sku,
+            i.category,
+            i.product_price,
+            i.product_cost,
+            i.current_quantity,
+            i.last_restocked,
+            v.vendor_id,
+            -- Velocity
+            COALESCE(vel30.daily_vel,    0)   AS daily_vel_30,
+            COALESCE(vel7.daily_vel_7,   0)   AS daily_vel_7,
+            COALESCE(vel30.revenue_30,   0)   AS revenue_30,
+            -- Shipment data
+            sh.last_shipment_date,
+            COALESCE(sh.avg_shipment_qty, 0)  AS avg_shipment_qty,
+            COALESCE(sh.shipment_count,   0)  AS shipment_count,
+            COALESCE(sh.avg_lead_days,   14)  AS avg_lead_days,
+            -- Expiration
+            ex.nearest_expiry,
+            -- ── Derived metrics ───────────────────────────────────────────────
+            CASE WHEN COALESCE(vel30.daily_vel,0) > 0
+                 THEN ROUND(i.current_quantity::numeric / vel30.daily_vel)
+                 ELSE NULL
+            END AS days_of_supply,
+            -- Par level = velocity × lead_time × 1.25 safety factor
+            CEIL(
+                COALESCE(vel30.daily_vel,0)
+                * COALESCE(sh.avg_lead_days,14)
+                * 1.25
+            )::int  AS par_level,
+            -- Suggested order: max(0, par_level - current_qty + pending_replenishment)
+            GREATEST(0,
+                CEIL(COALESCE(vel30.daily_vel,0) * COALESCE(sh.avg_lead_days,14) * 1.25)
+                - i.current_quantity
+            )::int  AS suggested_order_qty,
+            -- Days since last shipment
+            COALESCE(
+                (CURRENT_DATE - sh.last_shipment_date)::int,
+                999
+            ) AS days_since_shipment,
+            -- ── Urgency score (0–100, higher = order sooner) ─────────────────
+            LEAST(100, ROUND(
+                -- (1) Supply-days component (40%): fewer days supply = more urgent
+                0.40 * LEAST(100,
+                    CASE
+                        WHEN COALESCE(vel30.daily_vel,0) = 0 AND i.current_quantity = 0 THEN 100
+                        WHEN COALESCE(vel30.daily_vel,0) = 0                            THEN 0
+                        ELSE GREATEST(0, 100 - (i.current_quantity::numeric / vel30.daily_vel) * 4)
+                    END
+                )
+                -- (2) Demand trend (25%): accelerating demand raises urgency
+                + 0.25 * LEAST(100,
+                    CASE
+                        WHEN COALESCE(vel30.daily_vel,0) > 0
+                        THEN LEAST(100, (COALESCE(vel7.daily_vel_7,0) / NULLIF(vel30.daily_vel,0)) * 50)
+                        ELSE 0
+                    END
+                )
+                -- (3) Shipment lag (20%): long gap since last shipment = more urgent
+                + 0.20 * LEAST(100,
+                    COALESCE((CURRENT_DATE - sh.last_shipment_date)::numeric, 90) / 90.0 * 100
+                )
+                -- (4) Expiry urgency (15%): stock expiring before it can be sold
+                + 0.15 * CASE
+                    WHEN ex.nearest_expiry IS NULL THEN 0
+                    WHEN ex.nearest_expiry < CURRENT_DATE THEN 100
+                    WHEN COALESCE(vel30.daily_vel,0) > 0
+                     AND (ex.nearest_expiry - CURRENT_DATE) < (i.current_quantity / vel30.daily_vel)
+                    THEN 80
+                    WHEN ex.nearest_expiry <= CURRENT_DATE + 14 THEN 70
+                    WHEN ex.nearest_expiry <= CURRENT_DATE + 30 THEN 40
+                    ELSE 0
+                END
+            ))::int AS urgency_score,
+            -- Reason tags (comma-separated, drives badge display)
+            TRIM(BOTH ',' FROM CONCAT(
+                CASE WHEN i.current_quantity = 0 THEN 'out_of_stock,' ELSE '' END,
+                CASE WHEN COALESCE(vel30.daily_vel,0) > 0
+                      AND i.current_quantity::numeric / vel30.daily_vel < 7  THEN 'low_supply,' ELSE '' END,
+                CASE WHEN COALESCE(vel7.daily_vel_7,0) > COALESCE(vel30.daily_vel,0) * 1.3 THEN 'demand_spike,' ELSE '' END,
+                CASE WHEN ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry < CURRENT_DATE THEN 'expired,'
+                     WHEN ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry <= CURRENT_DATE + 14 THEN 'expires_soon,'
+                     ELSE '' END,
+                CASE WHEN COALESCE((CURRENT_DATE - sh.last_shipment_date)::int,999) > 45 THEN 'overdue_reorder,' ELSE '' END
+            )) AS reason_tags
+        FROM inventory i
+        LEFT JOIN (SELECT DISTINCT ON (product_id) product_id, vendor_id FROM inventory ORDER BY product_id) v
+            ON v.product_id = i.product_id
+        LEFT JOIN vel30       ON vel30.product_id = i.product_id
+        LEFT JOIN vel7        ON vel7.product_id  = i.product_id
+        LEFT JOIN shipments sh ON sh.product_id   = i.product_id
+        LEFT JOIN expirations ex ON ex.product_id = i.product_id
+        WHERE (
+            i.current_quantity < 20
+            OR (vel30.daily_vel > 0 AND i.current_quantity::numeric / vel30.daily_vel < 14)
+            OR (ex.nearest_expiry IS NOT NULL AND ex.nearest_expiry <= CURRENT_DATE + 30)
+        )
+        {est_filter_i}
+        ORDER BY urgency_score DESC, daily_vel_30 DESC
+        LIMIT %(limit)s
+        """, {'days': days, 'eid': establishment_id, 'limit': limit})
+
+        rows = cur.fetchall()
+        conn.close()
+
+        items = []
+        for r in rows:
+            d = dict(r)
+            for k in ('product_price', 'product_cost', 'daily_vel_30', 'daily_vel_7', 'revenue_30'):
+                if d.get(k) is not None:
+                    d[k] = round(float(d[k]), 2)
+            for k in ('last_shipment_date', 'nearest_expiry', 'last_restocked'):
+                if d.get(k) is not None:
+                    d[k] = str(d[k])
+            items.append(d)
+
+        return jsonify({'success': True, 'items': items, 'days': days}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e), 'items': []}), 500
+
+
+@app.route('/api/dashboard/customer-analytics', methods=['GET'])
+def api_dashboard_customer_analytics():
+    """Customer breakdown: registered vs guest, rewards enrollment, new customer trend."""
+    try:
+        session_token = request.args.get('session_token') or request.headers.get('X-Session-Token') or request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        sess = verify_session(session_token) if session_token else {}
+        establishment_id = sess.get('establishment_id')
+        days = int(request.args.get('days', 30))
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        est_filter_o = 'AND o.establishment_id = %(eid)s' if establishment_id else ''
+        est_filter_c = 'AND c.establishment_id = %(eid)s' if establishment_id else ''
+        params = {'eid': establishment_id, 'days': days}
+
+        # Registered vs guest order counts
+        cur.execute(f"""
+            SELECT
+                COUNT(*) FILTER (WHERE customer_id IS NOT NULL)  AS registered_orders,
+                COUNT(*) FILTER (WHERE customer_id IS NULL)      AS guest_orders,
+                COUNT(DISTINCT customer_id) FILTER (WHERE customer_id IS NOT NULL) AS unique_registered_customers,
+                SUM(total) FILTER (WHERE customer_id IS NOT NULL) AS registered_revenue,
+                SUM(total) FILTER (WHERE customer_id IS NULL)     AS guest_revenue
+            FROM orders o
+            WHERE order_status = 'completed'
+              AND payment_status = 'completed'
+              {est_filter_o}
+        """, params)
+        order_row = cur.fetchone()
+
+        # Total customers
+        cur.execute(f"""
+            SELECT COUNT(*) AS total_customers,
+                   COUNT(*) FILTER (WHERE loyalty_points > 0) AS customers_with_points,
+                   SUM(loyalty_points) AS total_points_outstanding,
+                   SUM(total_spent) AS total_customer_spend
+            FROM customers c
+            WHERE 1=1 {est_filter_c}
+        """, params)
+        cust_row = cur.fetchone()
+
+        # Enrollment trend: new customers per day for last N days
+        cur.execute(f"""
+            SELECT DATE(created_date) AS day,
+                   COUNT(*) AS new_customers
+            FROM customers c
+            WHERE created_date >= CURRENT_DATE - %(days)s
+              {est_filter_c}
+            GROUP BY DATE(created_date)
+            ORDER BY day ASC
+        """, params)
+        trend_rows = cur.fetchall()
+
+        # Customers enrolled in last 7 / 30 / 90 days
+        cur.execute(f"""
+            SELECT
+                COUNT(*) FILTER (WHERE created_date >= CURRENT_DATE - 7)  AS enrolled_7d,
+                COUNT(*) FILTER (WHERE created_date >= CURRENT_DATE - 30) AS enrolled_30d,
+                COUNT(*) FILTER (WHERE created_date >= CURRENT_DATE - 90) AS enrolled_90d
+            FROM customers c
+            WHERE 1=1 {est_filter_c}
+        """, params)
+        enrolled_row = cur.fetchone()
+
+        # Top customers by spend
+        cur.execute(f"""
+            SELECT c.customer_id, c.customer_name, c.email,
+                   COALESCE(c.total_spent, 0) AS total_spent,
+                   COALESCE(c.loyalty_points, 0) AS loyalty_points,
+                   COUNT(o.order_id) AS order_count
+            FROM customers c
+            LEFT JOIN orders o ON o.customer_id = c.customer_id
+              AND o.order_status = 'completed'
+            WHERE 1=1 {est_filter_c}
+            GROUP BY c.customer_id, c.customer_name, c.email, c.total_spent, c.loyalty_points
+            ORDER BY total_spent DESC
+            LIMIT 10
+        """, params)
+        top_customers = [dict(r) for r in cur.fetchall()]
+
+        # Rewards config
+        cur.execute("SELECT * FROM customer_rewards_settings LIMIT 1")
+        rw = cur.fetchone()
+        rewards_config = dict(rw) if rw else {}
+
+        conn.close()
+
+        import math
+        def sf(v):
+            if v is None: return 0
+            try: return round(float(v), 2)
+            except: return 0
+
+        enrollment_trend = [{'date': str(r['day']), 'new_customers': r['new_customers']} for r in trend_rows]
+
+        return jsonify({
+            'success': True,
+            'orders': {
+                'registered': int(order_row['registered_orders'] or 0),
+                'guest': int(order_row['guest_orders'] or 0),
+                'unique_registered_customers': int(order_row['unique_registered_customers'] or 0),
+                'registered_revenue': sf(order_row['registered_revenue']),
+                'guest_revenue': sf(order_row['guest_revenue']),
+            },
+            'customers': {
+                'total': int(cust_row['total_customers'] or 0),
+                'with_points': int(cust_row['customers_with_points'] or 0),
+                'total_points_outstanding': sf(cust_row['total_points_outstanding']),
+                'total_spend': sf(cust_row['total_customer_spend']),
+            },
+            'enrollment': {
+                'last_7d': int(enrolled_row['enrolled_7d'] or 0),
+                'last_30d': int(enrolled_row['enrolled_30d'] or 0),
+                'last_90d': int(enrolled_row['enrolled_90d'] or 0),
+            },
+            'enrollment_trend': enrollment_trend,
+            'top_customers': [{
+                'customer_id': r['customer_id'],
+                'customer_name': r['customer_name'] or 'Unknown',
+                'email': r['email'] or '',
+                'total_spent': sf(r['total_spent']),
+                'loyalty_points': int(r['loyalty_points'] or 0),
+                'order_count': int(r['order_count'] or 0),
+            } for r in top_customers],
+            'rewards': {
+                'enabled': bool(rewards_config.get('enabled', 0)),
+                'reward_type': rewards_config.get('reward_type', 'points'),
+                'points_per_dollar': sf(rewards_config.get('points_per_dollar', 1.0)),
+                'points_redemption_value': sf(rewards_config.get('points_redemption_value', 0.01)),
+                'percentage_discount': sf(rewards_config.get('percentage_discount', 0)),
+                'fixed_discount': sf(rewards_config.get('fixed_discount', 0)),
+                'minimum_spend': sf(rewards_config.get('minimum_spend', 0)),
+                'points_enabled': bool(rewards_config.get('points_enabled', 0)),
+                'percentage_enabled': bool(rewards_config.get('percentage_enabled', 0)),
+                'fixed_enabled': bool(rewards_config.get('fixed_enabled', 0)),
+            },
+            'days': days,
+        }), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/dashboard/employee-performance', methods=['GET'])
+def api_dashboard_employee_performance():
+    """Per-employee productivity: orders, revenue, tips, voids, returns, avg order value, session count."""
+    try:
+        session_token = request.args.get('session_token') or request.headers.get('X-Session-Token') or request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        sess = verify_session(session_token) if session_token else {}
+        establishment_id = sess.get('establishment_id')
+        days = int(request.args.get('days', 30))
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        est_filter_e = 'AND e.establishment_id = %(eid)s' if establishment_id else ''
+        est_filter_o = 'AND o.establishment_id = %(eid)s' if establishment_id else ''
+        params = {'eid': establishment_id, 'days': days}
+
+        # Per-employee order stats
+        cur.execute(f"""
+            WITH emp_orders AS (
+                SELECT
+                    o.employee_id,
+                    COUNT(*) FILTER (WHERE o.order_status = 'completed' AND o.payment_status = 'completed') AS orders_completed,
+                    COUNT(*) FILTER (WHERE o.order_status = 'voided')    AS orders_voided,
+                    COUNT(*) FILTER (WHERE o.order_status = 'returned')  AS orders_returned,
+                    SUM(o.total) FILTER (WHERE o.order_status = 'completed' AND o.payment_status = 'completed') AS revenue_total,
+                    SUM(o.tip)   FILTER (WHERE o.order_status = 'completed' AND o.payment_status = 'completed') AS tips_total,
+                    SUM(o.discount) FILTER (WHERE o.order_status = 'completed') AS discounts_given,
+                    AVG(o.total) FILTER (WHERE o.order_status = 'completed' AND o.payment_status = 'completed') AS avg_order_value,
+                    COUNT(DISTINCT DATE(o.order_date)) AS days_active
+                FROM orders o
+                WHERE o.order_date >= CURRENT_DATE - %(days)s
+                  {est_filter_o}
+                GROUP BY o.employee_id
+            ),
+            emp_sessions AS (
+                SELECT
+                    es.employee_id,
+                    COUNT(*) AS session_count,
+                    SUM(EXTRACT(EPOCH FROM (COALESCE(es.logout_time, NOW()) - es.login_time)) / 3600.0) AS total_hours
+                FROM employee_sessions es
+                WHERE es.login_time >= CURRENT_DATE - %(days)s
+                GROUP BY es.employee_id
+            ),
+            emp_returns AS (
+                SELECT
+                    pr.employee_id,
+                    COUNT(*) AS return_requests_handled
+                FROM pending_returns pr
+                WHERE pr.return_date >= CURRENT_DATE - %(days)s
+                GROUP BY pr.employee_id
+            )
+            SELECT
+                e.employee_id,
+                e.first_name,
+                e.last_name,
+                e.position,
+                e.department,
+                e.employment_type,
+                e.active,
+                COALESCE(eo.orders_completed, 0)        AS orders_completed,
+                COALESCE(eo.orders_voided, 0)           AS orders_voided,
+                COALESCE(eo.orders_returned, 0)         AS orders_returned,
+                COALESCE(eo.revenue_total, 0)           AS revenue_total,
+                COALESCE(eo.tips_total, 0)              AS tips_total,
+                COALESCE(eo.discounts_given, 0)         AS discounts_given,
+                COALESCE(eo.avg_order_value, 0)         AS avg_order_value,
+                COALESCE(eo.days_active, 0)             AS days_active,
+                COALESCE(es.session_count, 0)           AS session_count,
+                COALESCE(es.total_hours, 0)             AS total_hours,
+                COALESCE(er.return_requests_handled, 0) AS return_requests_handled
+            FROM employees e
+            LEFT JOIN emp_orders eo ON eo.employee_id = e.employee_id
+            LEFT JOIN emp_sessions es ON es.employee_id = e.employee_id
+            LEFT JOIN emp_returns er ON er.employee_id = e.employee_id
+            WHERE e.active = 1
+              {est_filter_e}
+            ORDER BY revenue_total DESC
+        """, params)
+        emp_rows = cur.fetchall()
+
+        # Daily order trend per employee for sparklines (last 14 days)
+        cur.execute(f"""
+            SELECT
+                o.employee_id,
+                DATE(o.order_date) AS day,
+                COUNT(*) AS orders,
+                SUM(o.total) AS revenue
+            FROM orders o
+            WHERE o.order_date >= CURRENT_DATE - 14
+              AND o.order_status = 'completed'
+              AND o.payment_status = 'completed'
+              {est_filter_o}
+            GROUP BY o.employee_id, DATE(o.order_date)
+            ORDER BY o.employee_id, day
+        """, params)
+        trend_rows = cur.fetchall()
+
+        conn.close()
+
+        # Build sparkline map: employee_id -> list of 14 values
+        from collections import defaultdict
+        import datetime
+        spark_map = defaultdict(dict)
+        for r in trend_rows:
+            spark_map[r['employee_id']][str(r['day'])] = int(r['orders'])
+
+        # Last 14 dates
+        today = datetime.date.today()
+        last14 = [str(today - datetime.timedelta(days=i)) for i in range(13, -1, -1)]
+
+        def sf(v):
+            if v is None: return 0
+            try: return round(float(v), 2)
+            except: return 0
+
+        employees = []
+        for r in emp_rows:
+            eid = r['employee_id']
+            sparkline = [spark_map[eid].get(d, 0) for d in last14]
+            productivity_score = round(
+                (r['orders_completed'] or 0) * 0.4
+                + (float(r['revenue_total'] or 0) / max(float(r['days_active'] or 1), 1)) * 0.001
+                + (r['tips_total'] or 0) * 0.001
+                - (r['orders_voided'] or 0) * 0.5
+            , 2)
+            employees.append({
+                'employee_id': eid,
+                'name': f"{r['first_name']} {r['last_name']}",
+                'first_name': r['first_name'],
+                'last_name': r['last_name'],
+                'position': r['position'],
+                'department': r['department'] or '',
+                'employment_type': r['employment_type'] or '',
+                'orders_completed': int(r['orders_completed'] or 0),
+                'orders_voided': int(r['orders_voided'] or 0),
+                'orders_returned': int(r['orders_returned'] or 0),
+                'revenue_total': sf(r['revenue_total']),
+                'tips_total': sf(r['tips_total']),
+                'discounts_given': sf(r['discounts_given']),
+                'avg_order_value': sf(r['avg_order_value']),
+                'days_active': int(r['days_active'] or 0),
+                'session_count': int(r['session_count'] or 0),
+                'total_hours': sf(r['total_hours']),
+                'return_requests_handled': int(r['return_requests_handled'] or 0),
+                'productivity_score': productivity_score,
+                'sparkline': sparkline,
+                'sparkline_dates': last14,
+            })
+
+        return jsonify({'success': True, 'employees': employees, 'days': days}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e), 'employees': []}), 500
+
+
+@app.route('/api/gift_cards', methods=['POST'])
+def api_gift_card_sale():
+    """
+    Record a gift card sale.
+    Body: { amount, payment_method?, session_token? }
+    Creates a row in accounting for the liability.
+    """
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        session_token = body.get('session_token') or request.headers.get('X-Session-Token') or request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        sess = verify_session(session_token) if session_token else {}
+        employee_id = sess.get('employee_id') or 1
+        establishment_id = sess.get('establishment_id')
+
+        amount = float(body.get('amount') or 0)
+        if amount <= 0:
+            return jsonify({'success': False, 'message': 'Amount must be positive'}), 400
+
+        # Insert gift card record
+        from database import get_connection as _gc
+        from psycopg2.extras import RealDictCursor as _RDC
+        conn = _gc()
+        cur = conn.cursor(cursor_factory=_RDC)
+        cur.execute("""
+            INSERT INTO gift_cards (amount, balance, status, establishment_id, created_by)
+            VALUES (%s, %s, 'active', %s, %s)
+            RETURNING id
+        """, (amount, amount, establishment_id, employee_id))
+        row = cur.fetchone()
+        conn.commit()
+        conn.close()
+        gift_card_id = row['id'] if row else 0
+
+        from pos_accounting_bridge import journalize_gift_card_sale_to_accounting
+        acct = journalize_gift_card_sale_to_accounting(gift_card_id, amount, employee_id, establishment_id)
+        return jsonify({'success': True, 'gift_card_id': gift_card_id, 'amount': amount, 'accounting': acct}), 201
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/gift_cards/<int:gift_card_id>/breakage', methods=['POST'])
+def api_gift_card_breakage(gift_card_id):
+    """
+    Write off an expired / unredeemed gift card and recognize breakage income.
+    Body: { amount, session_token? }
+    """
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        session_token = body.get('session_token') or request.headers.get('X-Session-Token') or request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        sess = verify_session(session_token) if session_token else {}
+        employee_id = sess.get('employee_id') or 1
+        establishment_id = sess.get('establishment_id')
+        amount = float(body.get('amount') or 0)
+        if amount <= 0:
+            return jsonify({'success': False, 'message': 'Amount must be positive'}), 400
+        from pos_accounting_bridge import journalize_gift_card_breakage_to_accounting
+        acct = journalize_gift_card_breakage_to_accounting(gift_card_id, amount, employee_id, establishment_id)
+        return jsonify({'success': True, 'accounting': acct}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/accounting/backfill-orders', methods=['POST'])
+def api_accounting_backfill_orders():
+    """
+    Backfill journal entries for completed orders that have no posted accounting transaction.
+    Safe to call multiple times — idempotency is enforced inside journalize_sale_to_accounting.
+
+    Body (optional): { "days_back": 90 }   ← how far back to look (default 90)
+    Returns counts of succeeded / skipped / failed orders.
+    """
+    try:
+        session_token = (
+            request.headers.get('X-Session-Token') or
+            request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        )
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        sess = verify_session(session_token)
+        if not sess.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        employee_id = sess.get('employee_id') or 1
+        establishment_id = sess.get('establishment_id')
+
+        body = request.get_json(force=True, silent=True) or {}
+        days_back = int(body.get('days_back', 90))
+
+        from database import get_connection as _gc
+        from psycopg2.extras import RealDictCursor as _RDC
+        conn = _gc()
+        cur = conn.cursor(cursor_factory=_RDC)
+
+        # Find orders with no posted accounting entry
+        est_filter = "AND o.establishment_id = %(eid)s" if establishment_id else ""
+        cur.execute(f"""
+            SELECT o.order_id
+            FROM orders o
+            WHERE o.status = 'completed'
+              AND o.order_date >= CURRENT_DATE - INTERVAL '{days_back} days'
+              {est_filter}
+              AND NOT EXISTS (
+                  SELECT 1 FROM accounting.transactions t
+                  WHERE t.source_document_id = o.order_id
+                    AND t.source_document_type = 'order'
+                    AND t.is_posted = TRUE
+              )
+            ORDER BY o.order_date DESC
+        """, {'eid': establishment_id})
+        rows = cur.fetchall()
+        conn.close()
+
+        order_ids = [r['order_id'] for r in rows]
+        succeeded, skipped, failed = [], [], []
+
+        from pos_accounting_bridge import journalize_sale_to_accounting
+        for oid in order_ids:
+            try:
+                result = journalize_sale_to_accounting(oid, employee_id)
+                if result.get('skipped'):
+                    skipped.append(oid)
+                elif result.get('success'):
+                    succeeded.append(oid)
+                else:
+                    failed.append({'order_id': oid, 'error': result.get('message')})
+            except Exception as ex:
+                failed.append({'order_id': oid, 'error': str(ex)})
+
+        return jsonify({
+            'success': True,
+            'orders_found': len(order_ids),
+            'succeeded': len(succeeded),
+            'skipped': len(skipped),
+            'failed': len(failed),
+            'failed_details': failed[:20],  # cap response size
+        }), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/accounting/reconciliation', methods=['GET'])
+def api_accounting_reconciliation():
+    """
+    Compare POS order totals vs accounting ledger for a date range.
+    Query params: start_date, end_date (YYYY-MM-DD).
+    Scoped to the authenticated user's establishment.
+    """
+    try:
+        session_token = (
+            request.headers.get('X-Session-Token') or
+            request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        )
+        establishment_id = None
+        if session_token:
+            sess = verify_session(session_token)
+            if sess.get('valid'):
+                establishment_id = sess.get('establishment_id')
+
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        if not start_date or not end_date:
+            return jsonify({'success': False, 'message': 'start_date and end_date required'}), 400
+
+        from database import get_reconciliation_report
+        report = get_reconciliation_report(start_date, end_date, establishment_id=establishment_id)
+        if 'error' in report:
+            return jsonify({'success': False, 'message': report['error']}), 500
+        return jsonify({'success': True, 'data': report}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/establishments/<int:establishment_id>/vertical', methods=['GET', 'POST'])
+def api_establishment_vertical(establishment_id):
+    """
+    GET  – return the current vertical for an establishment.
+    POST – update the vertical (restaurant | retail | service) and re-seed accounts + rules.
+    """
+    try:
+        session_token = (
+            request.headers.get('X-Session-Token') or
+            request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        )
+        if not session_token:
+            return jsonify({'success': False, 'message': 'Session token required'}), 401
+        sess = verify_session(session_token)
+        if not sess.get('valid'):
+            return jsonify({'success': False, 'message': 'Invalid session'}), 401
+
+        if request.method == 'GET':
+            from accounting_bootstrap import get_accounting_settings
+            settings = get_accounting_settings(establishment_id)
+            return jsonify({'success': True, 'vertical': settings.get('vertical', 'retail')}), 200
+
+        # POST
+        body = request.get_json(force=True, silent=True) or {}
+        vertical = (body.get('vertical') or '').strip().lower()
+        if vertical not in ('restaurant', 'retail', 'service'):
+            return jsonify({'success': False, 'message': "vertical must be 'restaurant', 'retail', or 'service'"}), 400
+
+        from accounting_bootstrap import set_establishment_vertical
+        ok = set_establishment_vertical(establishment_id, vertical)
+        if not ok:
+            return jsonify({'success': False, 'message': 'Failed to update vertical'}), 500
+        return jsonify({'success': True, 'vertical': vertical}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @app.route('/api/accounting/dashboard', methods=['GET'])
 def api_accounting_dashboard():

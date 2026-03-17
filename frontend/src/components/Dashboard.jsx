@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
+import { User, ChevronRight } from 'lucide-react'
 import { usePermissions } from '../contexts/PermissionContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { useToast } from '../contexts/ToastContext'
@@ -27,7 +28,7 @@ const NO_PERMISSION_MSG = "You don't have permission"
 
 function Dashboard() {
   const navigate = useNavigate()
-  const { isAdmin, hasPermission } = usePermissions()
+  const { isAdmin, hasPermission, employee } = usePermissions()
   const canAccessAccounting = isAdmin || hasPermission('view_financial_reports')
   const canAccessTables = isAdmin
   const { show: showToast } = useToast()
@@ -149,24 +150,21 @@ function Dashboard() {
   leftBoxes.forEach(b => { allBoxesById[b.id] = { ...b, isLeftColumn: true } })
   rightBoxes.forEach(b => { allBoxesById[b.id] = { ...b, isLeftColumn: false } })
   const mobileBoxes = [
+    { id: 'profile-notification', type: 'notification' },
     allBoxesById['statistics'],
-    allBoxesById['pos'],
-    allBoxesById['recent-orders'],
-    allBoxesById['calendar'],
-    allBoxesById['shipment-verification'],
-    allBoxesById['customers'],
-    allBoxesById['inventory'],
+    allBoxesById['accounting'],
     allBoxesById['tables'],
-    allBoxesById['accounting']
+    allBoxesById['customers'],
+    allBoxesById['calendar']
   ].filter(Boolean)
 
-  const renderBox = (box, isLeftColumn = false, gridColumnSpan = null) => {
+  const renderBox = (box, isLeftColumn = false, gridColumnSpan = null, gridRowSpan = null) => {
     const Component = box.component
     const isComponentBox = box.isComponent
     const isStatistics = box.id === 'statistics'
     const isPOS = box.id === 'pos'
-    const spanCol = gridColumnSpan ?? (isLeftColumn && isStatistics ? 2 : 1)
-    const spanRow = !isMobile && isLeftColumn && isStatistics ? 2 : 1
+    const spanCol = isMobile ? 1 : (gridColumnSpan ?? (isLeftColumn && isStatistics ? 2 : 1))
+    const spanRow = gridRowSpan ?? (!isMobile && isLeftColumn && isStatistics ? 2 : 1)
     const isMobileStatsRow = isMobile && isStatistics
 
     const boxContent = (
@@ -231,6 +229,33 @@ function Dashboard() {
       </div>
     )
 
+    if (box.id === 'profile-notification') {
+      return (
+        <div 
+          key="profile-notification"
+          onClick={() => navigate('/profile')}
+          className="mobile-profile-notification-card"
+          style={{
+            gridColumn: 'span 1',
+            cursor: 'pointer'
+          }}
+        >
+          <div className="mobile-profile-notification-content">
+            <div className="mobile-profile-notification-icon">
+               <User size={20} />
+            </div>
+            <div className="mobile-profile-notification-text">
+              <span className="mobile-profile-notification-title">Welcome back, {employee?.employee_name?.split(' ')[0] || 'Employee'}</span>
+              <span className="mobile-profile-notification-subtitle">Tap to view your profile & stats</span>
+            </div>
+            <div className="mobile-profile-notification-arrow">
+               <ChevronRight size={18} />
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <ParticleCard
         key={box.id}
@@ -256,13 +281,13 @@ function Dashboard() {
   }
 
   const pad = 12
-  const padTop = 20
+  const padTop = 15
   if (isMobile) {
     return (
       <div style={{
         paddingTop: padTop,
         paddingRight: pad,
-        paddingBottom: pad,
+        paddingBottom: 110, // Account for mobile nav bar
         paddingLeft: pad,
         maxWidth: '100%',
         margin: '0 auto',
@@ -273,20 +298,28 @@ function Dashboard() {
         overflowX: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        backgroundColor: 'var(--bg-primary, white)'
+        backgroundColor: 'var(--bg-secondary, #f5f5f5)'
       }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '10px',
-          gridAutoRows: 'minmax(140px, auto)',
+          gridTemplateColumns: '1fr',
+          gap: '12px',
+          gridAutoRows: 'auto', // Changed to auto for the notification card
           alignContent: 'start'
         }}>
-          {mobileBoxes.map(box => renderBox(
-            box,
-            box.isLeftColumn,
-            box.id === 'statistics' ? 2 : null
-          ))}
+          {mobileBoxes.map(box => {
+            if (box.id === 'profile-notification') return renderBox(box)
+            return (
+              <div key={box.id} style={{ height: box.id === 'statistics' ? '252px' : '120px' }}>
+                {renderBox(
+                  box, 
+                  false, 
+                  1,
+                  box.id === 'statistics' ? 2 : 1
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     )

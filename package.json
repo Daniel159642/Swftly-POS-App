@@ -13,6 +13,11 @@
   "devDependencies": {
     "@shopify/cli": "^3.88.0",
     "@tauri-apps/cli": "^2",
-    "jsonwebtoken": "^9.0.3"
+    "@types/react": "~19.2.10",
+    "jsonwebtoken": "^9.0.3",
+    "typescript": "~5.9.2"
+  },
+  "dependencies": {
+    "expo": "^55.0.6"
   }
 }

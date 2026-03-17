@@ -314,7 +314,23 @@ class TransactionRepository:
             # Validate balance
             if not TransactionRepository.validate_balance(data.get('lines', [])):
                 raise ValueError('Transaction is not balanced. Total debits must equal total credits.')
-            
+
+            # Validate account ownership: each account must belong to this tenant or be a global template
+            establishment_id = data.get('establishment_id')
+            if establishment_id:
+                account_ids = [l['account_id'] for l in data.get('lines', []) if l.get('account_id')]
+                if account_ids:
+                    cursor.execute("""
+                        SELECT id FROM accounting.accounts
+                        WHERE id = ANY(%s)
+                          AND establishment_id IS NOT NULL
+                          AND establishment_id != %s
+                    """, (account_ids, establishment_id))
+                    foreign = cursor.fetchall()
+                    if foreign:
+                        bad_ids = [r['id'] for r in foreign]
+                        raise ValueError(f'Account(s) {bad_ids} do not belong to establishment {establishment_id}')
+
             # Generate transaction number (database trigger will handle if empty)
             transaction_number = data.get('transaction_number') or ''
             
@@ -323,8 +339,8 @@ class TransactionRepository:
                 INSERT INTO accounting.transactions (
                     transaction_number, transaction_date, transaction_type,
                     reference_number, description, source_document_id, source_document_type,
-                    is_posted, created_by, updated_by, qbo_id
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, false, %s, %s, %s)
+                    is_posted, created_by, updated_by, qbo_id, establishment_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, false, %s, %s, %s, %s)
                 RETURNING *
             """, (
                 transaction_number,
@@ -336,7 +352,8 @@ class TransactionRepository:
                 data.get('source_document_type'),
                 user_id,
                 user_id,
-                data.get('qbo_id')
+                data.get('qbo_id'),
+                data.get('establishment_id')
             ))
             
             txn_row = cursor.fetchone()
@@ -348,8 +365,9 @@ class TransactionRepository:
                 cursor.execute("""
                     INSERT INTO accounting.transaction_lines (
                         transaction_id, account_id, line_number, debit_amount, credit_amount,
-                        description, entity_type, entity_id, class_id, location_id, billable
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        description, entity_type, entity_id, class_id, location_id, billable,
+                        establishment_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING *
                 """, (
                     txn.id,
@@ -362,7 +380,8 @@ class TransactionRepository:
                     line_data.get('entity_id'),
                     line_data.get('class_id'),
                     line_data.get('location_id'),
-                    line_data.get('billable', False)
+                    line_data.get('billable', False),
+                    data.get('establishment_id')
                 ))
                 
                 line_row = cursor.fetchone()

@@ -138,9 +138,11 @@ function Profile({ employeeId, employeeName }) {
     endOfWeek.setDate(startOfWeek.getDate() + 6)
     endOfWeek.setHours(23, 59, 59, 999)
     const fetchStartDate = new Date(startOfWeek)
-    fetchStartDate.setDate(startOfWeek.getDate() - 28) // 4 weeks back
+    // Narrow the window to reduce data over the network when using a remote DB:
+    // fetch 2 weeks back and 4 weeks forward from the current week anchor.
+    fetchStartDate.setDate(startOfWeek.getDate() - 14)
     const fetchEndDate = new Date(startOfWeek)
-    fetchEndDate.setDate(startOfWeek.getDate() + 56)   // 8 weeks forward
+    fetchEndDate.setDate(startOfWeek.getDate() + 28)
     const fetchStartDateStr = fetchStartDate.toISOString().split('T')[0]
     const fetchEndDateStr = fetchEndDate.toISOString().split('T')[0]
 
@@ -785,11 +787,7 @@ function Profile({ employeeId, employeeName }) {
                   }}>
                     Time Clock
                   </div>
-                  {loading && clockStatus == null ? (
-                    <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#999', fontStyle: 'italic' }}>
-                      Loading…
-                    </div>
-                  ) : clockStatus?.clocked_in ? (
+                  {loading && clockStatus == null ? null : clockStatus?.clocked_in ? (
                     <div style={{
                       fontSize: '12px',
                       color: isDarkMode ? 'var(--text-secondary, #999)' : '#666'
@@ -911,17 +909,10 @@ function Profile({ employeeId, employeeName }) {
                               position: 'absolute',
                               inset: 0,
                               borderRadius: '8px',
-                              backgroundColor: isDarkMode ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              zIndex: 10,
-                              fontSize: '14px',
-                              color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                              backgroundColor: isDarkMode ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.55)',
+                              zIndex: 10
                             }}
-                          >
-                            Loading…
-                          </div>
+                          />
                         )}
                         <div className="fc fc-theme-standard" style={{ border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #e0e0e0', borderRadius: '8px', overflow: 'hidden', backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff', minHeight: '320px' }}>
                           <FullCalendar

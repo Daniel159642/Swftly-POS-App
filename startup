@@ -13,3 +13,8 @@ the checkout ui edit modal should also use shold us eht e modal background blur 
 (.venv) daniellopez@Daniels-MBP pos % cd cench-realwebsite
 cd "/Users/daniellopez/POS FR/pos" && source venv/bin/activate && python3 web_viewer.py
 cd "/Users/daniellopez/POS FR/pos" && source venv/bin/activate && python3 web_viewer.py
+
+cd "/Users/daniellopez/POS FR/pos"
+source venv/bin/activate
+export $(grep -v '^#' .env | xargs)   # this brings in DATABASE_URL for Neon
+python3 web_viewer.py

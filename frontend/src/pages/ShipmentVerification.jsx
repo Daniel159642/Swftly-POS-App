@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useMobileNav } from '../App'
 import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
 import { useTheme } from '../contexts/ThemeContext'
 import { usePageScroll } from '../contexts/PageScrollContext'
@@ -15,6 +16,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 
 function ShipmentVerificationDashboard() {
   const { themeMode, themeColor } = useTheme()
+  const { setContextualNavItems } = useMobileNav()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
@@ -177,6 +179,20 @@ function ShipmentVerificationDashboard() {
     { id: 'completed', label: 'Completed', icon: CheckCircle, filterValue: 'approved' },
     { id: 'new_shipment', label: 'New Shipment', icon: Plus, filterValue: 'new_shipment' }
   ]
+
+  useEffect(() => {
+    if (setContextualNavItems) {
+      setContextualNavItems(filterSections.map(s => ({
+        label: s.label,
+        active: filter === s.filterValue,
+        onClick: () => {
+          setFilter(s.filterValue)
+          setSearchParams({ filter: s.filterValue })
+        },
+        icon: s.icon
+      })))
+    }
+  }, [filter, setContextualNavItems])
 
   return (
     <div style={{ 

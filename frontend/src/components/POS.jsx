@@ -4,17 +4,40 @@ import { useNavigate } from 'react-router-dom'
 import { usePermissions, ProtectedComponent } from '../contexts/PermissionContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { useToast } from '../contexts/ToastContext'
+import { usePageScroll } from '../contexts/PageScrollContext'
 import { cachedFetch } from '../services/offlineSync'
 import BarcodeScanner from './BarcodeScanner'
 import CustomerDisplayPopup from './CustomerDisplayPopup'
 import { ScanBarcode, UserPlus, CheckCircle, Gift, X, AlertCircle, Percent, Check, Pencil, Clock } from 'lucide-react'
 import { formLabelStyle, formModalStyle, inputBaseStyle, getInputFocusHandlers, FormModalActions, FormField, FormLabel, modalOverlayStyle, modalContentStyle, CompactFormActions, FormTitle, compactCancelButtonStyle, compactPrimaryButtonStyle } from './FormStyles'
 
+const MOBILE_BREAKPOINT = 768
+
+function useIsMobilePOS() {
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= MOBILE_BREAKPOINT)
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`)
+    const update = () => setIsMobile(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
+
+  return isMobile
+}
+
 function POS({ employeeId, employeeName }) {
   const navigate = useNavigate()
   const { hasPermission } = usePermissions()
   const { themeColor, themeMode } = useTheme()
   const { show: showToast } = useToast()
+  const { setDisableScroll } = usePageScroll()
+
+  useEffect(() => {
+    setDisableScroll(true)
+    return () => setDisableScroll(false)
+  }, [setDisableScroll])
 
   // Convert hex to RGB for rgba usage
   const hexToRgb = (hex) => {
@@ -49,7 +72,7 @@ function POS({ employeeId, employeeName }) {
   const [searchResults, setSearchResults] = useState([])
   const [allProducts, setAllProducts] = useState([])
   const [categories, setCategories] = useState([])
-  const [selectedCategory, setSelectedCategory] = useState(null)
+  const [selectedCategory, setSelectedCategory] = useState('All')
   const [categoryProducts, setCategoryProducts] = useState([])
   const [taxRate, setTaxRate] = useState(0.08) // Default 8% tax
   const [paymentMethod, setPaymentMethod] = useState('cash')
@@ -140,6 +163,8 @@ function POS({ employeeId, employeeName }) {
   const [scheduledTime, setScheduledTime] = useState(null) // Date object
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const searchInputRef = useRef(null) // focus after scan so scanner's Enter doesn't trigger Pay
+  const isMobile = useIsMobilePOS()
+  const isBrowsingMobile = isMobile && (searchTerm.length >= 1 || selectedCategory !== 'All')
 
   // Default filter config so intelligent search works even if API fails (sm, roni, 1/2 pep, etc.)
   const DEFAULT_POS_FILTERS = {
@@ -182,6 +207,63 @@ function POS({ employeeId, employeeName }) {
   const canProcessSale = hasPermission('process_sale')
   const canApplyDiscount = hasPermission('apply_discount')
   const canVoidTransaction = hasPermission('void_transaction')
+
+  // Mobile POS actions triggered from MobileNavBar
+  useEffect(() => {
+    if (!isMobile) return
+
+    const handlePosPay = () => {
+      if (showPaymentForm || cart.length === 0) return
+      if (!canProcessSale) {
+        showToast(NO_PERMISSION_MSG, 'error')
+        return
+      }
+      if (orderType && payAtPickupOrDelivery) {
+        handlePlacePayLaterOrder()
+      } else {
+        setShowSummary(true)
+      }
+    }
+
+    const handlePosDiscount = () => {
+      if (showPaymentForm || cart.length === 0 || !canApplyDiscount) return
+      setDiscountInput(orderDiscount ? String(orderDiscount) : '')
+      setShowDiscountModal(true)
+    }
+
+    const handlePosScan = () => {
+      if (showPaymentForm) return
+      setShowBarcodeScanner(true)
+    }
+
+    const handlePosAddCustomer = () => {
+      if (showPaymentForm) return
+      // Open "New customer" bottom sheet
+      setShowCreateCustomer(true)
+      setShowCustomerInfoModal(true)
+    }
+
+    const handlePosOrderOptions = () => {
+      if (showPaymentForm) return
+      // Open pickup/delivery options in bottom sheet, without forcing new customer
+      setShowCreateCustomer(false)
+      setShowCustomerInfoModal(true)
+    }
+
+    window.addEventListener('pos-pay', handlePosPay)
+    window.addEventListener('pos-discount', handlePosDiscount)
+    window.addEventListener('pos-scan', handlePosScan)
+    window.addEventListener('pos-add-customer', handlePosAddCustomer)
+    window.addEventListener('pos-order-options', handlePosOrderOptions)
+
+    return () => {
+      window.removeEventListener('pos-pay', handlePosPay)
+      window.removeEventListener('pos-discount', handlePosDiscount)
+      window.removeEventListener('pos-scan', handlePosScan)
+      window.removeEventListener('pos-add-customer', handlePosAddCustomer)
+      window.removeEventListener('pos-order-options', handlePosOrderOptions)
+    }
+  }, [isMobile, showPaymentForm, cart.length, canProcessSale, canApplyDiscount, orderType, payAtPickupOrDelivery, orderDiscount, showToast])
 
   const checkRegisterOpen = async () => {
     const sessionToken = localStorage.getItem('sessionToken')
@@ -438,6 +520,7 @@ function POS({ employeeId, employeeName }) {
 
   // Match product to category: exact or under that path (e.g. "Food & Beverage" shows "Food & Beverage > Produce > Fruits")
   const productMatchesCategory = (product, category) => {
+    if (category === 'All') return true
     const cat = product.category || ''
     if (cat === category) return true
     if (category && cat.startsWith(category + ' >')) return true
@@ -729,9 +812,8 @@ function POS({ employeeId, employeeName }) {
 
   const handleCategorySelect = (category) => {
     if (selectedCategory === category) {
-      // Deselect if clicking the same category
-      setSelectedCategory(null)
-      setCategoryProducts([])
+      // Deselecting back to All
+      setSelectedCategory('All')
     } else {
       setSelectedCategory(category)
       setSearchTerm('') // Clear search when selecting category
@@ -2025,13 +2107,13 @@ function POS({ employeeId, employeeName }) {
     <div className="pos-page" style={{
       display: 'flex',
       flexDirection: 'column',
-      height: 'calc(100vh - 60px)',
-      gap: '20px',
-      padding: '0 20px 0 20px',
-      paddingTop: '0',
-      paddingBottom: '0',
+      height: '100%',
+      maxHeight: '100%',
+      gap: isMobile ? '0' : '20px',
+      padding: isMobile ? '0' : '0 20px 20px 20px',
       backgroundColor: 'white',
       position: 'relative',
+      overflow: 'hidden',
       fontFamily: '"Product Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     }}>
       {/* Size / Variant selection modal */}
@@ -2428,22 +2510,182 @@ function POS({ employeeId, employeeName }) {
       {/* Main Content Row - Hidden when customer display is showing */}
       <div style={{
         display: showCustomerDisplay ? 'none' : 'flex',
-        gap: '0',
+        flexDirection: isMobile ? 'column' : 'row',
+        gap: isMobile ? '0' : '0',
         flex: '1',
-        minHeight: 0
+        height: '100%',
+        minHeight: 0,
+        overflow: 'hidden'
       }}>
-        {/* Left Column - Cart */}
+        {/* Left Column - Cart (and search on mobile) */}
         <div style={{
           flex: '1',
-          padding: '20px',
-          paddingRight: '20px',
+          padding: isMobile ? '12px 12px 8px 12px' : '20px',
+          paddingRight: isMobile ? '12px' : '20px',
           display: 'flex',
           flexDirection: 'column',
           minWidth: 0,
-          borderRight: '1px solid #ddd'
+          borderRight: isMobile ? 'none' : '1px solid #ddd',
+          borderBottom: isMobile ? '1px solid #eee' : 'none'
         }}>
+          {isMobile && (
+            <>
+              {/* Mobile Search + Categories pinned above cart */}
+              {/* Search Bar: chips inside bar + input, then scan button */}
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '6px',
+                      borderBottom: '2px solid #ddd',
+                      padding: '6px 0',
+                      minHeight: '40px',
+                      boxSizing: 'border-box'
+                    }}
+                  >
+                    {searchFilterChips.map((chip, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          fontSize: '13px',
+                          backgroundColor: `rgba(${themeColorRgb}, 0.15)`,
+                          border: `1px solid rgba(${themeColorRgb}, 0.4)`,
+                          color: isDarkMode ? '#fff' : '#333'
+                        }}
+                      >
+                        {chip.label}
+                        <button
+                          type="button"
+                          onClick={(ev) => { ev.preventDefault(); setSearchFilterChips(prev => prev.filter((_, i) => i !== idx)) }}
+                          style={{
+                            padding: 0,
+                            marginLeft: '2px',
+                            border: 'none',
+                            background: 'none',
+                            cursor: 'pointer',
+                            fontSize: '16px',
+                            lineHeight: 1,
+                            color: 'inherit',
+                            opacity: 0.8
+                          }}
+                          aria-label="Remove filter"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      placeholder={searchFilterChips.length ? "Search…" : "Search products…"}
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === ' ' && searchTerm.length > 0) {
+                          const trimmed = searchTerm.trim()
+                          const segments = trimmed.split(/\s+/)
+                          const word = segments[segments.length - 1]
+                          if (!word) return
+                          const resolved = resolveFilterWord(word, pendingQuantityForChip)
+                          if (resolved) {
+                            e.preventDefault()
+                            if (resolved.isQuantityPrefix) {
+                              setPendingQuantityForChip({ label: resolved.label, word: word })
+                              setSearchTerm(prev => prev.replace(new RegExp('\\s*' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$'), '').trim())
+                              return
+                            }
+                            setSearchFilterChips(prev => [...prev, resolved])
+                            setPendingQuantityForChip(null)
+                            setSearchTerm(prev => prev.replace(new RegExp('\\s*' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$'), '').trim())
+                          }
+                        }
+                      }}
+                      disabled={showPaymentForm}
+                      style={{
+                        flex: 1,
+                        minWidth: '120px',
+                        padding: '4px 0',
+                        border: 'none',
+                        borderRadius: 0,
+                        fontSize: '16px',
+                        boxSizing: 'border-box',
+                        backgroundColor: 'transparent',
+                        outline: 'none',
+                        opacity: showPaymentForm ? 0.3 : 1,
+                        cursor: showPaymentForm ? 'not-allowed' : 'text'
+                      }}
+                      autoFocus={!showPaymentForm}
+                    />
+                  </div>
+                  {/* Mobile scan is handled from the bottom nav bar */}
+                </div>
+              </div>
+
+              {/* Category Navigation (mobile) */}
+              <div style={{ marginBottom: '8px' }}>
+                <div style={{ position: 'relative' }}>
+                  <div
+                    className="pos-category-buttons-scroll"
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'nowrap',
+                      gap: '8px',
+                      overflowX: 'auto',
+                      paddingBottom: '4px',
+                      scrollbarWidth: 'none',
+                      msOverflowStyle: 'none'
+                    }}
+                  >
+                    {['All', ...categories].map(category => {
+                      const label = category === 'All' ? 'All' : (category.includes(' > ') ? category.split(' > ').pop().trim() : category)
+                      return (
+                        <button
+                          key={category}
+                          onClick={() => handleCategorySelect(category)}
+                          disabled={showPaymentForm}
+                          title={category}
+                          style={{
+                            padding: '4px 16px',
+                            height: '28px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            whiteSpace: 'nowrap',
+                            backgroundColor: selectedCategory === category
+                              ? `rgba(${themeColorRgb}, 0.7)`
+                              : (isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'),
+                            border: selectedCategory === category
+                              ? `1px solid rgba(${themeColorRgb}, 0.5)`
+                              : `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`,
+                            borderRadius: '8px',
+                            fontSize: '14px',
+                            fontWeight: selectedCategory === category ? 600 : 500,
+                            color: selectedCategory === category ? '#fff' : (isDarkMode ? 'var(--text-primary, #fff)' : '#333'),
+                            cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                            transition: 'all 0.3s ease',
+                            boxShadow: selectedCategory === category ? `0 4px 15px rgba(${themeColorRgb}, 0.3)` : 'none',
+                            opacity: showPaymentForm ? 0.3 : 1
+                          }}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
           {/* Cart Items */}
-          <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', display: isBrowsingMobile ? 'none' : 'block' }}>
             {cart.length === 0 ? (
               <div style={{
                 textAlign: 'center',
@@ -2549,10 +2791,10 @@ function POS({ employeeId, employeeName }) {
             borderTop: '2px solid #eee',
             paddingTop: '20px'
           }}>
-            {/* Pickup/Delivery Options - only show buttons that are enabled in Settings */}
-            {(allowPickup || allowDelivery) && (
+            {/* Pickup/Delivery Options - only show buttons that are enabled in Settings (desktop only here; mobile inline with Add Customer) */}
+            {!isMobile && (allowPickup || allowDelivery) && (
               <div style={{ marginBottom: '16px' }}>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
                   {allowPickup && (
                     <button
                       onClick={() => {
@@ -2664,8 +2906,8 @@ function POS({ employeeId, employeeName }) {
               </div>
             )}
 
-            {/* Inline Customer Info Form for Pickup/Delivery - hidden after check */}
-            {orderType && !customerInfoConfirmed && (
+            {/* Inline Customer Info Form for Pickup/Delivery - hidden after check (desktop only; mobile uses bottom sheet) */}
+            {!isMobile && orderType && !customerInfoConfirmed && (
               <>
                 <div style={{ marginBottom: '16px' }}>
                   <input
@@ -3013,69 +3255,94 @@ function POS({ employeeId, employeeName }) {
                 </div>
               ) : !selectedCustomer ? (
                 <div style={{ position: 'relative' }}>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="text"
-                      value={customerSearchTerm}
-                      onChange={(e) => {
-                        if (!showPaymentForm) {
-                          setCustomerSearchTerm(e.target.value)
-                          searchCustomers(e.target.value)
-                        }
-                      }}
-                      placeholder="Search for customers"
-                      disabled={showPaymentForm}
-                      style={{
-                        ...inputBaseStyle(isDarkMode, themeColorRgb),
-                        flex: 1,
-                        paddingTop: '6px',
-                        paddingBottom: '6px',
-                        opacity: showPaymentForm ? 0.3 : 1,
-                        cursor: showPaymentForm ? 'not-allowed' : 'text'
-                      }}
-                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                    />
-                    <button
-                      onClick={handleCreateCustomer}
-                      disabled={showPaymentForm}
-                      style={{
-                        padding: '4px',
-                        width: '40px',
-                        height: '40px',
-                        backgroundColor: showPaymentForm ? `rgba(${themeColorRgb}, 0.3)` : `rgba(${themeColorRgb}, 0.7)`,
-                        backdropFilter: 'blur(10px)',
-                        WebkitBackdropFilter: 'blur(10px)',
-                        color: '#fff',
-                        border: '1px solid rgba(255, 255, 255, 0.2)',
-                        borderRadius: '8px',
-                        cursor: showPaymentForm ? 'not-allowed' : 'pointer',
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        boxShadow: showPaymentForm ? `0 2px 8px rgba(${themeColorRgb}, 0.2)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                        transition: 'all 0.3s ease',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        opacity: showPaymentForm ? 0.3 : 1
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!showPaymentForm) {
-                          e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.8)`
-                          e.currentTarget.style.boxShadow = `0 4px 20px rgba(${themeColorRgb}, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!showPaymentForm) {
-                          e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
-                          e.currentTarget.style.boxShadow = `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`
-                        }
-                      }}
-                      title="Add Customer"
-                    >
-                      <UserPlus size={24} />
-                    </button>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+                    {/* Desktop: search + add customer */}
+                    {!isMobile && (
+                      <>
+                        <input
+                          type="text"
+                          value={customerSearchTerm}
+                          onChange={(e) => {
+                            if (!showPaymentForm) {
+                              setCustomerSearchTerm(e.target.value)
+                              searchCustomers(e.target.value)
+                            }
+                          }}
+                          placeholder="Search for customers"
+                          disabled={showPaymentForm}
+                          style={{
+                            ...inputBaseStyle(isDarkMode, themeColorRgb),
+                            flex: 1,
+                            paddingTop: '6px',
+                            paddingBottom: '6px',
+                            opacity: showPaymentForm ? 0.3 : 1,
+                            cursor: showPaymentForm ? 'not-allowed' : 'text'
+                          }}
+                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                        />
+                        <button
+                          onClick={handleCreateCustomer}
+                          disabled={showPaymentForm}
+                          style={{
+                            padding: '4px',
+                            width: '40px',
+                            height: '40px',
+                            backgroundColor: showPaymentForm ? `rgba(${themeColorRgb}, 0.3)` : `rgba(${themeColorRgb}, 0.7)`,
+                            backdropFilter: 'blur(10px)',
+                            WebkitBackdropFilter: 'blur(10px)',
+                            color: '#fff',
+                            border: '1px solid rgba(255, 255, 255, 0.2)',
+                            borderRadius: '8px',
+                            cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                            fontSize: '14px',
+                            fontWeight: 600,
+                            boxShadow: showPaymentForm ? `0 2px 8px rgba(${themeColorRgb}, 0.2)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                            transition: 'all 0.3s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: showPaymentForm ? 0.3 : 1
+                          }}
+                          title="Add Customer"
+                        >
+                          <UserPlus size={24} />
+                        </button>
+                      </>
+                    )}
+
+                    {/* Mobile: only Add Customer button (pickup/delivery opened from nav bar Order button) */}
+                    {isMobile && (
+                      <button
+                        type="button"
+                        onClick={handleCreateCustomer}
+                        disabled={showPaymentForm}
+                        style={{
+                          padding: '4px',
+                          width: '40px',
+                          height: '40px',
+                          backgroundColor: showPaymentForm ? `rgba(${themeColorRgb}, 0.3)` : `rgba(${themeColorRgb}, 0.7)`,
+                          backdropFilter: 'blur(10px)',
+                          WebkitBackdropFilter: 'blur(10px)',
+                          color: '#fff',
+                          border: '1px solid rgba(255, 255, 255, 0.2)',
+                          borderRadius: '8px',
+                          cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                          fontSize: '14px',
+                          fontWeight: 600,
+                          boxShadow: showPaymentForm ? `0 2px 8px rgba(${themeColorRgb}, 0.2)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                          transition: 'all 0.3s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: showPaymentForm ? 0.3 : 1
+                        }}
+                        title="Add Customer"
+                      >
+                        <UserPlus size={24} />
+                      </button>
+                    )}
                   </div>
-                  {customerSearchResults.length > 0 && (
+                  {!isMobile && customerSearchResults.length > 0 && (
                     <div style={{
                       position: 'absolute',
                       top: '100%',
@@ -3263,114 +3530,116 @@ function POS({ employeeId, employeeName }) {
               </div>
             )}
 
-            {/* Pay and Discount Buttons */}
-            <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
-              <ProtectedComponent permission="process_sale" fallback={
-                <button
-                  disabled
-                  style={{
-                    flex: 1,
-                    padding: '16px',
-                    backgroundColor: '#E9D5FF',
-                    color: '#666',
-                    border: 'none',
-                    borderRadius: '4px',
-                    fontSize: '18px',
-                    fontWeight: 600,
-                    cursor: 'not-allowed'
-                  }}
-                >
-                  No Permission to Process Sales
-                </button>
-              }>
-                <button
-                  onClick={async () => {
-                    if (!showPaymentForm) {
-                      // Pay when pickup/delivery: place order without payment
-                      if (orderType && payAtPickupOrDelivery) {
-                        placeOrderPayLater()
-                        return
+            {/* Pay and Discount Buttons – desktop only; mobile uses POS nav buttons */}
+            {!isMobile && (
+              <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+                <ProtectedComponent permission="process_sale" fallback={
+                  <button
+                    disabled
+                    style={{
+                      flex: 1,
+                      padding: '16px',
+                      backgroundColor: '#E9D5FF',
+                      color: '#666',
+                      border: 'none',
+                      borderRadius: '4px',
+                      fontSize: '18px',
+                      fontWeight: 600,
+                      cursor: 'not-allowed'
+                    }}
+                  >
+                    No Permission to Process Sales
+                  </button>
+                }>
+                  <button
+                    onClick={async () => {
+                      if (!showPaymentForm) {
+                        // Pay when pickup/delivery: place order without payment
+                        if (orderType && payAtPickupOrDelivery) {
+                          placeOrderPayLater()
+                          return
+                        }
+                        const registerOpen = await checkRegisterOpen()
+                        if (!registerOpen) {
+                          showToast('Register is closed.', 'warning', {
+                            label: 'Open Register',
+                            onClick: () => navigate('/settings?tab=cash'),
+                            iconColor: '#ef4444',
+                            buttonColor: themeColor
+                          })
+                          return
+                        }
+                        // Only check requirements if rewards are enabled AND customer is selected/entered
+                        if (rewardsSettings.enabled && (selectedCustomer || customerInfo.name) && !checkCustomerInfoRequirements()) {
+                          setShowCustomerInfoModal(true)
+                          return
+                        }
+                        setShowSummary(true)
+                        setShowCustomerDisplay(true)
                       }
-                      const registerOpen = await checkRegisterOpen()
-                      if (!registerOpen) {
-                        showToast('Register is closed.', 'warning', {
-                          label: 'Open Register',
-                          onClick: () => navigate('/settings?tab=cash'),
-                          iconColor: '#ef4444',
-                          buttonColor: themeColor
-                        })
-                        return
+                    }}
+                    disabled={cart.length === 0 || showPaymentForm || (orderType && payAtPickupOrDelivery && processing)}
+                    style={{
+                      flex: 1,
+                      padding: '16px',
+                      backgroundColor: (cart.length === 0 || showPaymentForm) ? `rgba(${themeColorRgb}, 0.4)` : `rgba(${themeColorRgb}, 0.7)`,
+                      backdropFilter: 'blur(10px)',
+                      WebkitBackdropFilter: 'blur(10px)',
+                      color: '#fff',
+                      border: (cart.length === 0 || showPaymentForm) ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.2)',
+                      borderRadius: '8px',
+                      fontSize: '18px',
+                      fontWeight: 600,
+                      cursor: (cart.length === 0 || showPaymentForm) ? 'not-allowed' : 'pointer',
+                      boxShadow: (cart.length === 0 || showPaymentForm) ? `0 2px 8px rgba(${themeColorRgb}, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                      transition: 'all 0.3s ease',
+                      opacity: showPaymentForm ? 0.3 : 1
+                    }}
+                  >
+                    {orderType && payAtPickupOrDelivery ? (processing ? 'Placing…' : 'Place order') : 'Pay'}
+                  </button>
+                </ProtectedComponent>
+                <ProtectedComponent permission="apply_discount" fallback={null}>
+                  <button
+                    onClick={() => {
+                      if (!showPaymentForm) {
+                        setDiscountInput(orderDiscount ? String(orderDiscount) : '')
+                        setShowDiscountModal(true)
                       }
-                      // Only check requirements if rewards are enabled AND customer is selected/entered
-                      if (rewardsSettings.enabled && (selectedCustomer || customerInfo.name) && !checkCustomerInfoRequirements()) {
-                        setShowCustomerInfoModal(true)
-                        return
-                      }
-                      setShowSummary(true)
-                      setShowCustomerDisplay(true)
-                    }
-                  }}
-                  disabled={cart.length === 0 || showPaymentForm || (orderType && payAtPickupOrDelivery && processing)}
-                  style={{
-                    flex: 1,
-                    padding: '16px',
-                    backgroundColor: (cart.length === 0 || showPaymentForm) ? `rgba(${themeColorRgb}, 0.4)` : `rgba(${themeColorRgb}, 0.7)`,
-                    backdropFilter: 'blur(10px)',
-                    WebkitBackdropFilter: 'blur(10px)',
-                    color: '#fff',
-                    border: (cart.length === 0 || showPaymentForm) ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.2)',
-                    borderRadius: '8px',
-                    fontSize: '18px',
-                    fontWeight: 600,
-                    cursor: (cart.length === 0 || showPaymentForm) ? 'not-allowed' : 'pointer',
-                    boxShadow: (cart.length === 0 || showPaymentForm) ? `0 2px 8px rgba(${themeColorRgb}, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                    transition: 'all 0.3s ease',
-                    opacity: showPaymentForm ? 0.3 : 1
-                  }}
-                >
-                  {orderType && payAtPickupOrDelivery ? (processing ? 'Placing…' : 'Place order') : 'Pay'}
-                </button>
-              </ProtectedComponent>
-              <ProtectedComponent permission="apply_discount" fallback={null}>
-                <button
-                  onClick={() => {
-                    if (!showPaymentForm) {
-                      setDiscountInput(orderDiscount ? String(orderDiscount) : '')
-                      setShowDiscountModal(true)
-                    }
-                  }}
-                  disabled={cart.length === 0 || showPaymentForm}
-                  style={{
-                    padding: '16px 24px',
-                    backgroundColor: (cart.length === 0 || showPaymentForm) ? `rgba(${themeColorRgb}, 0.35)` : `rgba(${themeColorRgb}, 0.55)`,
-                    backdropFilter: 'blur(10px)',
-                    WebkitBackdropFilter: 'blur(10px)',
-                    color: '#fff',
-                    border: (cart.length === 0 || showPaymentForm) ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.2)',
-                    borderRadius: '8px',
-                    fontSize: '18px',
-                    fontWeight: 600,
-                    cursor: (cart.length === 0 || showPaymentForm) ? 'not-allowed' : 'pointer',
-                    boxShadow: (cart.length === 0 || showPaymentForm) ? `0 2px 8px rgba(${themeColorRgb}, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.15)` : `0 4px 15px rgba(${themeColorRgb}, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                    transition: 'all 0.3s ease',
-                    opacity: showPaymentForm ? 0.3 : 1
-                  }}
-                >
-                  %
-                </button>
-              </ProtectedComponent>
-            </div>
+                    }}
+                    disabled={cart.length === 0 || showPaymentForm}
+                    style={{
+                      padding: '16px 24px',
+                      backgroundColor: (cart.length === 0 || showPaymentForm) ? `rgba(${themeColorRgb}, 0.35)` : `rgba(${themeColorRgb}, 0.55)`,
+                      backdropFilter: 'blur(10px)',
+                      WebkitBackdropFilter: 'blur(10px)',
+                      color: '#fff',
+                      border: (cart.length === 0 || showPaymentForm) ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.2)',
+                      borderRadius: '8px',
+                      fontSize: '18px',
+                      fontWeight: 600,
+                      cursor: (cart.length === 0 || showPaymentForm) ? 'not-allowed' : 'pointer',
+                      boxShadow: (cart.length === 0 || showPaymentForm) ? `0 2px 8px rgba(${themeColorRgb}, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.15)` : `0 4px 15px rgba(${themeColorRgb}, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                      transition: 'all 0.3s ease',
+                      opacity: showPaymentForm ? 0.3 : 1
+                    }}
+                  >
+                    %
+                  </button>
+                </ProtectedComponent>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Right Column - Product Search or Payment Form or Change Screen */}
         <div style={{
           flex: '1',
-          padding: '20px',
-          paddingLeft: '20px',
+          padding: isMobile ? '8px 12px 12px 12px' : '20px 20px 0 20px',
           minWidth: 0,
-          display: 'flex',
+          display: isMobile && !isBrowsingMobile ? 'none' : 'flex',
           flexDirection: 'column',
+          height: '100%',
           overflow: 'hidden'
         }}>
           {showChangeScreen ? (
@@ -3644,60 +3913,63 @@ function POS({ employeeId, employeeName }) {
                 </div>
               </div>
 
-              {/* Process Order Button */}
-              <div style={{ display: 'flex', gap: '12px', width: '100%', marginTop: 'auto' }}>
-                <button
-                  onClick={() => {
-                    setShowPaymentForm(false)
-                    setShowCustomerDisplay(false)
-                    setAmountPaid('')
-                    setShowSummary(false)
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '16px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                    backdropFilter: 'blur(10px)',
-                    WebkitBackdropFilter: 'blur(10px)',
-                    color: '#333',
-                    border: '1px solid rgba(0, 0, 0, 0.1)',
-                    borderRadius: '8px',
-                    fontSize: '18px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5)',
-                    transition: 'all 0.3s ease'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={processOrder}
-                  disabled={processing || cart.length === 0}
-                  style={{
-                    flex: 2,
-                    padding: '16px',
-                    backgroundColor: processing || cart.length === 0 ? `rgba(${themeColorRgb}, 0.4)` : `rgba(${themeColorRgb}, 0.7)`,
-                    backdropFilter: 'blur(10px)',
-                    WebkitBackdropFilter: 'blur(10px)',
-                    color: '#fff',
-                    border: processing || cart.length === 0 ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.2)',
-                    borderRadius: '8px',
-                    fontSize: '18px',
-                    fontWeight: 600,
-                    cursor: processing || cart.length === 0 ? 'not-allowed' : 'pointer',
-                    boxShadow: processing || cart.length === 0 ? `0 2px 8px rgba(${themeColorRgb}, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                    transition: 'all 0.3s ease',
-                    opacity: 1
-                  }}
-                >
-                  {processing ? 'Processing...' : 'Process'}
-                </button>
-              </div>
+              {/* Process Order Button – desktop only; mobile uses POS nav Pay */}
+              {!isMobile && (
+                <div style={{ display: 'flex', gap: '12px', width: '100%', marginTop: 'auto' }}>
+                  <button
+                    onClick={() => {
+                      setShowPaymentForm(false)
+                      setShowCustomerDisplay(false)
+                      setAmountPaid('')
+                      setShowSummary(false)
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '16px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                      backdropFilter: 'blur(10px)',
+                      WebkitBackdropFilter: 'blur(10px)',
+                      color: '#333',
+                      border: '1px solid rgba(0, 0, 0, 0.1)',
+                      borderRadius: '8px',
+                      fontSize: '18px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5)',
+                      transition: 'all 0.3s ease'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={processOrder}
+                    disabled={processing || cart.length === 0}
+                    style={{
+                      flex: 2,
+                      padding: '16px',
+                      backgroundColor: processing || cart.length === 0 ? `rgba(${themeColorRgb}, 0.4)` : `rgba(${themeColorRgb}, 0.7)`,
+                      backdropFilter: 'blur(10px)',
+                      WebkitBackdropFilter: 'blur(10px)',
+                      color: '#fff',
+                      border: processing || cart.length === 0 ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.2)',
+                      borderRadius: '8px',
+                      fontSize: '18px',
+                      fontWeight: 600,
+                      cursor: processing || cart.length === 0 ? 'not-allowed' : 'pointer',
+                      boxShadow: processing || cart.length === 0 ? `0 2px 8px rgba(${themeColorRgb}, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                      transition: 'all 0.3s ease',
+                      opacity: 1
+                    }}
+                  >
+                    {processing ? 'Processing...' : 'Process'}
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <>
-              {/* Search Bar: chips inside bar + input, then scan button */}
+              {/* Desktop Search Bar: chips inside bar + input, then scan button */}
+              {!isMobile && (
               <div style={{ marginBottom: '20px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <div
@@ -3833,8 +4105,10 @@ function POS({ employeeId, employeeName }) {
                   </button>
                 </div>
               </div>
+              )}
 
-              {/* Category Navigation */}
+              {/* Category Navigation (desktop) */}
+              {!isMobile && (
               <div style={{ marginBottom: '20px' }}>
                 <div style={{ position: 'relative' }}>
                   <div
@@ -3849,8 +4123,8 @@ function POS({ employeeId, employeeName }) {
                       msOverflowStyle: 'none'
                     }}
                   >
-                    {categories.map(category => {
-                      const label = category.includes(' > ') ? category.split(' > ').pop().trim() : category
+                    {['All', ...categories].map(category => {
+                      const label = category === 'All' ? 'All' : (category.includes(' > ') ? category.split(' > ').pop().trim() : category)
                       return (
                         <button
                           key={category}
@@ -3908,9 +4182,11 @@ function POS({ employeeId, employeeName }) {
                   }} />
                 </div>
               </div>
+              )}
 
-              {/* Product List / Search Results – shell always visible; skeletons while data loads */}
-              <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 400px)' }}>
+              {/* Product List / Search Results – on desktop always visible; on mobile only when searching/browsing */}
+              {(!isMobile || isBrowsingMobile) && (
+              <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
                 {loading ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }} aria-busy="true" aria-label="Loading products">
                     {Array.from({ length: 10 }, (_, i) => (
@@ -4205,6 +4481,7 @@ function POS({ employeeId, employeeName }) {
                   </div>
                 )}
               </div>
+              )}
             </>
           )}
         </div>
@@ -4213,9 +4490,17 @@ function POS({ employeeId, employeeName }) {
       {/* Customer Info Modal */}
       {showCustomerInfoModal && (
         showCreateCustomer ? (
-          /* Add Customer form — identical to Customers page (New customer modal) */
+          /* Add Customer form — desktop: centered modal; mobile: bottom sheet */
           <div
-            style={modalOverlayStyle(isDarkMode, 2000)}
+            style={isMobile ? {
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.35)',
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'center',
+              zIndex: 4000
+            } : modalOverlayStyle(isDarkMode, 4000)}
             onClick={() => {
               setShowCustomerInfoModal(false)
               setShowCreateCustomer(false)
@@ -4223,9 +4508,76 @@ function POS({ employeeId, employeeName }) {
             }}
           >
             <div
-              style={modalContentStyle(isDarkMode, { maxWidth: '560px', width: '90%', maxHeight: '90vh' })}
+              style={isMobile ? {
+                width: '100%',
+                maxHeight: '80vh',
+                backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+                borderTopLeftRadius: '16px',
+                borderTopRightRadius: '16px',
+                padding: '16px 16px 20px 16px',
+                boxShadow: '0 -4px 16px rgba(0,0,0,0.3)',
+                overflowY: 'auto'
+              } : modalContentStyle(isDarkMode, { maxWidth: '560px', width: '90%', maxHeight: '90vh' })}
               onClick={(e) => e.stopPropagation()}
             >
+              {isMobile && (
+                <>
+                  {/* Mobile customer search inside New Customer sheet */}
+                  <div style={{ marginBottom: '12px' }}>
+                    <input
+                      type="text"
+                      value={customerSearchTerm}
+                      onChange={(e) => {
+                        if (!showPaymentForm) {
+                          setCustomerSearchTerm(e.target.value)
+                          searchCustomers(e.target.value)
+                        }
+                      }}
+                      placeholder="Search for existing customers"
+                      disabled={showPaymentForm}
+                      style={{
+                        ...inputBaseStyle(isDarkMode, themeColorRgb),
+                        paddingTop: '6px',
+                        paddingBottom: '6px',
+                        opacity: showPaymentForm ? 0.3 : 1,
+                        cursor: showPaymentForm ? 'not-allowed' : 'text'
+                      }}
+                      {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                    />
+                    {customerSearchResults.length > 0 && (
+                      <div style={{
+                        marginTop: '4px',
+                        backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                        border: '1px solid #ddd',
+                        borderRadius: '8px',
+                        maxHeight: '180px',
+                        overflowY: 'auto'
+                      }}>
+                        {customerSearchResults.map(customer => (
+                          <div
+                            key={customer.customer_id}
+                            onClick={() => !showPaymentForm && handleCustomerSelect(customer)}
+                            style={{
+                              padding: '10px 12px',
+                              cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                              borderBottom: '1px solid #eee',
+                              transition: 'background-color 0.2s',
+                              opacity: showPaymentForm ? 0.3 : 1,
+                              pointerEvents: showPaymentForm ? 'none' : 'auto'
+                            }}
+                          >
+                            <div style={{ fontWeight: 500, fontSize: '14px' }}>{customer.customer_name}</div>
+                            {customer.phone && (
+                              <div style={{ fontSize: '12px', color: '#666' }}>{customer.phone}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
               <div style={{ marginBottom: '20px' }}>
                 <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
                   New customer
@@ -4371,20 +4723,164 @@ function POS({ employeeId, employeeName }) {
             </div>
           </div>
         ) : (
-          /* Pickup/Delivery/Customer Information modal (unchanged) */
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'transparent',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 2000
-          }}>
-            <div style={formModalStyle(isDarkMode)}>
+          /* Pickup/Delivery/Customer Information modal */
+          <div
+            style={isMobile ? {
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.35)',
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'center',
+              zIndex: 4000
+            } : {
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 4000
+            }}
+            onClick={() => {
+              setShowCustomerInfoModal(false)
+              setShowCreateCustomer(false)
+            }}
+          >
+            <div
+              style={isMobile ? {
+                width: '100%',
+                maxHeight: '80vh',
+                backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+                borderTopLeftRadius: '16px',
+                borderTopRightRadius: '16px',
+                padding: '16px 16px 20px 16px',
+                boxShadow: '0 -4px 16px rgba(0,0,0,0.3)',
+                overflowY: 'auto'
+              } : formModalStyle(isDarkMode)}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isMobile && (
+                <>
+                  {/* Pickup/Delivery buttons inside bottom sheet on mobile */}
+                  {(allowPickup || allowDelivery) && (
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {allowPickup && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!showPaymentForm) {
+                                if (orderType === 'pickup') {
+                                  setOrderType(null)
+                                  setPayAtPickupOrDelivery(false)
+                                  setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                                  setSelectedCustomer(null)
+                                  setCustomerInfoConfirmed(false)
+                                  setScheduledTime(null)
+                                } else {
+                                  setOrderType('pickup')
+                                  setCustomerInfoConfirmed(false)
+                                  if (selectedCustomer) {
+                                    setCustomerInfo(prev => ({
+                                      ...prev,
+                                      name: selectedCustomer.customer_name || prev.name,
+                                      phone: (selectedCustomer.phone || prev.phone || '').replace(/\D/g, '').slice(0, 10),
+                                      email: selectedCustomer.email || prev.email
+                                    }))
+                                  }
+                                }
+                              }
+                            }}
+                            disabled={showPaymentForm}
+                            style={{
+                              flex: 1,
+                              padding: '8px 10px',
+                              border: orderType === 'pickup' ? '2px solid ' + themeColor : '1px solid #ddd',
+                              borderRadius: '8px',
+                              fontSize: '14px',
+                              fontWeight: orderType === 'pickup' ? 600 : 400,
+                              backgroundColor: orderType === 'pickup' ? `rgba(${themeColorRgb}, 0.1)` : '#fff',
+                              color: orderType === 'pickup' ? themeColor : '#666',
+                              cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                              opacity: showPaymentForm ? 0.3 : 1
+                            }}
+                          >
+                            Pickup
+                          </button>
+                        )}
+                        {allowDelivery && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!showPaymentForm) {
+                                if (orderType === 'delivery') {
+                                  setOrderType(null)
+                                  setPayAtPickupOrDelivery(false)
+                                  setCustomerInfo({ name: '', email: '', phone: '', address: '' })
+                                  setSelectedCustomer(null)
+                                  setCustomerInfoConfirmed(false)
+                                  setScheduledTime(null)
+                                } else {
+                                  setOrderType('delivery')
+                                  setCustomerInfoConfirmed(false)
+                                  if (selectedCustomer) {
+                                    const sanitizePhone = (v) => (v || '').replace(/\D/g, '').slice(0, 10)
+                                    let info = {
+                                      name: selectedCustomer.customer_name || customerInfo.name,
+                                      phone: sanitizePhone(selectedCustomer.phone || customerInfo.phone),
+                                      email: selectedCustomer.email || customerInfo.email,
+                                      address: selectedCustomer.address ?? customerInfo.address ?? ''
+                                    }
+                                    if (selectedCustomer.customer_id) {
+                                      try {
+                                        const res = await fetch(`/api/customers/${selectedCustomer.customer_id}`)
+                                        const data = await res.json()
+                                        if (data.success && data.data) {
+                                          const c = data.data
+                                          info = {
+                                            name: c.customer_name ?? info.name,
+                                            phone: sanitizePhone(c.phone ?? info.phone),
+                                            email: c.email ?? info.email,
+                                            address: (c.address != null && c.address !== '') ? c.address : info.address
+                                          }
+                                          if (c.address != null && c.address !== '') {
+                                            setSelectedCustomer(prev => prev ? { ...prev, address: c.address } : null)
+                                          }
+                                        }
+                                      } catch (_) { /* keep existing info */ }
+                                    }
+                                    setCustomerInfo(info)
+                                  }
+                                }
+                              }
+                            }}
+                            disabled={showPaymentForm}
+                            style={{
+                              flex: 1,
+                              padding: '8px 10px',
+                              border: orderType === 'delivery' ? '2px solid ' + themeColor : '1px solid #ddd',
+                              borderRadius: '8px',
+                              fontSize: '14px',
+                              fontWeight: orderType === 'delivery' ? 600 : 400,
+                              backgroundColor: orderType === 'delivery' ? `rgba(${themeColorRgb}, 0.1)` : '#fff',
+                              color: orderType === 'delivery' ? themeColor : '#666',
+                              cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                              opacity: showPaymentForm ? 0.3 : 1
+                            }}
+                          >
+                            Delivery
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
               <div style={{ marginBottom: '20px' }}>
                 <h3 style={{ margin: 0, fontSize: '18px', fontFamily: '"Product Sans", sans-serif', color: isDarkMode ? 'var(--text-primary, #fff)' : '#1a1a1a' }}>
                   {orderType ? (orderType === 'pickup' ? 'Pickup' : 'Delivery') : 'Customer'} Information
@@ -4513,6 +5009,7 @@ function POS({ employeeId, employeeName }) {
           </div>
         )
       )}
+
 
       {/* Customer Rewards Modal - shown when a customer is selected */}
       {showRewardsModal && selectedCustomer && (
