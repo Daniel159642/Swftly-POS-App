@@ -7,6 +7,31 @@ PostgreSQL ONLY - All SQLite code has been removed
 import hashlib
 import logging
 import secrets
+try:
+    import bcrypt as _bcrypt
+    _BCRYPT_AVAILABLE = True
+except ImportError:
+    _bcrypt = None
+    _BCRYPT_AVAILABLE = False
+
+try:
+    from webauthn import (
+        generate_registration_options,
+        verify_registration_response,
+        generate_authentication_options,
+        verify_authentication_response,
+        options_to_json,
+    )
+    from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
+    from webauthn.helpers.structs import (
+        AuthenticatorSelectionCriteria,
+        UserVerificationRequirement,
+        ResidentKeyRequirement,
+        PublicKeyCredentialDescriptor,
+    )
+    _WEBAUTHN_AVAILABLE = True
+except ImportError:
+    _WEBAUTHN_AVAILABLE = False
 import json
 import re
 import os
@@ -16,6 +41,18 @@ from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 _ensure_metadata_lock = threading.Lock()
+
+# WebAuthn relying party config — override via env for production (swftly.app)
+WEBAUTHN_RP_ID = os.environ.get('WEBAUTHN_RP_ID', 'localhost')
+WEBAUTHN_RP_NAME = os.environ.get('WEBAUTHN_RP_NAME', 'Swftly')
+WEBAUTHN_ORIGINS = [
+    o.strip()
+    for o in os.environ.get(
+        'WEBAUTHN_ORIGINS',
+        'http://localhost:5173,http://localhost:5001,http://localhost:3000,https://swftly.app'
+    ).split(',')
+    if o.strip()
+]
 _category_path_cache: Dict[str, int] = {}
 _category_cache_max_size = 1000
 _ensure_shipment_lock = threading.Lock()
@@ -3630,8 +3667,50 @@ def generate_pin() -> str:
     return ''.join([str(secrets.randbelow(10)) for _ in range(6)])
 
 def hash_password(password: str) -> str:
-    """Hash password using SHA-256"""
+    """Hash password using bcrypt (falls back to SHA-256 if bcrypt unavailable)."""
+    if _BCRYPT_AVAILABLE:
+        return _bcrypt.hashpw(password.encode('utf-8'), _bcrypt.gensalt(rounds=12)).decode('utf-8')
+    # Fallback — not recommended for production
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+def verify_password(password: str, stored_hash: str, employee_id: int = None, cursor=None) -> bool:
+    """Verify password against stored hash.
+
+    Supports both bcrypt hashes ($2b$...) and legacy SHA-256 hex hashes.
+    On a successful SHA-256 match the hash is automatically upgraded to bcrypt
+    if employee_id and cursor are provided.
+    """
+    if not password or not stored_hash:
+        return False
+
+    # --- bcrypt path ---
+    if stored_hash.startswith('$2'):
+        if not _BCRYPT_AVAILABLE:
+            return False
+        try:
+            return _bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8'))
+        except Exception:
+            return False
+
+    # --- legacy SHA-256 path ---
+    sha_hash = hashlib.sha256(password.encode()).hexdigest()
+    if sha_hash != stored_hash:
+        return False
+
+    # Auto-upgrade: rehash with bcrypt and persist if we have DB access
+    if _BCRYPT_AVAILABLE and employee_id and cursor:
+        try:
+            new_hash = hash_password(password)
+            cursor.execute(
+                "UPDATE employees SET password_hash = %s WHERE employee_id = %s",
+                (new_hash, employee_id)
+            )
+        except Exception as upgrade_err:
+            # Non-fatal — login still succeeds
+            print(f"Warning: bcrypt upgrade failed for employee {employee_id}: {upgrade_err}")
+
+    return True
 
 def is_admin_user(employee_id: int, cursor) -> bool:
     """Check if employee is an admin user"""
@@ -7582,119 +7661,163 @@ def employee_login(
     username: Optional[str] = None,
     password: str = None,
     ip_address: Optional[str] = None,
-    device_info: Optional[str] = None
+    device_info: Optional[str] = None,
+    store_code: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Authenticate employee and create session"""
+    """Authenticate employee and create session.
+
+    store_code (optional): if provided, the employee's establishment_id must
+    match the establishment with that code. Mismatches return generic
+    "Invalid credentials" to avoid revealing whether the store exists.
+    """
     from database_postgres import get_cursor
     cursor = get_cursor()  # Use RealDictCursor
     conn = cursor.connection
-    
+
     # Support both username and employee_code for backward compatibility
     login_identifier = username if username else employee_code
     if not login_identifier:
         conn.close()
         return {'success': False, 'message': 'Username or employee code required'}
-    
+
     if not password:
         conn.close()
         return {'success': False, 'message': 'Password is required'}
-    
-    password_hash = hash_password(password)
-    
+
+    # Resolve store_code → establishment_id constraint (Phase 4)
+    required_establishment_id = None
+    if store_code:
+        cursor.execute("""
+            SELECT establishment_id FROM establishments
+            WHERE establishment_code = %s AND is_active = TRUE
+        """, (store_code.strip(),))
+        store_row = cursor.fetchone()
+        if not store_row:
+            conn.close()
+            return {'success': False, 'message': 'Invalid credentials'}
+        required_establishment_id = (
+            store_row.get('establishment_id') if isinstance(store_row, dict) else store_row[0]
+        )
+
     # Check if table has username column (RBAC migration)
-    cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'employees' AND table_schema = 'public'")
+    cursor.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'employees' AND table_schema = 'public'"
+    )
     column_rows = cursor.fetchall()
-    # Handle both RealDictRow and tuple results
     if column_rows and isinstance(column_rows[0], dict):
-        columns = [row.get('column_name') for row in column_rows]
+        col_names = [row.get('column_name') for row in column_rows]
     else:
-        columns = [row[0] if isinstance(row, (tuple, list)) else row.get('column_name', row) for row in column_rows]
-    has_username = 'username' in columns
-    
+        col_names = [row[0] if isinstance(row, (tuple, list)) else row.get('column_name', row) for row in column_rows]
+    has_username = 'username' in col_names
+
     # Verify credentials - try username first if available, then employee_code
     if has_username:
         cursor.execute("""
-            SELECT employee_id, first_name, last_name, position, active, password_hash, username, employee_code
+            SELECT employee_id, first_name, last_name, position, active, password_hash,
+                   username, employee_code, establishment_id
             FROM employees
             WHERE username = %s OR employee_code = %s
         """, (login_identifier, login_identifier))
     else:
         cursor.execute("""
-            SELECT employee_id, first_name, last_name, position, active, password_hash, employee_code
+            SELECT employee_id, first_name, last_name, position, active, password_hash,
+                   employee_code, establishment_id
             FROM employees
             WHERE employee_code = %s
         """, (login_identifier,))
-    
+
     employee = cursor.fetchone()
-    
+
     if not employee:
         conn.close()
         return {'success': False, 'message': 'Invalid credentials'}
-    
+
     # Convert to dict - handle both RealDictRow and tuple
     if isinstance(employee, dict):
         employee = dict(employee)
     else:
-        # Tuple - convert using column names
         columns = [desc[0] for desc in cursor.description]
         employee = {col: val for col, val in zip(columns, employee)}
-    
+
     # Check if employee has a password set
     if not employee.get('password_hash'):
         conn.close()
         return {'success': False, 'message': 'Account has no password set. Please contact administrator.'}
-    
-    # Check password
-    if employee['password_hash'] != password_hash:
+
+    # Verify password (bcrypt with SHA-256 fallback + auto-upgrade)
+    if not verify_password(password, employee['password_hash'], employee['employee_id'], cursor):
         conn.close()
         return {'success': False, 'message': 'Invalid credentials'}
-    
+
     if not employee['active']:
         conn.close()
         return {'success': False, 'message': 'Account is inactive'}
-    
+
+    # Enforce store_code constraint: employee must belong to the resolved establishment
+    emp_est_id = employee.get('establishment_id')
+    if required_establishment_id and emp_est_id != required_establishment_id:
+        conn.close()
+        return {'success': False, 'message': 'Invalid credentials'}
+
     # Generate session token
     session_token = secrets.token_urlsafe(32)
-    
-    # Get establishment_id from employee
-    establishment_id = employee.get('establishment_id')
+
+    # Use employee's establishment_id (already fetched)
+    establishment_id = emp_est_id
     if not establishment_id:
-        # Get establishment_id from employee record
         cursor.execute("SELECT establishment_id FROM employees WHERE employee_id = %s", (employee['employee_id'],))
         est_row = cursor.fetchone()
         if est_row:
             establishment_id = est_row.get('establishment_id') if isinstance(est_row, dict) else est_row[0]
-    
-    # Create session record - check if establishment_id column exists
+
+    # Create session record; include expires_at if the column exists
     cursor.execute("""
-        SELECT column_name FROM information_schema.columns 
-        WHERE table_name = 'employee_sessions' AND table_schema = 'public' AND column_name = 'establishment_id'
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'employee_sessions' AND table_schema = 'public'
     """)
-    has_establishment_id = cursor.fetchone() is not None
-    
-    if has_establishment_id and establishment_id:
+    session_cols = {
+        (r.get('column_name') if isinstance(r, dict) else r[0])
+        for r in cursor.fetchall()
+    }
+    has_establishment_id = 'establishment_id' in session_cols
+    has_expires_at = 'expires_at' in session_cols
+
+    if has_establishment_id and establishment_id and has_expires_at:
+        cursor.execute("""
+            INSERT INTO employee_sessions (
+                employee_id, establishment_id, session_token, ip_address, device_info, expires_at
+            ) VALUES (%s, %s, %s, %s, %s, NOW() + INTERVAL '24 hours')
+        """, (employee['employee_id'], establishment_id, session_token, ip_address, device_info))
+    elif has_establishment_id and establishment_id:
         cursor.execute("""
             INSERT INTO employee_sessions (
                 employee_id, establishment_id, session_token, ip_address, device_info
             ) VALUES (%s, %s, %s, %s, %s)
         """, (employee['employee_id'], establishment_id, session_token, ip_address, device_info))
+    elif has_expires_at:
+        cursor.execute("""
+            INSERT INTO employee_sessions (
+                employee_id, session_token, ip_address, device_info, expires_at
+            ) VALUES (%s, %s, %s, %s, NOW() + INTERVAL '24 hours')
+        """, (employee['employee_id'], session_token, ip_address, device_info))
     else:
         cursor.execute("""
             INSERT INTO employee_sessions (
                 employee_id, session_token, ip_address, device_info
             ) VALUES (%s, %s, %s, %s)
         """, (employee['employee_id'], session_token, ip_address, device_info))
-    
+
     # Update last login
     cursor.execute("""
         UPDATE employees
         SET last_login = CURRENT_TIMESTAMP
         WHERE employee_id = %s
     """, (employee['employee_id'],))
-    
+
     conn.commit()
     conn.close()
-    
+
     # Log login action (don't fail login if audit logging fails)
     try:
         log_audit_action(
@@ -7706,9 +7829,8 @@ def employee_login(
             notes=f'Employee {login_identifier} logged in'
         )
     except Exception as audit_error:
-        # Log error but don't fail the login
         print(f"Warning: Failed to log audit action for login: {audit_error}")
-    
+
     return {
         'success': True,
         'employee_id': employee['employee_id'],
@@ -7716,6 +7838,124 @@ def employee_login(
         'position': employee['position'],
         'session_token': session_token
     }
+
+
+def manager_login(email: str, password: str, ip_address: Optional[str] = None, device_info: Optional[str] = None) -> Dict[str, Any]:
+    """Authenticate a manager/admin by email + password.
+
+    Replaces the Clerk-based flow. Returns a session token on success.
+    Only employees with a management-level position are allowed.
+    """
+    from database_postgres import get_cursor
+    cursor = get_cursor()
+    conn = cursor.connection
+
+    MANAGER_POSITIONS = ('admin', 'manager', 'supervisor', 'assistant_manager')
+
+    if not email or not password:
+        conn.close()
+        return {'success': False, 'message': 'Email and password are required'}
+
+    try:
+        cursor.execute("""
+            SELECT employee_id, first_name, last_name, position, active,
+                   password_hash, establishment_id, email
+            FROM employees
+            WHERE lower(email) = lower(%s)
+              AND active = 1
+        """, (email.strip(),))
+
+        employee = cursor.fetchone()
+
+        if not employee:
+            conn.close()
+            return {'success': False, 'message': 'Invalid credentials'}
+
+        if isinstance(employee, dict):
+            employee = dict(employee)
+        else:
+            columns = [desc[0] for desc in cursor.description]
+            employee = {col: val for col, val in zip(columns, employee)}
+
+        # Only allow management roles via this endpoint
+        position = (employee.get('position') or '').lower()
+        if not any(position == p or position.startswith(p) for p in MANAGER_POSITIONS):
+            conn.close()
+            return {'success': False, 'message': 'Invalid credentials'}
+
+        if not employee.get('password_hash'):
+            conn.close()
+            return {'success': False, 'message': 'Account has no password set. Please contact administrator.'}
+
+        if not verify_password(password, employee['password_hash'], employee['employee_id'], cursor):
+            conn.close()
+            return {'success': False, 'message': 'Invalid credentials'}
+
+        # Create session
+        session_token = secrets.token_urlsafe(32)
+        establishment_id = employee.get('establishment_id')
+
+        cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'employee_sessions' AND table_schema = 'public'
+        """)
+        session_cols = {
+            (r.get('column_name') if isinstance(r, dict) else r[0])
+            for r in cursor.fetchall()
+        }
+        has_est = 'establishment_id' in session_cols
+        has_exp = 'expires_at' in session_cols
+
+        if has_est and establishment_id and has_exp:
+            cursor.execute("""
+                INSERT INTO employee_sessions (
+                    employee_id, establishment_id, session_token, ip_address, device_info, expires_at
+                ) VALUES (%s, %s, %s, %s, %s, NOW() + INTERVAL '24 hours')
+            """, (employee['employee_id'], establishment_id, session_token, ip_address, device_info))
+        elif has_est and establishment_id:
+            cursor.execute("""
+                INSERT INTO employee_sessions (
+                    employee_id, establishment_id, session_token, ip_address, device_info
+                ) VALUES (%s, %s, %s, %s, %s)
+            """, (employee['employee_id'], establishment_id, session_token, ip_address, device_info))
+        elif has_exp:
+            cursor.execute("""
+                INSERT INTO employee_sessions (
+                    employee_id, session_token, ip_address, device_info, expires_at
+                ) VALUES (%s, %s, %s, %s, NOW() + INTERVAL '24 hours')
+            """, (employee['employee_id'], session_token, ip_address, device_info))
+        else:
+            cursor.execute("""
+                INSERT INTO employee_sessions (
+                    employee_id, session_token, ip_address, device_info
+                ) VALUES (%s, %s, %s, %s)
+            """, (employee['employee_id'], session_token, ip_address, device_info))
+
+        cursor.execute(
+            "UPDATE employees SET last_login = CURRENT_TIMESTAMP WHERE employee_id = %s",
+            (employee['employee_id'],)
+        )
+        conn.commit()
+        conn.close()
+
+        return {
+            'success': True,
+            'employee_id': employee['employee_id'],
+            'employee_name': f"{employee['first_name']} {employee['last_name']}",
+            'position': employee['position'],
+            'establishment_id': establishment_id,
+            'session_token': session_token
+        }
+    except Exception as e:
+        print(f"manager_login error: {e}")
+        import traceback; traceback.print_exc()
+        if conn and not conn.closed:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            conn.close()
+        return {'success': False, 'message': 'Server error during login'}
 
 def get_employee_role(employee_id: int) -> Optional[Dict[str, Any]]:
     """Get employee's role information"""
@@ -7781,9 +8021,10 @@ def verify_session(session_token: str) -> Dict[str, Any]:
             SELECT es.*, e.first_name, e.last_name, e.position, e.active, e.email
             FROM employee_sessions es
             JOIN employees e ON es.employee_id = e.employee_id
-            WHERE es.session_token = %s 
+            WHERE es.session_token = %s
               AND es.is_active = 1
               AND e.active = 1
+              AND (es.expires_at IS NULL OR es.expires_at > NOW())
         """, (session_token,))
         
         session = cursor.fetchone()
@@ -7832,6 +8073,511 @@ def verify_session(session_token: str) -> Dict[str, Any]:
                 conn.close()
             except:
                 pass
+
+def check_login_rate_limit(identifier: str, establishment_id: Optional[int] = None, ip_address: Optional[str] = None, window_minutes: int = 15, max_attempts: int = 5) -> bool:
+    """Return True if the identifier is within allowed attempts, False if rate-limited.
+
+    Creates the login_attempts table on first use if it doesn't exist.
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        # Ensure table exists
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                id SERIAL PRIMARY KEY,
+                identifier TEXT NOT NULL,
+                establishment_id INTEGER,
+                ip_address TEXT,
+                attempted_at TIMESTAMP DEFAULT NOW(),
+                succeeded BOOLEAN DEFAULT FALSE
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_login_attempts_identifier ON login_attempts (identifier, attempted_at)"
+        )
+        conn.commit()
+        # Count recent failures
+        cursor.execute("""
+            SELECT COUNT(*) FROM login_attempts
+            WHERE identifier = %s
+              AND succeeded = FALSE
+              AND attempted_at > NOW() - INTERVAL '%s minutes'
+        """, (identifier, window_minutes))
+        row = cursor.fetchone()
+        count = row[0] if row else 0
+        return count < max_attempts
+    except Exception as e:
+        print(f"Warning: rate limit check failed: {e}")
+        return True  # Fail open — don't block login if rate-limit DB is unavailable
+    finally:
+        if conn and not conn.closed:
+            conn.close()
+
+
+def record_login_attempt(identifier: str, succeeded: bool, establishment_id: Optional[int] = None, ip_address: Optional[str] = None) -> None:
+    """Insert a row into login_attempts and (on success) clean up old failures."""
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO login_attempts (identifier, establishment_id, ip_address, succeeded)
+            VALUES (%s, %s, %s, %s)
+        """, (identifier, establishment_id, ip_address, succeeded))
+        if succeeded:
+            # Remove old failed attempts for this identifier so the counter resets
+            cursor.execute(
+                "DELETE FROM login_attempts WHERE identifier = %s AND succeeded = FALSE",
+                (identifier,)
+            )
+        conn.commit()
+    except Exception as e:
+        print(f"Warning: record_login_attempt failed: {e}")
+    finally:
+        if conn and not conn.closed:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            conn.close()
+
+
+# ============================================================================
+# WEBAUTHN / PASSKEY FUNCTIONS
+# ============================================================================
+
+def _ensure_webauthn_tables(cursor, conn) -> None:
+    """Create WebAuthn tables if missing — runs at first use."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS webauthn_credentials (
+            id            SERIAL PRIMARY KEY,
+            employee_id   INTEGER NOT NULL,
+            credential_id TEXT NOT NULL UNIQUE,
+            public_key    TEXT NOT NULL,
+            sign_count    INTEGER NOT NULL DEFAULT 0,
+            transports    TEXT[],
+            device_name   TEXT,
+            created_at    TIMESTAMP DEFAULT NOW(),
+            last_used_at  TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS webauthn_challenges (
+            id             SERIAL PRIMARY KEY,
+            challenge      TEXT NOT NULL UNIQUE,
+            employee_email TEXT,
+            challenge_type TEXT NOT NULL,
+            expires_at     TIMESTAMP NOT NULL DEFAULT NOW() + INTERVAL '10 minutes'
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_wc_emp ON webauthn_credentials (employee_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_wchall ON webauthn_challenges (challenge)")
+    conn.commit()
+
+
+def _row_to_dict(row, cursor) -> dict:
+    if isinstance(row, dict):
+        return dict(row)
+    cols = [d[0] for d in cursor.description]
+    return dict(zip(cols, row))
+
+
+def _extract_challenge_from_client_data(client_data_b64: str) -> str:
+    """Decode clientDataJSON (base64url) and return the embedded challenge string."""
+    import base64
+    padded = client_data_b64 + '=' * (4 - len(client_data_b64) % 4)
+    decoded = base64.urlsafe_b64decode(padded)
+    return json.loads(decoded).get('challenge', '')
+
+
+def _parse_registration_credential(credential_data: dict):
+    from webauthn.helpers.structs import RegistrationCredential
+    raw = json.dumps(credential_data)
+    for method in ('parse_raw', 'model_validate_json'):
+        try:
+            return getattr(RegistrationCredential, method)(raw)
+        except Exception:
+            pass
+    return RegistrationCredential(**credential_data)
+
+
+def _parse_authentication_credential(credential_data: dict):
+    from webauthn.helpers.structs import AuthenticationCredential
+    raw = json.dumps(credential_data)
+    for method in ('parse_raw', 'model_validate_json'):
+        try:
+            return getattr(AuthenticationCredential, method)(raw)
+        except Exception:
+            pass
+    return AuthenticationCredential(**credential_data)
+
+
+def webauthn_register_begin(employee_id: int) -> Dict[str, Any]:
+    """Generate passkey registration options for an already-authenticated manager."""
+    if not _WEBAUTHN_AVAILABLE:
+        return {'success': False, 'message': 'py_webauthn not installed on server'}
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        _ensure_webauthn_tables(cursor, conn)
+        cursor.execute(
+            "SELECT employee_id, email, first_name, last_name FROM employees WHERE employee_id = %s AND active = 1",
+            (employee_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return {'success': False, 'message': 'Employee not found'}
+        emp = _row_to_dict(row, cursor)
+
+        # Build exclusion list so the same authenticator can't be re-registered
+        cursor.execute("SELECT credential_id FROM webauthn_credentials WHERE employee_id = %s", (employee_id,))
+        exclude_creds = [
+            PublicKeyCredentialDescriptor(id=base64url_to_bytes(
+                (_row_to_dict(r, cursor) if not isinstance(r, dict) else r)['credential_id']
+            ))
+            for r in cursor.fetchall()
+        ]
+
+        options = generate_registration_options(
+            rp_id=WEBAUTHN_RP_ID,
+            rp_name=WEBAUTHN_RP_NAME,
+            user_id=str(employee_id).encode(),
+            user_name=emp.get('email') or f'employee_{employee_id}',
+            user_display_name=(f"{emp.get('first_name','')} {emp.get('last_name','')}".strip()
+                               or emp.get('email', '')),
+            authenticator_selection=AuthenticatorSelectionCriteria(
+                resident_key=ResidentKeyRequirement.PREFERRED,
+                user_verification=UserVerificationRequirement.PREFERRED,
+            ),
+            exclude_credentials=exclude_creds,
+        )
+
+        challenge_b64 = bytes_to_base64url(options.challenge)
+        cursor.execute("DELETE FROM webauthn_challenges WHERE expires_at < NOW()")
+        cursor.execute("""
+            INSERT INTO webauthn_challenges (challenge, employee_email, challenge_type)
+            VALUES (%s, %s, 'registration')
+            ON CONFLICT (challenge) DO UPDATE SET expires_at = NOW() + INTERVAL '10 minutes'
+        """, (challenge_b64, emp.get('email')))
+        conn.commit()
+        return {'success': True, 'options': json.loads(options_to_json(options))}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+    finally:
+        if conn and not conn.closed:
+            conn.close()
+
+
+def webauthn_register_complete(employee_id: int, credential_data: dict, device_name: Optional[str] = None) -> Dict[str, Any]:
+    """Verify attestation and persist the new passkey credential."""
+    if not _WEBAUTHN_AVAILABLE:
+        return {'success': False, 'message': 'py_webauthn not installed on server'}
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        _ensure_webauthn_tables(cursor, conn)
+        challenge_b64 = _extract_challenge_from_client_data(
+            credential_data.get('response', {}).get('clientDataJSON', '')
+        )
+        cursor.execute("""
+            SELECT id FROM webauthn_challenges
+            WHERE challenge = %s AND challenge_type = 'registration' AND expires_at > NOW()
+        """, (challenge_b64,))
+        if not cursor.fetchone():
+            return {'success': False, 'message': 'Challenge expired or not found. Please try again.'}
+
+        try:
+            cred_obj = _parse_registration_credential(credential_data)
+            verification = verify_registration_response(
+                credential=cred_obj,
+                expected_challenge=base64url_to_bytes(challenge_b64),
+                expected_rp_id=WEBAUTHN_RP_ID,
+                expected_origin=WEBAUTHN_ORIGINS,
+            )
+        except Exception as verify_err:
+            return {'success': False, 'message': f'Verification failed: {verify_err}'}
+
+        cred_id_b64 = bytes_to_base64url(verification.credential_id)
+        pub_key_b64 = bytes_to_base64url(verification.credential_public_key)
+        transports = (credential_data.get('response', {}).get('transports')
+                      or credential_data.get('transports'))
+
+        cursor.execute("""
+            INSERT INTO webauthn_credentials
+                (employee_id, credential_id, public_key, sign_count, transports, device_name)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (credential_id)
+            DO UPDATE SET sign_count = EXCLUDED.sign_count, last_used_at = NOW()
+        """, (employee_id, cred_id_b64, pub_key_b64, verification.sign_count,
+               transports, device_name))
+        cursor.execute("DELETE FROM webauthn_challenges WHERE challenge = %s", (challenge_b64,))
+        conn.commit()
+        return {'success': True, 'credential_id': cred_id_b64}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        if conn and not conn.closed:
+            conn.rollback()
+        return {'success': False, 'message': str(e)}
+    finally:
+        if conn and not conn.closed:
+            conn.close()
+
+
+def webauthn_login_begin(email: Optional[str] = None) -> Dict[str, Any]:
+    """Generate authentication options. Pass email to show only that user's passkeys,
+    or omit for discoverable / usernameless flow."""
+    if not _WEBAUTHN_AVAILABLE:
+        return {'success': False, 'message': 'py_webauthn not installed on server'}
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        _ensure_webauthn_tables(cursor, conn)
+        allow_credentials = []
+        if email:
+            cursor.execute("""
+                SELECT wc.credential_id, wc.transports
+                FROM webauthn_credentials wc
+                JOIN employees e ON wc.employee_id = e.employee_id
+                WHERE lower(e.email) = lower(%s) AND e.active = 1
+            """, (email.strip(),))
+            for row in cursor.fetchall():
+                r = _row_to_dict(row, cursor)
+                allow_credentials.append(PublicKeyCredentialDescriptor(
+                    id=base64url_to_bytes(r['credential_id']),
+                    transports=r.get('transports') or [],
+                ))
+
+        options = generate_authentication_options(
+            rp_id=WEBAUTHN_RP_ID,
+            allow_credentials=allow_credentials,
+            user_verification=UserVerificationRequirement.PREFERRED,
+        )
+        challenge_b64 = bytes_to_base64url(options.challenge)
+        cursor.execute("DELETE FROM webauthn_challenges WHERE expires_at < NOW()")
+        cursor.execute("""
+            INSERT INTO webauthn_challenges (challenge, employee_email, challenge_type)
+            VALUES (%s, %s, 'authentication')
+            ON CONFLICT (challenge) DO UPDATE SET expires_at = NOW() + INTERVAL '10 minutes'
+        """, (challenge_b64, email))
+        conn.commit()
+        return {'success': True, 'options': json.loads(options_to_json(options))}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {'success': False, 'message': str(e)}
+    finally:
+        if conn and not conn.closed:
+            conn.close()
+
+
+def webauthn_login_complete(credential_data: dict, ip_address: Optional[str] = None, device_info: Optional[str] = None) -> Dict[str, Any]:
+    """Verify the passkey assertion and create a session."""
+    if not _WEBAUTHN_AVAILABLE:
+        return {'success': False, 'message': 'py_webauthn not installed on server'}
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        _ensure_webauthn_tables(cursor, conn)
+        challenge_b64 = _extract_challenge_from_client_data(
+            credential_data.get('response', {}).get('clientDataJSON', '')
+        )
+        cursor.execute("""
+            SELECT id FROM webauthn_challenges
+            WHERE challenge = %s AND challenge_type = 'authentication' AND expires_at > NOW()
+        """, (challenge_b64,))
+        if not cursor.fetchone():
+            return {'success': False, 'message': 'Challenge expired or not found. Please try again.'}
+
+        cred_id_b64 = credential_data.get('id') or credential_data.get('rawId', '')
+        cursor.execute("""
+            SELECT wc.credential_id, wc.public_key, wc.sign_count,
+                   e.employee_id, e.first_name, e.last_name, e.position,
+                   e.establishment_id, e.active
+            FROM webauthn_credentials wc
+            JOIN employees e ON wc.employee_id = e.employee_id
+            WHERE wc.credential_id = %s
+        """, (cred_id_b64,))
+        row = cursor.fetchone()
+        if not row:
+            return {'success': False, 'message': 'Invalid credentials'}
+        cred_row = _row_to_dict(row, cursor)
+
+        if not cred_row.get('active'):
+            return {'success': False, 'message': 'Account is inactive'}
+
+        try:
+            cred_obj = _parse_authentication_credential(credential_data)
+            verification = verify_authentication_response(
+                credential=cred_obj,
+                expected_challenge=base64url_to_bytes(challenge_b64),
+                expected_rp_id=WEBAUTHN_RP_ID,
+                expected_origin=WEBAUTHN_ORIGINS,
+                credential_public_key=base64url_to_bytes(cred_row['public_key']),
+                credential_current_sign_count=cred_row['sign_count'],
+                require_user_verification=False,
+            )
+        except Exception as verify_err:
+            return {'success': False, 'message': f'Verification failed: {verify_err}'}
+
+        # Update sign count + last used
+        cursor.execute("""
+            UPDATE webauthn_credentials
+            SET sign_count = %s, last_used_at = NOW()
+            WHERE credential_id = %s
+        """, (verification.new_sign_count, cred_id_b64))
+
+        cursor.execute("DELETE FROM webauthn_challenges WHERE challenge = %s", (challenge_b64,))
+
+        # Create session (same as password login)
+        employee_id = cred_row['employee_id']
+        establishment_id = cred_row.get('establishment_id')
+        session_token = secrets.token_urlsafe(32)
+
+        cursor.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'employee_sessions' AND table_schema = 'public'
+        """)
+        session_cols = {(_row_to_dict(r, cursor).get('column_name') or r[0]) for r in cursor.fetchall()}
+        has_exp = 'expires_at' in session_cols
+
+        if establishment_id and has_exp:
+            cursor.execute("""
+                INSERT INTO employee_sessions
+                    (employee_id, establishment_id, session_token, ip_address, device_info, expires_at)
+                VALUES (%s, %s, %s, %s, %s, NOW() + INTERVAL '24 hours')
+            """, (employee_id, establishment_id, session_token, ip_address, device_info))
+        elif establishment_id:
+            cursor.execute("""
+                INSERT INTO employee_sessions
+                    (employee_id, establishment_id, session_token, ip_address, device_info)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (employee_id, establishment_id, session_token, ip_address, device_info))
+        elif has_exp:
+            cursor.execute("""
+                INSERT INTO employee_sessions
+                    (employee_id, session_token, ip_address, device_info, expires_at)
+                VALUES (%s, %s, %s, %s, NOW() + INTERVAL '24 hours')
+            """, (employee_id, session_token, ip_address, device_info))
+        else:
+            cursor.execute("""
+                INSERT INTO employee_sessions (employee_id, session_token, ip_address, device_info)
+                VALUES (%s, %s, %s, %s)
+            """, (employee_id, session_token, ip_address, device_info))
+
+        cursor.execute(
+            "UPDATE employees SET last_login = CURRENT_TIMESTAMP WHERE employee_id = %s",
+            (employee_id,)
+        )
+        conn.commit()
+        return {
+            'success': True,
+            'session_token': session_token,
+            'employee_id': employee_id,
+            'employee_name': f"{cred_row['first_name']} {cred_row['last_name']}",
+            'position': cred_row['position'],
+            'establishment_id': establishment_id,
+        }
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        if conn and not conn.closed:
+            conn.rollback()
+        return {'success': False, 'message': str(e)}
+    finally:
+        if conn and not conn.closed:
+            conn.close()
+
+
+def list_webauthn_credentials(employee_id: int) -> Dict[str, Any]:
+    """Return all passkeys registered for a single employee (for their settings page)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT id, credential_id, device_name, transports, created_at, last_used_at
+            FROM webauthn_credentials
+            WHERE employee_id = %s
+            ORDER BY created_at DESC
+        """, (employee_id,))
+        rows = cursor.fetchall()
+        cols = ['id', 'credential_id', 'device_name', 'transports', 'created_at', 'last_used_at']
+        result = []
+        for r in rows:
+            r = dict(r) if isinstance(r, dict) else dict(zip(cols, r))
+            result.append({
+                'id': r['id'],
+                'device_name': r.get('device_name') or 'Passkey',
+                'transports': r.get('transports') or [],
+                'created_at': r['created_at'].isoformat() if r.get('created_at') else None,
+                'last_used_at': r['last_used_at'].isoformat() if r.get('last_used_at') else None,
+            })
+        return {'success': True, 'credentials': result}
+    except Exception as e:
+        return {'success': False, 'credentials': [], 'message': str(e)}
+    finally:
+        if conn and not conn.closed:
+            conn.close()
+
+
+def delete_webauthn_credential(credential_db_id: int, employee_id: int) -> Dict[str, Any]:
+    """Remove a passkey. Employees can only delete their own."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "DELETE FROM webauthn_credentials WHERE id = %s AND employee_id = %s",
+            (credential_db_id, employee_id)
+        )
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return {'success': False, 'message': 'Not found or access denied'}
+        conn.commit()
+        return {'success': True}
+    except Exception as e:
+        conn.rollback()
+        return {'success': False, 'message': str(e)}
+    finally:
+        if conn and not conn.closed:
+            conn.close()
+
+
+def list_all_webauthn_credentials() -> Dict[str, Any]:
+    """Admin-only: all passkeys across all employees, with owner details."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT wc.id, wc.employee_id, wc.device_name, wc.transports,
+                   wc.created_at, wc.last_used_at,
+                   e.first_name, e.last_name, e.email, e.position
+            FROM webauthn_credentials wc
+            JOIN employees e ON wc.employee_id = e.employee_id
+            ORDER BY e.last_name, e.first_name, wc.created_at DESC
+        """)
+        cols = ['id', 'employee_id', 'device_name', 'transports', 'created_at', 'last_used_at',
+                'first_name', 'last_name', 'email', 'position']
+        result = []
+        for r in cursor.fetchall():
+            r = dict(r) if isinstance(r, dict) else dict(zip(cols, r))
+            result.append({
+                'id': r['id'],
+                'employee_id': r['employee_id'],
+                'employee_name': f"{r.get('first_name','')} {r.get('last_name','')}".strip(),
+                'email': r.get('email'),
+                'position': r.get('position'),
+                'device_name': r.get('device_name') or 'Passkey',
+                'transports': r.get('transports') or [],
+                'created_at': r['created_at'].isoformat() if r.get('created_at') else None,
+                'last_used_at': r['last_used_at'].isoformat() if r.get('last_used_at') else None,
+            })
+        return {'success': True, 'credentials': result}
+    except Exception as e:
+        return {'success': False, 'credentials': [], 'message': str(e)}
+    finally:
+        if conn and not conn.closed:
+            conn.close()
+
 
 def employee_logout(session_token: str) -> Dict[str, Any]:
     """End employee session"""
@@ -7915,20 +8661,21 @@ def change_employee_password(employee_id: int, old_password: str, new_password: 
     # Verify old password
     cursor.execute("SELECT password_hash FROM employees WHERE employee_id = %s", (employee_id,))
     row = cursor.fetchone()
-    
+
     if not row:
         conn.close()
         return {'success': False, 'message': 'Employee not found'}
-    
-    if dict(row)['password_hash'] != hash_password(old_password):
+
+    stored_hash = (dict(row) if not isinstance(row, dict) else row).get('password_hash') or row[0]
+    if not verify_password(old_password, stored_hash):
         conn.close()
         return {'success': False, 'message': 'Incorrect old password'}
-    
+
     # Validate admin password (must be numeric only)
     if is_admin_user(employee_id, cursor) and not validate_admin_password(new_password):
         conn.close()
         return {'success': False, 'message': 'Admin passwords must contain only numbers'}
-    
+
     # Update password
     new_password_hash = hash_password(new_password)
     cursor.execute("""

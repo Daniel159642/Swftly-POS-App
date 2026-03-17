@@ -52,6 +52,7 @@ import '../components/CustomerDisplay.css'
 import '../components/CustomerDisplayButtons.css'
 import { getDefaultCheckoutUi, mergeCheckoutUiFromApi } from '../utils/checkoutUi'
 import { playNewOrderSound, NOTIFICATION_SOUND_OPTIONS } from '../utils/notificationSound'
+import { startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/browser'
 import { LA_MAISON_RECEIPT_HTML, LA_MAISON_ORDER_HTML, LA_MAISON_ORDER_APP_NOTIFICATION_HTML, LA_MAISON_SCHEDULE_HTML, LA_MAISON_SCHEDULE_APP_NOTIFICATION_HTML, LA_MAISON_CLOCKIN_HTML, LA_MAISON_CLOCKIN_APP_NOTIFICATION_HTML, LA_MAISON_REPORT_HTML, LA_MAISON_REPORT_APP_NOTIFICATION_HTML, LA_MAISON_RESTAURANT_PROMOTION_RECEIPT_HTML } from './laMaisonReceiptTemplate'
 
 function CustomDropdown({ value, onChange, options, placeholder, required, isDarkMode, themeColorRgb, style = {} }) {
@@ -1193,7 +1194,267 @@ function ReceiptPreview({ settings, id = 'receipt-preview-print', onSectionClick
   )
 }
 
-const SETTINGS_TAB_IDS = ['location', 'pos', 'cash', 'notifications', 'rewards', 'integration', 'admin']
+// ── Security Tab ────────────────────────────────────────────────────────────
+function SecurityTab() {
+  const { themeColor } = useTheme()
+  const { employee } = usePermissions()
+  const { show: showToast } = useToast()
+  const [creds, setCreds] = useState([])
+  const [allCreds, setAllCreds] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [addingPasskey, setAddingPasskey] = useState(false)
+  const [deviceName, setDeviceName] = useState('')
+  const [editingId, setEditingId] = useState(null)
+  const [editName, setEditName] = useState('')
+  const isAdmin = ['admin', 'administrator'].includes((employee?.position || '').toLowerCase())
+  const supportsPasskey = browserSupportsWebAuthn()
+
+  const token = () => localStorage.getItem('sessionToken') || localStorage.getItem('session_token') || ''
+  const authHeaders = () => ({ 'Content-Type': 'application/json', 'X-Session-Token': token() })
+
+  const hexToRgb = (hex) => {
+    const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+    return r ? `${parseInt(r[1], 16)}, ${parseInt(r[2], 16)}, ${parseInt(r[3], 16)}` : '132, 0, 255'
+  }
+  const rgb = hexToRgb(themeColor)
+
+  const fetchCreds = async () => {
+    setLoading(true)
+    try {
+      const [mine, all] = await Promise.all([
+        fetch(getApiUrl('/api/admin/webauthn/credentials'), { headers: authHeaders() }).then(r => r.json()),
+        isAdmin
+          ? fetch(getApiUrl('/api/admin/webauthn/all-credentials'), { headers: authHeaders() }).then(r => r.json())
+          : Promise.resolve({ credentials: [] }),
+      ])
+      setCreds(mine.credentials || [])
+      setAllCreds(all.credentials || [])
+    } catch (e) {
+      console.error('Failed to load passkeys', e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { fetchCreds() }, [])
+
+  const handleAddPasskey = async () => {
+    if (!supportsPasskey) return
+    setAddingPasskey(true)
+    try {
+      const beginResp = await fetch(getApiUrl('/api/admin/webauthn/register/begin'), {
+        method: 'POST', headers: authHeaders(), body: JSON.stringify({}),
+      })
+      const beginData = await beginResp.json()
+      if (!beginData.success) { showToast(beginData.message || 'Could not start passkey setup', 'error'); return }
+
+      const credential = await startRegistration({ optionsJSON: beginData.options })
+
+      const completeResp = await fetch(getApiUrl('/api/admin/webauthn/register/complete'), {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ credential, device_name: deviceName.trim() || undefined }),
+      })
+      const result = await completeResp.json()
+      if (result.success) {
+        showToast('Passkey added successfully', 'success')
+        setDeviceName('')
+        await fetchCreds()
+      } else {
+        showToast(result.message || 'Failed to save passkey', 'error')
+      }
+    } catch (err) {
+      if (err.name !== 'NotAllowedError') showToast('Passkey setup failed', 'error')
+    } finally {
+      setAddingPasskey(false)
+    }
+  }
+
+  const handleDelete = async (credId, empId) => {
+    if (!window.confirm('Remove this passkey?')) return
+    try {
+      const res = await fetch(getApiUrl(`/api/admin/webauthn/credentials/${credId}`), {
+        method: 'DELETE', headers: authHeaders(),
+        body: JSON.stringify({ employee_id: empId || employee?.employee_id }),
+      })
+      const data = await res.json()
+      if (data.success) { showToast('Passkey removed', 'success'); await fetchCreds() }
+      else showToast(data.message || 'Failed to remove passkey', 'error')
+    } catch { showToast('Error removing passkey', 'error') }
+  }
+
+  const handleRename = async (credId, empId) => {
+    if (!editName.trim()) return
+    try {
+      const res = await fetch(getApiUrl(`/api/admin/webauthn/credentials/${credId}`), {
+        method: 'PATCH', headers: authHeaders(),
+        body: JSON.stringify({ device_name: editName.trim(), employee_id: empId || employee?.employee_id }),
+      })
+      const data = await res.json()
+      if (data.success) { showToast('Renamed', 'success'); setEditingId(null); await fetchCreds() }
+      else showToast(data.message || 'Failed to rename', 'error')
+    } catch { showToast('Error renaming passkey', 'error') }
+  }
+
+  const fmtDate = (iso) => {
+    if (!iso) return '—'
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  const transportLabel = (transports) => {
+    if (!transports || !transports.length) return ''
+    const map = { internal: 'Biometric', usb: 'USB key', nfc: 'NFC', ble: 'Bluetooth', hybrid: 'Phone' }
+    return transports.map(t => map[t] || t).join(', ')
+  }
+
+  const sectionStyle = {
+    backgroundColor: 'var(--bg-primary)',
+    border: '1px solid var(--border-light)',
+    borderRadius: '8px',
+    padding: '24px',
+    marginBottom: '24px',
+    maxWidth: '680px',
+  }
+  const rowStyle = {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '12px 0', borderBottom: '1px solid var(--border-light)',
+    gap: '12px',
+  }
+
+  const CredRow = ({ cred, showOwner, empId }) => (
+    <div style={rowStyle}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {editingId === cred.id ? (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              style={{ padding: '6px 10px', borderRadius: '6px', border: `1px solid rgba(${rgb},0.4)`, fontSize: '14px', flex: 1 }}
+              autoFocus
+            />
+            <button onClick={() => handleRename(cred.id, empId)}
+              style={{ padding: '6px 14px', backgroundColor: `rgba(${rgb},0.7)`, color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}>
+              Save
+            </button>
+            <button onClick={() => setEditingId(null)}
+              style={{ padding: '6px 10px', backgroundColor: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-light)', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div>
+            <span style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)' }}>
+              🔑 {cred.device_name || 'Passkey'}
+            </span>
+            {showOwner && (
+              <span style={{ fontSize: '12px', color: `rgba(${rgb},0.8)`, marginLeft: '8px', fontWeight: 500 }}>
+                {cred.employee_name} ({cred.position})
+              </span>
+            )}
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+              Added {fmtDate(cred.created_at)}
+              {cred.last_used_at && ` · Last used ${fmtDate(cred.last_used_at)}`}
+              {cred.transports?.length > 0 && ` · ${transportLabel(cred.transports)}`}
+            </div>
+          </div>
+        )}
+      </div>
+      {editingId !== cred.id && (
+        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+          <button onClick={() => { setEditingId(cred.id); setEditName(cred.device_name || '') }}
+            style={{ padding: '6px 12px', fontSize: '12px', border: '1px solid var(--border-light)', borderRadius: '6px', backgroundColor: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+            Rename
+          </button>
+          <button onClick={() => handleDelete(cred.id, empId)}
+            style={{ padding: '6px 12px', fontSize: '12px', border: '1px solid #ffcdd2', borderRadius: '6px', backgroundColor: '#fff8f8', color: '#c62828', cursor: 'pointer' }}>
+            Remove
+          </button>
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    <div style={{ padding: '24px', maxWidth: '720px' }}>
+      <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>Security</h2>
+      <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '28px' }}>
+        Manage passkeys (Face ID, Touch ID, Windows Hello) for manager and admin accounts.
+      </p>
+
+      {/* My Passkeys */}
+      <div style={sectionStyle}>
+        <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px', marginTop: 0 }}>
+          My Passkeys
+        </h3>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
+          Registered on this account. Use these instead of your password to sign in.
+        </p>
+
+        {loading ? (
+          <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Loading…</p>
+        ) : creds.length === 0 ? (
+          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', fontStyle: 'italic', marginBottom: '16px' }}>
+            No passkeys registered yet.
+          </p>
+        ) : (
+          <div style={{ marginBottom: '16px' }}>
+            {creds.map(c => <CredRow key={c.id} cred={c} showOwner={false} empId={employee?.employee_id} />)}
+          </div>
+        )}
+
+        {!supportsPasskey ? (
+          <p style={{ fontSize: '13px', color: '#f57c00', padding: '10px', backgroundColor: '#fff8e1', borderRadius: '6px' }}>
+            Your browser doesn't support passkeys. Use Chrome, Safari, or Edge on a modern device.
+          </p>
+        ) : (
+          <div style={{ marginTop: '16px' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                value={deviceName}
+                onChange={e => setDeviceName(e.target.value)}
+                placeholder='Device name (e.g. "Work MacBook")'
+                maxLength={40}
+                style={{ padding: '10px 14px', borderRadius: '8px', border: `1px solid rgba(${rgb},0.35)`, fontSize: '14px', flex: 1, minWidth: '180px' }}
+              />
+              <button
+                onClick={handleAddPasskey}
+                disabled={addingPasskey}
+                style={{
+                  padding: '10px 20px', backgroundColor: addingPasskey ? `rgba(${rgb},0.4)` : `rgba(${rgb},0.7)`,
+                  color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 600,
+                  cursor: addingPasskey ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
+                }}
+              >
+                {addingPasskey ? 'Setting up…' : '+ Add Passkey'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Admin view — all passkeys */}
+      {isAdmin && (
+        <div style={sectionStyle}>
+          <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px', marginTop: 0 }}>
+            All Registered Passkeys
+          </h3>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
+            All passkeys across all manager and admin accounts. You can remove any device.
+          </p>
+          {loading ? (
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Loading…</p>
+          ) : allCreds.length === 0 ? (
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', fontStyle: 'italic' }}>No passkeys registered yet.</p>
+          ) : (
+            allCreds.map(c => <CredRow key={c.id} cred={c} showOwner={true} empId={c.employee_id} />)
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const SETTINGS_TAB_IDS = ['location', 'pos', 'cash', 'notifications', 'rewards', 'integration', 'admin', 'security']
 
 const NO_PERMISSION_MSG = "You don't have permission"
 const EMPLOYEE_ALLOWED_SETTINGS_TABS = ['cash', 'location'] // Employee can only open Cash Register and Store Information (location read-only)
@@ -9118,6 +9379,9 @@ function Settings() {
                   </p>
                 </div>
               )}
+
+              {/* Security Tab */}
+              {activeTab === 'security' && <SecurityTab />}
 
               {/* Admin Tab */}
               {activeTab === 'admin' && hasAdminAccess && (

@@ -12,6 +12,8 @@ const KEY_OFFLINE_PIN_HASHES = 'pos_offline_pin_hashes'
 const EMPLOYEES_ROLES_MAX_AGE_MS = 24 * 60 * 60 * 1000  // 24 hours when online
 const PERMISSIONS_MAX_AGE_MS = 60 * 60 * 1000           // 1 hour when online
 const OFFLINE_USE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // when offline, use cache up to 7 days old
+// Offline PIN hashes expire after 48 hours without an online login (convenience only, not a security guarantee)
+const OFFLINE_PIN_TTL_MS = 48 * 60 * 60 * 1000
 
 function get(key, maxAgeMs, forOffline = false) {
   if (typeof localStorage === 'undefined') return null
@@ -67,13 +69,28 @@ export function setPermissionsCache(employeeId, permissions) {
 }
 
 // --- Offline login: store PIN hash (from successful online login) so we can verify when offline ---
+// NOTE: This is a convenience feature only, not a security guarantee. Hashes are SHA-256
+// (client-side) and stored in localStorage. They expire after OFFLINE_PIN_TTL_MS (48h) of
+// no online login so stale/terminated employees eventually lose offline access.
+
 export function getOfflinePinHashes() {
   if (typeof localStorage === 'undefined') return {}
   try {
     const raw = localStorage.getItem(KEY_OFFLINE_PIN_HASHES)
     if (!raw) return {}
     const obj = JSON.parse(raw)
-    return obj && typeof obj.pinHashes === 'object' ? obj.pinHashes : {}
+    if (!obj || typeof obj.pinHashes !== 'object') return {}
+    // Filter out entries that have exceeded the TTL
+    const now = Date.now()
+    const timestamps = obj.cachedAt || {}
+    const valid = {}
+    for (const [id, hash] of Object.entries(obj.pinHashes)) {
+      const ts = timestamps[id]
+      if (!ts || now - ts <= OFFLINE_PIN_TTL_MS) {
+        valid[id] = hash
+      }
+    }
+    return valid
   } catch {
     return {}
   }
@@ -82,9 +99,13 @@ export function getOfflinePinHashes() {
 export function setOfflinePinHash(employeeId, pinHashHex) {
   if (!employeeId || typeof pinHashHex !== 'string') return
   try {
-    const hashes = getOfflinePinHashes()
+    const raw = localStorage.getItem(KEY_OFFLINE_PIN_HASHES)
+    const obj = raw ? JSON.parse(raw) : {}
+    const hashes = (obj && typeof obj.pinHashes === 'object') ? { ...obj.pinHashes } : {}
+    const timestamps = (obj && typeof obj.cachedAt === 'object') ? { ...obj.cachedAt } : {}
     hashes[String(employeeId)] = pinHashHex
-    localStorage.setItem(KEY_OFFLINE_PIN_HASHES, JSON.stringify({ pinHashes: hashes }))
+    timestamps[String(employeeId)] = Date.now()
+    localStorage.setItem(KEY_OFFLINE_PIN_HASHES, JSON.stringify({ pinHashes: hashes, cachedAt: timestamps }))
   } catch (e) {
     console.warn('[employeeRolesCache] setOfflinePinHash error', e)
   }

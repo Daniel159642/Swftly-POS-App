@@ -11,7 +11,7 @@ if (typeof window !== 'undefined') {
 }
 import BlurText from './components/BlurText';
 import LogoLoop from './components/LogoLoop';
-import { ArrowUpRight, Settings, User, LogOut, Bell, Camera, CreditCard, Search, Check, ChevronRight, ChevronDown, Upload, Scan, FileSearch, Store, FileText, FileImage, FileSpreadsheet, Package, RefreshCw, Building2, AlertCircle, TriangleAlert, Mail, Send, MousePointer2, LayoutDashboard, FolderOpen, BookOpen, ArrowLeftRight, Library, FileBarChart, Truck, TrendingUp, DollarSign, Users, Activity, ClipboardList, SquareArrowOutUpRight, Plus, Gift, Ticket, UserPlus, Shirt, Watch, Smartphone, ShoppingBag, Monitor, ScanLine, Utensils } from 'lucide-react';
+import { ArrowUpRight, Settings, User, LogOut, Bell, Camera, CreditCard, Search, Check, ChevronRight, ChevronDown, Upload, Scan, FileSearch, Store, FileText, FileImage, FileSpreadsheet, Package, RefreshCw, Building2, AlertCircle, TriangleAlert, Mail, Send, MousePointer2, LayoutDashboard, FolderOpen, BookOpen, ArrowLeftRight, Library, FileBarChart, Truck, TrendingUp, DollarSign, Users, Activity, ClipboardList, SquareArrowOutUpRight, Plus, Gift, Ticket, UserPlus, Shirt, Watch, Smartphone, ShoppingBag, Monitor, ScanLine, Utensils, Database, BarChart3, MessageCircle, Instagram, Github, Menu, X } from 'lucide-react';
 import Link from 'next/link';
 import ThreeLogo, { StaticLogo } from "./components/ThreeLogo";
 import GradualBlur from './components/GradualBlur';
@@ -54,277 +54,9 @@ const NotificationCard = ({
   </div>
 );
 
-const RewardsMockup = () => {
-  const baseCustomers = [
-    { id: 1, name: "Alice J.", points: 450, status: "Gold" },
-    { id: 2, name: "Bob M.", points: 120, status: "Silver" },
-    { id: 3, name: "Diana S.", points: 80, status: "Bronze" },
-  ];
 
-  const [customers, setCustomers] = useState(baseCustomers);
-  const [isHovered, setIsHovered] = useState(false);
-  const [isClicked, setIsClicked] = useState(false);
 
-  useEffect(() => {
-    let isActive = true;
 
-    const runSequence = async () => {
-      while (isActive) {
-        // Wait before starting sequence
-        await new Promise(r => setTimeout(r, 1000));
-        if (!isActive) break;
-
-        // Cursor hovers button
-        setIsHovered(true);
-        await new Promise(r => setTimeout(r, 600));
-        if (!isActive) break;
-
-        // Cursor clicks down
-        setIsClicked(true);
-        await new Promise(r => setTimeout(r, 150));
-        if (!isActive) break;
-
-        // Button unclicks, add 0-point customer
-        setIsClicked(false);
-        const newNames = ["Charlie D.", "Diana S.", "Evan R.", "Fiona W.", "George T."];
-        const newC = {
-          id: Date.now(),
-          name: newNames[Math.floor(Math.random() * newNames.length)],
-          points: 0,
-          status: "New"
-        };
-        setCustomers([newC, ...baseCustomers]);
-
-        await new Promise(r => setTimeout(r, 400));
-        if (!isActive) break;
-
-        // Cursor moves away
-        setIsHovered(false);
-
-        // Keep the new customer on screen for 4 seconds
-        await new Promise(r => setTimeout(r, 4000));
-        if (!isActive) break;
-
-        // Remove new customer (triggers exit animation)
-        setCustomers(baseCustomers);
-
-        // Wait for removal animation to complete before repeating loop
-        await new Promise(r => setTimeout(r, 800));
-      }
-    };
-
-    runSequence();
-
-    return () => { isActive = false; };
-  }, []);
-
-  return (
-    <div className="w-full max-w-sm mx-auto md:ml-auto md:mr-0 flex flex-col gap-4 bg-white/10 backdrop-blur-xl border border-white/20 p-6 rounded-[24px] shadow-[0_20px_40px_rgba(0,0,0,0.5)] font-sans relative group/mockup">
-      {/* Background inner glow */}
-      <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none rounded-[24px]" />
-
-      <div className="flex justify-between items-center mb-2 relative z-10 w-full">
-        <h4 className="text-white text-2xl font-black tracking-tight">
-          Customers
-        </h4>
-        <div className="absolute -top-10 -right-6 md:-top-11 md:-right-8 z-30">
-          <button
-            className={`button-24 button-24--blue !p-0 !rounded-full !w-14 !h-14 md:!w-16 md:!h-16 shadow-xl z-20 transition-all duration-150 relative ${isHovered ? 'scale-105' : ''} ${isClicked ? 'scale-95 bg-[#1f11c7]' : 'scale-100'}`}
-          >
-            <UserPlus size={24} className="md:w-7 md:h-7 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
-          </button>
-
-          {/* Animated Cursor */}
-          <motion.div
-            initial={{ x: 50, y: 70, opacity: 0 }}
-            animate={isHovered ? { x: 12, y: 12, opacity: 1 } : { x: 50, y: 70, opacity: 0 }}
-            transition={{ duration: 0.5, ease: "easeOut" }}
-            className="absolute top-1/2 left-1/2 pointer-events-none z-50 text-white drop-shadow-xl origin-top-left"
-          >
-            <MousePointer2 size={32} className="fill-black/50" />
-          </motion.div>
-        </div>
-      </div>
-
-      <div
-        className="flex flex-col relative z-10 h-[220px] overflow-hidden"
-        style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}
-      >
-        <AnimatePresence initial={false}>
-          {customers.map((c) => (
-            <motion.div
-              layout
-              key={c.id}
-              initial={{ opacity: 0, y: -60 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.8, height: 0, padding: 0, marginBottom: 0, overflow: 'hidden' }}
-              transition={{ duration: 0.4, ease: [0.25, 1, 0.5, 1] }}
-              className="flex justify-between items-center shrink-0 p-3 rounded-[16px] bg-black/40 border border-white/10 backdrop-blur-md mb-3"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#5e30eb] to-[#2c19fc] flex items-center justify-center text-white text-sm font-bold border border-white/20 shadow-inner">
-                  {c.name.charAt(0)}
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-white text-sm font-bold tracking-tight">{c.name}</span>
-                  <span className={`text-[10px] uppercase tracking-widest font-bold ${c.status === 'New' ? 'text-green-400' : 'text-white/50'}`}>{c.status}</span>
-                </div>
-              </div>
-              <div className="text-right">
-                <span className="text-white font-bold text-sm tracking-tight"><span className="text-[#5e30eb] mr-0.5">★</span> {c.points} <span className="text-white/50 text-xs font-medium">pts</span></span>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
-};
-
-const SchedulingMockup = () => {
-  const [step, setStep] = useState(0);
-  const [isCardHovered, setIsCardHovered] = useState(false);
-  const isHoveredRef = useRef(false);
-  const isAnimatingRef = useRef(false);
-
-  const sequence = [
-    { duration: 800 },  // 0: Start
-    { duration: 700 },  // 1: Moving to date
-    { duration: 150 },  // 2: Click
-    { duration: 700 },  // 3: Moving to end date
-    { duration: 150 },  // 4: Click (Range Highlighted)
-    { duration: 700 },  // 5: Moving to Generate
-    { duration: 150 },  // 6: Click
-    { duration: 2500 }, // 7: Displaying shifts
-    { duration: 800 },  // 8: Final pause before reset
-  ];
-
-  useEffect(() => {
-    isHoveredRef.current = isCardHovered;
-
-    if (isCardHovered && !isAnimatingRef.current) {
-      isAnimatingRef.current = true;
-
-      const runStep = (idx: number) => {
-        setStep(idx);
-        setTimeout(() => {
-          if (idx < sequence.length - 1) {
-            runStep(idx + 1);
-          } else {
-            // Cycle complete
-            if (isHoveredRef.current) {
-              runStep(0);
-            } else {
-              setStep(0);
-              isAnimatingRef.current = false;
-            }
-          }
-        }, sequence[idx].duration);
-      };
-
-      runStep(0);
-    }
-  }, [isCardHovered]);
-
-  const days = Array.from({ length: 35 }, (_, i) => i + 1);
-  const weekDays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-
-  const startDay = 4;
-  const endDay = 10;
-
-  return (
-    <div
-      onMouseEnter={() => setIsCardHovered(true)}
-      onMouseLeave={() => setIsCardHovered(false)}
-      className="w-[340px] h-[340px] md:w-[420px] md:h-[420px] bg-white/10 backdrop-blur-xl rounded-[24px] border border-white/20 p-8 flex flex-col shadow-2xl overflow-hidden relative group/calendar z-30 cursor-pointer"
-    >
-      {/* Calendar Header */}
-      <div className="flex justify-between items-center mb-6 relative z-10">
-        <div>
-          <div className="text-white text-xl font-bold tracking-tight" style={{ fontFamily: 'Zodiak, serif' }}>December 2026</div>
-          <div className="text-white/40 text-[10px] font-bold uppercase tracking-widest mt-0.5">Automated Planning</div>
-        </div>
-        <motion.div
-          animate={{
-            scale: step === 6 ? 0.92 : 1, // "Push-in" click effect
-            y: step === 6 ? 2 : 0,
-          }}
-          transition={{ duration: 0.1 }}
-          className="button-24 !px-6 !py-2.5 !rounded-full shadow-xl cursor-default border-transparent bg-white !text-black flex items-center justify-center font-medium"
-          style={{ fontFamily: 'var(--font-geist-sans), Inter, sans-serif', textTransform: 'none' }}
-        >
-          <span className="text-black">Generate</span>
-        </motion.div>
-      </div>
-
-      {/* Calendar Grid */}
-      <div className="grid grid-cols-7 gap-1 md:gap-2 relative z-10">
-        {weekDays.map((d, i) => (
-          <div key={i} className="text-center text-white/30 text-[9px] font-black pb-2">{d}</div>
-        ))}
-        {days.map((day, i) => {
-          const date = i; // Dec 1st 2026 is a Tuesday (i=1 if i=0 is Monday)
-          const isDate = date > 0 && date <= 31;
-
-          // Selection logic - Selecting a full week from Dec 7 (Mon) to Dec 13 (Sun)
-          const isInRange = date >= 7 && date <= 13 && step >= 4;
-          const isStart = date === 7 && step >= 2;
-          const isEnd = date === 13 && step >= 4;
-
-          return (
-            <motion.div
-              key={i}
-              animate={{
-                scale: (isStart || isEnd) && step < 7 ? [1, 1.05, 1] : 1,
-              }}
-              transition={{ repeat: (isStart || isEnd) && step < 7 ? Infinity : 0, duration: 2 }}
-              className={`relative aspect-square flex flex-col items-center justify-center rounded-xl transition-all duration-300 ${isDate ? 'bg-white/5 border border-white/5' : ''
-                } ${isInRange ? 'bg-gradient-to-br from-[#2c19fc]/60 to-[#2c19fc]/30 border-2 border-[#2c19fc] shadow-[inset_0_0_10px_rgba(255,255,255,0.2)]' : ''} ${isStart || isEnd ? 'bg-[#2c19fc] border-2 border-white/30 shadow-[0_0_30px_rgba(44,25,252,0.6)] scale-105 z-20' : ''}`}
-            >
-              {isDate && (
-                <span className={`text-[11px] font-bold ${isStart || isEnd ? 'text-white' : isInRange ? 'text-white' : 'text-white/80'}`}>{date}</span>
-              )}
-
-              {/* Shifts Populating Animation */}
-              {step >= 7 && isInRange && isDate && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="absolute bottom-1.5 flex gap-0.5"
-                >
-                  <div className="w-1 h-1 rounded-full bg-white" />
-                  <div className="w-1 h-1 rounded-full bg-white" />
-                </motion.div>
-              )}
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {/* Interactive Cursor Animation - Aligned to Dec 7th to Dec 13th */}
-      <motion.div
-        animate={
-          step === 0 ? { x: 300, y: 350, opacity: 0 } :
-            step === 1 ? { x: 38, y: 170, opacity: 1 } :   // Dec 7 (Monday, Row 2) 
-              step === 2 ? { x: 38, y: 170, scale: 0.8 } :
-                step === 3 ? { x: 354, y: 170, opacity: 1, scale: 1 } :  // Dec 13 (Sunday, Row 2)
-                  step === 4 ? { x: 354, y: 170, scale: 0.8 } :
-                    step === 5 ? { x: 320, y: 20, opacity: 1, scale: 1 } :   // Generate Button
-                      step === 6 ? { x: 320, y: 20, scale: 0.8 } :
-                        step === 7 ? { x: 320, y: 20, scale: 0, opacity: 0 } :
-                          { opacity: 0 }
-        }
-        transition={{
-          duration: [1, 3, 5].includes(step) ? 0.7 : 0.15, // Movement takes 0.7s, Clicks take 0.15s
-          ease: "circOut"
-        }}
-        className="absolute z-50 pointer-events-none"
-      >
-        <MousePointer2 size={24} className="text-white fill-black drop-shadow-[0_5px_15px_rgba(0,0,0,0.5)]" />
-      </motion.div>
-    </div>
-  );
-};
 
 
 
@@ -920,8 +652,8 @@ export default function Home() {
       if (typeof window !== 'undefined') {
         const width = window.innerWidth;
         setIsMobile(width < 768);
-        const containerWidth = Math.min(width - 48, 1152); // max-w-6xl is 1152px
-        const baseWidth = 1152;
+        const containerWidth = Math.min(width - 48, 960);
+        const baseWidth = 960;
         const newScale = containerWidth / baseWidth;
         setMockupScale(newScale);
       }
@@ -935,15 +667,16 @@ export default function Home() {
   const scrollingContentRef = useRef<HTMLDivElement>(null);
   const mobileVideoRef = useRef<HTMLVideoElement>(null);
   const finalGetRef = useRef<HTMLHeadingElement>(null);
-  const finalSwftlyRef = useRef<HTMLHeadingElement>(null);
   const [showHeavyAssets, setShowHeavyAssets] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
+  const [hoveredInventoryCard, setHoveredInventoryCard] = useState<number | null>(null);
   const inventoryRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [uploadAnimKey, setUploadAnimKey] = useState(0);
   const [parseAnimKey, setParseAnimKey] = useState(0);
   const [proofAnimKey, setProofAnimKey] = useState(0);
   const [stockAnimKey, setStockAnimKey] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
 
   // Auto-advance loop for the 4 process animations
   useEffect(() => {
@@ -1212,6 +945,7 @@ export default function Home() {
 
 
   const [isScrolled, setIsScrolled] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -1353,14 +1087,8 @@ export default function Home() {
       });
 
       tl.fromTo(finalGetRef.current,
-        { x: -500, opacity: 0, filter: 'blur(10px)' },
-        { x: 0, opacity: 1, filter: 'blur(0px)', ease: "power3.out" },
-        0
-      );
-
-      tl.fromTo(finalSwftlyRef.current,
-        { x: 500, opacity: 0, filter: 'blur(10px)' },
-        { x: 0, opacity: 1, filter: 'blur(0px)', ease: "power3.out" },
+        { y: 60, opacity: 0, filter: 'blur(10px)' },
+        { y: 0, opacity: 1, filter: 'blur(0px)', ease: "power3.out" },
         0
       );
     });
@@ -1452,17 +1180,23 @@ export default function Home() {
         <div className="w-full pl-0 pr-4 py-1.5 flex items-center justify-between relative z-10">
           <div className="flex items-center gap-4 relative w-12 h-12">
             {/* 3D Logo docks here on scroll */}
-            <span
-              ref={swftlyTextRef}
-              className="absolute left-[140px] text-sm font-bold text-black py-1 drop-shadow-[0_0_8_rgba(44,25,252,0.15)] hidden md:block whitespace-nowrap"
-            >
-              Swftly
-            </span>
+            <button onClick={() => navigate('/')} className="flex items-center gap-4 relative w-full h-full group focus:outline-none">
+              <span
+                ref={swftlyTextRef}
+                className="absolute left-0 sm:left-[12px] md:left-[26px] lg:left-[50px] text-[12px] md:text-sm font-bold text-black py-1 drop-shadow-[0_0_8px_rgba(44,25,252,0.15)] block whitespace-nowrap"
+              >
+                Swftly
+              </span>
+            </button>
           </div>
           <div className="flex items-center gap-4 md:gap-10">
-            {['Pricing', 'Book A Demo'].map((item) => {
+            {/* Desktop nav */}
+            <div className="hidden md:flex items-center gap-10">
+              {['Docs', 'Pricing', 'Book A Demo'].map((item) => {
               const handleNav = () => {
-                if (item === 'Pricing') {
+                if (item === 'Docs') {
+                  navigate('/docs');
+                } else if (item === 'Pricing') {
                   setIsNavigating(true);
                   document.getElementById('pricing-section')?.scrollIntoView({ behavior: 'smooth' });
                   setTimeout(() => setIsNavigating(false), 1200);
@@ -1472,25 +1206,87 @@ export default function Home() {
               };
 
               return (
-                <div key={item} className={item === 'Book A Demo' ? '' : 'hidden md:block'}>
+                <div key={item}>
                   <NavButton onClick={handleNav}>
-                    {item === 'Book A Demo' ? (
-                      <>
-                        <span className="md:hidden">Demo</span>
-                        <span className="hidden md:inline">Book A Demo</span>
-                      </>
-                    ) : item}
+                    {item}
                   </NavButton>
                 </div>
               );
-            })}
-            <NavButton isBold onClick={() => navigate('/waitlist')}>
-              Get Started
-              <ArrowUpRight className="w-4 h-4 relative z-10" />
-            </NavButton>
+              })}
+
+              <NavButton isBold onClick={() => navigate('/waitlist')}>
+                Get Started
+                <ArrowUpRight className="w-4 h-4 relative z-10" />
+              </NavButton>
+            </div>
+
+            {/* Mobile hamburger */}
+            <button
+              type="button"
+              className="md:hidden w-10 h-10 rounded-full flex items-center justify-center text-black/70 hover:text-black transition-colors"
+              onClick={() => setIsMobileNavOpen(true)}
+              aria-label="Open menu"
+            >
+              <Menu size={20} />
+            </button>
           </div>
         </div>
       </header>
+
+      {/* Mobile menu overlay */}
+      {isMobileNavOpen && (
+        <div className="fixed inset-0 z-[2000] md:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/10"
+            onClick={() => setIsMobileNavOpen(false)}
+            aria-label="Close menu"
+          />
+          <div className="absolute top-6 right-6 left-6 rounded-[20px] bg-white/55 backdrop-blur-2xl border border-white/60 shadow-[0_22px_70px_rgba(15,23,42,0.14)] overflow-hidden">
+            <div className="absolute inset-0 pointer-events-none bg-gradient-to-br from-white/55 via-white/20 to-transparent" />
+            <div className="absolute inset-0 pointer-events-none ring-1 ring-white/50 rounded-[20px]" />
+            <div className="flex items-center justify-between px-4 py-3 border-b border-black/5">
+              <div className="text-[12px] font-semibold text-black/70 tracking-wide">Menu</div>
+              <button
+                type="button"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-black/60 hover:text-black"
+                onClick={() => setIsMobileNavOpen(false)}
+                aria-label="Close menu"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="relative p-2">
+              {[
+                { label: 'Docs', onClick: () => navigate('/docs') },
+                {
+                  label: 'Pricing',
+                  onClick: () => {
+                    setIsMobileNavOpen(false);
+                    setIsNavigating(true);
+                    document.getElementById('pricing-section')?.scrollIntoView({ behavior: 'smooth' });
+                    setTimeout(() => setIsNavigating(false), 1200);
+                  }
+                },
+                { label: 'Book a demo', onClick: () => navigate('/book-a-demo') },
+                { label: 'Get started', onClick: () => navigate('/waitlist') }
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  className="w-full text-left px-4 py-3 rounded-[14px] text-[14px] font-semibold text-black/80 hover:bg-white/40 transition-colors"
+                  onClick={() => {
+                    setIsMobileNavOpen(false);
+                    item.onClick();
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <ThreeLogo />
 
@@ -1525,151 +1321,280 @@ export default function Home() {
               </div>
             </div>
 
-            <div
-              className="relative flex items-center justify-center whitespace-nowrap tracking-[0.05em] uppercase w-full mt-52 md:mt-16 transform-gpu scale-y-[1.8] md:scale-y-100 origin-bottom"
-              style={{
-                lineHeight: 0.8,
-                fontSize: 'min(24vw, 350px)'
-              }}
-            >
-              <span
-                className="text-white relative z-10"
-                style={{
-                  fontFamily: 'Zodiak, serif',
-                  fontWeight: 700,
-                  WebkitMaskImage: 'linear-gradient(to bottom, white 40%, transparent 95%)',
-                  maskImage: 'linear-gradient(to bottom, white 40%, transparent 95%)'
-                }}
-              >
-                SWFTLY
-              </span>
-              {/* Foreground Floating Bags for Mobile - Integrated into branding for alignment */}
-              <div className="absolute inset-0 z-30 md:hidden pointer-events-none">
-                <motion.div
-                  className="absolute left-[10%] bottom-[-160%] will-change-transform"
-                  initial={{ opacity: 0.9, y: 0, rotate: -12, scale: 0.38 }}
-                  animate={{ y: [0, -15, 0], rotate: [-12, -7, -12] }}
-                  transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-                >
-                  <div className="relative w-[180px] h-[180px]">
-                    <Image src="/bagg.png" alt="" fill className="object-contain brightness-50 opacity-90" style={{ filter: 'drop-shadow(0 20px 40px rgba(0,0,0,0.2))' }} />
-                  </div>
-                </motion.div>
-                <motion.div
-                  className="absolute right-[5%] bottom-[-140%] will-change-transform"
-                  initial={{ opacity: 0.9, y: 0, rotate: 18, scale: 0.32 }}
-                  animate={{ y: [0, -15, 0], rotate: [18, 23, 18] }}
-                  transition={{ duration: 9, delay: 0.5, repeat: Infinity, ease: "easeInOut" }}
-                >
-                  <div className="relative w-[160px] h-[160px]">
-                    <Image src="/bagg.png" alt="" fill className="object-contain brightness-50 opacity-90" style={{ filter: 'drop-shadow(0 20px 40px rgba(0,0,0,0.2))' }} />
-                  </div>
-                </motion.div>
-              </div>
-              {/* Subtle blur fadeout for mobile branding */}
-              <div
-                className="absolute inset-x-0 bottom-[-10%] h-[40%] backdrop-blur-[4px] pointer-events-none md:hidden z-20"
-                style={{
-                  WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 40%, black 70%, transparent)',
-                  maskImage: 'linear-gradient(to bottom, transparent, black 40%, black 70%, transparent)'
-                }}
-              />
-            </div>
+
           </div>
         </div>
 
         {/* Mobile Bottom Fade - Pushed lower into the transition area */}
         <div className="absolute bottom-[-40px] left-0 w-full h-52 bg-gradient-to-t from-white to-transparent pointer-events-none md:hidden z-20" />
 
-        {/* Animated Grainient Background Container - Expanded white section */}
-        <div className="absolute top-[70vh] left-0 w-full min-h-[115vh] z-0 flex flex-col items-center">
-          <div className="absolute inset-0 z-0">
-            {showHeavyAssets && (
-              <Grainient
-                color1="#5e30eb"
-                color2="#371a94"
-                color3="#ffffff"
-                timeSpeed={0}
-                colorBalance={0}
-                warpStrength={1}
-                warpFrequency={5}
-                warpSpeed={0}
-                warpAmplitude={50}
-                blendAngle={0}
-                blendSoftness={0.05}
-                rotationAmount={500}
-                noiseScale={2}
-                grainAmount={0.1}
-                grainScale={2}
-                grainAnimated={false}
-                contrast={1.5}
-                gamma={1}
-                saturation={1}
-                centerX={0}
-                centerY={0}
-                zoom={0.9}
-              />
-            )}
-          </div>
+
 
           {/* Floating Bags Scattered Across the Entire Background */}
-          {[
-            { top: '10%', left: '8%', rotate: -15, scale: 0.4, delay: 0, mobile: false },
-            { top: '18%', left: '78%', rotate: 20, scale: 0.35, delay: 0.5, mobile: false },
-            { top: '30%', left: '15%', rotate: 10, scale: 0.3, delay: 1, mobile: false },
-            { top: '48%', left: '82%', rotate: -10, scale: 0.25, delay: 1.5, mobile: false },
-            { top: '65%', left: '20%', rotate: -5, scale: 0.45, delay: 2, mobile: false },
-            { top: '25%', left: '92%', rotate: 15, scale: 0.38, delay: 2.5, mobile: false },
-            { top: '40%', left: '5%', rotate: -20, scale: 0.32, delay: 3, mobile: false },
-            { top: '58%', left: '68%', rotate: 25, scale: 0.42, delay: 3.5, mobile: false },
-            { top: '-15%', left: '15%', rotate: -12, scale: 0.38, delay: 0, mobile: false },
-            { top: '-8%', left: '65%', rotate: 18, scale: 0.32, delay: 0.5, mobile: false },
-          ].map((bag, i) => (
+          <div className="relative z-[50] w-full max-w-6xl mx-auto px-6 mb-20 -mt-20">
             <motion.div
-              key={i}
-              className={`absolute pointer-events-none will-change-transform ${!bag.mobile ? 'hidden md:block' : ''}`}
-              style={{ top: bag.top, left: bag.left, zIndex: 10 }}
-              initial={{ opacity: 0.85, y: 0, rotate: bag.rotate, scale: bag.scale }}
-              animate={{
-                y: [0, -25, 0],
-                rotate: [bag.rotate, bag.rotate + 5, bag.rotate]
-              }}
-              transition={{
-                duration: 1.2,
-                delay: bag.delay,
-                y: { duration: 8 + (i % 4), repeat: Infinity, ease: "easeInOut" },
-                rotate: { duration: 9 + (i % 5), repeat: Infinity, ease: "easeInOut" }
+              initial={{ opacity: 0, scale: 0.98, y: 40 }}
+              whileInView={{ opacity: 1, scale: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+              className="w-full min-h-[420px] rounded-[32px] relative overflow-hidden flex flex-col group border border-white/70"
+              style={{
+                background: 'linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%)',
+                boxShadow: '0 2px 40px rgba(160,180,220,0.18)'
               }}
             >
-              <div className="relative w-[280px] h-[280px] md:w-[400px] md:h-[400px]">
-                <Image
-                  src="/bagg.png"
-                  alt=""
-                  fill
-                  priority
-                  unoptimized
-                  className="object-contain"
-                />
+              {/* Radial highlight top-right */}
+              <div className="pointer-events-none absolute -top-24 -right-24 w-[360px] h-[360px] rounded-full"
+                   style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.35) 0%, transparent 70%)' }} />
+              {/* Radial tint bottom-left */}
+              <div className="pointer-events-none absolute -bottom-20 -left-16 w-[260px] h-[260px] rounded-full"
+                   style={{ background: 'radial-gradient(circle, rgba(200,215,240,0.3) 0%, transparent 70%)' }} />
+              {/* Inner gradient for depth (same blue as waitlist button) */}
+              <div className="absolute inset-0 rounded-[24px] pointer-events-none bg-gradient-to-br from-white/20 via-transparent to-transparent opacity-80" />
+              {/* Table Header Row */}
+              <div className="w-full h-12 border-b border-white/40 flex items-center justify-between px-6 bg-white/70 backdrop-blur-sm">
+                <div className="h-full flex items-center gap-3">
+                  <img src="/Swftly.svg" alt="Swftly" className="w-6 h-6 object-contain brightness-0" />
+                  <span className="text-black text-[11px] font-semibold tracking-wide">
+                    Automated features
+                  </span>
+                </div>
+                <div className="h-full flex items-center">
+                  <Settings size={16} className="text-gray-500" />
+                </div>
               </div>
+
+              {/* Table Content */}
+              <div className="flex flex-1">
+                <div className="w-full flex flex-col">
+                  {[
+                    { 
+                      name: "POS", 
+                      desc: "Next-gen checkout with integrated payments and lightning-fast product search.",
+                      icons: ["stripe", "visa", "mastercard", "amex", "/tap-to-pay.svg"]
+                    },
+                    { 
+                      name: "Shipments", 
+                      desc: "Auto-parse PDFs, spreadsheets, and images from vendors and flag inventory discrepancies via email.",
+                      icons: ["file-pdf", "file-excel", "file-image"]
+                    },
+                    { 
+                      name: "Marketing", 
+                      desc: "Built-in rewards, SMS, and email marketing to keep customers coming back.",
+                      icons: ["/apple-wallet.svg", "/google-wallet.svg", "sms", "mail"]
+                    },
+                    {
+                      name: "Scheduling & Employees", 
+                      desc: "Generate optimized shifts and track real-time employee productivity and check-ins.",
+                      icons: ["/google-calendar.svg", "/apple-calendar.png", "/outlook.svg", "/calendly.svg"]
+                    },
+                    { 
+                      name: "Accounting", 
+                      desc: "Automatically sync orders, payroll, and generate tax forms on autopilot.",
+                      icons: ["/justworks.svg", "/adp.svg", "/gusto.svg"]
+                    },
+                    {
+                      name: "Orders", 
+                      desc: "View and manage orders from in-house and third-party apps in one place.",
+                      icons: ["/shopify.svg", "/doordash.svg", "/ubereats.svg"]
+                    },
+                    { 
+                      name: "Data & Analytics", 
+                      desc: "Completely private, secure data warehouse with smart insights into sales, inventory, and performance.",
+                      icons: ["database", "chart-bar"]
+                    }
+                  ].map((item, i) => (
+                    <div key={item.name} className="border-b border-white/50 cursor-default">
+                      {/* Mobile layout: name + icons on one row, description below */}
+                      <div className="md:hidden px-5 py-3 bg-white/60 shadow-[0_0_0_1px_rgba(255,255,255,0.7),0_1px_4px_rgba(15,23,42,0.06)]">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-black text-[13px] font-semibold tracking-tight">
+                            {item.name}
+                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {item.icons?.map((icon, idx) => {
+                            let content;
+                            const isAppleCalendar = icon === '/apple-calendar.png';
+                            const isFilePdf = icon === 'file-pdf';
+                            const isFileExcel = icon === 'file-excel';
+                            const isFileImage = icon === 'file-image';
+                            const isFileType = isFilePdf || isFileExcel || isFileImage;
+
+                            if (icon.startsWith('/')) {
+                              content = <img src={icon} alt="" className={`w-auto object-contain ${isAppleCalendar ? 'h-[40px] max-w-[48px]' : 'h-5 max-w-[32px]'}`} />;
+                            } else if (isFilePdf) {
+                              content = (
+                                <div className="flex items-center gap-1.5">
+                                  <FileText size={14} className="text-red-500" />
+                                  <span className="text-[10px] font-semibold text-red-300 tracking-wide">PDF</span>
+                                </div>
+                              );
+                            } else if (isFileExcel) {
+                              content = (
+                                <div className="flex items-center gap-1.5">
+                                  <FileSpreadsheet size={14} className="text-emerald-400" />
+                                  <span className="text-[10px] font-semibold text-emerald-300 tracking-wide">XLSX</span>
+                                </div>
+                              );
+                            } else if (isFileImage) {
+                              content = (
+                                <div className="flex items-center gap-1.5">
+                                  <FileImage size={14} className="text-sky-400" />
+                                  <span className="text-[10px] font-semibold text-sky-300 tracking-wide">IMG</span>
+                                </div>
+                              );
+                            } else if (icon === 'database') {
+                              content = <Database size={16} className="text-[#2c19fc]" />;
+                            } else if (icon === 'chart-bar') {
+                              content = <BarChart3 size={16} className="text-[#2c19fc]" />;
+                            } else if (icon === 'stripe') {
+                              content = <span className="text-[8px] font-black text-[#635BFF] tracking-tighter uppercase">STRIPE</span>;
+                            } else if (icon === 'visa') {
+                              content = <span className="text-[10px] font-black italic text-[#1A1F71]">VISA</span>;
+                            } else if (icon === 'mastercard') {
+                              content = <div className="flex gap-0.5"><div className="w-2.5 h-2.5 rounded-full bg-[#EB001B]" /><div className="w-2.5 h-2.5 rounded-full bg-[#F79E1B] -ml-1.5 opacity-80" /></div>;
+                            } else if (icon === 'amex') {
+                              content = <img src="/amex.svg" alt="Amex" className="h-5 w-auto object-contain max-w-[32px]" />;
+                            } else if (icon === 'sms') {
+                              content = <MessageCircle size={14} className="text-emerald-400" />;
+                            } else if (icon === 'mail') {
+                              content = <Mail size={14} className="text-sky-400" />;
+                            }
+
+                              if (isAppleCalendar) {
+                                return <span key={idx} className="h-[40px] min-w-[42px] flex items-center justify-center -mx-1.5">{content}</span>;
+                              }
+                              return (
+                                <div
+                                  key={idx}
+                                  className="h-8 min-w-[34px] px-1.5 bg-white rounded-lg flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.08)] border border-white/20"
+                                >
+                                  {content}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <div className="mt-2 text-black/70 text-[13px] font-medium leading-relaxed">
+                          {item.desc}
+                        </div>
+                      </div>
+
+                      {/* Desktop layout */}
+                      <div className="hidden md:flex h-[64px]">
+                        <div className="w-1/4 border-r border-white/70 flex items-center px-8 bg-white/80 shadow-[0_0_0_1px_rgba(255,255,255,0.8),0_1px_4px_rgba(15,23,42,0.08)]">
+                          <span className="text-black text-sm font-medium tracking-tight transition-colors">
+                            {item.name}
+                          </span>
+                        </div>
+                        <div className="flex-1 flex items-center justify-between px-8 gap-4 bg-white/60 shadow-[0_0_0_1px_rgba(255,255,255,0.7),0_1px_4px_rgba(15,23,42,0.06)]">
+                          <span className="text-black/80 text-[13px] font-medium leading-relaxed">
+                            {item.desc}
+                          </span>
+
+                          {/* Integration Symbols Container */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            {item.icons?.map((icon, idx) => {
+                              let content;
+                              const isAppleCalendar = icon === '/apple-calendar.png';
+                              const isFilePdf = icon === 'file-pdf';
+                              const isFileExcel = icon === 'file-excel';
+                              const isFileImage = icon === 'file-image';
+                              const isFileType = isFilePdf || isFileExcel || isFileImage;
+
+                              if (icon.startsWith('/')) {
+                                content = <img src={icon} alt="" className={`w-auto object-contain ${isAppleCalendar ? 'h-[40px] max-w-[48px]' : 'h-5 max-w-[32px]'}`} />;
+                              } else if (isFilePdf) {
+                                content = (
+                                  <div className="flex items-center gap-1.5">
+                                    <FileText size={14} className="text-red-500" />
+                                    <span className="text-[10px] font-semibold text-red-300 tracking-wide">PDF</span>
+                                  </div>
+                                );
+                              } else if (isFileExcel) {
+                                content = (
+                                  <div className="flex items-center gap-1.5">
+                                    <FileSpreadsheet size={14} className="text-emerald-400" />
+                                    <span className="text-[10px] font-semibold text-emerald-300 tracking-wide">XLSX</span>
+                                  </div>
+                                );
+                              } else if (isFileImage) {
+                                content = (
+                                  <div className="flex items-center gap-1.5">
+                                    <FileImage size={14} className="text-sky-400" />
+                                    <span className="text-[10px] font-semibold text-sky-300 tracking-wide">IMG</span>
+                                  </div>
+                                );
+                              } else if (icon === 'database') {
+                                content = <Database size={16} className="text-[#2c19fc]" />;
+                              } else if (icon === 'chart-bar') {
+                                content = <BarChart3 size={16} className="text-[#2c19fc]" />;
+                              } else if (icon === 'stripe') {
+                                content = <span className="text-[8px] font-black text-[#635BFF] tracking-tighter uppercase">STRIPE</span>;
+                              } else if (icon === 'visa') {
+                                content = <span className="text-[10px] font-black italic text-[#1A1F71]">VISA</span>;
+                              } else if (icon === 'mastercard') {
+                                content = <div className="flex gap-0.5"><div className="w-2.5 h-2.5 rounded-full bg-[#EB001B]" /><div className="w-2.5 h-2.5 rounded-full bg-[#F79E1B] -ml-1.5 opacity-80" /></div>;
+                              } else if (icon === 'amex') {
+                                content = <img src="/amex.svg" alt="Amex" className="h-5 w-auto object-contain max-w-[32px]" />;
+                              } else if (icon === 'sms') {
+                                content = <MessageCircle size={14} className="text-emerald-400" />;
+                              } else if (icon === 'mail') {
+                                content = <Mail size={14} className="text-sky-400" />;
+                              }
+
+                              if (isAppleCalendar) {
+                                return <span key={idx} className="h-[40px] min-w-[42px] flex items-center justify-center -mx-1.5">{content}</span>;
+                              }
+                              return (
+                                <div
+                                  key={idx}
+                                  className="h-8 min-w-[34px] px-1.5 bg-white rounded-lg flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.08)] border border-white/20"
+                                >
+                                  {content}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Glassmorphic inner shine */}
+              <div className="absolute inset-0 rounded-[24px] bg-gradient-to-br from-white/15 via-transparent to-transparent pointer-events-none" />
+              <div className="absolute inset-0 rounded-[24px] shadow-[inset_0_0_100px_rgba(255,255,255,0.06)] pointer-events-none" />
+
+              {/* Enhanced light sweep */}
+              <div className="absolute -inset-x-full top-0 h-full w-[200%] bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-25deg] -translate-x-full group-hover:translate-x-full transition-transform duration-[2000ms] ease-in-out pointer-events-none" />
             </motion.div>
-          ))}
+          </div>
+
+
 
           {/* Absolute Fade to white at the section end */}
           <div className="absolute bottom-0 left-0 w-full h-[80vh] flex flex-col pointer-events-none z-[30]">
             <div className="flex-1 bg-gradient-to-t from-white via-white/40 to-transparent" />
             <div className="h-[20vh] bg-white" />
           </div>
-        </div>
       </section>
 
       {/* Blue Gradient Feature Squares Section */}
       <section className="relative w-full py-24 bg-white z-20 overflow-hidden">
         <div className="max-w-[1600px] mx-auto px-6 md:px-12">
           {/* Section Title */}
-          <div className="mb-20 text-center">
-            <h2 className="text-4xl md:text-6xl font-medium tracking-tight text-black" style={{ fontFamily: 'var(--font-eb-garamond), serif' }}>
-              Automate Inventory Management.
+          <div
+            className="mb-16 md:mb-20 text-center"
+            style={{ fontFamily: 'var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif' }}
+          >
+            <h2 className="text-[44px] md:text-[72px] font-semibold tracking-tight text-black leading-[1.05]">
+              Automate inventory in 4 steps
             </h2>
+            <p className="mt-5 text-[18px] md:text-[26px] text-gray-400 leading-snug max-w-3xl mx-auto">
+              Auto-import shipments, catch issues, and flag vendor mismatches instantly.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-16 lg:gap-8 xl:gap-14">
@@ -1679,46 +1604,36 @@ export default function Home() {
               { title: "Detects Issues", desc: "Identifies issues and resolves issues with vendors.", x: -0.2, y: 0.25, zoom: 0.9 },
               { title: "Restocks Inventory", desc: "Sync stock, create products, and update accounting.", x: 0.1, y: -0.3, zoom: 1.1 }
             ].map((item, i) => {
-              const [isItemHovered, setIsItemHovered] = useState(false);
-              const isActive = isMobile ? (activeStep === i) : isItemHovered;
+              const isActive = isMobile ? (activeStep === i) : (hoveredInventoryCard === i);
 
               return (
                 <div
                   key={i}
                   ref={(el) => { inventoryRefs.current[i] = el; }}
                   className="flex flex-col items-center"
-                  onMouseEnter={() => !isMobile && setIsItemHovered(true)}
-                  onMouseLeave={() => !isMobile && setIsItemHovered(false)}
+                  onMouseEnter={() => !isMobile && setHoveredInventoryCard(i)}
+                  onMouseLeave={() => !isMobile && setHoveredInventoryCard(null)}
                 >
                   <div
-                    className="w-7 h-7 md:w-8 md:h-8 bg-black rounded-full flex items-center justify-center mb-4 shadow-lg relative z-10"
+                    className="aspect-[4/3.5] w-[90%] mx-auto rounded-[32px] relative overflow-hidden border border-white/70"
+                    style={{
+                      background: 'linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%)',
+                      boxShadow: '0 2px 40px rgba(160,180,220,0.18)'
+                    }}
                   >
-                    <span className="text-white text-xs md:text-sm font-bold font-zodiak">{i + 1}</span>
-                  </div>
+                    {/* Radial highlight top-right */}
+                    <div
+                      className="pointer-events-none absolute -top-24 -right-24 w-[260px] h-[260px] rounded-full"
+                      style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.35) 0%, transparent 70%)' }}
+                    />
+                    {/* Radial tint bottom-left */}
+                    <div
+                      className="pointer-events-none absolute -bottom-20 -left-16 w-[200px] h-[200px] rounded-full"
+                      style={{ background: 'radial-gradient(circle, rgba(200,215,240,0.3) 0%, transparent 70%)' }}
+                    />
 
-                  <div
-                    className="aspect-[4/3.5] w-[90%] mx-auto rounded-3xl relative overflow-hidden bg-[#2c19fc]"
-                  >
-                    <div className="absolute -inset-[15%] z-0">
-                      {showHeavyAssets && (
-                        <Grainient
-                          color1="#5e30eb"
-                          color2="#371a94"
-                          color3="#ffffff"
-                          timeSpeed={0}
-                          zoom={item.zoom}
-                          centerX={item.x}
-                          centerY={item.y}
-                          grainAmount={0.05}
-                        />
-                      )}
-                    </div>
-                    {/* Inner blue gradient glow around the border */}
-                    <div className="absolute inset-0 rounded-3xl shadow-[inset_0_0_80px_rgba(44,25,252,0.5),inset_0_0_0_1.5px_rgba(255,255,255,0.3)] z-10 pointer-events-none" />
-                    <div className="absolute inset-0 rounded-3xl border border-white/40 z-10 pointer-events-none" />
-
-                    {/* Subtle internal shine for depth */}
-                    <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent opacity-40 mix-blend-overlay" />
+                    {/* Inner soft glow */}
+                    <div className="absolute inset-0 rounded-[28px] bg-gradient-to-br from-white/28 via-transparent to-transparent pointer-events-none" />
 
                     {/* Custom Mockups */}
                     {i === 0 && <UploadMockup isHovered={isActive} />}
@@ -1728,10 +1643,22 @@ export default function Home() {
                   </div>
 
                   <div
-                    className="mt-6 text-center px-4"
+                    className="mt-4 w-full px-4 text-left"
+                    style={{ fontFamily: 'var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif' }}
                   >
-                    <h3 className="text-black font-bold tracking-tight mb-2 font-sans" style={{ fontSize: '18px' }}>{item.title}</h3>
-                    <p className="text-gray-500 text-sm leading-[1.4] max-w-[220px] mx-auto font-sans line-clamp-2">{item.desc}</p>
+                    <div className="flex items-start gap-3">
+                      <span className="text-gray-300 text-[14px] md:text-[15px] font-medium leading-none mt-[3px]">
+                        {i + 1}
+                      </span>
+                      <div>
+                        <h3 className="text-[17px] md:text-[18px] font-semibold text-black tracking-tight mb-1">
+                          {item.title}
+                        </h3>
+                        <p className="text-[13px] md:text-[14px] text-gray-500 leading-snug max-w-[260px]">
+                          {item.desc}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
@@ -1740,58 +1667,60 @@ export default function Home() {
         </div>
       </section>
 
-      {/* New Full-Width Blue Gradient Section */}
-      <section className="relative w-full min-h-[90vh] bg-[#2c19fc] z-20 overflow-hidden flex items-center justify-center py-32">
-        {/* Signature Blue Grainient Background */}
-        <div className="absolute inset-0 z-0">
-          {showHeavyAssets && (
-            <Grainient
-              color1="#5e30eb"
-              color2="#371a94"
-              color3="#ffffff"
-              timeSpeed={0}
-              zoom={0.8}
-              grainAmount={0.05}
-            />
-          )}
-        </div>
-
-        {/* Top & Bottom Shades for transition */}
-        <div className="absolute top-0 left-0 w-full h-40 bg-gradient-to-b from-white to-transparent opacity-100 z-[1] pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-full h-40 bg-gradient-to-t from-white to-transparent opacity-100 z-[1] pointer-events-none" />
-
+      {/* Accounting Section */}
+      <section className="relative w-full bg-white z-20 overflow-hidden flex items-center justify-center py-32">
         <div className="max-w-6xl mx-auto px-6 md:px-12 relative z-10 flex flex-col items-center w-full">
-          <div className="text-center w-full max-w-5xl mx-auto mb-8 flex flex-col gap-4">
+          <div
+            className="text-left w-full max-w-5xl mx-auto mb-8 flex flex-col gap-4"
+            style={{ fontFamily: 'var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif' }}
+          >
             <motion.h2
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.8, ease: "easeOut" }}
-              className="text-white text-[36px] font-bold tracking-tight leading-[1.1] md:whitespace-nowrap"
-              style={{ fontFamily: 'Zodiak, serif' }}
+              className="text-[40px] md:text-[64px] font-semibold tracking-tight leading-[1.05]"
             >
-              Accounting On Autopilot.
+              <span className="text-black">Accounting on autopilot</span>{' '}
+              <span className="text-gray-400">that stays in sync.</span>
             </motion.h2>
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.8, delay: 0.1, ease: "easeOut" }}
-              className="text-white/70 text-[16px] font-medium leading-relaxed font-sans max-w-2xl mx-auto"
+              className="text-gray-400 text-[18px] md:text-[22px] font-medium leading-snug max-w-3xl"
             >
-              Sync orders from Shopify, DoorDash & more, connect payroll, and Swftly generates your reports and statements automatically.
+              Sync orders, connect payroll, and Swftly generates reports and statements automatically.
             </motion.p>
           </div>
 
-          {/* Software App Window Mockup - Proportional Scaling Wrapper */}
+          {/* Outer shell container (outer_container_shell.html) */}
           <div
-            className="w-full relative flex justify-center"
-            style={{ height: `${mockupScale * 648 + 20}px` }} // 1152 * (9/16) = 648 + shadow room
+            className="w-full rounded-[32px] relative overflow-hidden border border-white/70"
+            style={{
+              background: 'linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%)',
+              boxShadow: '0 2px 40px rgba(160,180,220,0.18)'
+            }}
           >
             <div
-              className="w-[1152px] h-[648px] bg-white rounded-2xl shadow-[0_4px_12px_rgba(0,0,0,0.1)] overflow-hidden flex flex-col border border-white/10 origin-top shrink-0 relative select-none"
-              style={{ transform: `scale(${mockupScale})` }}
+              className="pointer-events-none absolute -top-24 -right-24 w-[360px] h-[360px] rounded-full"
+              style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.35) 0%, transparent 70%)' }}
+            />
+            <div
+              className="pointer-events-none absolute -bottom-20 -left-16 w-[260px] h-[260px] rounded-full"
+              style={{ background: 'radial-gradient(circle, rgba(200,215,240,0.3) 0%, transparent 70%)' }}
+            />
+
+            {/* Software App Window Mockup - Proportional Scaling Wrapper */}
+            <div
+              className="w-full relative flex justify-center px-4 py-6 md:px-8 md:py-8"
+              style={{ height: `${mockupScale * 540 + 20}px` }}
             >
+              <div
+                className="w-[960px] h-[540px] bg-white rounded-2xl shadow-[0_10px_30px_rgba(15,23,42,0.10)] overflow-hidden flex flex-col border border-black/5 origin-top shrink-0 relative select-none"
+                style={{ transform: `scale(${mockupScale})` }}
+              >
               {/* App Window Header */}
               <div className="w-full bg-white border-b border-[#eee] px-5 py-1 flex justify-between items-center z-10 relative">
                 <div className="flex items-center flex-1 min-w-0 select-none">
@@ -1856,639 +1785,294 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
       {/* Automate Growth Section */}
-      <section className="relative w-full py-32 bg-white z-20">
-        <div className="max-w-7xl mx-auto px-6 md:px-12 flex flex-col items-center">
-          <motion.h2
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
-            className="text-black text-3xl md:text-5xl font-bold tracking-tight text-center mb-4"
-            style={{ fontFamily: 'Zodiak, serif' }}
-          >
-            Customers. Customers. Customers.
-          </motion.h2>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-10 w-full max-w-[800px] mx-auto mt-4">
-            {[0, 1, 2, 3].map((i) => (
+
+
+
+
+
+      {/* Choose Your Hardware Section */}
+      <section className="relative w-full py-28 md:py-32 bg-white z-20">
+        <div className="max-w-6xl mx-auto px-6 md:px-12">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16 items-start">
+            {/* Left: image inside outer_container_shell */}
+            <div>
               <div
-                key={i}
-                className="aspect-[4/3] md:aspect-[16/9] relative rounded-[32px] overflow-hidden bg-[#2c19fc] border border-white/10"
+                className="rounded-[32px] relative overflow-hidden border border-white/70 min-h-[440px] md:min-h-[520px]"
+                style={{
+                  background: 'linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%)',
+                  boxShadow: '0 2px 40px rgba(160,180,220,0.18)'
+                }}
               >
-                {/* Background Texture Logic */}
-                <div className="absolute -inset-[15%] z-0">
-                  {showHeavyAssets && (
-                    <Grainient
-                      color1="#5e30eb"
-                      color2="#371a94"
-                      color3="#ffffff"
-                      timeSpeed={0}
-                      zoom={1.2 - (i * 0.1)}
-                      centerX={0}
-                      centerY={0}
-                      grainAmount={0.06}
+                <div
+                  className="pointer-events-none absolute -top-24 -right-24 w-[360px] h-[360px] rounded-full"
+                  style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.35) 0%, transparent 70%)' }}
+                />
+                <div
+                  className="pointer-events-none absolute -bottom-20 -left-16 w-[260px] h-[260px] rounded-full"
+                  style={{ background: 'radial-gradient(circle, rgba(200,215,240,0.3) 0%, transparent 70%)' }}
+                />
+
+                <div className="p-6 md:p-8 h-full flex flex-col">
+                  <div
+                    className="mb-5"
+                    style={{ fontFamily: 'var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif' }}
+                  >
+                    <h2 className="text-[34px] md:text-[40px] font-semibold tracking-tight text-black leading-[1.05]">
+                      Choose your hardware
+                    </h2>
+                    <p className="mt-3 text-[14px] md:text-[16px] text-gray-500 leading-snug max-w-[520px]">
+                      Run Swftly on any device, keep your existing peripherals, and connect your processor seamlessly.
+                    </p>
+                  </div>
+
+                  <div className="mt-auto rounded-[24px] bg-white/70 border border-white/70 shadow-[0_10px_30px_rgba(15,23,42,0.10)] overflow-hidden w-full">
+                    <img
+                      src="/hardware-hero.png"
+                      alt="Hardware Ecosystem"
+                      className="w-full h-auto block"
                     />
-                  )}
-                </div>
-
-                {/* Inner blue gradient glow around the border */}
-                <div className="absolute inset-0 rounded-[36px] shadow-[inset_0_0_100px_rgba(44,25,252,0.6),inset_0_0_0_1.5px_rgba(255,255,255,0.4)] z-10 pointer-events-none" />
-                <div className="absolute inset-0 rounded-[36px] border border-white/40 z-10 pointer-events-none" />
-
-                {/* Subtle internal shine for depth */}
-                <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent opacity-40 mix-blend-overlay" />
-
-                {/* Container Content Logic */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-                  {i === 0 ? (
-                    <div className="grid grid-cols-8 gap-2 p-4">
-                      {Array.from({ length: 32 }).map((_, u) => (
-                        <div
-                          key={u}
-                          className="w-6 h-6 md:w-8 md:h-8 rounded-full border border-white/40 bg-white/20 backdrop-blur-md flex items-center justify-center shadow-lg"
-                        >
-                          <User size={14} className="text-white opacity-90" />
-                        </div>
-                      ))}
-                    </div>
-                  ) : i === 1 ? (
-                    <div className="relative w-full px-5 h-full flex items-center justify-center">
-                      <div className="absolute top-10 right-4 w-10 h-10 rounded-full border border-white/40 bg-white/20 backdrop-blur-md flex items-center justify-center shadow-lg pointer-events-none z-30">
-                        <Mail size={18} className="text-white opacity-90" />
-                      </div>
-                      <div className="w-full bg-white/20 backdrop-blur-xl border border-white/40 rounded-2xl p-3.5 shadow-2xl relative overflow-hidden">
-                        {/* Message Header */}
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="w-8 h-8 rounded-full bg-orange-500 border border-white/30 flex items-center justify-center overflow-hidden shadow-inner">
-                            <img src="/pizza.png" alt="Pizza Pit" className="w-full h-full object-contain p-1" />
-                          </div>
-                          <div className="flex flex-col">
-                            <span className="text-white text-[13px] font-bold leading-tight">Pizza Pit</span>
-                            <span className="text-white/50 text-[10px] uppercase tracking-wider font-semibold">Promotion · Just now</span>
-                          </div>
-                        </div>
-                        {/* Message Body */}
-                        <p className="text-white text-xs leading-relaxed font-medium">
-                          🍕 <span className="text-white font-black">20% OFF!</span> We've missed you. Use code <span className="bg-white/20 px-1.5 py-0.5 rounded border border-white/20 italic font-bold tracking-widest uppercase">PIZZA20</span> to get a hot deal today. Order at <span className="underline decoration-white/30 underline-offset-2">pizzapit.com</span>
-                        </p>
-                      </div>
-                    </div>
-                  ) : i === 2 ? (
-                    <div className="flex flex-col items-center justify-center h-full w-full px-6 pt-10 pb-8 gap-1">
-                      {/* iOS Style Profile Header */}
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="w-12 h-12 rounded-full border border-white/50 bg-[#22c55e] flex items-center justify-center shadow-lg relative overflow-hidden">
-                          <span className="text-2xl">🍔</span>
-                          <div className="absolute inset-0 bg-gradient-to-tr from-black/20 to-transparent" />
-                        </div>
-
-                        <div className="flex flex-col items-center">
-                          <span className="text-white text-[12px] font-black tracking-tight">Burger House</span>
-                          <span className="text-white text-[10px] font-bold opacity-40 uppercase tracking-widest">iMessage</span>
-                        </div>
-                      </div>
-
-                      {/* Glass Message Bubble */}
-                      <div className="relative max-w-[95%] bg-[#3b82f6]/40 backdrop-blur-xl border border-white/30 rounded-[22px] px-4 py-2.5 shadow-2xl mt-1">
-                        <p className="text-white text-[13px] leading-relaxed font-semibold">
-                          <span className="font-black text-white">Hey Alex! 🌟</span> 2 orders left for your <span className="underline decoration-white/40 underline-offset-2">Free Burger</span>! 🍔🔥
-                        </p>
-                      </div>
-                    </div>
-                  ) : i === 3 ? (
-                    <div className="flex flex-col items-center justify-center h-full w-full px-6 gap-6">
-                      {/* Glass Notification */}
-                      <div className="w-full bg-white/20 backdrop-blur-xl border border-white/40 rounded-2xl p-3.5 shadow-2xl relative overflow-hidden">
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className="text-white text-[13px] font-bold">Taco Town 🌮</span>
-                        </div>
-                        <p className="text-white text-xs leading-relaxed font-medium">
-                          Welcome! 🎁 <span className="text-white font-black">Tap to use</span> your points, discounts, and exclusive offers instantly.
-                        </p>
-                      </div>
-
-                      {/* Wallet Badges */}
-                      <div className="flex flex-row flex-wrap items-center justify-center gap-4 w-full opacity-90">
-                        <img
-                          src="/apple-wallet.svg"
-                          alt="Add to Apple Wallet"
-                          className="h-10 w-auto hover:opacity-100 transition-opacity"
-                        />
-                        <img
-                          src="/google-wallet.svg"
-                          alt="Add to Google Wallet"
-                          className="h-10 w-auto hover:opacity-100 transition-opacity"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="w-1/3 h-[2px] bg-white/10 rounded-full blur-sm" />
-                  )}
+                  </div>
                 </div>
               </div>
-            ))}
+
+            </div>
+
+            {/* Right: title + stacked rows (screenshot style) */}
+            <div
+              style={{ fontFamily: 'var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif' }}
+            >
+              <div className="mt-10">
+                {[
+                  { title: 'Mobile & Desktop', desc: 'Use iOS, Android, Chrome, Windows, or macOS.' },
+                  { title: 'Use existing hardware', desc: 'Scanners, printers, cash drawers, and terminals. Stripe built-in, or connect your current provider.' }
+                ].map((row, idx) => (
+                  <div key={idx} className="py-8 border-b border-gray-100">
+                    <div>
+                      <div className="text-black text-[22px] md:text-[26px] font-semibold tracking-tight">
+                        {row.title}
+                      </div>
+                      <div className="mt-2 text-gray-400 text-[14px] md:text-[16px] leading-relaxed max-w-xl">
+                        {row.desc}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <p className="mt-10 text-gray-400 text-sm md:text-base leading-relaxed max-w-xl tracking-tight">
+                <span className="font-semibold text-gray-900">*Swftly does not take a percentage of your transactions.</span>{' '}
+                Default processor is Stripe: online 2.9% + 30¢, in-person 2.7% + 5¢ (Stripe Terminal).
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* AI Analytics Section */}
-      <section className="relative w-full min-h-[90vh] bg-[#2c19fc] z-20 overflow-hidden flex items-center justify-center py-32">
-        {/* Signature Blue Grainient Background */}
-        <div className="absolute inset-0 z-0">
-          {showHeavyAssets && (
-            <Grainient
-              color1="#5e30eb"
-              color2="#371a94"
-              color3="#ffffff"
-              timeSpeed={0}
-              zoom={0.8}
-              grainAmount={0.05}
-            />
-          )}
-        </div>
-
-        {/* Top & Bottom Shades for transition */}
-        <div className="absolute top-0 left-0 w-full h-40 bg-gradient-to-b from-white to-transparent opacity-100 z-[1] pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-full h-40 bg-gradient-to-t from-white via-white/40 to-transparent opacity-100 z-[1] pointer-events-none" />
-
-        <div className="max-w-7xl mx-auto px-6 md:px-12 relative z-10 flex flex-col items-center w-full">
-          <div className="text-center w-full max-w-5xl mx-auto mb-8 md:mb-16 flex flex-col gap-2 md:gap-4">
-            <motion.h2
-              initial={isMobile ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-              whileInView={isMobile ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
-              className="text-white text-[36px] font-bold tracking-tight leading-[1.1]"
-              style={{ fontFamily: 'Zodiak, serif' }}
-            >
-              AI-Driven Analytics.
-            </motion.h2>
-            <motion.p
-              initial={isMobile ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-              whileInView={isMobile ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.8, delay: 0.1, ease: "easeOut" }}
-              className="text-white/70 text-[16px] font-medium leading-relaxed font-sans max-w-2xl mx-auto"
-            >
-              Track what actually drives your business. Swftly collects meaningful data on employee activity, sales trends, inventory, and more
-            </motion.p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl mx-auto mt-6 md:mt-12">
-            {[
-              {
-                title: "Employee Productivity",
-                desc: "Track employee productivity and activity in real-time.",
-                chart: (
-                  <div className="absolute inset-x-4 bottom-4 top-4 flex items-end justify-between opacity-30">
-                    {[40, 70, 45, 90, 65, 80, 50].map((h, i) => (
-                      <div
-                        key={i}
-                        className="w-[10%] bg-white/80 rounded-t-full shadow-[0_0_10px_rgba(255,255,255,0.2)]"
-                        style={{ height: `${h}%` }}
-                      />
-                    ))}
-                  </div>
-                )
-              },
-              {
-                title: "Popular Items & Trends",
-                desc: "Identify best sellers and emerging trends instantly.",
-                chart: (
-                  <div className="absolute inset-4 flex items-center justify-center opacity-30">
-                    <svg viewBox="0 0 200 100" className="w-full h-full p-4">
-                      <path
-                        d="M0,80 Q25,20 50,60 T100,20 T150,70 T200,30"
-                        fill="none"
-                        stroke="white"
-                        strokeWidth="3"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </div>
-                )
-              },
-              {
-                title: "Revenue Insights",
-                desc: "Understand your sales inside out with automated revenue mapping.",
-                chart: (
-                  <div className="absolute inset-6 flex items-center justify-center opacity-30">
-                    <div className="grid grid-cols-4 gap-1.5 w-full h-full p-6">
-                      {[1, 0.6, 0.8, 0.4, 0.7, 0.9, 0.5, 0.3].map((op, i) => (
-                        <div
-                          key={i}
-                          className="bg-white/80 rounded-md"
-                          style={{ opacity: op * 0.5 }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )
-              },
-              {
-                title: "Inventory Alerts",
-                desc: "Get notified before you run out. Tracks low stock.",
-                chart: (
-                  <div className="absolute inset-0 flex items-center justify-center opacity-40">
-                    <div className="relative w-16 h-16">
-                      <div className="absolute inset-0 border border-white/40 rounded-full scale-150" />
-                      <div className="absolute inset-0 border border-white/60 rounded-full scale-100" />
-                    </div>
-                  </div>
-                )
-              },
-              {
-                title: "Intelligent Search",
-                desc: "Find products faster with AI-powered search and image recognition.",
-                chart: (
-                  <div className="absolute inset-0 flex items-center justify-center opacity-30">
-                    <div className="relative w-20 h-20 border-2 border-white/40 rounded-full flex items-center justify-center">
-                      <div className="w-8 h-8 border-2 border-white/60 rounded-full" />
-                      <div className="absolute bottom-2 right-2 w-6 h-1 bg-white/60 rotate-45 rounded-full" />
-                    </div>
-                  </div>
-                )
-              },
-              {
-                title: "Automated Reports",
-                desc: "Full custom reports delivered to your inbox.",
-                chart: (
-                  <div className="absolute inset-x-8 bottom-0 top-1/4 flex flex-col gap-2 opacity-30">
-                    {[1, 2, 3].map((line) => (
-                      <div
-                        key={line}
-                        className="h-1 bg-white/80 rounded-full"
-                        style={{ width: `${60 + (line * 10)}%` }}
-                      />
-                    ))}
-                  </div>
-                )
-              }
-            ].map((stat, i) => (
-              <div
-                key={i}
-                className="relative h-[220px] bg-white/20 backdrop-blur-xl border border-white/40 rounded-2xl overflow-hidden shadow-[0_8px_32px_0_rgba(255,255,255,0.1),inset_0_0_0_1px_rgba(255,255,255,0.2)]"
-              >
-                {/* Static Background Chart */}
-                {stat.chart}
-
-                {/* Text Content Overlay */}
-                <div className="absolute bottom-4 left-4 right-4 p-4 py-3 bg-white/30 backdrop-blur-xl border border-white/50 rounded-xl shadow-lg z-20">
-                  <h3 className="text-white text-base font-bold mb-0.5" style={{ fontFamily: 'Zodiak, serif' }}>{stat.title}</h3>
-                  <p className="text-white/80 text-[11px] font-sans leading-[1.3]">{stat.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section >
-
-      {/* Schedule Shift Section */}
-      < section className="relative w-full py-32 bg-white z-20" >
-        <div className="max-w-7xl mx-auto px-6 md:px-12 flex flex-col items-center">
-          <motion.h2
-            initial={isMobile ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-            whileInView={isMobile ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
-            className="text-black text-[36px] font-medium tracking-tight text-center mb-8"
-            style={{ fontFamily: 'var(--font-eb-garamond), serif' }}
-          >
-            Schedule Shifts In One Click.
-          </motion.h2>
-
-          <div className="flex flex-col gap-8 w-full max-w-5xl mx-auto items-center">
-            <motion.div
-              initial={isMobile ? { opacity: 1, y: 0 } : { opacity: 0, y: 40 }}
-              whileInView={isMobile ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
-              className="relative w-full min-h-[500px] md:h-[550px] rounded-3xl overflow-hidden bg-[#2c19fc] flex flex-col md:flex-row transition-transform duration-500"
-            >
-              {/* Internal Polish Layers - Exact Replica of Automate Inventory Section */}
-              <div className="absolute inset-0 rounded-3xl shadow-[inset_0_0_80px_rgba(44,25,252,0.5),inset_0_0_0_1.5px_rgba(255,255,255,0.3)] z-10 pointer-events-none" />
-              <div className="absolute inset-0 rounded-3xl border border-white/40 z-10 pointer-events-none" />
-              <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent opacity-40 mix-blend-overlay z-10 pointer-events-none" />
-
-              {/* Background Gradient */}
-              <div className="absolute -inset-[15%] z-0">
-                {showHeavyAssets && (
-                  <Grainient
-                    color1="#5e30eb"
-                    color2="#371a94"
-                    color3="#ffffff"
-                    timeSpeed={0}
-                    zoom={1.5}
-                    grainAmount={0.05}
-                  />
-                )}
-              </div>
-
-              <div className="relative z-20 flex flex-col justify-start pt-12 md:pt-16 p-8 md:p-16 h-full w-full md:w-[45%] lg:w-[40%] text-white" style={{ fontFamily: 'var(--font-geist-sans), Inter, sans-serif' }}>
-                <p className="text-xl font-bold mb-4">Schedules Based On:</p>
-                <ul className="space-y-2 mb-8 text-white text-lg font-medium">
-                  <li className="flex items-center gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                    Peak Hours
-                  </li>
-                  <li className="flex items-center gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                    Employee Availability
-                  </li>
-                  <li className="flex items-center gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                    Labor Costs
-                  </li>
-                </ul>
-                <p className="text-white/60 text-lg font-medium italic">
-                  Swftly handles the complexity.
-                </p>
-
-                {/* Integration Logos - Floating App Icon Style with Individual Fades */}
-                <div className="flex flex-wrap items-center gap-10 mt-4 md:mt-10 relative h-32 w-full max-w-[400px]">
-                  <div
-                    className="absolute left-0 top-0 w-10 h-10 md:w-14 md:h-14 bg-white rounded-2xl flex items-center justify-center p-2.5 shadow-2xl shadow-black/20 -translate-y-4 -rotate-6"
-                    style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}
-                  >
-                    <img src="/calendly.png" alt="Calendly" className="w-full h-full object-contain" />
-                  </div>
-                  <div
-                    className="absolute left-1/4 top-1/2 w-10 h-10 md:w-14 md:h-14 bg-white rounded-2xl flex items-center justify-center p-2.5 shadow-2xl shadow-black/20 translate-y-2 rotate-12"
-                    style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}
-                  >
-                    <img src="/google-calendar.svg" alt="Google Calendar" className="w-full h-full object-contain" />
-                  </div>
-                  {/* Apple Calendar - Large Floating */}
-                  <div
-                    className="absolute left-1/2 top-0 -translate-x-4 -translate-y-4 -rotate-3 z-10"
-                    style={{ maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)' }}
-                  >
-                    <img src="/apple-calendar.png" alt="Apple Calendar" className="w-[65px] h-[65px] md:w-[75px] md:h-[75px] object-contain drop-shadow-2xl" />
-                  </div>
-                  <div
-                    className="absolute right-0 top-1/3 w-10 h-10 md:w-14 md:h-14 bg-white rounded-2xl flex items-center justify-center p-2.5 shadow-2xl shadow-black/20 translate-y-0 rotate-[-12deg]"
-                    style={{ maskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 50%, transparent 100%)' }}
-                  >
-                    <img src="/outlook.svg" alt="Outlook" className="w-full h-full object-contain" />
-                  </div>
-                </div>
-                {/* Mobile-only Generate Button above Asterisk */}
-                {isMobile && (
-                  <div className="flex justify-end mt-2">
-                    <div
-                      className="button-24 !px-6 !py-2.5 !rounded-full shadow-xl cursor-default border-transparent bg-white !text-black flex items-center justify-center font-medium scale-90 origin-right"
-                      style={{ fontFamily: 'var(--font-geist-sans), Inter, sans-serif', textTransform: 'none' }}
-                    >
-                      <span className="text-black">Generate</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Integration Footnote */}
-                <p className={`${isMobile ? 'mt-2' : 'mt-8'} text-white/40 text-[10px] md:text-xs font-medium tracking-tight text-right md:text-left`} style={{ fontFamily: 'var(--font-geist-sans), Inter, sans-serif' }}>
-                  *Integrate with Google Calendar, Apple Calendar, Microsoft Calendar, Calendly +
-                </p>
-              </div>
-
-              {/* Mockup Area - Hidden on Mobile */}
-              <div className="relative z-20 w-full md:w-[55%] lg:w-[60%] hidden md:flex items-center justify-center p-6 md:p-12 h-full">
-                <SchedulingMockup />
-              </div>
-            </motion.div>
-          </div>
-        </div>
-      </section >
-
-      {/* Choose Your Hardware Section */}
-      < section className="relative w-full py-32 bg-white z-20" >
-        <div className="max-w-7xl mx-auto px-6 md:px-12 text-center">
-          <motion.h2
-            initial={isMobile ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-            whileInView={isMobile ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
-            className="text-black text-[46px] font-medium tracking-tight mb-4"
-            style={{ fontFamily: 'var(--font-eb-garamond), serif' }}
-          >
-            Choose Your Hardware
-          </motion.h2>
-
-          {/* Hero Hardware Image */}
-          <motion.img
-            initial={isMobile ? { opacity: 1, y: 0 } : { opacity: 0, y: 40 }}
-            whileInView={isMobile ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 1, ease: "easeOut" }}
-            src="/hardware-hero.png"
-            alt="Hardware Ecosystem"
-            className="w-full h-auto max-w-2xl mx-auto translate-x-4 md:-translate-x-8 mb-12 block rounded-none shadow-none"
-          />
-
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-20">
-            {[
-              {
-                title: "Mobile & Desktop",
-                desc: "Your POS, your device — your choice.",
-              },
-              {
-                title: "Use Existing Hardware",
-                desc: "Your scanners, printers, and terminals — plug in and go.",
-              },
-              {
-                title: "Connect Your Processor",
-                desc: "Stripe built-in, or connect any provider you already use.",
-              }
-            ].map((item, i) => (
-              <motion.div
-                key={i}
-                initial={isMobile ? { opacity: 1, y: 0 } : { opacity: 0, y: 30 }}
-                whileInView={isMobile ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.6, delay: i * 0.1 }}
-                className="bg-gray-50 rounded-[32px] p-10 flex flex-col items-start text-left border border-transparent shadow-sm"
-              >
-                <h3 className="text-black text-xl xl:text-2xl font-bold mb-4 whitespace-nowrap" style={{ fontFamily: 'Zodiak, serif' }}>{item.title}</h3>
-                <p className="text-gray-500 text-base md:text-lg leading-relaxed" style={{ fontFamily: 'var(--font-geist-sans), Inter, sans-serif' }}>
-                  {item.desc}
-                </p>
-              </motion.div>
-            ))}
-          </div>
-
-          <motion.div
-            initial={isMobile ? { opacity: 1 } : { opacity: 0 }}
-            whileInView={isMobile ? { opacity: 1 } : { opacity: 1 }}
-            viewport={{ once: true }}
-            transition={{ duration: 1 }}
-            className="border-t border-gray-100 pt-12 text-left"
-          >
-            <p className="text-gray-400 text-sm md:text-base leading-relaxed max-w-4xl tracking-tight" style={{ fontFamily: 'var(--font-geist-sans), Inter, sans-serif' }}>
-              <span className="font-bold text-gray-900">*Swftly does not take a percentage of your transactions.</span> Our default processor is Stripe Online orders: 2.9% + 30¢.
-              In-Person (Stripe Terminal): 2.7% + 5¢, all other terminals can be seamlessly configured in-app.
-            </p>
-          </motion.div>
-        </div>
-      </section >
-
       {/* Pricing Comparison Section */}
-      < section id="pricing-section" className="relative w-full py-40 overflow-hidden" >
-        {/* Animated Grainient Background */}
-        < div className="absolute inset-0 z-0" >
-          {showHeavyAssets && (
-            <Grainient
-              color1="#5e30eb"
-              color2="#371a94"
-              color3="#ffffff"
-              timeSpeed={0}
-              zoom={0.8}
-              grainAmount={0.05}
-            />
-          )}
-        </div >
+      <section className="relative w-full py-24 md:py-28 bg-white z-20">
+        <div
+          className="max-w-5xl mx-auto px-4 md:px-8"
+          style={{ fontFamily: 'var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif' }}
+        >
+          <h2 className="text-[28px] md:text-[34px] font-semibold tracking-tight text-black mb-10">
+            Frequently asked questions
+          </h2>
 
-        {/* Top & Bottom Shades for transition */}
-        < div className="absolute top-0 left-0 w-full h-40 bg-gradient-to-b from-white to-transparent opacity-100 z-[1] pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-full h-40 bg-gradient-to-t from-white to-transparent opacity-100 z-[1] pointer-events-none" />
-
-        <div className="max-w-6xl mx-auto px-6 md:px-12 flex justify-center relative z-10">
-          <div className="w-full">
-            <div className="relative">
-              {/* Solid White Card Behind */}
-              <div className="absolute inset-0 bg-white/90 rounded-[40px]" />
-
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                className="relative pos-card-glass-inhouse rounded-[40px] p-8 md:p-12 shadow-[0_40px_100px_rgba(44,25,252,0.15)] overflow-hidden flex flex-col md:flex-row gap-12 group transition-all duration-500"
-              >
-                <div className="absolute inset-0 bg-gradient-to-br from-[#2c19fc]/5 via-transparent to-transparent pointer-events-none" />
-
-                {/* Left Side: Brand & Billing */}
-                <div className="md:w-1/3 flex flex-col justify-between relative z-10">
-                  <div>
-                    <div className="flex items-center gap-4 mb-8">
-                      <div className="relative w-14 h-14 flex items-center justify-center transform-gpu perspective-1000 group-hover:rotate-y-12 transition-transform duration-500">
-                        <div className="absolute inset-0 bg-[#2c19fc] rounded-xl rotate-6 translate-x-1 translate-y-1 opacity-20" />
-                        <div className="relative w-full h-full bg-gradient-to-br from-[#2c19fc] to-[#1a0fb3] rounded-2xl flex items-center justify-center shadow-xl border border-white/20 p-1">
-                          <img src="/Swftly.svg" alt="Swftly" className="w-full h-full object-contain brightness-0 invert" />
-                        </div>
+          {[
+            {
+              q: 'How do shipments get imported?',
+              a: 'Upload PDFs, spreadsheets, or images. Swftly extracts products, pricing, and SKUs, then prepares inventory updates for approval.'
+            },
+            {
+              q: 'How does mismatch detection work?',
+              a: 'Swftly compares the vendor document against expected items and pricing, then flags discrepancies before you publish inventory.'
+            },
+            {
+              q: 'Can Swftly notify vendors automatically?',
+              a: 'Yes. Swftly can draft and send discrepancy emails so vendors can correct invoices or issue credits quickly.'
+            },
+            {
+              q: 'What hardware can I use?',
+              a: 'Run Swftly on mobile or desktop. Keep your existing scanners, printers, cash drawers, and terminals.'
+            },
+            {
+              q: 'Do you take a percentage of transactions?',
+              a: 'No. Swftly does not take a percentage of your transactions.'
+            }
+          ].map((item, idx) => {
+            const isOpen = openFaqIndex === idx;
+            return (
+              <div key={item.q} className="border-t border-gray-200 last:border-b last:border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setOpenFaqIndex(isOpen ? null : idx)}
+                  className="w-full py-5 md:py-6 flex items-center justify-between gap-6 text-left"
+                >
+                  <span className="text-[15px] md:text-[16px] font-semibold text-black">
+                    {item.q}
+                  </span>
+                  <ChevronDown
+                    size={18}
+                    className={`text-gray-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                <AnimatePresence initial={false}>
+                  {isOpen && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: 'easeOut' }}
+                      className="overflow-hidden"
+                    >
+                      <div className="pt-1 pb-6 text-[14px] md:text-[15px] text-gray-500 leading-relaxed max-w-3xl">
+                        {item.a}
                       </div>
-                      <span className="text-3xl font-bold text-black tracking-tight" style={{ fontFamily: 'var(--font-eb-garamond), serif' }}>Swftly</span>
-                    </div>
-
-                    <div className="mb-8">
-                      <div className="flex items-baseline gap-1 mb-2">
-                        <span className="text-6xl font-black text-black tracking-tighter">$34.99</span>
-                        <span className="text-xl font-bold text-gray-400">/mo</span>
-                      </div>
-                      <p className="text-gray-500 text-base font-medium">All-in-one software suite</p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => navigate('/waitlist')}
-                    className="button-7 button-7--blue !w-full !mx-0 !mb-0 hidden md:flex justify-center items-center py-5 text-lg"
-                  >
-                    <span className="text">Switch to Swftly</span>
-                  </button>
-                </div>
-
-                {/* Right Side: Features Grid */}
-                <div className="md:w-2/3 flex flex-col relative z-10">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6 mb-12">
-                    {[
-                      { label: "Rewards & Marketing", value: "Built-In", desc: "Emails, SMS & Digital Passes" },
-                      { label: "Hardware Compatibility", value: "Any Device", desc: "iOS, Android, Chrome, Windows" },
-                      { label: "3rd Party Aggregates", value: "Unlimited", desc: "DoorDash, UberEats, etc." },
-                      { label: "Automated Accounting", value: "Included", desc: "Real-time sync to leading books" },
-                      { label: "Flexible Processing", value: "Universal", desc: "Works with your existing terminal" },
-                      { label: "And much more", value: "Included", desc: "Inventory, Scheduling, Analytics +" }
-                    ].map((item, i) => (
-                      <div key={i} className="flex flex-col pb-4 border-b border-gray-100 last:md:border-b-0">
-                        <div className="flex justify-between items-center mb-1">
-                          <p className="text-black font-bold text-lg">{item.label}</p>
-                          <Check className="w-5 h-5 text-[#2c19fc] stroke-[3.5]" />
-                        </div>
-                        <p className="text-gray-500 text-sm leading-relaxed">{item.desc}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Mobile-only CTA at the bottom of the card */}
-                  <button
-                    onClick={() => navigate('/waitlist')}
-                    className="button-7 button-7--blue !w-full !mx-0 !mb-0 flex md:hidden justify-center items-center py-5 text-lg"
-                  >
-                    <span className="text">Switch to Swftly</span>
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
         </div>
-      </section >
+      </section>
 
+      {/* Final CTA + Footer (shared background) */}
+      <div style={{ background: 'linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%)' }}>
       {/* Final CTA Section */}
-      < section id="final-cta" className="relative w-full h-screen flex flex-col bg-white overflow-hidden" >
+      <section
+        id="final-cta"
+        className="relative w-full h-screen flex flex-col overflow-hidden bg-transparent"
+      >
+        {/* Fade from white into the shared gradient */}
+        <div className="pointer-events-none absolute top-0 left-0 right-0 h-56 bg-gradient-to-b from-white via-white/70 to-transparent z-[1]" />
+
+        {/* Subtle blurred background logos */}
+        <div className="pointer-events-none absolute inset-0 z-[1]">
+          <img
+            src="/Swftly.svg"
+            alt=""
+            aria-hidden="true"
+            className="absolute -top-10 -left-24 w-[520px] opacity-[0.16] blur-[2px] rotate-[-12deg] mix-blend-soft-light"
+          />
+          <img
+            src="/Swftly.svg"
+            alt=""
+            aria-hidden="true"
+            className="absolute top-[18%] -right-28 w-[640px] opacity-[0.14] blur-[2.5px] rotate-[18deg] mix-blend-soft-light"
+          />
+          <img
+            src="/Swftly.svg"
+            alt=""
+            aria-hidden="true"
+            className="absolute bottom-[-140px] left-1/2 -translate-x-1/2 w-[760px] opacity-[0.12] blur-[3px] rotate-[2deg] mix-blend-soft-light"
+          />
+        </div>
         <div className="flex-1 flex items-center justify-center">
-          <div className="max-w-7xl mx-auto px-4 flex items-center justify-center gap-2 md:gap-32 mt-20">
+          <div className="max-w-7xl mx-auto px-4 mt-20 relative z-[2] flex flex-col items-center">
             <h2
               ref={finalGetRef}
-              className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight translate-x-[2vw] md:translate-x-[-288px]"
+              className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight text-center"
               style={{ fontFamily: 'Zodiak, serif' }}
             >
-              Get
+              Get Swftly
             </h2>
-            {/* Mac App Symbol for Mobile, Gap for 3D Logo on Desktop */}
-            <div className="w-16 h-24 md:w-[220px] flex items-center justify-center relative">
-              <motion.div
-                className="md:hidden w-16 h-16 bg-gradient-to-br from-[#2c19fc] to-[#1a0fb3] rounded-[18px] flex items-center justify-center shadow-[0_10px_30px_rgba(44,25,252,0.3)] border border-white/10 p-2.5"
-                initial={{ scale: 0, opacity: 0 }}
-                whileInView={{ scale: 1, opacity: 1 }}
-                viewport={{ once: false, amount: 0.5 }}
-                transition={{
-                  type: "spring",
-                  stiffness: 260,
-                  damping: 20,
-                  duration: 0.6
-                }}
-              >
-                <img src="/Swftly.svg" alt="Swftly" className="w-full h-full object-contain brightness-0 invert" />
-              </motion.div>
+            <div className="mt-8">
+              <button className="button-29" role="button" onClick={() => navigate('/waitlist')}>
+                <span className="text">Join The Waitlist</span>
+              </button>
             </div>
-            <h2
-              ref={finalSwftlyRef}
-              className="text-[10vw] md:text-[120px] font-bold text-black tracking-tight -translate-x-[2vw] md:translate-x-0"
-              style={{ fontFamily: 'Zodiak, serif' }}
-            >
-              Swftly.
-            </h2>
           </div>
         </div>
 
-        {/* Integrated Footer */}
-        <div className="w-full pt-8 pb-16 px-4 relative z-10 bg-white">
-          <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-2 border-t border-gray-50 pt-8">
-            <div className="flex items-center">
-              <span className="text-[10px] md:text-sm text-gray-400 font-medium whitespace-nowrap">© 2026 Swftly.</span>
+      </section>
+
+      {/* Footer (Cluely-style) */}
+      <section
+        className="w-full px-4 py-14 md:py-16 relative z-10"
+        style={{
+          fontFamily: 'var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif'
+        }}
+      >
+        <footer className="max-w-6xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-[1.2fr_1fr_1fr_1fr] gap-10 md:gap-8 pb-10 border-b border-black/5">
+            {/* Left: brand + status */}
+            <div className="flex flex-col gap-6">
+              <div className="flex items-center gap-2">
+                <img src="/Swftly.svg" alt="Swftly" className="w-5 h-5 object-contain brightness-0" />
+                <span className="text-[14px] font-semibold text-black tracking-tight">Swftly</span>
+              </div>
+
+              <button type="button" className="button-42">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                <span className="text text-[12px] font-medium text-black/70">All systems operational</span>
+              </button>
+
             </div>
-            <div className="flex items-center gap-2 md:gap-10">
-              <NavButton className="text-[10px] md:text-sm" onClick={() => window.open('https://instagram.com/getswftly', '_blank')}>Instagram</NavButton>
-              <NavButton className="text-[10px] md:text-sm" onClick={() => window.open('https://instagram.com/getswftly', '_blank')}>X</NavButton>
-              <NavButton className="text-[10px] md:text-sm" onClick={() => navigate('/book-a-demo')}>Contact</NavButton>
+
+            {/* Columns */}
+            <div className="space-y-3">
+              <div className="text-[12px] font-semibold text-black/80">Resources</div>
+              <div className="space-y-2">
+                {['Mobile', 'Manifesto', 'Bug Bounty'].map((t) => (
+                  <button key={t} type="button" className="block text-[13px] text-black/55 hover:text-black/75 transition-colors">
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-[12px] font-semibold text-black/80">Support</div>
+              <div className="space-y-2">
+                {['Help Center', 'Contact Us'].map((t) => (
+                  <button key={t} type="button" className="block text-[13px] text-black/55 hover:text-black/75 transition-colors">
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-[12px] font-semibold text-black/80">Legal</div>
+              <div className="space-y-2">
+                {['Privacy Policy', 'Terms of Service', 'Data Processing Agreement'].map((t) => (
+                  <button key={t} type="button" className="block text-[13px] text-black/55 hover:text-black/75 transition-colors">
+                    {t}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      </section >
 
+          <div className="pt-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <div className="text-[12px] text-black/45">
+              © 2026 Swftly. All rights reserved.
+            </div>
+            <div className="flex items-center gap-4 text-black/55">
+              <button type="button" onClick={() => window.open('https://instagram.com/getswftly', '_blank')} className="hover:text-black/75 transition-colors">
+                <Instagram size={18} />
+              </button>
+              <button type="button" onClick={() => window.open('https://github.com', '_blank')} className="hover:text-black/75 transition-colors">
+                <Github size={18} />
+              </button>
+              <button type="button" onClick={() => window.open('https://x.com', '_blank')} className="hover:text-black/75 transition-colors">
+                <img src="/x-logo.svg" alt="X" className="w-[18px] h-[18px] object-contain opacity-70 hover:opacity-100 transition-opacity" />
+              </button>
+            </div>
+          </div>
+        </footer>
+      </section>
+      </div>
 
-    </div >
+    </div>
   );
 }

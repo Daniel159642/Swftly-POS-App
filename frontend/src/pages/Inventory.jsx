@@ -1731,36 +1731,6 @@ function Inventory() {
               </ul>
             )}
           </div>
-          {/* Lowest stock (needs attention) */}
-          <div style={cardStyle}>
-            <div style={cardTitleStyle}>Lowest stock</div>
-            {lowestStock.length === 0 ? (
-              <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#9ca3af' }}>No items with stock</div>
-            ) : (
-              <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                {lowestStock.map((item) => (
-                  <li key={item.product_id} style={{ ...listItemStyle, cursor: 'pointer' }} onClick={() => handleEditProduct(item)}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.product_name}>{item.product_name || item.sku || '—'}</span>
-                    <span style={{ flexShrink: 0, marginLeft: '8px', fontWeight: 600 }}>{qty(item)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          {/* Expected delivery refills – placeholder */}
-          <div style={cardStyle}>
-            <div style={cardTitleStyle}>Expected delivery / refills</div>
-            <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#9ca3af' }}>
-              Add expected delivery dates in product notes or use a separate refills workflow to see them here.
-            </div>
-          </div>
-          {/* Items sitting a while – placeholder for last received/updated */}
-          <div style={cardStyle}>
-            <div style={cardTitleStyle}>Items sitting a while</div>
-            <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#9ca3af' }}>
-              Track last received or last updated dates on products to see items that have been in stock the longest. Add date fields in product metadata to enable this.
-            </div>
-          </div>
           {/* Expiring / Expiring soon – use expiration_date if present on items */}
           {(() => {
             const parseDate = (d) => {
@@ -1807,64 +1777,6 @@ function Inventory() {
               </div>
             )
           })()}
-          {/* Shopify integration */}
-          <div style={cardStyle}>
-            <div style={cardTitleStyle}>Shopify</div>
-            {shopifyEnabled ? (
-              <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
-                <p style={{ margin: '0 0 8px 0' }}>Shopify is connected. Orders and products can sync with your store.</p>
-                <p style={{ margin: 0, color: isDarkMode ? 'var(--text-tertiary, #999)' : '#6b7280', fontSize: '13px' }}>
-                  Manage connection and sync in Settings → Integrations.
-                </p>
-              </div>
-            ) : (
-              <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#9ca3af' }}>
-                Connect Shopify in Settings → Integrations to sync products and orders with your store.
-              </div>
-            )}
-          </div>
-        </div>
-        {/* Categories overview */}
-        <div style={cardStyle}>
-          <div style={cardTitleStyle}>Categories</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-            {categories.length === 0 ? (
-              <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#9ca3af' }}>No categories</span>
-            ) : (
-              categories.map((cat) => {
-                const count = getItemsByCategory(cat).length
-                const label = cat.includes(' > ') ? cat.split(' > ').pop().trim() : cat
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => { setInventoryViewMode('table'); setFilterView('category'); setSelectedCategory(cat); setSelectedVendor(null) }}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: '8px',
-                      border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#e5e7eb'}`,
-                      backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : '#f9fafb',
-                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#374151',
-                      fontSize: '13px',
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = `rgba(${themeColorRgb}, 0.15)`
-                      e.currentTarget.style.borderColor = `rgba(${themeColorRgb}, 0.5)`
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255,255,255,0.05)' : '#f9fafb'
-                      e.currentTarget.style.borderColor = isDarkMode ? 'var(--border-color, #404040)' : '#e5e7eb'
-                    }}
-                  >
-                    {label} <span style={{ opacity: 0.8, marginLeft: '4px' }}>({count})</span>
-                  </button>
-                )
-              })
-            )}
-          </div>
         </div>
       </div>
     )

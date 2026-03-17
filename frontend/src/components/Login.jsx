@@ -13,10 +13,50 @@ import {
 import { apiFetch } from '../utils/apiFetch'
 import '../index.css'
 
+const STORE_CODE_KEY = 'pos_store_code_data'
+// On the app (Tauri): store code never expires — it's a dedicated terminal.
+// On the website: store code expires after 30 days, then re-prompts.
+const WEB_STORE_CODE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+function loadSavedStoreCode(isTauri) {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('store')) return { code: params.get('store'), locked: true, known: true }
+    const raw = localStorage.getItem(STORE_CODE_KEY)
+    if (!raw) return { code: '', locked: false, known: false }
+    const obj = JSON.parse(raw)
+    if (!obj || !obj.code) return { code: '', locked: false, known: false }
+    const ttlMs = isTauri ? Infinity : WEB_STORE_CODE_TTL_MS
+    const isValid = !isFinite(ttlMs) || (Date.now() - (obj.savedAt || 0)) < ttlMs
+    // known = valid → hide input and pass silently
+    // !known but has code = expired → pre-fill but show input so user can confirm/update
+    return { code: obj.code, locked: false, known: isValid }
+  } catch (_) {
+    return { code: '', locked: false, known: false }
+  }
+}
+
+function saveStoreCode(code) {
+  try {
+    localStorage.setItem(STORE_CODE_KEY, JSON.stringify({ code, savedAt: Date.now() }))
+  } catch (_) { }
+}
+
+function clearStoreCode() {
+  try { localStorage.removeItem(STORE_CODE_KEY) } catch (_) { }
+}
+
 function Login({ onLogin }) {
   const { themeColor } = useTheme()
+  // isTauri must be computed before state so loadSavedStoreCode uses the correct TTL
+  const isTauri = typeof window !== 'undefined' && (window.__TAURI__ || window.__TAURI_INTERNALS__)
   const [employeeCode, setEmployeeCode] = useState('')
   const [password, setPassword] = useState('')
+  const initialStore = loadSavedStoreCode(isTauri)
+  const [storeCode, setStoreCode] = useState(initialStore.code)
+  // storeCodeKnown: code is saved and valid → hide the input, pass silently
+  const [storeCodeKnown, setStoreCodeKnown] = useState(initialStore.known)
+  const storeCodeLocked = initialStore.locked
   const [revealLastDigit, setRevealLastDigit] = useState(false)
   const revealTimeoutRef = useRef(null)
   const [error, setError] = useState('')
@@ -285,7 +325,7 @@ function Login({ onLogin }) {
           apiFetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: employeeCode, employee_code: employeeCode, password })
+            body: JSON.stringify({ username: employeeCode, employee_code: employeeCode, password, store_code: storeCode || undefined })
           })
             .then((r) => (r.ok ? r.json() : null))
             .then((result) => { if (result?.success) onLogin(result) })
@@ -299,13 +339,17 @@ function Login({ onLogin }) {
     const timeoutId = setTimeout(() => controller.abort(), 10000)
 
     try {
+      // Save store code on this device so future logins skip the input
+      if (storeCode) saveStoreCode(storeCode)
+
       const response = await apiFetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: employeeCode,
           employee_code: employeeCode,
-          password
+          password,
+          store_code: storeCode || undefined
         }),
         signal: controller.signal
       })
@@ -335,6 +379,7 @@ function Login({ onLogin }) {
           const pinHash = await hashPin(password)
           if (pinHash) setOfflinePinHash(result.employee_id, pinHash)
         } catch (_) { }
+        if (storeCode) setStoreCodeKnown(true)
         onLogin(result)
       } else {
         setError('')
@@ -375,7 +420,6 @@ function Login({ onLogin }) {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  const isTauri = typeof window !== 'undefined' && (window.__TAURI__ || window.__TAURI_INTERNALS__)
   const handleHeaderDrag = (e) => {
     if (e.target.closest('button')) return
     try {
@@ -443,10 +487,61 @@ function Login({ onLogin }) {
             textAlign: 'center'
           }}
         >
-          Select employee and enter password
+          {storeCodeKnown ? 'Select employee and enter PIN' : 'Enter your store code to get started'}
         </p>
 
         <form ref={formRef} onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', maxWidth: '320px' }}>
+          {/* Store code: shown only on first use or when expired/locked via URL param */}
+          {!storeCodeKnown ? (
+            <div style={{ marginBottom: '16px', width: '100%' }}>
+              <input
+                type="text"
+                value={storeCode}
+                onChange={(e) => !storeCodeLocked && setStoreCode(e.target.value.toUpperCase())}
+                placeholder="Store Code"
+                readOnly={storeCodeLocked}
+                required
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  border: `2px solid rgba(${themeColorRgb}, 0.4)`,
+                  borderRadius: '12px',
+                  fontSize: '14px',
+                  backgroundColor: storeCodeLocked ? '#f5f5f5' : '#fff',
+                  color: '#111',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  textAlign: 'center',
+                  letterSpacing: '2px',
+                  fontWeight: storeCode ? 600 : 400
+                }}
+                onFocus={(e) => { e.target.style.borderColor = `rgba(${themeColorRgb}, 0.7)` }}
+                onBlur={(e) => { e.target.style.borderColor = `rgba(${themeColorRgb}, 0.4)` }}
+              />
+              <p style={{ fontSize: '12px', color: '#888', textAlign: 'center', marginTop: '6px', marginBottom: 0 }}>
+                Enter your store code to get started. You won't need it again on this device.
+              </p>
+            </div>
+          ) : (
+            <div style={{ marginBottom: '12px', width: '100%', textAlign: 'center' }}>
+              <span style={{ fontSize: '13px', color: '#888' }}>
+                Store: <strong style={{ color: '#333' }}>{storeCode}</strong>
+              </span>
+              {!storeCodeLocked && (
+                <button
+                  type="button"
+                  onClick={() => { clearStoreCode(); setStoreCodeKnown(false); setStoreCode('') }}
+                  style={{
+                    background: 'none', border: 'none', padding: '0 6px',
+                    fontSize: '12px', color: `rgba(${themeColorRgb}, 0.7)`,
+                    cursor: 'pointer', textDecoration: 'underline'
+                  }}
+                >
+                  Change
+                </button>
+              )}
+            </div>
+          )}
           <div style={{ marginBottom: '20px', width: '100%' }}>
             <CustomDropdown
               value={employeeCode}
@@ -625,6 +720,21 @@ function Login({ onLogin }) {
             </button>
           </div>
 
+          <div style={{ marginTop: '16px', textAlign: 'center' }}>
+            <a
+              href="/master-login"
+              style={{
+                fontSize: '13px',
+                color: `rgba(${themeColorRgb}, 0.8)`,
+                textDecoration: 'none',
+                fontWeight: 500
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline' }}
+              onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none' }}
+            >
+              Manager / Admin Login
+            </a>
+          </div>
         </form>
       </div>
     </div>

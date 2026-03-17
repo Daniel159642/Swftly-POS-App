@@ -15,10 +15,12 @@ import {
 } from 'lucide-react'
 import { FormLabel, FormField, inputBaseStyle, getInputFocusHandlers } from '../components/FormStyles'
 import CustomDropdown from '../components/common/CustomDropdown'
+import { useMobileNav } from '../App'
 
 function Profile({ employeeId, employeeName }) {
   const { themeColor, setThemeColor, themeMode, setThemeMode } = useTheme()
   const { show: showToast } = useToast()
+  const { setContextualNavItems } = useMobileNav()
   const [activeTab, setActiveTab] = useState('profile')
   const [sidebarMinimized, setSidebarMinimized] = useState(false)
   const [hoveringProfile, setHoveringProfile] = useState(false)
@@ -553,6 +555,17 @@ function Profile({ employeeId, employeeName }) {
     { id: 'settings', label: 'App Settings', icon: SettingsIcon }
   ]
 
+  // Sync profile sections into mobile sidebar menu like Accounting
+  useEffect(() => {
+    if (!setContextualNavItems) return
+    setContextualNavItems(profileSections.map(s => ({
+      label: s.label,
+      active: activeTab === s.id,
+      onClick: () => setActiveTab(s.id),
+      icon: s.icon
+    })))
+  }, [activeTab, setContextualNavItems])
+
   return (
     <div style={{
       display: 'flex',
@@ -561,7 +574,7 @@ function Profile({ employeeId, employeeName }) {
       width: '100%',
       overflow: 'hidden'
     }}>
-      {/* Sidebar Navigation - 1/4 of page */}
+      {/* Sidebar Navigation - hidden on mobile; tabs exposed via mobile sidebar menu */}
       <div style={{
         position: 'fixed',
         left: 0,
@@ -574,7 +587,8 @@ function Profile({ employeeId, employeeName }) {
         borderRight: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#e0e0e0'}`,
         transition: isInitialMount ? 'none' : 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), padding 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
         overflowY: 'auto',
-        overflowX: 'hidden'
+        overflowX: 'hidden',
+        display: window.innerWidth <= 768 ? 'none' : 'block'
       }}>
         <div style={{
           display: 'flex',
@@ -753,8 +767,8 @@ function Profile({ employeeId, employeeName }) {
 
       {/* Main Content Area - 3/4 of page (like Tables: no page scroll; only inner content scrolls) */}
       <div style={{
-        marginLeft: sidebarMinimized ? '60px' : '25%',
-        width: sidebarMinimized ? 'calc(100% - 60px)' : '75%',
+        marginLeft: window.innerWidth <= 768 ? 0 : (sidebarMinimized ? '60px' : '25%'),
+        width: window.innerWidth <= 768 ? '100%' : (sidebarMinimized ? 'calc(100% - 60px)' : '75%'),
         flex: 1,
         minHeight: 0,
         display: 'flex',

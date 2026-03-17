@@ -22,11 +22,12 @@ if (typeof window !== 'undefined') {
     });
 }
 
-const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = false }: {
+const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = false, disableScrollSpin = false }: {
     url: string,
     onScrollProgress?: (p: number) => void,
     forceDock?: boolean,
-    isStatic?: boolean
+    isStatic?: boolean,
+    disableScrollSpin?: boolean
 }) => {
     const groupRef = useRef<THREE.Group>(null);
     const scrollSpinRef = useRef<THREE.Group>(null); // New group for main page-scroll spin
@@ -68,7 +69,7 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
 
     // Main Spinning Rotation Effect - isolated to scrollSpinRef
     useEffect(() => {
-        if (!scrollSpinRef.current || isStatic) return;
+        if (!scrollSpinRef.current || isStatic || disableScrollSpin) return;
         const isMobile = size.width < 768;
 
         const ctx = gsap.context(() => {
@@ -89,51 +90,10 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
         });
 
         return () => ctx.revert();
-    }, [isStatic, size.width, onScrollProgress]);
+    }, [disableScrollSpin, isStatic, size.width, onScrollProgress]);
 
-    // Final Position & Transition Effect - handled on the outer groupRef
-    useEffect(() => {
-        if (!groupRef.current || forceDock || isStatic) return;
-        const isMobile = size.width < 768;
-        if (isMobile) return;
-
-        const finalScale = 1.8;
-        const finalX = -35;
-        const finalY = 10;
-
-        const ctx = gsap.context(() => {
-            const finalTl = gsap.timeline({
-                scrollTrigger: {
-                    trigger: "#final-cta",
-                    start: "top 110%",
-                    end: "bottom bottom",
-                    scrub: 1.5
-                }
-            });
-
-            finalTl.to(groupRef.current!.position, {
-                x: finalX,
-                y: finalY,
-                ease: "none"
-            }, 0);
-
-            finalTl.to(groupRef.current!.scale, {
-                x: finalScale,
-                y: finalScale,
-                z: finalScale,
-                ease: "none"
-            }, 0);
-
-            // Add extra rotation to the parent group so it doesn't conflict with child's spin
-            // We use an exact multiple of PI to ensure it lands facing forward
-            finalTl.to(groupRef.current!.rotation, {
-                y: Math.PI * 4,
-                ease: "none"
-            }, 0);
-        });
-
-        return () => ctx.revert();
-    }, [size.width, viewport.height, forceDock, isStatic]);
+    // Intentionally no "dock to #final-cta" animation:
+    // the 3D logo stays in the nav area at all times.
 
     useFrame((state, delta) => {
         // Entry animation handles fly-in arrival
@@ -220,7 +180,7 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
     );
 };
 
-const ThreeLogoInner = ({ forceDock }: { forceDock?: boolean }) => {
+const ThreeLogoInner = ({ forceDock, disableScrollSpin }: { forceDock?: boolean; disableScrollSpin?: boolean }) => {
     return (
         <>
             <ambientLight intensity={0.5} />
@@ -233,7 +193,7 @@ const ThreeLogoInner = ({ forceDock }: { forceDock?: boolean }) => {
                 floatIntensity={0}
             >
                 <React.Suspense fallback={null}>
-                    <ExtrudedLogo url="/Swftly.svg" forceDock={forceDock} />
+                    <ExtrudedLogo url="/Swftly.svg" forceDock={forceDock} disableScrollSpin={disableScrollSpin} />
                 </React.Suspense>
             </Float>
             <React.Suspense fallback={null}>
@@ -243,7 +203,7 @@ const ThreeLogoInner = ({ forceDock }: { forceDock?: boolean }) => {
     );
 };
 
-export default function ThreeLogo({ forceDock = false }: { forceDock?: boolean }) {
+export default function ThreeLogo({ forceDock = false, disableScrollSpin = false }: { forceDock?: boolean; disableScrollSpin?: boolean }) {
     const [mounted, setMounted] = useState(false);
     useEffect(() => {
         if (forceDock) {
@@ -294,7 +254,7 @@ export default function ThreeLogo({ forceDock = false }: { forceDock?: boolean }
                 performance={{ min: 0.5 }}
             >
                 <React.Suspense fallback={null}>
-                    <ThreeLogoInner forceDock={forceDock} />
+                    <ThreeLogoInner forceDock={forceDock} disableScrollSpin={disableScrollSpin} />
                 </React.Suspense>
             </Canvas>
         </motion.div>

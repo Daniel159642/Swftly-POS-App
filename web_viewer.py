@@ -2734,44 +2734,289 @@ def api_login():
     """Employee login"""
     try:
         print("Login request received")
-        # Check if request has JSON data
         if not request.is_json:
             return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
-        
+
         if not request.json:
             return jsonify({'success': False, 'message': 'Invalid request data'}), 400
-        
+
         data = request.json
-        print(f"Login attempt for: {data.get('username') or data.get('employee_code')}")
-        
-        # Validate required fields
         username = data.get('username')
         employee_code = data.get('employee_code')
         password = data.get('password')
-        
+        store_code = data.get('store_code')
+
         if not password:
             return jsonify({'success': False, 'message': 'Password is required'}), 400
-        
+
         if not username and not employee_code:
             return jsonify({'success': False, 'message': 'Username or employee code is required'}), 400
-        
-        # Call login function
-        print("Calling employee_login...")
+
+        identifier = (username or employee_code or '').strip()
+        ip_address = request.remote_addr or '127.0.0.1'
+
+        # Rate limiting: check before attempting login
+        try:
+            from database import check_login_rate_limit, record_login_attempt
+            if not check_login_rate_limit(identifier, ip_address=ip_address):
+                return jsonify({
+                    'success': False,
+                    'message': 'Too many failed attempts. Try again in 15 minutes.'
+                }), 429
+        except ImportError:
+            pass
+
+        print(f"Login attempt for: {identifier}")
+
         result = employee_login(
             username=username,
             employee_code=employee_code,
             password=password,
-            ip_address=request.remote_addr or '127.0.0.1',
-            device_info=request.headers.get('User-Agent', 'Unknown')
+            ip_address=ip_address,
+            device_info=request.headers.get('User-Agent', 'Unknown'),
+            store_code=store_code,
         )
         print(f"Login result: success={result.get('success')}")
-        
+
+        # Record attempt for rate limiting
+        try:
+            record_login_attempt(identifier, succeeded=result.get('success', False), ip_address=ip_address)
+        except Exception:
+            pass
+
         return jsonify(result)
     except Exception as e:
         print(f"Login error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
+
+
+@app.route('/api/admin/login', methods=['POST'])
+def api_admin_login():
+    """Manager / admin email+password login (replaces Clerk)."""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+
+        data = request.json or {}
+        email = (data.get('email') or '').strip()
+        password = data.get('password', '')
+
+        if not email or not password:
+            return jsonify({'success': False, 'message': 'Email and password are required'}), 400
+
+        ip_address = request.remote_addr or '127.0.0.1'
+
+        # Rate limiting keyed on email
+        try:
+            from database import check_login_rate_limit, record_login_attempt
+            if not check_login_rate_limit(email, ip_address=ip_address):
+                return jsonify({
+                    'success': False,
+                    'message': 'Too many failed attempts. Try again in 15 minutes.'
+                }), 429
+        except ImportError:
+            pass
+
+        from database import manager_login
+        result = manager_login(
+            email=email,
+            password=password,
+            ip_address=ip_address,
+            device_info=request.headers.get('User-Agent', 'Unknown'),
+        )
+
+        try:
+            record_login_attempt(email, succeeded=result.get('success', False), ip_address=ip_address)
+        except Exception:
+            pass
+
+        if result.get('success'):
+            return jsonify(result)
+        return jsonify(result), 401
+    except Exception as e:
+        print(f"Admin login error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
+
+def _get_session_employee(required_positions=None):
+    """Helper: verify session_token from request header/body, return employee dict or None."""
+    token = (request.headers.get('X-Session-Token')
+             or (request.json or {}).get('session_token')
+             or request.args.get('session_token'))
+    if not token:
+        return None
+    result = verify_session(token)
+    if not result.get('valid'):
+        return None
+    if required_positions:
+        pos = (result.get('position') or '').lower()
+        if not any(pos == p or pos.startswith(p) for p in required_positions):
+            return None
+    return result
+
+
+MANAGER_POSITIONS = ('admin', 'manager', 'supervisor', 'assistant_manager')
+
+
+@app.route('/api/admin/webauthn/register/begin', methods=['POST'])
+def api_webauthn_register_begin():
+    """Generate passkey registration options. Requires an active manager session."""
+    try:
+        employee = _get_session_employee(MANAGER_POSITIONS)
+        if not employee:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        from database import webauthn_register_begin
+        result = webauthn_register_begin(employee['employee_id'])
+        return jsonify(result), (200 if result.get('success') else 400)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/admin/webauthn/register/complete', methods=['POST'])
+def api_webauthn_register_complete():
+    """Verify attestation and store the new passkey."""
+    try:
+        employee = _get_session_employee(MANAGER_POSITIONS)
+        if not employee:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        data = request.json or {}
+        credential = data.get('credential')
+        device_name = (data.get('device_name') or '').strip() or None
+        if not credential:
+            return jsonify({'success': False, 'message': 'credential is required'}), 400
+        from database import webauthn_register_complete
+        result = webauthn_register_complete(employee['employee_id'], credential, device_name)
+        return jsonify(result), (200 if result.get('success') else 400)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/admin/webauthn/login/begin', methods=['POST'])
+def api_webauthn_login_begin():
+    """Generate passkey authentication options. Public endpoint."""
+    try:
+        data = request.json or {}
+        email = (data.get('email') or '').strip() or None
+        from database import webauthn_login_begin
+        result = webauthn_login_begin(email)
+        return jsonify(result), (200 if result.get('success') else 400)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/admin/webauthn/login/complete', methods=['POST'])
+def api_webauthn_login_complete():
+    """Verify passkey assertion and return a session token."""
+    try:
+        data = request.json or {}
+        credential = data.get('credential')
+        if not credential:
+            return jsonify({'success': False, 'message': 'credential is required'}), 400
+        ip = request.remote_addr or '127.0.0.1'
+        from database import webauthn_login_complete, record_login_attempt
+        result = webauthn_login_complete(
+            credential,
+            ip_address=ip,
+            device_info=request.headers.get('User-Agent', 'Unknown'),
+        )
+        try:
+            identifier = credential.get('id', 'unknown')
+            record_login_attempt(identifier, succeeded=result.get('success', False), ip_address=ip)
+        except Exception:
+            pass
+        return jsonify(result), (200 if result.get('success') else 401)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/admin/webauthn/credentials', methods=['GET'])
+def api_webauthn_list_mine():
+    """List the current user's registered passkeys."""
+    try:
+        employee = _get_session_employee(MANAGER_POSITIONS)
+        if not employee:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        from database import list_webauthn_credentials
+        return jsonify(list_webauthn_credentials(employee['employee_id']))
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/admin/webauthn/credentials/<int:cred_id>', methods=['DELETE'])
+def api_webauthn_delete_credential(cred_id):
+    """Remove a passkey. Managers can delete their own; admins can delete anyone's."""
+    try:
+        employee = _get_session_employee(MANAGER_POSITIONS)
+        if not employee:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+
+        data = request.json or {}
+        target_employee_id = data.get('employee_id') or employee['employee_id']
+
+        # Only admins can delete other people's passkeys
+        is_admin = (employee.get('position') or '').lower() in ('admin', 'administrator')
+        if int(target_employee_id) != int(employee['employee_id']) and not is_admin:
+            return jsonify({'success': False, 'message': 'Access denied'}), 403
+
+        from database import delete_webauthn_credential
+        result = delete_webauthn_credential(cred_id, int(target_employee_id))
+        return jsonify(result), (200 if result.get('success') else 400)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/admin/webauthn/all-credentials', methods=['GET'])
+def api_webauthn_list_all():
+    """Admin-only: all registered passkeys across all employees."""
+    try:
+        employee = _get_session_employee(('admin',))
+        if not employee:
+            return jsonify({'success': False, 'message': 'Admin access required'}), 403
+        from database import list_all_webauthn_credentials
+        return jsonify(list_all_webauthn_credentials())
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/admin/webauthn/credentials/<int:cred_id>', methods=['PATCH'])
+def api_webauthn_rename_credential(cred_id):
+    """Rename a passkey (update device_name)."""
+    try:
+        employee = _get_session_employee(MANAGER_POSITIONS)
+        if not employee:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        data = request.json or {}
+        new_name = (data.get('device_name') or '').strip()
+        if not new_name:
+            return jsonify({'success': False, 'message': 'device_name is required'}), 400
+        # Only update own credentials (or admin for any)
+        target_emp_id = data.get('employee_id') or employee['employee_id']
+        is_admin = (employee.get('position') or '').lower() in ('admin', 'administrator')
+        if int(target_emp_id) != int(employee['employee_id']) and not is_admin:
+            return jsonify({'success': False, 'message': 'Access denied'}), 403
+        from database_postgres import get_connection
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE webauthn_credentials SET device_name = %s WHERE id = %s AND employee_id = %s",
+            (new_name, cred_id, int(target_emp_id))
+        )
+        if cur.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Not found'}), 404
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @app.route('/api/verify_session', methods=['POST'])
 def api_verify_session():
