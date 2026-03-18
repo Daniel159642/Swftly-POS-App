@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TLED Email Template Generator</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&display=swap">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #f0f0f0;
+      font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-weight: 400;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .outer {
+      background: linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%);
+      border-radius: 32px;
+      min-height: calc(100vh - 48px);
+      position: relative;
+      overflow: hidden;
+      border: 0.5px solid rgba(255,255,255,0.7);
+      box-shadow: 0 2px 40px rgba(160,180,220,0.18);
+      display: flex;
+      flex-direction: row;
+      gap: 0;
+    }
+
+    .outer::before {
+      content: '';
+      position: absolute;
+      top: -100px; right: -100px;
+      width: 360px; height: 360px;
+      background: radial-gradient(circle, rgba(255,255,255,0.35) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .outer::after {
+      content: '';
+      position: absolute;
+      bottom: -80px; left: -60px;
+      width: 260px; height: 260px;
+      background: radial-gradient(circle, rgba(200,215,240,0.3) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .preview-pane {
+      flex: 1;
+      padding: 32px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      z-index: 1;
+    }
+
+    .preview-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #5a6b7d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    .preview-frame {
+      flex: 1;
+      min-height: 400px;
+      background: #f0f0f0;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+
+    .preview-frame iframe {
+      width: 100%;
+      height: 100%;
+      min-height: 500px;
+      border: none;
+    }
+
+    .modal-pane {
+      width: 420px;
+      flex-shrink: 0;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 0 32px 32px 0;
+      border-left: 1px solid rgba(255,255,255,0.6);
+      box-shadow: -8px 0 24px rgba(0,0,0,0.04);
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .modal-pane h2 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #2d3748;
+      margin-bottom: 4px;
+    }
+
+    .modal-pane .hint {
+      font-size: 12px;
+      color: #718096;
+      margin-bottom: 12px;
+    }
+
+    .input-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .input-wrap textarea {
+      flex: 1;
+      min-height: 280px;
+      padding: 14px 16px;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      resize: none;
+      background: #fff;
+      color: #2d3748;
+    }
+
+    .input-wrap textarea:focus {
+      outline: none;
+      border-color: #4a90e2;
+      box-shadow: 0 0 0 3px rgba(74,144,226,0.15);
+    }
+
+    .copy-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      background: linear-gradient(145deg, #4a90e2 0%, #357abd 100%);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.2s;
+      box-shadow: 0 2px 8px rgba(74,144,226,0.35);
+    }
+
+    .copy-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(74,144,226,0.4);
+    }
+
+    .copy-btn:active {
+      transform: translateY(0);
+    }
+
+    .copy-btn.copied {
+      background: linear-gradient(145deg, #48bb78 0%, #38a169 100%);
+      box-shadow: 0 2px 8px rgba(72,187,120,0.35);
+    }
+
+    .email-count {
+      font-size: 11px;
+      color: #a0aec0;
+      margin-top: 4px;
+    }
+
+    @media (max-width: 900px) {
+      .outer {
+        flex-direction: column;
+      }
+      .modal-pane {
+        width: 100%;
+        border-radius: 0 0 32px 32px;
+        border-left: none;
+        border-top: 1px solid rgba(255,255,255,0.6);
+      }
+      .preview-frame {
+        min-height: 300px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="outer">
+    <div class="preview-pane">
+      <span class="preview-label">Email preview (1 of 1)</span>
+      <div class="preview-frame">
+        <iframe id="preview" sandbox="allow-same-origin" title="Email preview"></iframe>
+      </div>
+    </div>
+
+    <div class="modal-pane">
+      <h2>HTML Email</h2>
+      <p class="hint">Paste or edit your HTML below. Use the copy button to paste into Gmail.</p>
+      <div class="input-wrap">
+        <textarea id="htmlInput" placeholder="<div>Your email HTML here...</div>"></textarea>
+        <span class="email-count">1 of 1</span>
+      </div>
+      <button type="button" class="copy-btn" id="copyBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+        Copy for Gmail
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const htmlInput = document.getElementById('htmlInput')
+    const preview = document.getElementById('preview')
+    const copyBtn = document.getElementById('copyBtn')
+
+    const geistFallback = "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+    const swftlyLogoUrl = 'https://swftly.com/swftly-logo-black.svg'
+    const emailFooter = `<table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top: 48px; padding-top: 32px; border-top: 1px solid rgba(0,0,0,0.08); font-family: ${geistFallback}; font-size: 14px; font-weight: 400;">
+  <tr style="vertical-align: baseline;">
+    <td style="vertical-align: baseline; padding-right: 48px; padding-bottom: 12px; white-space: nowrap;">
+      <img src="${swftlyLogoUrl}" alt="Swftly" width="20" height="20" style="vertical-align: middle; margin-right: 8px; display: inline-block; border: 0;" /><span style="font-weight: 500; font-size: 14px; color: #000; vertical-align: baseline;">Swftly</span>
+    </td>
+    <td style="vertical-align: baseline; padding-right: 48px; padding-bottom: 12px;">
+      <span style="font-weight: 500; font-size: 14px; color: #000;">Resources</span>
+    </td>
+    <td style="vertical-align: baseline; padding-right: 48px; padding-bottom: 12px;">
+      <span style="font-weight: 500; font-size: 14px; color: #000;">Support</span>
+    </td>
+    <td style="vertical-align: baseline; padding-bottom: 12px;">
+      <span style="font-weight: 500; font-size: 14px; color: #000;">Legal</span>
+    </td>
+  </tr>
+  <tr>
+    <td style="vertical-align: top; padding-right: 48px;"></td>
+    <td style="vertical-align: top; padding-right: 48px;">
+      <a href="#" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">Our Site</a>
+      <a href="#" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">About Us</a>
+      <a href="#" style="color: #333; text-decoration: none; display: block;">Docs</a>
+    </td>
+    <td style="vertical-align: top; padding-right: 48px;">
+      <a href="#" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">Help Center</a>
+      <a href="#" style="color: #333; text-decoration: none; display: block;">Contact Us</a>
+    </td>
+    <td style="vertical-align: top;">
+      <a href="#" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">Privacy Policy</a>
+      <a href="#" style="color: #333; text-decoration: none; display: block;">Terms of Service</a>
+    </td>
+  </tr>
+</table>`
+
+    const defaultHtml = `<div style="font-family: ${geistFallback}; font-weight: 400; max-width: 600px; padding: 24px; text-align: left;">
+  <h2 style="color: #2d3748; font-weight: 500; margin-bottom: 16px;">Hello,</h2>
+  <p style="color: #4a5568; font-weight: 400; line-height: 1.6;">Your TLED email content goes here.</p>
+  <p style="color: #4a5568; font-weight: 400; line-height: 1.6; margin-top: 16px;">Best regards,<br>Your Team</p>
+</div>`
+
+    htmlInput.value = defaultHtml
+
+    function updatePreview() {
+      const html = htmlInput.value.trim() || '<p style="color:#718096;">Enter HTML above to preview</p>'
+      const doc = preview.contentDocument || preview.contentWindow.document
+      doc.open()
+      doc.write(`
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&display=swap">
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { background: #f0f0f0; font-family: ${geistFallback}; font-weight: 400; padding: 24px; }
+          .outer { background: linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%); min-height: 420px; position: relative; overflow: hidden; border: 0.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 40px rgba(160,180,220,0.18); padding: 24px; }
+          .outer::before { content: ''; position: absolute; top: -100px; right: -100px; width: 360px; height: 360px; background: radial-gradient(circle, rgba(255,255,255,0.35) 0%, transparent 70%); pointer-events: none; }
+          .outer::after { content: ''; position: absolute; bottom: -80px; left: -60px; width: 260px; height: 260px; background: radial-gradient(circle, rgba(200,215,240,0.3) 0%, transparent 70%); pointer-events: none; }
+        </style>
+        </head>
+        <body style="margin:0; text-align: left;">
+          <div class="outer">${html}${emailFooter}</div>
+        </body>
+        </html>
+      `)
+      doc.close()
+    }
+
+    htmlInput.addEventListener('input', updatePreview)
+    htmlInput.addEventListener('paste', () => setTimeout(updatePreview, 0))
+
+    function getHtmlForCopy() {
+      const inner = htmlInput.value.trim()
+      if (!inner) return ''
+      return `<div style="background: linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%); min-height: 420px; position: relative; overflow: hidden; border: 0.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 40px rgba(160,180,220,0.18); padding: 24px; text-align: left; font-family: ${geistFallback}; font-weight: 400;">${inner}${emailFooter}</div>`
+    }
+
+    copyBtn.addEventListener('click', async () => {
+      const html = getHtmlForCopy()
+      if (!html) return
+      try {
+        // Copy as rich HTML so Gmail pastes rendered content, not raw code
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([html], { type: 'text/plain' })
+          })
+        ])
+        copyBtn.classList.add('copied')
+        copyBtn.innerHTML = `
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Copied!
+        `
+        setTimeout(() => {
+          copyBtn.classList.remove('copied')
+          copyBtn.innerHTML = `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+            Copy for Gmail
+          `
+        }, 2000)
+      } catch (err) {
+        alert('Copy failed. Please select and copy manually.')
+      }
+    })
+
+    updatePreview()
+  </script>
+</body>
+</html>
