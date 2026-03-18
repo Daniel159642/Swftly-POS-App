@@ -1965,6 +1965,20 @@ function Settings() {
   const [doordashSyncSaveLoading, setDoordashSyncSaveLoading] = useState(false)
   const [doordashSyncInventoryProducts, setDoordashSyncInventoryProducts] = useState([])
   const [doordashEditModalOpen, setDoordashEditModalOpen] = useState(false)
+  const [qboStatus, setQboStatus] = useState(null)
+  const [qboLoading, setQboLoading] = useState(false)
+  const [qboSyncLoading, setQboSyncLoading] = useState({ accounts: false, customers: false, vendors: false, transactions: false, inventory: false })
+  useEffect(() => {
+    if (activeTab !== 'integration') return
+    setQboLoading(true)
+    fetch('/api/integrations/quickbooks/status', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('sessionToken') || ''}` }
+    })
+      .then(res => res.json())
+      .then(data => setQboStatus(data))
+      .catch(() => setQboStatus(null))
+      .finally(() => setQboLoading(false))
+  }, [activeTab])
   useEffect(() => {
     if (!doordashSetupModalOpen) return
     const cfg = integrations?.doordash?.config?.doordash_hours
@@ -8550,6 +8564,117 @@ function Settings() {
                     <div style={{ padding: '24px', color: isDarkMode ? '#999' : '#666' }}>Loading…</div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                      {/* QuickBooks Section */}
+                      <div className="integration-card-glass" style={{
+                        padding: '20px',
+                        borderRadius: '12px',
+                        background: isDarkMode ? 'rgba(50, 50, 50, 0.35)' : 'rgba(255, 255, 255, 0.35)',
+                        backdropFilter: 'blur(12px)',
+                        WebkitBackdropFilter: 'blur(12px)',
+                        border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.2)' : '1px solid rgba(0, 0, 0, 0.14)',
+                        boxShadow: isDarkMode ? 'inset 0 1px 0 rgba(255, 255, 255, 0.04)' : 'inset 0 1px 0 rgba(255, 255, 255, 0.4)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600, fontSize: '16px', color: isDarkMode ? 'var(--text-primary)' : '#333' }}>
+                            <img src="/quickbooks-logo.svg" alt="" style={{ height: '24px', width: 'auto', maxWidth: '72px', objectFit: 'contain' }} onError={(e) => { e.target.style.display = 'none'; }} />
+                            QuickBooks Online
+                          </span>
+                          <span style={{ fontSize: '13px', fontWeight: 500, color: qboStatus?.connected ? '#22c55e' : (isDarkMode ? '#888' : '#999') }}>
+                            {qboLoading ? 'Loading...' : (qboStatus?.connected ? 'Connected' : 'Not Connected')}
+                          </span>
+                        </div>
+
+                        {qboStatus?.connected ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            <div style={{ fontSize: '12px', color: isDarkMode ? '#aaa' : '#555' }}>
+                              Refresh tokens and perform manual syncs below.
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                              {['accounts', 'customers', 'vendors', 'inventory', 'transactions'].map(type => (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  onClick={async () => {
+                                    setQboSyncLoading(p => ({ ...p, [type]: true }))
+                                    try {
+                                      const res = await fetch(`/api/integrations/quickbooks/sync/${type}`, {
+                                        method: 'POST',
+                                        headers: { 'Authorization': `Bearer ${localStorage.getItem('sessionToken') || ''}` }
+                                      })
+                                      const data = await res.json()
+                                      if (data.success) showToast(data.message || `Sync successful`, 'success')
+                                      else showToast(data.message || 'Sync failed', 'error')
+                                    } catch (e) {
+                                      showToast('Failed to sync', 'error')
+                                    } finally {
+                                      setQboSyncLoading(p => ({ ...p, [type]: false }))
+                                    }
+                                  }}
+                                  disabled={qboSyncLoading[type]}
+                                  style={{
+                                    padding: '8px 16px',
+                                    borderRadius: '6px',
+                                    border: isDarkMode ? '1px solid #555' : '1px solid #ccc',
+                                    background: isDarkMode ? '#333' : '#f5f5f5',
+                                    color: isDarkMode ? '#fff' : '#333',
+                                    cursor: qboSyncLoading[type] ? 'not-allowed' : 'pointer',
+                                    fontSize: '13px',
+                                    opacity: qboSyncLoading[type] ? 0.7 : 1
+                                  }}
+                                >
+                                  {qboSyncLoading[type] ? 'Syncing...' : `Sync ${type.charAt(0).toUpperCase() + type.slice(1)}`}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            <div style={{ fontSize: '12px', color: isDarkMode ? '#aaa' : '#555' }}>
+                              Connect your QuickBooks Online account to sync sales, refunds, accounts, and customers.
+                            </div>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  let redir = await fetch('/api/integrations/quickbooks/connect-url', {
+                                    headers: { 'Authorization': `Bearer ${localStorage.getItem('sessionToken') || ''}` }
+                                  })
+                                  let d = await redir.json()
+                                  // For Tauri, we might need shell open, but for now we'll do window.location
+                                  const isTauri = typeof window !== 'undefined' && window.__TAURI__
+                                  if (d.url) {
+                                    if (isTauri) {
+                                      const { open } = await import('@tauri-apps/plugin-shell')
+                                      await open(d.url)
+                                      showToast('QuickBooks authorization opened in your browser.', 'success')
+                                    } else {
+                                      window.location.href = d.url
+                                    }
+                                  } else {
+                                    showToast('Could not get connection URL', 'error')
+                                  }
+                                } catch (e) {
+                                  showToast('Failed to fetch connection URL', 'error')
+                                }
+                              }}
+                              style={{
+                                padding: '8px 20px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                background: '#2ca01c',
+                                color: '#fff',
+                                cursor: 'pointer',
+                                fontSize: '13px',
+                                fontWeight: 600,
+                                alignSelf: 'flex-start'
+                              }}
+                            >
+                              Connect to QuickBooks
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
                       {[
                         { id: 'shopify', label: 'Shopify', extra: 'Store URL' },
                         { id: 'doordash', label: 'DoorDash' },

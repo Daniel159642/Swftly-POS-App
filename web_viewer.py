@@ -11245,16 +11245,16 @@ def api_quickbooks_callback():
         state = request.args.get('state')
         
         if not code:
-            return redirect('/accounting?qbo=error&msg=missing_code')
+            return redirect('http://localhost:5173/settings?tab=integration&qbo=error&msg=missing_code')
             
         from quickbooks_sync import exchange_code_for_tokens
         exchange_code_for_tokens(code, realm_id)
         
-        return redirect('/accounting?qbo=connected')
+        return redirect('http://localhost:5173/settings?tab=integration&qbo=connected')
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return redirect('/accounting?qbo=error&msg=' + str(e)[:50])
+        return redirect('http://localhost:5173/settings?tab=integration&qbo=error&msg=' + requests.utils.quote(str(e)[:50]))
 
 @app.route('/api/integrations/quickbooks/status', methods=['GET'])
 def api_quickbooks_status():
@@ -11287,6 +11287,58 @@ def api_quickbooks_sync_accounts():
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/integrations/quickbooks/sync/customers', methods=['POST'])
+def api_quickbooks_sync_customers():
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.json.get('session_token') if request.is_json else None
+        if not session_token: return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'): return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        from quickbooks_sync import sync_qbo_customers_to_db
+        return jsonify(sync_qbo_customers_to_db())
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/integrations/quickbooks/sync/vendors', methods=['POST'])
+def api_quickbooks_sync_vendors():
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.json.get('session_token') if request.is_json else None
+        if not session_token: return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'): return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        from quickbooks_sync import sync_qbo_vendors_to_db
+        return jsonify(sync_qbo_vendors_to_db())
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/integrations/quickbooks/sync/inventory', methods=['POST'])
+def api_quickbooks_sync_inventory():
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.json.get('session_token') if request.is_json else None
+        if not session_token: return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'): return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        from quickbooks_sync import sync_qbo_products_to_db
+        return jsonify(sync_qbo_products_to_db())
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/integrations/quickbooks/sync/transactions', methods=['POST'])
+def api_quickbooks_sync_transactions():
+    try:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.json.get('session_token') if request.is_json else None
+        if not session_token: return jsonify({'success': False, 'message': 'Authentication required'}), 401
+        session_data = verify_session(session_token)
+        if not session_data.get('valid'): return jsonify({'success': False, 'message': 'Invalid session'}), 401
+        from quickbooks_sync import sync_transactions_to_qbo
+        return jsonify(sync_transactions_to_qbo())
+    except Exception as e:
+        import traceback; traceback.print_exc()
         return jsonify({'success': False, 'message': str(e)}), 500
 @app.route('/api/integrations/google-calendar/sync', methods=['POST'])
 def api_google_calendar_sync():

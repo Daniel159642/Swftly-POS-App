@@ -509,9 +509,6 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
   const [saving, setSaving] = useState(false)
   const [edit, setEdit] = useState(initialAccounting)
   const [employees, setEmployees] = useState([])
-  const [qboConnected, setQboConnected] = useState(false)
-  const [qboConnecting, setQboConnecting] = useState(false)
-  const [qboSyncing, setQboSyncing] = useState(false)
   const [laborThisWeek, setLaborThisWeek] = useState({ entries: [] })
   const [employeeRateSaving, setEmployeeRateSaving] = useState(null)
   const [employeeRateEdits, setEmployeeRateEdits] = useState({})
@@ -535,8 +532,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
       loadSettings(),
       loadEmployeesAndLabor(),
       loadPosSettings(),
-      loadDisplaySettings(),
-      loadQboStatus()
+      loadDisplaySettings()
     ]).catch(() => { })
   }, [])
 
@@ -608,57 +604,6 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
     }
   }
 
-  const loadQboStatus = async () => {
-    try {
-      const authHeaders = getAuthHeaders && getAuthHeaders()
-      const res = await fetch('/api/integrations/quickbooks/status', { headers: authHeaders || {} })
-      const json = await res.json()
-      if (json.success) {
-        setQboConnected(json.connected)
-      }
-    } catch (err) {
-      console.warn('Error loading QBO status:', err)
-    }
-  }
-
-  const handleConnectQbo = async () => {
-    setQboConnecting(true)
-    try {
-      const authHeaders = getAuthHeaders && getAuthHeaders()
-      const res = await fetch('/api/integrations/quickbooks/connect-url', { headers: authHeaders || {} })
-      const json = await res.json()
-      if (json.success && json.url) {
-        window.location.href = json.url
-      } else {
-        showToast(json.message || 'Failed to get QBO connect URL', 'error')
-        setQboConnecting(false)
-      }
-    } catch (err) {
-      showToast(err.message || 'Failed to connect QBO', 'error')
-      setQboConnecting(false)
-    }
-  }
-
-  const handleQboSyncAccounts = async () => {
-    setQboSyncing(true)
-    try {
-      const authHeaders = getAuthHeaders && getAuthHeaders()
-      const res = await fetch('/api/integrations/quickbooks/sync/accounts', {
-        method: 'POST',
-        headers: authHeaders || {}
-      })
-      const json = await res.json()
-      if (json.success) {
-        showToast(`Synced ${json.mapped_count} accounts from QuickBooks!`, 'success')
-      } else {
-        showToast(json.message || 'Failed to sync accounts', 'error')
-      }
-    } catch (err) {
-      showToast(err.message || 'Failed to sync accounts', 'error')
-    } finally {
-      setQboSyncing(false)
-    }
-  }
 
   const savePosTransactionFeeSettings = async () => {
     setSavingPosFee(true)
@@ -1285,53 +1230,7 @@ function SettingsTab({ formatCurrency, getAuthHeaders, themeColorRgb = '132, 0, 
         )}
       </div>
 
-      {/* QuickBooks Integration */}
-      <div style={cardStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-          <FolderOpen size={18} style={{ flexShrink: 0 }} />
-          <span style={{ fontWeight: 600, fontSize: '15px', color: textColor }}>QuickBooks Online Integration</span>
-        </div>
-        <p style={{ fontSize: '13px', color: textColor, opacity: 0.8, marginBottom: '16px' }}>
-          Connect your QuickBooks Online account to automatically sync your chart of accounts, customers, vendors, and transactions.
-        </p>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', background: isDarkMode ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)', borderRadius: '8px', border: `1px solid ${borderColor}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#2ca01c', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold' }}>
-              QB
-            </div>
-            <div>
-              <div style={{ fontWeight: 500, color: textColor, fontSize: '14px' }}>QuickBooks Online</div>
-              <div style={{ fontSize: '12px', color: qboConnected ? '#2ca01c' : (isDarkMode ? '#888' : '#666'), fontWeight: qboConnected ? 600 : 400 }}>
-                {qboConnected ? 'Connected' : 'Not connected'}
-              </div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {qboConnected && (
-              <Button
-                variant="primary"
-                disabled={qboSyncing}
-                onClick={handleQboSyncAccounts}
-                themeColorRgb={themeColorRgb}
-                isDarkMode={isDarkMode}
-              >
-                {qboSyncing ? 'Syncing...' : 'Sync Chart of Accounts'}
-              </Button>
-            )}
-            {!qboConnected && (
-              <Button
-                variant="primary"
-                disabled={qboConnecting}
-                onClick={handleConnectQbo}
-                themeColorRgb={themeColorRgb}
-                isDarkMode={isDarkMode}
-              >
-                {qboConnecting ? 'Connecting...' : 'Connect to QuickBooks'}
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
+
     </div>
   )
 }
