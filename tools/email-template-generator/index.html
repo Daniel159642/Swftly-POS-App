@@ -140,6 +140,30 @@
       box-shadow: 0 0 0 3px rgba(74,144,226,0.15);
     }
 
+    .sender-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .sender-controls label {
+      font-size: 12px;
+      font-weight: 500;
+      color: #4a5568;
+    }
+    .sender-controls select,
+    .sender-controls input {
+      padding: 8px 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    .sender-controls select:focus,
+    .sender-controls input:focus {
+      outline: none;
+      border-color: #4a90e2;
+    }
+
     .copy-btn {
       font-family: 'Geist', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       display: flex;
@@ -179,6 +203,29 @@
       margin-top: 4px;
     }
 
+    .preset-buttons {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .preset-btn {
+      flex: 1;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #4a5568;
+      background: #f7fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .preset-btn:hover {
+      background: #edf2f7;
+      border-color: #cbd5e0;
+    }
+
     @media (max-width: 900px) {
       .outer {
         flex-direction: column;
@@ -205,11 +252,34 @@
     </div>
 
     <div class="modal-pane">
-      <h2>HTML Email</h2>
-      <p class="hint">Paste or edit your HTML below. Use the copy button to paste into Gmail.</p>
+      <h2>Email</h2>
+      <p class="hint">Edit the body below. Use the copy button to paste into Gmail.</p>
+      <div class="preset-buttons">
+        <button type="button" class="preset-btn" data-preset="1">Follow-up 1</button>
+        <button type="button" class="preset-btn" data-preset="2">Follow-up 2</button>
+        <button type="button" class="preset-btn" data-preset="3">Follow-up 3</button>
+      </div>
       <div class="input-wrap">
-        <textarea id="htmlInput" placeholder="<div>Your email HTML here...</div>"></textarea>
+        <label style="font-size: 12px; font-weight: 500; color: #4a5568; margin-bottom: 6px;">Title</label>
+        <input type="text" id="bodyTitle" placeholder="Hello," style="margin-bottom: 12px; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: inherit;" />
+        <label style="font-size: 12px; font-weight: 500; color: #4a5568; margin-bottom: 6px;">Body</label>
+        <textarea id="bodyInput" placeholder="Your TLED email content goes here."></textarea>
         <span class="email-count">1 of 1</span>
+      </div>
+      <div class="sender-controls">
+        <h3 style="font-size: 14px; font-weight: 600; color: #2d3748; margin-bottom: 4px;">Buttons</h3>
+        <label>Book a call URL</label>
+        <input type="url" id="bookACallUrl" placeholder="https://www.swftly.app/book-a-demo" style="margin-bottom: 12px;" />
+        <h3 style="font-size: 14px; font-weight: 600; color: #2d3748; margin-bottom: 4px;">Sender</h3>
+        <label>From</label>
+        <select id="senderSelect">
+          <option value="daniel-b">Daniel Budnyatsky — Co-founder, Syracuse University</option>
+          <option value="daniel-l">Daniel Lopez — Co-founder, Stony Brook University</option>
+        </select>
+        <label>Phone</label>
+        <input type="text" id="senderPhone" placeholder="+1 (555) 123-4567" />
+        <label>Email</label>
+        <input type="email" id="senderEmail" placeholder="daniel@swftly.app" />
       </div>
       <button type="button" class="copy-btn" id="copyBtn">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -222,25 +292,98 @@
   </div>
 
   <script>
-    const htmlInput = document.getElementById('htmlInput')
+    const bodyInput = document.getElementById('bodyInput')
+    const bodyTitle = document.getElementById('bodyTitle')
     const preview = document.getElementById('preview')
     const copyBtn = document.getElementById('copyBtn')
+    const senderSelect = document.getElementById('senderSelect')
+    const senderPhone = document.getElementById('senderPhone')
+    const senderEmail = document.getElementById('senderEmail')
+    const bookACallUrl = document.getElementById('bookACallUrl')
+
+    const senderOptions = {
+      'daniel-b': { name: 'Daniel Budnyatsky', title: 'Co-founder, Syracuse University' },
+      'daniel-l': { name: 'Daniel Lopez', title: 'Co-founder, Stony Brook University' }
+    }
+
+    const phonePlaceholder = '+1 (555) 123-4567'
+    const emailPlaceholder = 'daniel@swftly.app'
+
+    const presets = {
+      1: { title: 'Hello,', body: 'I\'d love to hear about your experience with your current POS system — what\'s working, what\'s frustrating, and where you\'re spending the most time.\n\nWe have 3 spots left in our case study and are looking to fill them with store owners who want to try our agentic POS. Would you be interested in a quick call?' },
+      2: { title: 'Quick follow-up,', body: 'Just circling back — we\'re still looking to fill the last 3 spots in our case study.\n\nI\'d really like to hear about the issues you\'re facing with your current POS. If you have 15 minutes this week, I\'d love to chat and see if Swftly could help.' },
+      3: { title: 'Last note,', body: 'We have 3 spots left in our case study and I\'d love to hear about your situation with your current POS before we fill them.\n\nIf the timing isn\'t right, no problem — feel free to reach out when you\'re ready. You can also book a demo at swftly.app.' }
+    }
+
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = presets[btn.dataset.preset]
+        if (p) {
+          bodyTitle.value = p.title
+          bodyInput.value = p.body
+          updatePreview()
+        }
+      })
+    })
+
+    function formatPhoneUS(value) {
+      let digits = value.replace(/\D/g, '')
+      if (digits.length === 0) return ''
+      if (digits.startsWith('1') && digits.length > 10) digits = digits.slice(1, 11)
+      else if (digits.startsWith('1')) digits = digits.slice(1)
+      else digits = digits.slice(0, 10)
+      const d = digits
+      if (d.length <= 3) return '+1' + (d ? ' (' + d : '')
+      if (d.length <= 6) return '+1 (' + d.slice(0, 3) + ') ' + d.slice(3)
+      return '+1 (' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6)
+    }
+
+    function getSenderFooter() {
+      const opt = senderOptions[senderSelect.value] || senderOptions['daniel-b']
+      const phone = senderPhone.value.trim() || phonePlaceholder
+      const email = senderEmail.value.trim() || emailPlaceholder
+      const phoneDigits = senderPhone.value.replace(/\D/g, '')
+      const telNum = (phoneDigits.length === 11 && phoneDigits[0] === '1') ? phoneDigits.slice(1) : phoneDigits.slice(0, 10)
+      const phoneLink = senderPhone.value.trim()
+        ? `<a href="tel:+1${telNum}" style="color: #888; text-decoration: none;">${phone}</a>`
+        : `<span style="color: #aaa;">${phone}</span>`
+      const emailLink = senderEmail.value.trim()
+        ? `<a href="mailto:${senderEmail.value}" style="color: #888; text-decoration: none;">${email}</a>`
+        : `<span style="color: #aaa;">${email}</span>`
+      const contactHtml = `${emailLink} &nbsp;<span style="color: rgba(0,0,0,0.15);">|</span>&nbsp; ${phoneLink}`
+      const bestSignOff = `<div style="margin-top: 6px; padding: 0 0 0 24px; font-family: ${geistFallback}; font-size: 14px; font-weight: 400; color: #4a5568;">Best,</div>`
+      return `${bestSignOff}<div style="margin-top: 6px; padding: 16px 0 0 24px; font-family: ${geistFallback}; font-size: 14px; font-weight: 400;">
+  <div style="font-weight: 500; color: #000;">${opt.name}</div>
+  <div style="color: #666; font-size: 13px; margin-top: 2px;">${opt.title}</div>
+  <div style="color: #888; font-size: 13px; margin-top: 8px;">${contactHtml}</div>
+</div>`
+    }
 
     const geistFallback = "'Geist', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-    const button49Base = `display: inline-block; padding: 12px 26px; border: 0; font-size: 16px; border-radius: 8px; font-weight: 600; color: #fff; text-decoration: none; font-family: ${geistFallback}; box-shadow: rgba(255, 255, 255, 0.2) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.07) 0 1px 1px, rgba(0, 0, 0, 0.07) 0 2px 2px, rgba(0, 0, 0, 0.07) 0 4px 4px, rgba(32, 27, 92, 0.8) 0px 0px 0px 1px, rgba(255, 255, 255, 0.7) 0 0 3px 0 inset, 0 1px 2px 0 rgba(0, 0, 0, .5);`
+    const button49Base = `display: inline-block; padding: 12px 22px; border: 0; font-size: 15px; line-height: 1.4; border-radius: 8px; font-weight: 600; color: #fff; text-decoration: none; font-family: ${geistFallback}; box-shadow: rgba(255, 255, 255, 0.2) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.07) 0 1px 1px, rgba(0, 0, 0, 0.07) 0 2px 2px, rgba(0, 0, 0, 0.07) 0 4px 4px, rgba(32, 27, 92, 0.8) 0px 0px 0px 1px, rgba(255, 255, 255, 0.7) 0 0 3px 0 inset, 0 1px 2px 0 rgba(0, 0, 0, .5); min-width: 0; max-width: 100%; text-align: center; box-sizing: border-box; white-space: nowrap; vertical-align: middle;`
     const button49Purple = button49Base + ` background-image: radial-gradient(53% 87% at 44% 90%, rgba(255, 255, 255, 0.36) 0%, transparent 100%), linear-gradient(80deg, #5044E5 0%, #463CCA 100%);`
     const button49Blue = button49Base + ` background-image: radial-gradient(53% 87% at 44% 90%, rgba(255, 255, 255, 0.36) 0%, transparent 100%), linear-gradient(80deg, #0A66C2 0%, #004182 100%); box-shadow: rgba(255, 255, 255, 0.2) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.07) 0 1px 1px, rgba(0, 0, 0, 0.07) 0 2px 2px, rgba(0, 0, 0, 0.07) 0 4px 4px, rgba(0, 70, 130, 0.8) 0px 0px 0px 1px, rgba(255, 255, 255, 0.7) 0 0 3px 0 inset, 0 1px 2px 0 rgba(0, 0, 0, .5);`
     const button49Black = button49Base + ` background-image: radial-gradient(53% 87% at 44% 90%, rgba(255, 255, 255, 0.36) 0%, transparent 100%), linear-gradient(80deg, #1a1a1a 0%, #000 100%); box-shadow: rgba(255, 255, 255, 0.2) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.07) 0 1px 1px, rgba(0, 0, 0, 0.07) 0 2px 2px, rgba(0, 0, 0, 0.07) 0 4px 4px, rgba(0, 0, 0, 0.8) 0px 0px 0px 1px, rgba(255, 255, 255, 0.7) 0 0 3px 0 inset, 0 1px 2px 0 rgba(0, 0, 0, .5);`
-    const iconStyle = "vertical-align: middle; margin-right: 6px; width: 18px; height: 18px; display: inline-block;"
-    const calIcon = `<img src="https://swftly.app/calendar-icon-white.png" alt="" width="18" height="18" style="${iconStyle}" />`
-    const linkedInIcon = `<img src="https://swftly.app/linkedin-icon-white.png" alt="" width="18" height="18" style="${iconStyle}" />`
-    const xIcon = `<span style="vertical-align: middle; margin-right: 6px; font-size: 18px; line-height: 1;">𝕏</span>`
-    const emailButtons = `<div style="margin-top: 32px; margin-bottom: 24px;">
-  <a href="https://swftly.app/book-a-demo" style="${button49Purple} margin-right: 12px;">${calIcon}Book a call</a>
-  <a href="https://linkedin.com/company/swftly" style="${button49Blue} margin-right: 12px;">${linkedInIcon}Follow us</a>
-  <a href="https://x.com/getswftly" style="${button49Black}">${xIcon}Follow us</a>
-</div>`
-    const emailFooter = `<table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top: 48px; padding-top: 32px; border-top: 1px solid rgba(0,0,0,0.08); font-family: ${geistFallback}; font-size: 14px; font-weight: 400;">
+    const iconStyle = "vertical-align: middle; margin-right: 4px; width: 16px; height: 16px; display: inline-block; max-width: 100%;"
+    const iconStyleUp = "vertical-align: middle; margin-right: 4px; width: 16px; height: 16px; display: inline-block; position: relative; top: -1px; max-width: 100%;"
+    const calIcon = `<img src="https://swftly.app/calendar-icon-white.png" alt="" width="16" height="16" style="${iconStyleUp}" />`
+    const linkedInIcon = `<img src="https://swftly.app/linkedin-icon-white.png" alt="" width="16" height="16" style="${iconStyle}" />`
+    const xIcon = `<img src="https://swftly.app/x-icon-white.png" alt="X" width="16" height="16" style="${iconStyle}" />`
+    const btnBookCallImg = `<img src="https://swftly.app/btn-book-a-call.png" alt="Book a call" style="vertical-align: middle; height: 18px; width: auto; display: inline-block; border: 0;" />`
+    const btnFollowImg = `<img src="https://swftly.app/btn-follow-us.png" alt="Follow us" style="vertical-align: middle; height: 18px; width: auto; display: inline-block; border: 0;" />`
+    const btnXFollowImg = `<img src="https://swftly.app/btn-x-follow-us.png" alt="Follow us" style="vertical-align: middle; height: 18px; width: auto; display: inline-block; border: 0;" />`
+    const btnRespStyle = `@media (max-width: 520px){.em-btn img{height:14px!important;max-width:70px!important}}`
+    function getEmailButtons() {
+      let bookUrl = bookACallUrl.value.trim() || 'https://www.swftly.app/book-a-demo'
+      if (bookUrl && !/^https?:\/\//i.test(bookUrl)) bookUrl = 'https://' + bookUrl
+      const safeUrl = bookUrl.replace(/"/g, '&quot;')
+      return `<table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top: 56px; margin-bottom: 12px;">
+<tr><td class="btn-wrap" align="center" style="text-align: center; padding: 8px 0 24px 0; border-bottom: 1px solid rgba(0,0,0,0.1);">
+<style type="text/css">${btnRespStyle}</style>
+<a href="${safeUrl}" class="em-btn" style="${button49Purple} margin: 0 8px;">${calIcon}${btnBookCallImg}</a><a href="https://www.linkedin.com/company/swflty/?viewAsMember=true" class="em-btn" style="${button49Blue} margin: 0 8px;">${linkedInIcon}${btnFollowImg}</a><a href="https://x.com/getswftly" class="em-btn" style="${button49Black} margin: 0 8px;">${xIcon}${btnXFollowImg}</a>
+</td></tr></table>`
+    }
+    const emailFooter = `<table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top: 16px; padding-top: 16px; font-family: ${geistFallback}; font-size: 14px; font-weight: 400;">
   <tr style="vertical-align: baseline;">
     <td style="vertical-align: baseline; padding-right: 48px; padding-bottom: 12px; white-space: nowrap;">
       <img src="https://swftly.app/swftly-logo-black.png" alt="Swftly" width="24" height="24" style="vertical-align: middle; margin-right: 8px; display: inline-block;" /><span style="font-weight: 500; font-size: 14px; color: #000; vertical-align: baseline;">Swftly</span>
@@ -258,31 +401,42 @@
   <tr>
     <td style="vertical-align: top; padding-right: 48px;"></td>
     <td style="vertical-align: top; padding-right: 48px;">
-      <a href="#" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">Our Site</a>
-      <a href="#" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">About Us</a>
-      <a href="#" style="color: #333; text-decoration: none; display: block;">Docs</a>
+      <a href="https://www.swftly.app" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">Our Site</a>
+      <a href="https://www.swftly.app" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">About Us</a>
+      <a href="https://www.swftly.app/docs" style="color: #333; text-decoration: none; display: block;">Docs</a>
     </td>
     <td style="vertical-align: top; padding-right: 48px;">
-      <a href="#" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">Help Center</a>
-      <a href="#" style="color: #333; text-decoration: none; display: block;">Contact Us</a>
+      <a href="https://www.swftly.app/docs" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">Help Center</a>
+      <a href="https://www.swftly.app" style="color: #333; text-decoration: none; display: block;">Contact Us</a>
     </td>
     <td style="vertical-align: top;">
-      <a href="#" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">Privacy Policy</a>
-      <a href="#" style="color: #333; text-decoration: none; display: block;">Terms of Service</a>
+      <a href="https://www.swftly.app/docs" style="color: #333; text-decoration: none; display: block; margin-bottom: 6px;">Privacy Policy</a>
+      <a href="https://www.swftly.app/docs" style="color: #333; text-decoration: none; display: block;">Terms of Service</a>
     </td>
   </tr>
 </table>`
 
-    const defaultHtml = `<div style="font-family: ${geistFallback}; font-weight: 400; max-width: 600px; padding: 24px; text-align: left;">
-  <h2 style="color: #2d3748; font-weight: 500; margin-bottom: 16px;">Hello,</h2>
-  <p style="color: #4a5568; font-weight: 400; line-height: 1.6;">Your TLED email content goes here.</p>
-  <p style="color: #4a5568; font-weight: 400; line-height: 1.6; margin-top: 16px;">Best regards,<br>Your Team</p>
-</div>`
+    const defaultBody = 'Your TLED email content goes here.'
+    bodyInput.value = defaultBody
+    bodyTitle.placeholder = 'Hello,'
+    bodyTitle.value = 'Hello,'
 
-    htmlInput.value = defaultHtml
+    function bodyToHtml(text, title) {
+      const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      const titleHtml = (title && title.trim()) ? `<h2 style="color: #2d3748; font-weight: 500; margin-bottom: 16px;">${esc(title.trim())}</h2>` : ''
+      const trimmed = text.trim()
+      if (!trimmed && !titleHtml) return '<p style="color:#718096;">Enter body text above to preview</p>'
+      const pStyle = 'color: #4a5568; font-weight: 400; line-height: 1.6; margin-bottom: 12px;'
+      const paras = trimmed ? trimmed.split(/\n\n+/) : []
+      const bodyHtml = paras.map(p => {
+        const lines = p.split(/\n/).map(l => esc(l) || '<br>').join('<br>')
+        return `<p style="${pStyle}">${lines}</p>`
+      }).join('')
+      return `<div style="font-family: ${geistFallback}; font-weight: 400; max-width: 600px; padding: 24px; text-align: left;">${titleHtml}${bodyHtml}</div>`
+    }
 
     function updatePreview() {
-      const html = htmlInput.value.trim() || '<p style="color:#718096;">Enter HTML above to preview</p>'
+      const html = bodyToHtml(bodyInput.value, bodyTitle.value)
       const doc = preview.contentDocument || preview.contentWindow.document
       doc.open()
       doc.write(`
@@ -293,26 +447,49 @@
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
           body { background: #f0f0f0; font-family: ${geistFallback}; font-weight: 400; padding: 24px; }
-          .outer { background: linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%); min-height: 420px; position: relative; overflow: hidden; border: 0.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 40px rgba(160,180,220,0.18); padding: 24px; }
+          .outer { font-family: ${geistFallback}; background: linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%); min-height: 420px; position: relative; overflow: hidden; border: 0.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 40px rgba(160,180,220,0.18); padding: 24px; }
           .outer::before { content: ''; position: absolute; top: -100px; right: -100px; width: 360px; height: 360px; background: radial-gradient(circle, rgba(255,255,255,0.35) 0%, transparent 70%); pointer-events: none; }
           .outer::after { content: ''; position: absolute; bottom: -80px; left: -60px; width: 260px; height: 260px; background: radial-gradient(circle, rgba(200,215,240,0.3) 0%, transparent 70%); pointer-events: none; }
         </style>
         </head>
         <body style="margin:0; text-align: left;">
-          <div class="outer">${html}${emailButtons}${emailFooter}</div>
+          <div class="outer">${html}${getSenderFooter()}${getEmailButtons()}${emailFooter}</div>
         </body>
         </html>
       `)
       doc.close()
     }
 
-    htmlInput.addEventListener('input', updatePreview)
-    htmlInput.addEventListener('paste', () => setTimeout(updatePreview, 0))
+    bodyInput.addEventListener('input', updatePreview)
+    bodyInput.addEventListener('paste', () => setTimeout(updatePreview, 0))
+    bodyTitle.addEventListener('input', updatePreview)
+    bookACallUrl.value = 'https://www.swftly.app/book-a-demo'
+    bookACallUrl.addEventListener('input', updatePreview)
+    senderSelect.addEventListener('change', updatePreview)
+    senderPhone.addEventListener('input', () => {
+      const formatted = formatPhoneUS(senderPhone.value)
+      if (formatted !== senderPhone.value) senderPhone.value = formatted
+      updatePreview()
+    })
+    senderPhone.addEventListener('paste', () => setTimeout(() => {
+      const formatted = formatPhoneUS(senderPhone.value)
+      if (formatted !== senderPhone.value) senderPhone.value = formatted
+      updatePreview()
+    }, 0))
+    senderEmail.addEventListener('input', updatePreview)
 
     function getHtmlForCopy() {
-      const inner = htmlInput.value.trim()
-      if (!inner) return ''
-      return `<div style="background: linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%); min-height: 420px; position: relative; overflow: hidden; border: 0.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 40px rgba(160,180,220,0.18); padding: 24px; text-align: left; font-family: ${geistFallback}; font-weight: 400;">${inner}${emailButtons}${emailFooter}</div>`
+      const inner = bodyToHtml(bodyInput.value, bodyTitle.value)
+      if (inner.includes('Enter body text')) return ''
+      const gmailDarkFix = `u + .body .gmail-blend-screen{background:#000 !important; mix-blend-mode:screen !important;}
+u + .body .gmail-blend-diff{background:#000 !important; mix-blend-mode:difference !important;}`
+      return `<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><style>div,a,p,h1,h2,h3,span,td,th{font-family: ${geistFallback} !important;}${gmailDarkFix}</style></head><body class="body" style="margin:0;padding:0;background:#eaeff8; background-image:linear-gradient(#eaeff8,#eaeff8);">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; margin: 0 auto; font-family: ${geistFallback}; font-weight: 400;">
+<tr><td class="email-container" style="background: #eaeff8; background-image: linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%); min-height: 420px; padding: 24px; text-align: left; border: 0.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 40px rgba(160,180,220,0.18); color: #333;">
+<div class="gmail-blend-screen"><div class="gmail-blend-diff" style="color:#333;">
+${inner}${getSenderFooter()}${getEmailButtons()}${emailFooter}
+</div></div>
+</td></tr></table></body></html>`
     }
 
     copyBtn.addEventListener('click', async () => {
