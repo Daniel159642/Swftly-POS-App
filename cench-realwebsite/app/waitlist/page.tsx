@@ -2,7 +2,7 @@
 
 import { motion } from 'motion/react';
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Check, Loader2, ArrowUpRight, ChevronDown, Instagram, Github, Menu, X } from 'lucide-react';
+import { ArrowLeft, Check, Loader2, ArrowUpRight, ChevronDown, Instagram, Linkedin, Github, Menu, X } from 'lucide-react';
 import ThreeLogo from '../components/ThreeLogo';
 import { useTransition } from '../TransitionContext';
 
@@ -427,9 +427,18 @@ export default function WaitlistPage() {
                         <div className="space-y-3">
                             <div className="text-[12px] font-semibold text-black/80">Resources</div>
                             <div className="space-y-2">
-                                {['Mobile', 'Manifesto', 'Bug Bounty'].map((t) => (
-                                    <button key={t} type="button" className="block text-[13px] text-black/55 hover:text-black/75 transition-colors">
-                                        {t}
+                                {[
+                                    { label: 'Mobile', onClick: () => navigate('/') },
+                                    { label: 'About Us', onClick: () => navigate('/') },
+                                    { label: 'Docs', onClick: () => navigate('/docs') }
+                                ].map((item) => (
+                                    <button 
+                                        key={item.label} 
+                                        type="button" 
+                                        className="block text-[13px] text-black/55 hover:text-black/75 transition-colors"
+                                        onClick={item.onClick}
+                                    >
+                                        {item.label}
                                     </button>
                                 ))}
                             </div>
@@ -438,9 +447,17 @@ export default function WaitlistPage() {
                         <div className="space-y-3">
                             <div className="text-[12px] font-semibold text-black/80">Support</div>
                             <div className="space-y-2">
-                                {['Help Center', 'Contact Us'].map((t) => (
-                                    <button key={t} type="button" className="block text-[13px] text-black/55 hover:text-black/75 transition-colors">
-                                        {t}
+                                {[
+                                    { label: 'Help Center', onClick: () => navigate('/docs') },
+                                    { label: 'Contact Us', onClick: () => navigate('/waitlist') }
+                                ].map((item) => (
+                                    <button 
+                                        key={item.label} 
+                                        type="button" 
+                                        className="block text-[13px] text-black/55 hover:text-black/75 transition-colors"
+                                        onClick={item.onClick}
+                                    >
+                                        {item.label}
                                     </button>
                                 ))}
                             </div>
@@ -465,6 +482,9 @@ export default function WaitlistPage() {
                         <div className="flex items-center gap-4 text-black/55">
                             <button type="button" onClick={() => window.open('https://instagram.com/getswftly', '_blank')} className="hover:text-black/75 transition-colors">
                                 <Instagram size={18} />
+                            </button>
+                            <button type="button" onClick={() => window.open('https://linkedin.com/company/swftly', '_blank')} className="hover:text-black/75 transition-colors">
+                                <Linkedin size={18} />
                             </button>
                             <button type="button" onClick={() => window.open('https://github.com', '_blank')} className="hover:text-black/75 transition-colors">
                                 <Github size={18} />

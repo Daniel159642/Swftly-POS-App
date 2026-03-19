@@ -2,7 +2,7 @@
 
 import { motion } from 'motion/react';
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Check, Loader2, ArrowUpRight, Instagram, Github, Menu, X } from 'lucide-react';
+import { ArrowLeft, Check, Loader2, ArrowUpRight, Instagram, Linkedin, Github, Menu, X } from 'lucide-react';
 import ThreeLogo from '../components/ThreeLogo';
 import { useTransition } from '../TransitionContext';
 
@@ -410,6 +410,9 @@ export default function BookADemo() {
                         <div className="flex items-center gap-4 text-black/55">
                             <button type="button" onClick={() => window.open('https://instagram.com/getswftly', '_blank')} className="hover:text-black/75 transition-colors">
                                 <Instagram size={18} />
+                            </button>
+                            <button type="button" onClick={() => window.open('https://linkedin.com/company/swftly', '_blank')} className="hover:text-black/75 transition-colors">
+                                <Linkedin size={18} />
                             </button>
                             <button type="button" onClick={() => window.open('https://github.com', '_blank')} className="hover:text-black/75 transition-colors">
                                 <Github size={18} />

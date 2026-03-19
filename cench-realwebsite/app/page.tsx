@@ -11,7 +11,10 @@ if (typeof window !== 'undefined') {
 }
 import BlurText from './components/BlurText';
 import LogoLoop from './components/LogoLoop';
-import { ArrowUpRight, Settings, User, LogOut, Bell, Camera, CreditCard, Search, Check, ChevronRight, ChevronDown, Upload, Scan, FileSearch, Store, FileText, FileImage, FileSpreadsheet, Package, RefreshCw, Building2, AlertCircle, TriangleAlert, Mail, Send, MousePointer2, LayoutDashboard, FolderOpen, BookOpen, ArrowLeftRight, Library, FileBarChart, Truck, TrendingUp, DollarSign, Users, Activity, ClipboardList, SquareArrowOutUpRight, Plus, Gift, Ticket, UserPlus, Shirt, Watch, Smartphone, ShoppingBag, Monitor, ScanLine, Utensils, Database, BarChart3, MessageCircle, Instagram, Github, Menu, X } from 'lucide-react';
+import { ArrowUpRight, Settings, User, LogOut, Bell, Camera, CreditCard, Search, Check, ChevronRight, ChevronDown, Upload, Scan, FileSearch, Store, FileText, FileImage, FileSpreadsheet, Package, RefreshCw, Building2, AlertCircle, TriangleAlert, Mail, Send, MousePointer2,
+  Linkedin,
+  LayoutDashboard, 
+FolderOpen, BookOpen, ArrowLeftRight, Library, FileBarChart, Truck, TrendingUp, DollarSign, Users, Activity, ClipboardList, SquareArrowOutUpRight, Plus, Gift, Ticket, UserPlus, Shirt, Watch, Smartphone, ShoppingBag, Monitor, ScanLine, Utensils, Database, BarChart3, MessageCircle, Instagram, Github, Menu, X } from 'lucide-react';
 import Link from 'next/link';
 import ThreeLogo, { StaticLogo } from "./components/ThreeLogo";
 import GradualBlur from './components/GradualBlur';
@@ -212,7 +215,7 @@ const AIExtractionMockup = ({ isHovered }: { isHovered: boolean }) => {
               animate={{ top: '100%' }}
               exit={{ opacity: 0 }}
               transition={{ duration: 1.2, ease: "linear" }}
-              className="absolute left-0 right-0 h-1 z-30 bg-gradient-to-r from-transparent via-[#2c19fc]/40 to-transparent shadow-[0_0_15px_rgba(44,25,252,0.6)]"
+              className="absolute left-0 right-0 h-1 z-30 bg-gradient-to-r from-transparent via-[#0055ff]/40 to-transparent shadow-[0_0_15px_rgba(44,25,252,0.6)]"
             />
           )}
         </AnimatePresence>
@@ -224,7 +227,7 @@ const AIExtractionMockup = ({ isHovered }: { isHovered: boolean }) => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 0.1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-[#2c19fc]/10 z-20 pointer-events-none"
+              className="absolute inset-0 bg-[#0055ff]/10 z-20 pointer-events-none"
             />
           )}
         </AnimatePresence>
@@ -417,7 +420,7 @@ const AppSidebar = ({ className = "" }: { className?: string }) => (
 
   <div className={`w-[240px] border-r border-[#e5e7eb] bg-white flex flex-col py-6 shrink-0 font-sans ${className}`}>
     <div className="px-5 mb-6 flex items-center gap-3">
-      <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#2c19fc]">
+      <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#0055ff]">
         <LayoutDashboard size={18} />
       </div>
       <span className="font-bold text-[15px] text-[#111827]">Accounting</span>
@@ -514,8 +517,8 @@ const AppDashboard = () => (
                 </linearGradient>
               </defs>
               <path d="M0,35 Q10,32 20,28 T40,22 T60,25 T80,15 T100,5 V40 H0 Z" fill="url(#chartGradient)" />
-              <path d="M0,35 Q10,32 20,28 T40,22 T60,25 T80,15 T100,5" fill="none" stroke="#2c19fc" strokeWidth="1.5" strokeLinecap="round" />
-              <circle cx="100" cy="5" r="1.5" fill="#2c19fc" />
+              <path d="M0,35 Q10,32 20,28 T40,22 T60,25 T80,15 T100,5" fill="none" stroke="#0055ff" strokeWidth="1.5" strokeLinecap="round" />
+              <circle cx="100" cy="5" r="1.5" fill="#0055ff" />
             </svg>
             <div className="absolute inset-x-4 bottom-4 flex justify-between text-[10px] font-bold text-gray-300 uppercase tracking-widest">
               <span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span>
@@ -565,8 +568,8 @@ const BrandIcon = ({ name }: { name: string }) => {
     case 'ApplePay': return <img src="/apple-pay.svg" className={cn.replace('h-5', 'h-7')} alt="Apple Pay" style={{ filter: 'brightness(1.1) drop-shadow(0 2px 4px rgba(0,0,0,0.2))' }} />;
     case 'GooglePay': return <img src="/google-pay.svg" className={cn.replace('h-5', 'h-7')} alt="Google Pay" style={{ filter: 'brightness(1.1) drop-shadow(0 2px 4px rgba(0,0,0,0.2))' }} />;
     case 'QuickBooks': return <img src="/quickbooks.svg" className={cn} alt="QuickBooks" style={{ filter: 'brightness(1.1)' }} />;
-    case 'Camera': return <Camera size={16} className="inline-block mx-1.5 align-middle mb-0.5 text-[#2c19fc] drop-shadow-[0_0_8px_rgba(44,25,252,0.4)]" />;
-    case 'Wallet': return <CreditCard size={16} className="inline-block mx-1.5 align-middle mb-0.5 text-[#2c19fc] drop-shadow-[0_0_8px_rgba(44,25,252,0.4)]" />;
+    case 'Camera': return <Camera size={16} className="inline-block mx-1.5 align-middle mb-0.5 text-[#0055ff] drop-shadow-[0_0_8px_rgba(44,25,252,0.4)]" />;
+    case 'Wallet': return <CreditCard size={16} className="inline-block mx-1.5 align-middle mb-0.5 text-[#0055ff] drop-shadow-[0_0_8px_rgba(44,25,252,0.4)]" />;
     default: return null;
   }
 };
@@ -1174,53 +1177,45 @@ export default function Home() {
         opacity={0.85}
       />
       {/* Header */}
+      {/* Header */}
       <header
-        className={`fixed top-4 left-4 right-4 z-[1001] will-change-transform transition-all duration-300 ${isScrolled ? 'bg-gradient-to-b from-white/60 to-white/10 backdrop-blur-xl rounded-[24px] border border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.06)]' : 'bg-transparent border-transparent'}`}
+        className={`fixed top-4 left-4 right-4 z-[1001] transition-all duration-300 ${isScrolled ? 'bg-gradient-to-b from-white/60 to-white/10 backdrop-blur-xl rounded-[24px] border border-white/40 shadow-[0_8px_32px_0_rgba(0,0,0,0.06)]' : 'bg-transparent border-transparent'}`}
       >
         <div className="w-full pl-0 pr-4 py-1.5 flex items-center justify-between relative z-10">
           <div className="flex items-center gap-4 relative w-12 h-12">
-            {/* 3D Logo docks here on scroll */}
             <button onClick={() => navigate('/')} className="flex items-center gap-4 relative w-full h-full group focus:outline-none">
-              <span
-                ref={swftlyTextRef}
-                className="absolute left-0 sm:left-[12px] md:left-[26px] lg:left-[50px] text-[12px] md:text-sm font-bold text-black py-1 drop-shadow-[0_0_8px_rgba(44,25,252,0.15)] block whitespace-nowrap"
-              >
+              <span className="absolute left-[74px] sm:left-[86px] md:left-[100px] lg:left-[124px] text-[12px] md:text-sm font-bold text-black py-1 drop-shadow-[0_0_8px_rgba(44,25,252,0.15)] block whitespace-nowrap">
                 Swftly
               </span>
             </button>
           </div>
           <div className="flex items-center gap-4 md:gap-10">
-            {/* Desktop nav */}
             <div className="hidden md:flex items-center gap-10">
               {['Docs', 'Pricing', 'Book A Demo'].map((item) => {
-              const handleNav = () => {
-                if (item === 'Docs') {
-                  navigate('/docs');
-                } else if (item === 'Pricing') {
-                  setIsNavigating(true);
-                  document.getElementById('pricing-section')?.scrollIntoView({ behavior: 'smooth' });
-                  setTimeout(() => setIsNavigating(false), 1200);
-                } else if (item === 'Book A Demo') {
-                  navigate('/book-a-demo');
-                }
-              };
+                const handleNav = () => {
+                  if (item === 'Docs') {
+                    navigate('/docs');
+                  } else if (item === 'Pricing') {
+                    navigate('/pricing');
+                  } else if (item === 'Book A Demo') {
+                    navigate('/book-a-demo');
+                  }
+                };
 
-              return (
-                <div key={item}>
-                  <NavButton onClick={handleNav}>
-                    {item}
-                  </NavButton>
-                </div>
-              );
+                return (
+                  <div key={item}>
+                    <NavButton onClick={handleNav}>
+                      {item}
+                    </NavButton>
+                  </div>
+                );
               })}
-
               <NavButton isBold onClick={() => navigate('/waitlist')}>
                 Get Started
                 <ArrowUpRight className="w-4 h-4 relative z-10" />
               </NavButton>
             </div>
 
-            {/* Mobile hamburger */}
             <button
               type="button"
               className="md:hidden w-10 h-10 rounded-full flex items-center justify-center text-black/70 hover:text-black transition-colors"
@@ -1233,62 +1228,52 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Mobile menu overlay */}
-      {isMobileNavOpen && (
-        <div className="fixed inset-0 z-[2000] md:hidden">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/10"
-            onClick={() => setIsMobileNavOpen(false)}
-            aria-label="Close menu"
-          />
-          <div className="absolute top-6 right-6 left-6 rounded-[20px] bg-white/55 backdrop-blur-2xl border border-white/60 shadow-[0_22px_70px_rgba(15,23,42,0.14)] overflow-hidden">
-            <div className="absolute inset-0 pointer-events-none bg-gradient-to-br from-white/55 via-white/20 to-transparent" />
-            <div className="absolute inset-0 pointer-events-none ring-1 ring-white/50 rounded-[20px]" />
-            <div className="flex items-center justify-between px-4 py-3 border-b border-black/5">
-              <div className="text-[12px] font-semibold text-black/70 tracking-wide">Menu</div>
-              <button
-                type="button"
-                className="w-9 h-9 rounded-full flex items-center justify-center text-black/60 hover:text-black"
-                onClick={() => setIsMobileNavOpen(false)}
-                aria-label="Close menu"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="relative p-2">
-              {[
-                { label: 'Docs', onClick: () => navigate('/docs') },
-                {
-                  label: 'Pricing',
-                  onClick: () => {
-                    setIsMobileNavOpen(false);
-                    setIsNavigating(true);
-                    document.getElementById('pricing-section')?.scrollIntoView({ behavior: 'smooth' });
-                    setTimeout(() => setIsNavigating(false), 1200);
-                  }
-                },
-                { label: 'Book a demo', onClick: () => navigate('/book-a-demo') },
-                { label: 'Get started', onClick: () => navigate('/waitlist') }
-              ].map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  className="w-full text-left px-4 py-3 rounded-[14px] text-[14px] font-semibold text-black/80 hover:bg-white/40 transition-colors"
-                  onClick={() => {
-                    setIsMobileNavOpen(false);
-                    item.onClick();
-                  }}
-                >
-                  {item.label}
+      {/* Mobile Nav */}
+      <AnimatePresence>
+        {isMobileNavOpen && (
+          <div className="fixed inset-0 z-[2000] md:hidden">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/10 backdrop-blur-sm"
+              onClick={() => setIsMobileNavOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: -20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -20, scale: 0.95 }}
+              className="absolute top-6 right-6 left-6 rounded-[24px] bg-white/80 backdrop-blur-2xl border border-white/60 shadow-[0_22px_70px_rgba(0,0,0,0.15)] overflow-hidden"
+            >
+              <div className="p-4 flex items-center justify-between border-b border-black/5">
+                <span className="text-[12px] font-bold text-black/40 uppercase tracking-widest">Menu</span>
+                <button onClick={() => setIsMobileNavOpen(false)} className="w-9 h-9 rounded-full flex items-center justify-center bg-black/5">
+                  <X size={18} />
                 </button>
-              ))}
-            </div>
+              </div>
+              <div className="p-4 space-y-2">
+                {['Docs', 'Pricing', 'Book A Demo', 'Get Started'].map((item) => (
+                  <button
+                    key={item}
+                    className="w-full text-left px-4 py-3 rounded-xl text-[15px] font-bold text-black hover:bg-black/5 transition-colors"
+                    onClick={() => {
+                      setIsMobileNavOpen(false);
+                      if (item === 'Docs') navigate('/docs');
+                      if (item === 'Pricing') navigate('/pricing');
+                      if (item === 'Book A Demo') navigate('/book-a-demo');
+                      if (item === 'Get Started') navigate('/waitlist');
+                    }}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
-      <ThreeLogo />
+      <ThreeLogo forceDock={true} disableScrollSpin={true} />
 
       {/* Hero Section */}
       <section className="relative w-full min-h-screen md:min-h-[170vh] bg-white overflow-hidden pb-12 md:pb-32">
@@ -1444,9 +1429,9 @@ export default function Home() {
                                 </div>
                               );
                             } else if (icon === 'database') {
-                              content = <Database size={16} className="text-[#2c19fc]" />;
+                              content = <Database size={16} className="text-[#0055ff]" />;
                             } else if (icon === 'chart-bar') {
-                              content = <BarChart3 size={16} className="text-[#2c19fc]" />;
+                              content = <BarChart3 size={16} className="text-[#0055ff]" />;
                             } else if (icon === 'stripe') {
                               content = <span className="text-[8px] font-black text-[#635BFF] tracking-tighter uppercase">STRIPE</span>;
                             } else if (icon === 'visa') {
@@ -1526,9 +1511,9 @@ export default function Home() {
                                   </div>
                                 );
                               } else if (icon === 'database') {
-                                content = <Database size={16} className="text-[#2c19fc]" />;
+                                content = <Database size={16} className="text-[#0055ff]" />;
                               } else if (icon === 'chart-bar') {
-                                content = <BarChart3 size={16} className="text-[#2c19fc]" />;
+                                content = <BarChart3 size={16} className="text-[#0055ff]" />;
                               } else if (icon === 'stripe') {
                                 content = <span className="text-[8px] font-black text-[#635BFF] tracking-tighter uppercase">STRIPE</span>;
                               } else if (icon === 'visa') {
@@ -1724,7 +1709,7 @@ export default function Home() {
               {/* App Window Header */}
               <div className="w-full bg-white border-b border-[#eee] px-5 py-1 flex justify-between items-center z-10 relative">
                 <div className="flex items-center flex-1 min-w-0 select-none">
-                  <div className="px-3 py-1 text-[22px] font-bold tracking-[0.5px] text-[#2c19fc] leading-tight select-none font-sans">
+                  <div className="px-3 py-1 text-[22px] font-bold tracking-[0.5px] text-[#0055ff] leading-tight select-none font-sans">
                     SWFTLY
                   </div>
                 </div>
@@ -2022,9 +2007,18 @@ export default function Home() {
             <div className="space-y-3">
               <div className="text-[12px] font-semibold text-black/80">Resources</div>
               <div className="space-y-2">
-                {['Mobile', 'Manifesto', 'Bug Bounty'].map((t) => (
-                  <button key={t} type="button" className="block text-[13px] text-black/55 hover:text-black/75 transition-colors">
-                    {t}
+                {[
+                  { label: 'Mobile', onClick: () => navigate('/') },
+                  { label: 'About Us', onClick: () => navigate('/') },
+                  { label: 'Docs', onClick: () => navigate('/docs') }
+                ].map((item) => (
+                  <button 
+                    key={item.label} 
+                    type="button" 
+                    className="block text-[13px] text-black/55 hover:text-black/75 transition-colors"
+                    onClick={item.onClick}
+                  >
+                    {item.label}
                   </button>
                 ))}
               </div>
@@ -2033,9 +2027,17 @@ export default function Home() {
             <div className="space-y-3">
               <div className="text-[12px] font-semibold text-black/80">Support</div>
               <div className="space-y-2">
-                {['Help Center', 'Contact Us'].map((t) => (
-                  <button key={t} type="button" className="block text-[13px] text-black/55 hover:text-black/75 transition-colors">
-                    {t}
+                {[
+                  { label: 'Help Center', onClick: () => navigate('/docs') },
+                  { label: 'Contact Us', onClick: () => navigate('/waitlist') }
+                ].map((item) => (
+                  <button 
+                    key={item.label} 
+                    type="button" 
+                    className="block text-[13px] text-black/55 hover:text-black/75 transition-colors"
+                    onClick={item.onClick}
+                  >
+                    {item.label}
                   </button>
                 ))}
               </div>
@@ -2060,6 +2062,9 @@ export default function Home() {
             <div className="flex items-center gap-4 text-black/55">
               <button type="button" onClick={() => window.open('https://instagram.com/getswftly', '_blank')} className="hover:text-black/75 transition-colors">
                 <Instagram size={18} />
+              </button>
+              <button type="button" onClick={() => window.open('https://linkedin.com/company/swftly', '_blank')} className="hover:text-black/75 transition-colors">
+                <Linkedin size={18} />
               </button>
               <button type="button" onClick={() => window.open('https://github.com', '_blank')} className="hover:text-black/75 transition-colors">
                 <Github size={18} />

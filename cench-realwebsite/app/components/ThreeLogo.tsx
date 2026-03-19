@@ -34,7 +34,7 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
     const entryRef = useRef<THREE.Group>(null);
     const innerRef = useRef<THREE.Group>(null);
     const svgData = useLoader(SVGLoader, url);
-    const [hasEntered, setHasEntered] = useState(false);
+    const [hasEntered, setHasEntered] = useState(forceDock || isStatic);
     const { viewport, size } = useThree();
     const pixelToUnit = viewport.width / size.width;
 
@@ -44,15 +44,15 @@ const ExtrudedLogo = ({ url, onScrollProgress, forceDock = false, isStatic = fal
     const targetScale = size.width < 768 ? 0.3 : 0.45;
 
     useEffect(() => {
-        // If already scrolled, skip fly-in
-        if (window.scrollY > 50 || isStatic) {
+        // If already scrolled, or forced to dock/static, skip fly-in
+        if (window.scrollY > 50 || isStatic || forceDock) {
             setHasEntered(true);
             return;
         }
         // Delay the fly-in animation until after the canvas is stable
         const timer = setTimeout(() => setHasEntered(true), 50);
         return () => clearTimeout(timer);
-    }, [isStatic]);
+    }, [isStatic, forceDock]);
 
     // Initial positioning and scale setup - handled via ref and initial props
     useEffect(() => {
@@ -204,7 +204,7 @@ const ThreeLogoInner = ({ forceDock, disableScrollSpin }: { forceDock?: boolean;
 };
 
 export default function ThreeLogo({ forceDock = false, disableScrollSpin = false }: { forceDock?: boolean; disableScrollSpin?: boolean }) {
-    const [mounted, setMounted] = useState(false);
+    const [mounted, setMounted] = useState(forceDock);
     useEffect(() => {
         if (forceDock) {
             setMounted(true);
