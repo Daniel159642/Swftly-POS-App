@@ -249,10 +249,11 @@ export default function DocsPage() {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState(DOCS_DATA[0].id);
+  const [activeTab, setActiveTab] = useState<string>('overview');
   const [activeSubTab, setActiveSubTab] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const mobileTabsScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -281,6 +282,13 @@ export default function DocsPage() {
     if (contentRef.current) {
       contentRef.current.scrollTo(0, 0);
     }
+    // Auto-scroll active tab into view on mobile
+    if (mobileTabsScrollRef.current) {
+      const activeEl = mobileTabsScrollRef.current.querySelector('[data-active="true"]');
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+    }
   }, [activeTab, activeSubTab]);
 
   const filteredDocs = DOCS_DATA.filter(doc => 
@@ -289,8 +297,8 @@ export default function DocsPage() {
     doc.subsections.some(sub => sub.title.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const activeDoc = DOCS_DATA.find(d => d.id === activeTab) || DOCS_DATA[0];
-  const activeSubDoc = activeDoc.subsections.find(s => s.id === activeSubTab);
+  const activeDoc = activeTab === 'overview' ? null : DOCS_DATA.find(d => d.id === activeTab) || DOCS_DATA[0];
+  const activeSubDoc = activeDoc ? activeDoc.subsections.find(s => s.id === activeSubTab) : null;
 
   const [isScrolled, setIsScrolled] = useState(false);
   useEffect(() => {
@@ -355,7 +363,7 @@ export default function DocsPage() {
               {['Docs', 'Pricing', 'Book A Demo'].map((item) => {
                 const handleNav = () => {
                   if (item === 'Docs') {
-                    setActiveTab(DOCS_DATA[0].id);
+                    setActiveTab('overview');
                     setActiveSubTab(null);
                   } else if (item === 'Pricing') {
                     navigate('/pricing');
@@ -469,6 +477,7 @@ export default function DocsPage() {
         )}
       </AnimatePresence>
 
+      {/* Mobile Nav Overlay */}
       <AnimatePresence>
         {isMobileNavOpen && (
           <div className="fixed inset-0 z-[2000] md:hidden">
@@ -483,30 +492,65 @@ export default function DocsPage() {
               initial={{ opacity: 0, y: -20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -20, scale: 0.95 }}
-              className="absolute top-6 right-6 left-6 rounded-[24px] bg-white/80 backdrop-blur-2xl border border-white/60 shadow-[0_22px_70px_rgba(0,0,0,0.15)] overflow-hidden"
+              className="absolute top-6 right-6 left-6 rounded-[24px] bg-white/80 backdrop-blur-2xl border border-white/60 shadow-[0_22px_70px_rgba(0,0,0,0.15)] overflow-hidden flex flex-col max-h-[85vh]"
             >
-              <div className="p-4 flex items-center justify-between border-b border-black/5">
+              <div className="p-4 flex items-center justify-between border-b border-black/5 flex-shrink-0">
                 <span className="text-[12px] font-bold text-black/40 uppercase tracking-widest">Menu</span>
                 <button onClick={() => setIsMobileNavOpen(false)} className="w-9 h-9 rounded-full flex items-center justify-center bg-black/5">
                   <X size={18} />
                 </button>
               </div>
-              <div className="p-4 space-y-2">
-                {['Docs', 'Pricing', 'Book A Demo', 'Get Started'].map((item) => (
-                  <button
-                    key={item}
-                    className="w-full text-left px-4 py-3 rounded-xl text-[15px] font-bold text-black hover:bg-black/5 transition-colors"
-                    onClick={() => {
-                      setIsMobileNavOpen(false);
-                      if (item === 'Docs') { setActiveTab(DOCS_DATA[0].id); setActiveSubTab(null); }
-                      if (item === 'Pricing') navigate('/pricing');
-                      if (item === 'Book A Demo') navigate('/book-a-demo');
-                      if (item === 'Get Started') navigate('/waitlist');
-                    }}
-                  >
-                    {item}
-                  </button>
-                ))}
+              <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                {/* Global Nav */}
+                <div className="space-y-1">
+                   {['Pricing', 'Book A Demo', 'Get Started'].map((item) => (
+                    <button
+                      key={item}
+                      className="w-full text-left px-4 py-3 rounded-xl text-[16px] font-bold text-black hover:bg-black/5 transition-colors flex items-center justify-between"
+                      onClick={() => {
+                        setIsMobileNavOpen(false);
+                        if (item === 'Pricing') navigate('/pricing');
+                        if (item === 'Book A Demo') navigate('/book-a-demo');
+                        if (item === 'Get Started') navigate('/waitlist');
+                      }}
+                    >
+                      {item}
+                      <ArrowUpRight className="w-4 h-4 opacity-20" />
+                    </button>
+                  ))}
+                </div>
+
+                {/* Docs Nav */}
+                <div className="space-y-3">
+                   <div className="text-[11px] font-black text-black/20 uppercase tracking-[0.2em] px-4">Documentation</div>
+                   <div className="space-y-1">
+                      <button
+                        className={`w-full text-left px-4 py-3 rounded-xl text-[15px] font-bold transition-colors flex items-center justify-between ${activeTab === 'overview' ? 'bg-black text-white' : 'text-black/60 hover:bg-black/5'}`}
+                        onClick={() => {
+                          setActiveTab('overview');
+                          setActiveSubTab(null);
+                          setIsMobileNavOpen(false);
+                        }}
+                      >
+                        Overview
+                      </button>
+                      {DOCS_DATA.map((item) => (
+                        <div key={item.id}>
+                          <button
+                            className={`w-full text-left px-4 py-3 rounded-xl text-[15px] font-bold transition-colors flex items-center justify-between ${activeTab === item.id ? 'bg-black text-white' : 'text-black/60 hover:bg-black/5'}`}
+                            onClick={() => {
+                              setActiveTab(item.id);
+                              setActiveSubTab(null);
+                              setIsMobileNavOpen(false);
+                            }}
+                          >
+                            {item.title}
+                            {activeTab === item.id && <ChevronDown className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      ))}
+                   </div>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -516,7 +560,30 @@ export default function DocsPage() {
       <ThreeLogo forceDock={true} disableScrollSpin={true} />
 
       <main className="flex-1 flex flex-col md:flex-row pt-28 md:pt-32 px-4 md:px-8 pb-8 gap-8 max-w-7xl mx-auto w-full relative z-10 min-h-0">
-        {/* Sidebar */}
+        {/* Mobile Sections Scroller */}
+        <div className="md:hidden -mx-4 px-4 pb-4 overflow-x-auto scrollbar-hide flex-shrink-0" ref={mobileTabsScrollRef}>
+          <div className="flex items-center gap-1.5 min-w-max">
+            <button
+              data-active={activeTab === 'overview'}
+              onClick={() => { setActiveTab('overview'); setActiveSubTab(null); }}
+              className={`px-4 py-2.5 rounded-full text-[13px] font-bold transition-all border whitespace-nowrap ${activeTab === 'overview' ? 'bg-white border-black/10 text-black shadow-sm' : 'bg-transparent border-transparent text-black/40'}`}
+            >
+              Overview
+            </button>
+            {DOCS_DATA.map((item) => (
+              <button
+                key={item.id}
+                data-active={activeTab === item.id}
+                onClick={() => { setActiveTab(item.id); setActiveSubTab(null); }}
+                className={`px-4 py-2.5 rounded-full text-[13px] font-bold transition-all border whitespace-nowrap ${activeTab === item.id ? 'bg-white border-black/10 text-black shadow-sm' : 'bg-transparent border-transparent text-black/40'}`}
+              >
+                {item.title}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Sidebar (Desktop) */}
         <aside className="hidden md:block w-72 shrink-0 overflow-y-auto pr-4 scrollbar-hide py-4">
           <button 
             onClick={() => setIsSearchOpen(true)}
@@ -531,6 +598,12 @@ export default function DocsPage() {
           </button>
 
           <div className="space-y-1">
+            <button
+              onClick={() => { setActiveTab('overview'); setActiveSubTab(null); }}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold rounded-xl transition-all duration-200 font-sans mb-4 ${activeTab === 'overview' ? 'bg-white shadow-sm ring-1 ring-black/5 text-black' : 'text-black/40 hover:text-black/60 hover:bg-white/30'}`}
+            >
+              Overview
+            </button>
             <div className="text-[11px] font-bold text-black/60 uppercase tracking-widest px-4 mb-4 font-sans">Documentation</div>
             {DOCS_DATA.map((item) => (
               <div key={item.id} className="mb-2">
@@ -584,63 +657,108 @@ export default function DocsPage() {
 
         {/* Content Area */}
         <div 
-          className="flex-1 flex flex-col min-h-0 bg-white/40 backdrop-blur-md rounded-[40px] border border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.04)] overflow-hidden"
+          className="flex-1 flex flex-col min-h-0 bg-white/40 backdrop-blur-md rounded-[32px] md:rounded-[40px] border border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.04)] overflow-hidden"
         >
-          <div ref={contentRef} className="flex-1 overflow-y-auto p-8 md:p-20 scrollbar-hide">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={`${activeTab}-${activeSubTab}`}
-                initial={{ opacity: 0, x: 10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -10 }}
-                transition={{ duration: 0.2 }}
-                className="max-w-2xl"
+          <div ref={contentRef} className="flex-1 overflow-y-auto p-6 md:p-20 scrollbar-hide">
+            {/* Mobile Subsections horizontal scroller */}
+            {activeSubTab && (
+              <button 
+                onClick={() => setActiveSubTab(null)}
+                className="md:hidden flex items-center gap-1.5 text-[11px] font-black text-black/40 uppercase tracking-widest mb-6 bg-black/5 px-3 py-1.5 rounded-full w-fit"
               >
-                <div className="flex items-center gap-2 text-[11px] font-bold text-black/75 uppercase tracking-widest mb-4 font-sans">
-                  <span>{activeDoc.title}</span>
-                  {activeSubTab && (
-                     <>
-                        <ChevronRight className="w-3 h-3" />
-                        <span>{activeSubDoc?.title}</span>
-                     </>
-                  )}
-                </div>
+                <ChevronRight className="w-3 h-3 rotate-180" />
+                Back to Overview
+              </button>
+            )}
 
-                <h1 className="text-4xl md:text-5xl font-black text-black mb-8 tracking-tighter">
-                  {activeSubTab ? activeSubDoc?.title : "Overview"}
-                </h1>
+            <AnimatePresence mode="wait">
+              {activeTab === 'overview' ? (
+                <motion.div
+                  key="overview"
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                  transition={{ duration: 0.2 }}
+                  className="max-w-2xl"
+                >
+                  <div className="flex items-center gap-2 text-[10px] md:text-[11px] font-bold text-black/75 uppercase tracking-widest mb-4 font-sans">
+                    <span>Documentation</span>
+                  </div>
+                  <h1 className="text-3xl md:text-5xl font-black text-black mb-6 md:mb-8 tracking-tighter">
+                    Overview
+                  </h1>
+                  <p className="text-[14px] md:text-[16px] leading-relaxed font-bold mb-8" style={{ color: '#4a4a4a' }}>
+                    Swftly documentation covers all platform features. Use the links below to jump to any section.
+                  </p>
+                  <div className="space-y-2">
+                    {DOCS_DATA.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => { setActiveTab(item.id); setActiveSubTab(null); }}
+                        className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-white border border-black/5 text-left group hover:shadow-sm hover:border-black/20 transition-all"
+                      >
+                        <span className="text-[14px] md:text-[15px] font-bold text-black group-hover:text-black/80 tracking-tight">{item.title}</span>
+                        <ChevronRight className="w-4 h-4 text-black/30 group-hover:text-black/60 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key={`${activeTab}-${activeSubTab}`}
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                  transition={{ duration: 0.2 }}
+                  className="max-w-2xl"
+                >
+                  <div className="flex items-center gap-2 text-[10px] md:text-[11px] font-bold text-black/75 uppercase tracking-widest mb-4 font-sans">
+                    <span>{activeDoc?.title}</span>
+                    {activeSubTab && (
+                       <>
+                          <ChevronRight className="w-3 h-3" />
+                          <span>{activeSubDoc?.title}</span>
+                       </>
+                    )}
+                  </div>
 
-                <div className="prose prose-p:leading-relaxed prose-p:text-[16px] max-w-none font-bold">
-                   <p className="whitespace-pre-wrap" style={{ color: '#4a4a4a' }}>
-                      {activeSubTab ? activeSubDoc?.content : activeDoc.overview}
-                   </p>
-                </div>
+                  <h1 className="text-3xl md:text-5xl font-black text-black mb-6 md:mb-8 tracking-tighter">
+                    {activeSubTab ? activeSubDoc?.title : "Overview"}
+                  </h1>
 
-                {!activeSubTab && (
-                   <div className="mt-8 pt-6 border-t border-black/5">
-                      <div className="rounded-2xl border border-black/5 bg-white/50 p-4 md:p-5">
-                        <h3 className="text-[12px] font-black text-black uppercase tracking-wider mb-3 font-bold">Explore Subsections</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {activeDoc.subsections.map(sub => (
-                            <button
-                              key={sub.id}
-                              onClick={() => setActiveSubTab(sub.id)}
-                              className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-white border border-black/5 text-left group hover:shadow-sm hover:border-black/20 transition-all shadow-sm"
-                            >
-                              <span className="text-[13px] font-bold text-black/85 group-hover:text-black uppercase tracking-tight">{sub.title}</span>
-                              <ChevronRight className="w-3.5 h-3.5 text-black/10 group-hover:text-black/40 shrink-0" />
-                            </button>
-                          ))}
+                  <div className="prose prose-p:leading-relaxed prose-p:text-[14px] md:prose-p:text-[16px] max-w-none font-bold">
+                     <p className="whitespace-pre-wrap" style={{ color: '#4a4a4a' }}>
+                        {activeSubTab ? activeSubDoc?.content : activeDoc?.overview}
+                     </p>
+                  </div>
+
+                  {!activeSubTab && activeDoc && (
+                     <div className="mt-8 pt-6">
+                        <div className="rounded-2xl border border-black/5 bg-white/50 p-4 md:p-5">
+                          <h3 className="text-[11px] md:text-[12px] font-black text-black tracking-wider mb-3 font-bold">Explore Subsections</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {activeDoc.subsections.map(sub => (
+                              <button
+                                key={sub.id}
+                                onClick={() => setActiveSubTab(sub.id)}
+                                className="flex items-center justify-between px-4 py-3 md:py-2.5 rounded-xl bg-white border border-black/5 text-left group hover:shadow-sm hover:border-black/20 transition-all shadow-sm"
+                              >
+                                <span className="text-[12px] md:text-[13px] font-bold text-black/85 group-hover:text-black tracking-tight">{sub.title}</span>
+                                <ChevronRight className="w-3.5 h-3.5 text-black/10 group-hover:text-black/40 shrink-0" />
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                   </div>
-                )}
-              </motion.div>
+                     </div>
+                  )}
+                </motion.div>
+              )}
             </AnimatePresence>
           </div>
 
-          <div className="flex-shrink-0 px-8 md:px-20 py-6 border-t border-black/5 text-[11px] font-bold text-gray-800 tracking-[0.2em] flex justify-between items-center bg-white/20 font-sans">
-            <span>Swftly Platform Docs</span>
+          <div className="flex-shrink-0 px-6 md:px-20 py-5 md:py-6 border-t border-black/5 text-[9px] md:text-[11px] font-bold text-gray-800 tracking-[0.2em] flex justify-between items-center bg-white/20 font-sans">
+            <span className="hidden sm:inline">Swftly Platform Docs</span>
+            <span className="sm:hidden">Swftly Docs</span>
             <span>Updated March 2026</span>
           </div>
         </div>
@@ -657,17 +775,17 @@ export default function DocsPage() {
             <div className="flex flex-col gap-6">
               <div className="flex items-center gap-2">
                 <img src="/Swftly.svg" alt="Swftly" className="w-5 h-5 object-contain brightness-0" />
-                <span className="text-[14px] font-semibold text-black tracking-tight">Swftly</span>
+                <span className="text-[14px] font-semibold text-black tracking-tight uppercase">Swftly</span>
               </div>
 
-              <button type="button" className="button-42">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                <span className="text text-[12px] font-medium text-black/70">All systems operational</span>
+              <button type="button" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/50 border border-black/5 w-fit">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[11px] font-black text-black/40 uppercase tracking-widest">Network Operational</span>
               </button>
             </div>
 
             <div className="space-y-3">
-              <div className="text-[12px] font-semibold text-black/80">Resources</div>
+              <div className="text-[12px] font-black text-black/80 uppercase tracking-wider">Resources</div>
               <div className="space-y-2">
                 {[
                   { label: 'Mobile', onClick: () => navigate('/') },
@@ -677,7 +795,7 @@ export default function DocsPage() {
                   <button
                     key={item.label}
                     type="button"
-                    className="block text-[13px] text-black/55 hover:text-black/75 transition-colors"
+                    className="block text-[12px] font-bold text-black/40 hover:text-black transition-colors uppercase tracking-tight"
                     onClick={item.onClick}
                   >
                     {item.label}
@@ -687,16 +805,17 @@ export default function DocsPage() {
             </div>
 
             <div className="space-y-3">
-              <div className="text-[12px] font-semibold text-black/80">Support</div>
+              <div className="text-[12px] font-black text-black/80 uppercase tracking-wider">Support</div>
               <div className="space-y-2">
                 {[
+                   { label: 'Waitlist', onClick: () => navigate('/waitlist') },
                   { label: 'Help Center', onClick: () => navigate('/docs') },
                   { label: 'Contact Us', onClick: () => navigate('/waitlist') }
                 ].map((item) => (
                   <button
                     key={item.label}
                     type="button"
-                    className="block text-[13px] text-black/55 hover:text-black/75 transition-colors"
+                    className="block text-[12px] font-bold text-black/40 hover:text-black transition-colors uppercase tracking-tight"
                     onClick={item.onClick}
                   >
                     {item.label}
@@ -706,10 +825,10 @@ export default function DocsPage() {
             </div>
 
             <div className="space-y-3">
-              <div className="text-[12px] font-semibold text-black/80">Legal</div>
+              <div className="text-[12px] font-black text-black/80 uppercase tracking-wider">Legal</div>
               <div className="space-y-2">
                 {['Privacy Policy', 'Terms of Service', 'Data Processing Agreement'].map((t) => (
-                  <button key={t} type="button" className="block text-[13px] text-black/55 hover:text-black/75 transition-colors">
+                  <button key={t} type="button" className="block text-[12px] font-bold text-black/40 hover:text-black transition-colors uppercase tracking-tight">
                     {t}
                   </button>
                 ))}
@@ -717,22 +836,22 @@ export default function DocsPage() {
             </div>
           </div>
 
-          <div className="pt-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-            <div className="text-[12px] text-black/45">
-              © 2026 Swftly. All rights reserved.
+          <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="text-[10px] font-black text-black/20 uppercase tracking-[0.2em]">
+              © 2026 Swftly Inc. All rights reserved.
             </div>
-            <div className="flex items-center gap-4 text-black/55">
-              <button type="button" onClick={() => window.open('https://instagram.com/getswftly', '_blank')} className="hover:text-black/75 transition-colors">
+            <div className="flex items-center gap-6 text-black/30">
+              <button type="button" onClick={() => window.open('https://instagram.com/getswftly', '_blank')} className="hover:text-black transition-colors">
                 <Instagram size={18} />
               </button>
-              <button type="button" onClick={() => window.open('https://linkedin.com/company/swftly', '_blank')} className="hover:text-black/75 transition-colors">
+              <button type="button" onClick={() => window.open('https://linkedin.com/company/swftly', '_blank')} className="hover:text-black transition-colors">
                 <Linkedin size={18} />
               </button>
-              <button type="button" onClick={() => window.open('https://github.com', '_blank')} className="hover:text-black/75 transition-colors">
+              <button type="button" onClick={() => window.open('https://github.com', '_blank')} className="hover:text-black transition-colors">
                 <Github size={18} />
               </button>
-              <button type="button" onClick={() => window.open('https://x.com', '_blank')} className="hover:text-black/75 transition-colors">
-                <img src="/x-logo.svg" alt="X" className="w-[18px] h-[18px] object-contain opacity-70 hover:opacity-100 transition-opacity" />
+              <button type="button" onClick={() => window.open('https://x.com', '_blank')} className="hover:text-black transition-colors">
+                <img src="/x-logo.svg" alt="X" className="w-[18px] h-[18px] object-contain opacity-40 hover:opacity-100 transition-opacity brightness-0" />
               </button>
             </div>
           </div>
