@@ -8,7 +8,7 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: #f0f0f0;
+      background: transparent;
       font-family: 'Geist', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-weight: 400;
       min-height: 100vh;
@@ -16,7 +16,7 @@
     }
 
     .outer {
-      background: linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%);
+      background: transparent;
       border-radius: 32px;
       min-height: calc(100vh - 48px);
       position: relative;
@@ -28,23 +28,6 @@
       gap: 0;
     }
 
-    .outer::before {
-      content: '';
-      position: absolute;
-      top: -100px; right: -100px;
-      width: 360px; height: 360px;
-      background: radial-gradient(circle, rgba(255,255,255,0.35) 0%, transparent 70%);
-      pointer-events: none;
-    }
-
-    .outer::after {
-      content: '';
-      position: absolute;
-      bottom: -80px; left: -60px;
-      width: 260px; height: 260px;
-      background: radial-gradient(circle, rgba(200,215,240,0.3) 0%, transparent 70%);
-      pointer-events: none;
-    }
 
     .preview-pane {
       flex: 1;
@@ -68,7 +51,7 @@
     .preview-frame {
       flex: 1;
       min-height: 400px;
-      background: #f0f0f0;
+      background: transparent;
       border-radius: 12px;
       overflow: hidden;
       border: 1px solid rgba(0,0,0,0.06);
@@ -360,32 +343,36 @@
     }
 
     const geistFallback = "'Geist', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-    const button49Base = `display: inline-block; padding: 12px 22px; border: 0; font-size: 15px; line-height: 1.4; border-radius: 8px; font-weight: 600; color: #fff; text-decoration: none; font-family: ${geistFallback}; box-shadow: rgba(255, 255, 255, 0.2) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.07) 0 1px 1px, rgba(0, 0, 0, 0.07) 0 2px 2px, rgba(0, 0, 0, 0.07) 0 4px 4px, rgba(32, 27, 92, 0.8) 0px 0px 0px 1px, rgba(255, 255, 255, 0.7) 0 0 3px 0 inset, 0 1px 2px 0 rgba(0, 0, 0, .5); min-width: 0; max-width: 100%; text-align: center; box-sizing: border-box; white-space: nowrap; vertical-align: middle;`
-    const button49Purple = button49Base + ` background-image: radial-gradient(53% 87% at 44% 90%, rgba(255, 255, 255, 0.36) 0%, transparent 100%), linear-gradient(80deg, #5044E5 0%, #463CCA 100%);`
-    const button49Blue = button49Base + ` background-image: radial-gradient(53% 87% at 44% 90%, rgba(255, 255, 255, 0.36) 0%, transparent 100%), linear-gradient(80deg, #0A66C2 0%, #004182 100%); box-shadow: rgba(255, 255, 255, 0.2) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.07) 0 1px 1px, rgba(0, 0, 0, 0.07) 0 2px 2px, rgba(0, 0, 0, 0.07) 0 4px 4px, rgba(0, 70, 130, 0.8) 0px 0px 0px 1px, rgba(255, 255, 255, 0.7) 0 0 3px 0 inset, 0 1px 2px 0 rgba(0, 0, 0, .5);`
-    const button49Black = button49Base + ` background-image: radial-gradient(53% 87% at 44% 90%, rgba(255, 255, 255, 0.36) 0%, transparent 100%), linear-gradient(80deg, #1a1a1a 0%, #000 100%); box-shadow: rgba(255, 255, 255, 0.2) 0px 1px 0px 0px inset, rgba(0, 0, 0, 0.07) 0 1px 1px, rgba(0, 0, 0, 0.07) 0 2px 2px, rgba(0, 0, 0, 0.07) 0 4px 4px, rgba(0, 0, 0, 0.8) 0px 0px 0px 1px, rgba(255, 255, 255, 0.7) 0 0 3px 0 inset, 0 1px 2px 0 rgba(0, 0, 0, .5);`
+    const button49Base = `display: inline-flex; align-items: center; justify-content: center; padding: 12px 16px; font-size: 15px; line-height: 1; border-radius: 8px; font-weight: 600; color: #fff; text-decoration: none; font-family: ${geistFallback}; min-width: 0; width: 100%; max-width: 100%; text-align: center; box-sizing: border-box; white-space: nowrap; vertical-align: middle;`
+    const button49Purple = button49Base.replace('padding: 12px 16px', 'padding: 13px 21px') + ` border: 1px solid #3d38a8; background-image: radial-gradient(53% 87% at 44% 90%, rgba(255, 255, 255, 0.36) 0%, transparent 100%), linear-gradient(80deg, #5044E5 0%, #463CCA 100%);`
+    const button49Blue = button49Base + ` border: 1px solid #00467d; background-image: radial-gradient(53% 87% at 44% 90%, rgba(255, 255, 255, 0.36) 0%, transparent 100%), linear-gradient(80deg, #0A66C2 0%, #004182 100%);`
+    const button49Black = button49Base + ` border: 1px solid #1a1a1a; background-image: radial-gradient(53% 87% at 44% 90%, rgba(255, 255, 255, 0.36) 0%, transparent 100%), linear-gradient(80deg, #1a1a1a 0%, #000 100%);`
     const iconStyle = "vertical-align: middle; margin-right: 4px; width: 16px; height: 16px; display: inline-block; max-width: 100%;"
-    const iconStyleUp = "vertical-align: middle; margin-right: 4px; width: 16px; height: 16px; display: inline-block; position: relative; top: -1px; max-width: 100%;"
-    const calIcon = `<img src="https://swftly.app/calendar-icon-white.png" alt="" width="16" height="16" style="${iconStyleUp}" />`
-    const bookACallImg = `<img src="https://swftly.app/book-a-call-text.png" alt="Book a call" height="16" style="vertical-align: middle; height: 16px; width: auto; display: inline-block; max-width: 100%; margin-left: 4px;" />`
-    const followUsImg = `<img src="https://swftly.app/follow-us-text.png" alt="Follow us" height="16" style="vertical-align: middle; height: 16px; width: auto; display: inline-block; max-width: 100%; margin-left: 4px;" />`
+    const iconStyleUp = "vertical-align: middle; margin-right: 4px; width: 16px; height: 16px; display: inline-block; max-width: 100%;"
+    const calIcon = `<img src="https://swftly.app/calendar-icon-white.png" alt="" width="18" height="18" style="vertical-align: middle; margin-right: 4px; width: 18px; height: 18px; display: inline-block; max-width: 100%;" />`
+    const bookACallImg = `<img src="https://swftly.app/book-a-call-text.png" alt="Book a call" height="18" style="vertical-align: middle; height: 18px; width: auto; display: inline-block; max-width: 100%; margin-left: 4px;" />`
+    const followUsImg = `<img src="https://swftly.app/follow-us-text.png" alt="Follow us" height="16" style="vertical-align: middle; height: 16px; width: auto; display: inline-block; max-width: 100%; margin-left: 4px; margin-top: 4px;" />`
     const linkedInIcon = `<img src="https://swftly.app/linkedin-icon-white.png" alt="" width="16" height="16" style="${iconStyle}" />`
     const xIcon = `<img src="https://swftly.app/x-logo-white.png" alt="X" width="16" height="16" style="${iconStyle}" />`
-    const btnRespStyle = `@media (max-width: 520px){.em-btn img{height:14px!important;max-width:70px!important}}`
+    const btnRespStyle = `@media (max-width: 520px){.em-btn{padding:10px 12px!important;font-size:13px!important}.em-btn img{height:14px!important;width:auto!important;max-width:100%!important}}`
     function getEmailButtons() {
       let bookUrl = bookACallUrl.value.trim() || 'https://www.swftly.app/book-a-demo'
       if (bookUrl && !/^https?:\/\//i.test(bookUrl)) bookUrl = 'https://' + bookUrl
       const safeUrl = bookUrl.replace(/"/g, '&quot;')
       return `<table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top: 56px; margin-bottom: 12px;">
-<tr><td class="btn-wrap" align="center" style="text-align: center; padding: 8px 0 24px 0; border-bottom: 1px solid rgba(0,0,0,0.1);">
+<tr><td style="padding: 8px 0 24px 0; border-bottom: 1px solid rgba(0,0,0,0.1);">
 <style type="text/css">${btnRespStyle}</style>
-<a href="${safeUrl}" class="em-btn" style="${button49Purple} margin: 0 8px;">${calIcon}${bookACallImg}</a><a href="https://www.linkedin.com/company/swflty/?viewAsMember=true" class="em-btn" style="${button49Blue} margin: 0 8px;">${linkedInIcon}${followUsImg}</a><a href="https://x.com/getswftly" class="em-btn" style="${button49Black} margin: 0 8px;">${xIcon}${followUsImg}</a>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin: 0 auto;"><tr>
+<td class="btn-wrap" width="33.33%" style="padding: 0 4px; vertical-align: middle; text-align: center; white-space: nowrap;"><a href="${safeUrl}" class="em-btn" style="${button49Purple}"><table cellpadding="0" cellspacing="0" border="0" align="center" style="margin: 0 auto;"><tr><td style="text-align: center;">${calIcon}${bookACallImg}</td></tr></table></a></td>
+<td class="btn-wrap" width="33.33%" style="padding: 0 4px; vertical-align: middle; text-align: center; white-space: nowrap;"><a href="https://www.linkedin.com/company/swflty/?viewAsMember=true" class="em-btn" style="${button49Blue}"><table cellpadding="0" cellspacing="0" border="0" align="center" style="margin: 0 auto;"><tr><td style="text-align: center;">${linkedInIcon}${followUsImg}</td></tr></table></a></td>
+<td class="btn-wrap" width="33.33%" style="padding: 0 4px; vertical-align: middle; text-align: center; white-space: nowrap;"><a href="https://x.com/getswftly" class="em-btn" style="${button49Black}"><table cellpadding="0" cellspacing="0" border="0" align="center" style="margin: 0 auto;"><tr><td style="text-align: center;">${xIcon}${followUsImg}</td></tr></table></a></td>
+</tr></table>
 </td></tr></table>`
     }
     const emailFooter = `<table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top: 16px; padding-top: 16px; font-family: ${geistFallback}; font-size: 14px; font-weight: 400;">
   <tr style="vertical-align: baseline;">
     <td style="vertical-align: baseline; padding-right: 48px; padding-bottom: 12px; white-space: nowrap;">
-      <img src="https://swftly.app/swftly-logo-black.png" alt="Swftly" width="24" height="24" style="vertical-align: middle; margin-right: 8px; display: inline-block;" /><span style="font-weight: 500; font-size: 14px; color: #000; vertical-align: baseline;">Swftly</span>
+      <table cellpadding="0" cellspacing="0" border="0" align="left" style="margin-right: 8px; vertical-align: middle;"><tr><td style="background-color: #ffffff; padding: 4px; border-radius: 6px;"><img src="https://swftly.app/swftly-logo-black.png" alt="Swftly" width="24" height="24" style="display: block;" /></td></tr></table><span style="font-weight: 500; font-size: 14px; color: #000; vertical-align: baseline;">Swftly</span>
     </td>
     <td style="vertical-align: baseline; padding-right: 48px; padding-bottom: 12px;">
       <span style="font-weight: 500; font-size: 14px; color: #000;">Resources</span>
@@ -431,7 +418,7 @@
         const lines = p.split(/\n/).map(l => esc(l) || '<br>').join('<br>')
         return `<p style="${pStyle}">${lines}</p>`
       }).join('')
-      return `<div style="font-family: ${geistFallback}; font-weight: 400; max-width: 600px; padding: 24px; text-align: left;">${titleHtml}${bodyHtml}</div>`
+      return `<div style="font-family: ${geistFallback}; font-weight: 400; max-width: 600px; padding: 12px 24px 24px 24px; text-align: left;">${titleHtml}${bodyHtml}</div>`
     }
 
     function updatePreview() {
@@ -446,9 +433,7 @@
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
           body { background: #f0f0f0; font-family: ${geistFallback}; font-weight: 400; padding: 24px; }
-          .outer { font-family: ${geistFallback}; background: linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%); min-height: 420px; position: relative; overflow: hidden; border: 0.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 40px rgba(160,180,220,0.18); padding: 24px; }
-          .outer::before { content: ''; position: absolute; top: -100px; right: -100px; width: 360px; height: 360px; background: radial-gradient(circle, rgba(255,255,255,0.35) 0%, transparent 70%); pointer-events: none; }
-          .outer::after { content: ''; position: absolute; bottom: -80px; left: -60px; width: 260px; height: 260px; background: radial-gradient(circle, rgba(200,215,240,0.3) 0%, transparent 70%); pointer-events: none; }
+          .outer { font-family: ${geistFallback}; padding: 12px 24px 24px 24px; }
         </style>
         </head>
         <body style="margin:0; text-align: left;">
@@ -482,9 +467,9 @@
       if (inner.includes('Enter body text')) return ''
       const gmailDarkFix = `u + .body .gmail-blend-screen{background:#000 !important; mix-blend-mode:screen !important;}
 u + .body .gmail-blend-diff{background:#000 !important; mix-blend-mode:difference !important;}`
-      return `<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><style>div,a,p,h1,h2,h3,span,td,th{font-family: ${geistFallback} !important;}${gmailDarkFix}</style></head><body class="body" style="margin:0;padding:0;background:#eaeff8; background-image:linear-gradient(#eaeff8,#eaeff8);">
+      return `<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><style>div,a,p,h1,h2,h3,span,td,th{font-family: ${geistFallback} !important;}${gmailDarkFix}</style></head><body class="body" style="margin:0;padding:0;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; margin: 0 auto; font-family: ${geistFallback}; font-weight: 400;">
-<tr><td class="email-container" style="background: #eaeff8; background-image: linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%); min-height: 420px; padding: 24px; text-align: left; border: 0.5px solid rgba(255,255,255,0.7); box-shadow: 0 2px 40px rgba(160,180,220,0.18); color: #333;">
+<tr><td class="email-container" style="padding: 12px 24px 24px 24px; text-align: left; color: #333;">
 <div class="gmail-blend-screen"><div class="gmail-blend-diff" style="color:#333;">
 ${inner}${getSenderFooter()}${getEmailButtons()}${emailFooter}
 </div></div>
