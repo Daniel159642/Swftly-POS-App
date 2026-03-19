@@ -12,8 +12,13 @@ from config import EXTRACTION_CONFIG
 class ShipmentDocumentProcessor:
     def __init__(self, ai_extractor=None):
         if ai_extractor is None:
-            from openai_extractor import OpenAIExtractor
-            self.ai_extractor = OpenAIExtractor()
+            extractor_choice = EXTRACTION_CONFIG.get("extractor", "claude")
+            if extractor_choice == "openai":
+                from openai_extractor import OpenAIExtractor
+                self.ai_extractor = OpenAIExtractor()
+            else:
+                from claude_extractor import ClaudeExtractor
+                self.ai_extractor = ClaudeExtractor()
         else:
             self.ai_extractor = ai_extractor
         self.supported = set(EXTRACTION_CONFIG.get("supported_formats", []))

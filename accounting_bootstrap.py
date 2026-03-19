@@ -287,6 +287,12 @@ def _run_migrations(cur) -> None:
         DROP CONSTRAINT IF EXISTS accounts_account_number_key
     """)
 
+    # Drop restrictive account_type check constraint so "Contra Revenue" is allowed
+    cur.execute("""
+        ALTER TABLE accounting.accounts
+        DROP CONSTRAINT IF EXISTS accounts_account_type_check
+    """)
+
     # Partial unique index: one row per account_number for global templates
     cur.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS idx_acc_acct_num_global

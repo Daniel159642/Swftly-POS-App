@@ -656,9 +656,10 @@ def _send_order_notification_async(order_info):
             # Enrich order_info with full DB details before sending
             enriched = _enrich_order_info_for_notification(order_info)
             order_source = (enriched.get('order_source') or '').strip().lower()
+            order_type = (enriched.get('order_type') or '').strip().lower()
             
-            emails = get_order_email_recipients(1, order_source)
-            phones = get_order_sms_recipients(1, order_source)
+            emails = get_order_email_recipients(1, order_source, order_type)
+            phones = get_order_sms_recipients(1, order_source, order_type)
             
             if emails or phones:
                 result = send_order_notification(1, enriched, emails, phones)
@@ -703,11 +704,14 @@ def _sanitize_for_json(obj):
     return obj
 
 def _pg_allowed_tables():
-    """List public table names (PostgreSQL)."""
+    """List public table and view names (PostgreSQL)."""
     conn, cursor = _pg_conn()
     try:
-        cursor.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT LIKE 'pg_%%'")
-        return [r['tablename'] for r in cursor.fetchall()]
+        cursor.execute("SELECT tablename AS name FROM pg_tables WHERE schemaname = 'public' AND tablename NOT LIKE 'pg_%%'")
+        names = [r['name'] for r in cursor.fetchall()]
+        cursor.execute("SELECT viewname AS name FROM pg_views WHERE schemaname = 'public'")
+        names += [r['name'] for r in cursor.fetchall()]
+        return names
     finally:
         conn.close()
 
@@ -2841,8 +2845,13 @@ def api_admin_login():
         traceback.print_exc()
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
-def _get_session_employee(required_positions=None):
-    """Helper: verify session_token from request header/body, return employee dict or None."""
+def _get_session_employee(required_positions=None, require_admin=False):
+    """Helper: verify session_token from request header/body, return employee dict or None.
+
+    If require_admin=True, the employee must have is_admin=True.
+    If required_positions is set, the employee's position must match one of those values
+    (ignored when require_admin=True and employee is an admin).
+    """
     token = (request.headers.get('X-Session-Token')
              or (request.json or {}).get('session_token')
              or request.args.get('session_token'))
@@ -2851,7 +2860,9 @@ def _get_session_employee(required_positions=None):
     result = verify_session(token)
     if not result.get('valid'):
         return None
-    if required_positions:
+    if require_admin and not result.get('is_admin'):
+        return None
+    if required_positions and not result.get('is_admin'):
         pos = (result.get('position') or '').lower()
         if not any(pos == p or pos.startswith(p) for p in required_positions):
             return None
@@ -2859,6 +2870,306 @@ def _get_session_employee(required_positions=None):
 
 
 MANAGER_POSITIONS = ('admin', 'manager', 'supervisor', 'assistant_manager')
+
+
+@app.route('/api/setup/status', methods=['GET'])
+def api_setup_status():
+    """Return whether initial setup (first admin account) is still needed.
+
+    Dev bypass: set SKIP_SETUP=true in .env to always return needs_setup=false.
+    Frontend bypass: localStorage key 'pos_skip_setup' = '1' is checked client-side.
+    """
+    try:
+        # Env-based dev bypass
+        import os
+        if os.environ.get('SKIP_SETUP', 'false').lower() in ('true', '1', 'yes'):
+            return jsonify({'needs_setup': False, 'bypass': 'env'})
+
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            # Get first active establishment
+            cur.execute("SELECT establishment_id, establishment_name, establishment_code FROM establishments WHERE is_active = TRUE ORDER BY establishment_id LIMIT 1")
+            est = cur.fetchone()
+            if not est:
+                return jsonify({'needs_setup': True, 'establishment_id': None})
+
+            est_id = est[0] if isinstance(est, tuple) else est.get('establishment_id')
+            est_name = est[1] if isinstance(est, tuple) else est.get('establishment_name')
+            est_code = est[2] if isinstance(est, tuple) else est.get('establishment_code')
+
+            cur.execute(
+                "SELECT COUNT(*) FROM employees WHERE establishment_id = %s AND is_admin = TRUE AND active = 1",
+                (est_id,)
+            )
+            row = cur.fetchone()
+            admin_count = row[0] if isinstance(row, tuple) else (row.get('count') or 0)
+        finally:
+            conn.close()
+
+        return jsonify({
+            'needs_setup': admin_count == 0,
+            'establishment_id': est_id,
+            'establishment_name': est_name,
+            'establishment_code': est_code,
+        })
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'needs_setup': True, 'error': str(e)}), 500
+
+
+@app.route('/api/setup/establishment', methods=['PATCH'])
+def api_setup_update_establishment():
+    """Update establishment name and/or code during initial setup (no auth required if no admin exists)."""
+    try:
+        import os
+        if os.environ.get('SKIP_SETUP', 'false').lower() in ('true', '1', 'yes'):
+            return jsonify({'success': False, 'message': 'Setup is disabled'}), 403
+
+        data = request.json or {}
+        establishment_id = data.get('establishment_id')
+        name = (data.get('establishment_name') or '').strip()
+        code = (data.get('establishment_code') or '').strip().upper()
+        store_type = (data.get('store_type') or '').strip().lower()  # retail/restaurant/cafe/service/other
+        phone = (data.get('phone') or '').strip()
+        address = (data.get('address') or '').strip()
+        website = (data.get('website') or '').strip()
+        timezone = (data.get('timezone') or '').strip()
+        currency = (data.get('currency') or '').strip()
+
+        if not establishment_id:
+            return jsonify({'success': False, 'message': 'establishment_id is required'}), 400
+
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            # Only allow if no admin exists yet (or if admin session present)
+            cur.execute(
+                "SELECT COUNT(*) FROM employees WHERE establishment_id = %s AND is_admin = TRUE AND active = 1",
+                (establishment_id,)
+            )
+            row = cur.fetchone()
+            admin_count = row[0] if isinstance(row, tuple) else (row.get('count') or 0)
+            if admin_count > 0:
+                emp = _get_session_employee(require_admin=True)
+                if not emp or emp.get('establishment_id') != establishment_id:
+                    return jsonify({'success': False, 'message': 'Admin session required'}), 403
+
+            updates = []
+            params = []
+            if name:
+                updates.append("establishment_name = %s")
+                params.append(name)
+            if code:
+                updates.append("establishment_code = %s")
+                params.append(code)
+
+            # Merge extra fields into settings JSONB
+            extra = {}
+            if store_type: extra['store_type'] = store_type
+            if phone:      extra['phone'] = phone
+            if address:    extra['address'] = address
+            if website:    extra['website'] = website
+            if timezone:   extra['timezone'] = timezone
+            if currency:   extra['currency'] = currency
+            if extra:
+                import json as _json
+                updates.append("settings = settings || %s::jsonb")
+                params.append(_json.dumps(extra))
+
+            if updates:
+                params.append(establishment_id)
+                cur.execute(
+                    f"UPDATE establishments SET {', '.join(updates)} WHERE establishment_id = %s",
+                    params
+                )
+                conn.commit()
+
+            # Set accounting vertical to match store type
+            if store_type:
+                try:
+                    from accounting_bootstrap import set_establishment_vertical
+                    vertical_map = {'restaurant': 'restaurant', 'cafe': 'restaurant', 'service': 'service'}
+                    vertical = vertical_map.get(store_type, 'retail')
+                    set_establishment_vertical(establishment_id, vertical)
+                except Exception:
+                    pass
+        finally:
+            conn.close()
+
+        return jsonify({'success': True})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/setup/create-admin', methods=['POST'])
+def api_setup_create_admin():
+    """Create an admin account for an establishment.
+
+    Open (no auth) if establishment has zero admin accounts.
+    Requires an admin session if one or more admins already exist.
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+        data = request.json or {}
+        establishment_id = data.get('establishment_id')
+        email = (data.get('email') or '').strip()
+        password = data.get('password', '')
+        name = (data.get('name') or '').strip()
+
+        if not establishment_id or not email or not password or not name:
+            return jsonify({'success': False, 'message': 'establishment_id, email, password, and name are required'}), 400
+
+        # Check existing admins
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM employees WHERE establishment_id = %s AND is_admin = TRUE AND active = 1",
+                (establishment_id,)
+            )
+            row = cur.fetchone()
+            admin_count = row[0] if isinstance(row, tuple) else (row.get('count') or 0)
+        finally:
+            conn.close()
+
+        if admin_count > 0:
+            emp = _get_session_employee(require_admin=True)
+            if not emp or emp.get('establishment_id') != establishment_id:
+                return jsonify({'success': False, 'message': 'Admin session required to add more admins'}), 403
+
+        from database import create_admin_account
+        result = create_admin_account(establishment_id, email, password, name)
+        status = 200 if result.get('success') else 400
+        return jsonify(result), status
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/my/grantable-permissions', methods=['GET', 'POST'])
+def api_grantable_permissions():
+    """Return the list of permissions the current session employee can grant to others.
+
+    Admins get all permissions. Non-admins get only the permissions they themselves have.
+    """
+    try:
+        emp = _get_session_employee()
+        if not emp:
+            return jsonify({'success': False, 'message': 'Authentication required'}), 401
+
+        if emp.get('is_admin'):
+            # Fetch all permissions
+            conn = get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT permission_name, permission_category, description FROM permissions ORDER BY permission_category, permission_name")
+                rows = cur.fetchall()
+                perms = [
+                    {'name': (r[0] if isinstance(r, tuple) else r.get('permission_name')),
+                     'category': (r[1] if isinstance(r, tuple) else r.get('permission_category')),
+                     'description': (r[2] if isinstance(r, tuple) else r.get('description'))}
+                    for r in rows
+                ]
+            finally:
+                conn.close()
+            return jsonify({'success': True, 'permissions': perms})
+
+        # Non-admin: return their own granted permissions
+        from permission_manager import get_permission_manager
+        pm = get_permission_manager()
+        grouped = pm.get_employee_permissions(emp['employee_id'])
+        perms = []
+        for category, plist in grouped.items():
+            for p in plist:
+                perms.append({'name': p.get('name'), 'category': category, 'description': p.get('description')})
+        return jsonify({'success': True, 'permissions': perms})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/admin/permission-denials', methods=['GET'])
+def api_permission_denials():
+    """Return recent permission denial events for the establishment (admin only)."""
+    try:
+        emp = _get_session_employee(require_admin=True)
+        if not emp:
+            return jsonify({'success': False, 'message': 'Admin session required'}), 403
+
+        establishment_id = emp.get('establishment_id')
+        limit = min(int(request.args.get('limit', 100)), 500)
+        since = request.args.get('since')
+
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            if since:
+                cur.execute("""
+                    SELECT pd.id, pd.employee_id, pd.permission_name, pd.endpoint, pd.denied_at,
+                           CONCAT(e.first_name, ' ', e.last_name) AS employee_name
+                    FROM permission_denials pd
+                    LEFT JOIN employees e ON pd.employee_id = e.employee_id
+                    WHERE pd.establishment_id = %s AND pd.denied_at > %s
+                    ORDER BY pd.denied_at DESC
+                    LIMIT %s
+                """, (establishment_id, since, limit))
+            else:
+                cur.execute("""
+                    SELECT pd.id, pd.employee_id, pd.permission_name, pd.endpoint, pd.denied_at,
+                           CONCAT(e.first_name, ' ', e.last_name) AS employee_name
+                    FROM permission_denials pd
+                    LEFT JOIN employees e ON pd.employee_id = e.employee_id
+                    WHERE pd.establishment_id = %s
+                    ORDER BY pd.denied_at DESC
+                    LIMIT %s
+                """, (establishment_id, limit))
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description] if cur.description else []
+            events = [dict(zip(cols, r)) if isinstance(r, tuple) else dict(r) for r in rows]
+            # Convert datetime to ISO string
+            for ev in events:
+                if ev.get('denied_at') and hasattr(ev['denied_at'], 'isoformat'):
+                    ev['denied_at'] = ev['denied_at'].isoformat()
+        finally:
+            conn.close()
+
+        return jsonify({'success': True, 'denials': events})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/admin/employees/<int:employee_id>/make-admin', methods=['PATCH'])
+def api_make_employee_admin(employee_id):
+    """Promote or demote an employee's admin status (requires admin session)."""
+    try:
+        emp = _get_session_employee(require_admin=True)
+        if not emp:
+            return jsonify({'success': False, 'message': 'Admin session required'}), 403
+
+        data = request.json or {}
+        is_admin = bool(data.get('is_admin', True))
+
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE employees SET is_admin = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE employee_id = %s AND establishment_id = %s
+            """, (is_admin, employee_id, emp.get('establishment_id')))
+            if cur.rowcount == 0:
+                return jsonify({'success': False, 'message': 'Employee not found'}), 404
+            conn.commit()
+        finally:
+            conn.close()
+
+        return jsonify({'success': True, 'employee_id': employee_id, 'is_admin': is_admin})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @app.route('/api/admin/webauthn/register/begin', methods=['POST'])
@@ -6206,6 +6517,7 @@ def api_orders_latest():
             'order_id': o.get('order_id'),
             'order_number': o.get('order_number'),
             'order_source': o.get('order_source'),
+            'order_type': o.get('order_type'),
             'order_date': o.get('order_date'),
         })
     except Exception as e:
@@ -6975,6 +7287,12 @@ def api_get_clockin_notification_settings():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+def _normalize_employee_id_list(val):
+    """Normalize a list of employee IDs to list of ints."""
+    if not isinstance(val, list):
+        return []
+    return [int(i) for i in val if str(i).strip().isdigit()]
+
 @app.route('/api/clockin-notification-settings', methods=['POST'])
 def api_save_clockin_notification_settings():
     """Save clock-in/out notification settings for a store."""
@@ -6982,13 +7300,12 @@ def api_save_clockin_notification_settings():
         data = request.json or {}
         store_id = int(data.get('store_id', 1))
         from notification_service import save_clockin_notification_settings
-        # Ensure admin_email_ids is a list of ints
-        ids = data.get('admin_email_ids', [])
-        if isinstance(ids, list):
-            ids = [int(i) for i in ids if str(i).strip().isdigit()]
-        else:
-            ids = []
-        data['admin_email_ids'] = ids
+        # Ensure admin_email_ids and extended recipient lists are lists of ints
+        data['admin_email_ids'] = _normalize_employee_id_list(data.get('admin_email_ids', []))
+        for key in ('clockin_admin_email_ids', 'clockin_admin_sms_ids', 'clockout_admin_email_ids', 'clockout_admin_sms_ids',
+                    'late_alert_admin_email_ids', 'late_alert_admin_sms_ids', 'overtime_admin_email_ids', 'overtime_admin_sms_ids'):
+            if key in data:
+                data[key] = _normalize_employee_id_list(data[key])
         ok = save_clockin_notification_settings(store_id, data)
         return jsonify({'success': ok, 'message': 'Settings saved' if ok else 'Failed to save'})
     except Exception as e:
@@ -9966,9 +10283,44 @@ def api_create_employee():
         # Assign role if provided
         if data.get('role_id'):
             assign_role_to_employee(employee_id, data['role_id'])
-        
+
+        # Promote to admin if requested (requires admin session)
+        if data.get('make_admin'):
+            requesting_emp = _get_session_employee(require_admin=True)
+            if requesting_emp:
+                conn_tmp = get_connection()
+                try:
+                    cur_tmp = conn_tmp.cursor()
+                    cur_tmp.execute(
+                        "UPDATE employees SET is_admin = TRUE WHERE employee_id = %s",
+                        (employee_id,)
+                    )
+                    conn_tmp.commit()
+                finally:
+                    conn_tmp.close()
+
+        # Delegate individual permissions (granter must have each permission themselves)
+        permissions_to_grant = data.get('permissions') or []
+        grant_errors = []
+        if permissions_to_grant:
+            session_token = (request.headers.get('X-Session-Token') or
+                             (request.json or {}).get('session_token') or
+                             request.args.get('session_token'))
+            granter_id = None
+            if session_token:
+                sess = verify_session(session_token)
+                if sess and sess.get('valid'):
+                    granter_id = sess.get('employee_id')
+            if granter_id:
+                from permission_manager import get_permission_manager
+                pm = get_permission_manager()
+                for perm_name in permissions_to_grant:
+                    ok = pm.grant_permission_to_employee(employee_id, perm_name, granter_id)
+                    if not ok:
+                        grant_errors.append(perm_name)
+
         employee = get_employee(employee_id)
-        
+
         # Prepare response
         response_data = {
             'success': True,
@@ -9977,11 +10329,14 @@ def api_create_employee():
             'account_type': account_type,
             'invitation_sent': invitation_sent
         }
-        
+
+        if grant_errors:
+            response_data['permission_grant_errors'] = grant_errors
+
         # Include generated PIN when we created one
         if pin_code and not data.get('pin_code'):
             response_data['generated_pin'] = pin_code
-        
+
         return jsonify(response_data)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -12147,18 +12502,24 @@ def api_update_store_location_settings():
                 latitude = float(latitude)
             except (ValueError, TypeError):
                 latitude = None
+        else:
+            latitude = None
         
         if longitude is not None and longitude != '':
             try:
                 longitude = float(longitude)
             except (ValueError, TypeError):
                 longitude = None
+        else:
+            longitude = None
         
         if allowed_radius is not None and allowed_radius != '':
             try:
                 allowed_radius = float(allowed_radius)
             except (ValueError, TypeError):
                 allowed_radius = None
+        else:
+            allowed_radius = None
         
         # Convert require_location to int if provided
         require_location = data.get('require_location')
@@ -12167,27 +12528,30 @@ def api_update_store_location_settings():
                 require_location = int(require_location)
             except (ValueError, TypeError):
                 require_location = None
+        else:
+            require_location = None
         
         store_hours = data.get('store_hours')
         if store_hours is not None and not isinstance(store_hours, dict):
             store_hours = None
 
+        # Call with kwargs to allow distinction between missing and explicitly null (for logo)
         success = update_store_location_settings(
-            store_name=data.get('store_name') or None,
+            store_name=data.get('store_name'),
             latitude=latitude,
             longitude=longitude,
-            address=data.get('address') or None,
+            address=data.get('address'),
             allowed_radius_meters=allowed_radius,
             require_location=require_location,
-            city=data.get('city') or None,
-            state=data.get('state') or None,
-            zip_code=data.get('zip') or None,
-            country=data.get('country') or None,
-            store_phone=data.get('store_phone') or None,
-            store_email=data.get('store_email') or None,
-            store_website=data.get('store_website') or None,
-            store_type=data.get('store_type') or None,
-            store_logo=data.get('store_logo') or None,
+            city=data.get('city'),
+            state=data.get('state'),
+            zip_code=data.get('zip'),
+            country=data.get('country'),
+            store_phone=data.get('store_phone'),
+            store_email=data.get('store_email'),
+            store_website=data.get('store_website'),
+            store_type=data.get('store_type'),
+            store_logo=data.get('store_logo'),
             store_hours=store_hours
         )
         
@@ -12543,6 +12907,182 @@ def api_get_stripe_config():
             return jsonify({'success': True, 'config': safe_config})
         else:
             return jsonify({'success': True, 'config': {'payment_processor': 'cash_only'}})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================================
+# STRIPE TERMINAL ENDPOINTS
+# ============================================================================
+
+@app.route('/api/stripe/terminal/connection-token', methods=['POST'])
+def api_stripe_terminal_connection_token():
+    """
+    Create a Stripe Terminal connection token.
+    The frontend Stripe Terminal JS SDK calls this on startup to connect to readers.
+    """
+    try:
+        from terminal_adapters import StripeTerminalAdapter
+        data = request.json or {}
+        location_id = data.get('location_id')
+        adapter = StripeTerminalAdapter()
+        result = adapter.create_connection_token(location_id=location_id)
+        return jsonify(result), (200 if result.get('success') else 500)
+    except RuntimeError as e:
+        return jsonify({'success': False, 'error': str(e)}), 503
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/terminal/readers', methods=['GET'])
+def api_stripe_terminal_list_readers():
+    """List all registered Stripe Terminal readers for this account."""
+    try:
+        from terminal_adapters import StripeTerminalAdapter
+        location_id = request.args.get('location_id')
+        adapter = StripeTerminalAdapter()
+        result = adapter.list_readers(location_id=location_id)
+        return jsonify(result), (200 if result.get('success') else 500)
+    except RuntimeError as e:
+        return jsonify({'success': False, 'error': str(e)}), 503
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/terminal/readers', methods=['POST'])
+def api_stripe_terminal_register_reader():
+    """Register a new Stripe Terminal reader by pairing code."""
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'error': 'Content-Type must be application/json'}), 400
+        data = request.json
+        registration_code = data.get('registration_code', '').strip()
+        label = data.get('label', '').strip()
+        location_id = data.get('location_id')
+        if not registration_code or not label:
+            return jsonify({'success': False, 'error': 'registration_code and label are required'}), 400
+        from terminal_adapters import StripeTerminalAdapter
+        adapter = StripeTerminalAdapter()
+        result = adapter.register_reader(registration_code, label, location_id=location_id)
+        return jsonify(result), (200 if result.get('success') else 400)
+    except RuntimeError as e:
+        return jsonify({'success': False, 'error': str(e)}), 503
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/terminal/readers/<reader_id>', methods=['DELETE'])
+def api_stripe_terminal_delete_reader(reader_id):
+    """Delete / de-register a Stripe Terminal reader."""
+    try:
+        from terminal_adapters import StripeTerminalAdapter
+        adapter = StripeTerminalAdapter()
+        result = adapter.delete_reader(reader_id)
+        return jsonify(result), (200 if result.get('success') else 400)
+    except RuntimeError as e:
+        return jsonify({'success': False, 'error': str(e)}), 503
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/terminal/readers/<reader_id>/present-payment', methods=['POST'])
+def api_stripe_terminal_present_payment(reader_id):
+    """
+    Send a PaymentIntent to a specific internet-connected reader
+    (WisePos E, Verifone P400, S700).  The reader will display the total
+    and wait for the customer to tap/insert/swipe.
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'error': 'Content-Type must be application/json'}), 400
+        data = request.json
+        payment_intent_id = data.get('payment_intent_id', '').strip()
+        if not payment_intent_id:
+            return jsonify({'success': False, 'error': 'payment_intent_id is required'}), 400
+        from terminal_adapters import StripeTerminalAdapter
+        adapter = StripeTerminalAdapter()
+        result = adapter.present_to_reader(reader_id, payment_intent_id)
+        return jsonify(result), (200 if result.get('success') else 400)
+    except RuntimeError as e:
+        return jsonify({'success': False, 'error': str(e)}), 503
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/terminal/readers/<reader_id>/cancel', methods=['POST'])
+def api_stripe_terminal_cancel_reader(reader_id):
+    """Cancel the current action on a reader (e.g. waiting for tap)."""
+    try:
+        from terminal_adapters import StripeTerminalAdapter
+        adapter = StripeTerminalAdapter()
+        result = adapter.cancel_reader_action(reader_id)
+        return jsonify(result), (200 if result.get('success') else 400)
+    except RuntimeError as e:
+        return jsonify({'success': False, 'error': str(e)}), 503
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/payment-intent', methods=['POST'])
+def api_create_payment_intent():
+    """
+    Create a Stripe PaymentIntent via the appropriate adapter.
+
+    Body:
+      amount_cents   int    (required)
+      currency       str    (default 'usd')
+      description    str
+      adapter_type   str    ('stripe_terminal' | 'manual' | 'pax' | 'cash')
+      metadata       dict
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'error': 'Content-Type must be application/json'}), 400
+        data = request.json
+        amount_cents = int(data.get('amount_cents', 0))
+        if amount_cents <= 0:
+            return jsonify({'success': False, 'error': 'amount_cents must be > 0'}), 400
+        currency = data.get('currency', 'usd')
+        description = data.get('description', '')
+        metadata = data.get('metadata') or {}
+        adapter_type = data.get('adapter_type', 'manual')
+
+        from terminal_adapters import get_adapter
+        adapter = get_adapter(adapter_type)
+        result = adapter.create_payment(
+            amount_cents=amount_cents,
+            currency=currency,
+            description=description,
+            metadata=metadata,
+        )
+        return jsonify(result), (200 if result.get('success') else 400)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/payment-intent/<payment_intent_id>/capture', methods=['POST'])
+def api_capture_payment_intent(payment_intent_id):
+    """Capture a previously authorised PaymentIntent (Stripe Terminal flow)."""
+    try:
+        from terminal_adapters import StripeTerminalAdapter
+        adapter = StripeTerminalAdapter()
+        result = adapter.capture_payment(payment_intent_id)
+        return jsonify(result), (200 if result.get('success') else 400)
+    except RuntimeError as e:
+        return jsonify({'success': False, 'error': str(e)}), 503
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe/payment-intent/<payment_intent_id>/cancel', methods=['POST'])
+def api_cancel_payment_intent(payment_intent_id):
+    """Cancel an in-progress PaymentIntent."""
+    try:
+        adapter_type = (request.json or {}).get('adapter_type', 'manual')
+        from terminal_adapters import get_adapter
+        adapter = get_adapter(adapter_type)
+        result = adapter.cancel_payment(payment_intent_id)
+        return jsonify(result), (200 if result.get('success') else 400)
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500

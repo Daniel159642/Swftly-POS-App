@@ -13,7 +13,7 @@ import { playNewOrderSound } from '../utils/notificationSound'
 import { useToast } from '../contexts/ToastContext'
 
 const NEW_ORDER_TOAST_OPTIONS_KEY = 'pos_new_order_toast_options'
-const DEFAULT_NEW_ORDER_TOAST_OPTIONS = { play_sound: true, sound_type: 'default', volume: 0.5, sound_until_dismiss: false, auto_dismiss_sec: 0, click_action: 'go_to_order' }
+const DEFAULT_NEW_ORDER_TOAST_OPTIONS = { play_sound: true, sound_type: 'default', volume: 0.5, sound_until_dismiss: false, auto_dismiss_sec: 0, click_action: 'go_to_order', order_type_filter: ['all'] }
 
 function getNewOrderToastOptions() {
   try {
@@ -414,12 +414,22 @@ function RecentOrders() {
             const notifSettings = localStorage.getItem('pos_notification_settings')
             const prefs = notifSettings ? JSON.parse(notifSettings) : {}
             if (prefs.recent_new_order !== false) {
+              const opts = getNewOrderToastOptions()
+              const filter = Array.isArray(opts.order_type_filter) ? opts.order_type_filter : ['all']
               const source = (result.order_source || '').toLowerCase().trim()
-              setNewOrderToast({
-                order_id: latestId,
-                order_number: result.order_number || `#${latestId}`,
-                order_source: source
-              })
+              const orderType = (result.order_type || '').toLowerCase().trim()
+              const matches = filter.includes('all') || filter.length === 0 || (
+                filter.includes(source) ||
+                filter.includes(orderType) ||
+                ((!source || source === 'pos' || source === 'inhouse' || source === 'in_house') && filter.includes('pos'))
+              )
+              if (matches) {
+                setNewOrderToast({
+                  order_id: latestId,
+                  order_number: result.order_number || `#${latestId}`,
+                  order_source: source
+                })
+              }
             }
           } catch (_) {
             const source = (result.order_source || '').toLowerCase().trim()

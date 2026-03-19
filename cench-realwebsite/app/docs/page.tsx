@@ -19,6 +19,28 @@ import { useTransition } from '../TransitionContext';
 
 const DOCS_DATA = [
   {
+    id: 'overview',
+    title: 'Get Started',
+    overview: "Swftly is a modern point-of-sale and business management platform for retail and hospitality. Use the sections below to get oriented, then explore the full documentation.",
+    subsections: [
+      { 
+        id: 'what-is-swftly', 
+        title: 'What is Swftly?', 
+        content: "Swftly is a unified point-of-sale and business management platform built for retail and hospitality. It combines POS, inventory, accounting, employee management, and customer marketing into a single system—so you can run your business from one place.\n\nWhether you operate a single store or multiple locations, Swftly scales with you. The platform runs on desktop, tablet, and mobile, with native apps for iOS, Android, and Windows."
+      },
+      { 
+        id: 'quickstart', 
+        title: 'Quickstart', 
+        content: "Get up and running in minutes.\n\n1. Sign up or log in to your Swftly account.\n2. Complete your business profile (name, address, tax settings).\n3. Add products or import your inventory via CSV.\n4. Configure your first register and payment methods.\n5. Invite your team and set permissions.\n\nOnce your basics are set, you can start ringing sales, receiving shipments, and generating reports. Use the documentation links below to dive deeper into any area."
+      },
+      { 
+        id: 'navigating-interface', 
+        title: 'Navigating the Interface', 
+        content: "The main navigation is organized by function.\n\n• POS — Ring sales, process refunds, and manage orders.\n• Inventory — Products, categories, shipments, and stock levels.\n• Accounting — Chart of accounts, transactions, financial statements, and reports.\n• Employees — Scheduling, permissions, and payroll data.\n• Customers — Loyalty, marketing, and customer records.\n• Settings — Business profile, tax, payments, and integrations.\n\nUse the sidebar or top menu to switch between sections. Press ⌘K (or Ctrl+K) to search documentation from anywhere."
+      }
+    ]
+  },
+  {
     id: 'accounting',
     title: 'Accounting',
     overview: "Swftly's accounting engine uses standard double-entry bookkeeping. Every POS event—sales, refunds, voids, shipment receipts, cash drops, and inventory adjustments—automatically creates balanced journal entries. Your financial records stay audit-ready and tax-compliant without manual data entry.",
@@ -279,6 +301,17 @@ export default function DocsPage() {
   }, [isSearchOpen]);
 
   useEffect(() => {
+    if (isSearchOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isSearchOpen]);
+
+  useEffect(() => {
     if (contentRef.current) {
       contentRef.current.scrollTo(0, 0);
     }
@@ -297,7 +330,7 @@ export default function DocsPage() {
     doc.subsections.some(sub => sub.title.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const activeDoc = activeTab === 'overview' ? null : DOCS_DATA.find(d => d.id === activeTab) || DOCS_DATA[0];
+  const activeDoc = DOCS_DATA.find(d => d.id === activeTab) || DOCS_DATA[0];
   const activeSubDoc = activeDoc ? activeDoc.subsections.find(s => s.id === activeSubTab) : null;
 
   const [isScrolled, setIsScrolled] = useState(false);
@@ -342,9 +375,10 @@ export default function DocsPage() {
 
   return (
     <div
-      className="min-h-screen font-sans flex flex-col"
+      className="min-h-screen flex flex-col"
       style={{
-        background: 'linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%)'
+        background: 'linear-gradient(145deg, #eaeff8 0%, #dce6f2 40%, #cfd9ed 100%)',
+        fontFamily: 'var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif'
       }}
     >
       <header
@@ -532,9 +566,9 @@ export default function DocsPage() {
                           setIsMobileNavOpen(false);
                         }}
                       >
-                        Overview
+                        Get Started
                       </button>
-                      {DOCS_DATA.map((item) => (
+                      {DOCS_DATA.filter(d => d.id !== 'overview').map((item) => (
                         <div key={item.id}>
                           <button
                             className={`w-full text-left px-4 py-3 rounded-xl text-[15px] font-bold transition-colors flex items-center justify-between ${activeTab === item.id ? 'bg-black text-white' : 'text-black/60 hover:bg-black/5'}`}
@@ -568,9 +602,9 @@ export default function DocsPage() {
               onClick={() => { setActiveTab('overview'); setActiveSubTab(null); }}
               className={`px-4 py-2.5 rounded-full text-[13px] font-bold transition-all border whitespace-nowrap ${activeTab === 'overview' ? 'bg-white border-black/10 text-black shadow-sm' : 'bg-transparent border-transparent text-black/40'}`}
             >
-              Overview
+              Get Started
             </button>
-            {DOCS_DATA.map((item) => (
+            {DOCS_DATA.filter(d => d.id !== 'overview').map((item) => (
               <button
                 key={item.id}
                 data-active={activeTab === item.id}
@@ -598,21 +632,57 @@ export default function DocsPage() {
           </button>
 
           <div className="space-y-1">
-            <button
-              onClick={() => { setActiveTab('overview'); setActiveSubTab(null); }}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold rounded-xl transition-all duration-200 font-sans mb-4 ${activeTab === 'overview' ? 'bg-white shadow-sm ring-1 ring-black/5 text-black' : 'text-black/40 hover:text-black/60 hover:bg-white/30'}`}
-            >
-              Overview
-            </button>
+            {/* Get Started - appears once above Documentation */}
+            <div className="mb-4">
+              <button
+                onClick={() => { setActiveTab('overview'); if (activeTab !== 'overview') setActiveSubTab(null); }}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold rounded-xl transition-all duration-200 group font-sans ${activeTab === 'overview' ? 'bg-white/60 shadow-sm ring-1 ring-black/5 text-black' : 'text-black/40 hover:text-black/60 hover:bg-white/30'}`}
+              >
+                Get Started
+                <div className="ml-auto">
+                  {activeTab === 'overview' ? (
+                    <ChevronDown className="w-4 h-4 text-black/20" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-black/10 group-hover:text-black/20" />
+                  )}
+                </div>
+              </button>
+              <AnimatePresence>
+                {activeTab === 'overview' && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden mt-1 ml-4"
+                  >
+                    <button
+                      onClick={() => setActiveSubTab(null)}
+                      className={`w-full text-left px-5 py-2 text-[12px] font-bold transition-colors rounded-lg font-sans ${activeSubTab === null ? 'text-black' : 'text-black/35 hover:text-black/50 hover:bg-white/20'}`}
+                    >
+                      Overview
+                    </button>
+                    {DOCS_DATA.find(d => d.id === 'overview')?.subsections.map(sub => (
+                      <button
+                        key={sub.id}
+                        onClick={() => setActiveSubTab(sub.id)}
+                        className={`w-full text-left px-5 py-2 text-[12px] font-bold transition-colors rounded-lg mt-0.5 font-sans ${activeSubTab === sub.id ? 'text-black' : 'text-black/35 hover:text-black/50 hover:bg-white/20'}`}
+                      >
+                        {sub.title}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
             <div className="text-[11px] font-bold text-black/60 uppercase tracking-widest px-4 mb-4 font-sans">Documentation</div>
-            {DOCS_DATA.map((item) => (
+            {DOCS_DATA.filter(d => d.id !== 'overview').map((item) => (
               <div key={item.id} className="mb-2">
                 <button
                   onClick={() => { 
                     setActiveTab(item.id); 
                     if (activeTab !== item.id) setActiveSubTab(null);
                   }}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold rounded-xl transition-all duration-200 group font-sans ${activeTab === item.id ? 'bg-white shadow-sm ring-1 ring-black/5 text-black' : 'text-black/40 hover:text-black/60 hover:bg-white/30'}`}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold rounded-xl transition-all duration-200 group font-sans ${activeTab === item.id ? 'bg-white/60 shadow-sm ring-1 ring-black/5 text-black' : 'text-black/40 hover:text-black/60 hover:bg-white/30'}`}
                 >
                   {item.title}
                   <div className="ml-auto">
@@ -657,54 +727,23 @@ export default function DocsPage() {
 
         {/* Content Area */}
         <div 
-          className="flex-1 flex flex-col min-h-0 bg-white/40 backdrop-blur-md rounded-[32px] md:rounded-[40px] border border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.04)] overflow-hidden"
+          className="flex-1 flex flex-col min-h-0 overflow-hidden"
+          style={{ fontFamily: 'var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif' }}
         >
-          <div ref={contentRef} className="flex-1 overflow-y-auto p-6 md:p-20 scrollbar-hide">
+          <div ref={contentRef} className="flex-1 overflow-y-auto pt-4 pb-6 px-6 md:pt-10 md:pb-20 md:px-20 scrollbar-hide">
             {/* Mobile Subsections horizontal scroller */}
             {activeSubTab && (
               <button 
                 onClick={() => setActiveSubTab(null)}
-                className="md:hidden flex items-center gap-1.5 text-[11px] font-black text-black/40 uppercase tracking-widest mb-6 bg-black/5 px-3 py-1.5 rounded-full w-fit"
+                className="md:hidden flex items-center gap-1.5 text-[11px] font-black text-neutral-500 uppercase tracking-widest mb-6 bg-neutral-200/60 px-3 py-1.5 rounded-full w-fit"
               >
                 <ChevronRight className="w-3 h-3 rotate-180" />
-                Back to Overview
+                Back to {activeTab === 'overview' ? 'Get Started' : 'Overview'}
               </button>
             )}
 
             <AnimatePresence mode="wait">
-              {activeTab === 'overview' ? (
-                <motion.div
-                  key="overview"
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -10 }}
-                  transition={{ duration: 0.2 }}
-                  className="max-w-2xl"
-                >
-                  <div className="flex items-center gap-2 text-[10px] md:text-[11px] font-bold text-black/75 uppercase tracking-widest mb-4 font-sans">
-                    <span>Documentation</span>
-                  </div>
-                  <h1 className="text-3xl md:text-5xl font-black text-black mb-6 md:mb-8 tracking-tighter">
-                    Overview
-                  </h1>
-                  <p className="text-[14px] md:text-[16px] leading-relaxed font-bold mb-8" style={{ color: '#4a4a4a' }}>
-                    Swftly documentation covers all platform features. Use the links below to jump to any section.
-                  </p>
-                  <div className="space-y-2">
-                    {DOCS_DATA.map((item) => (
-                      <button
-                        key={item.id}
-                        onClick={() => { setActiveTab(item.id); setActiveSubTab(null); }}
-                        className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-white border border-black/5 text-left group hover:shadow-sm hover:border-black/20 transition-all"
-                      >
-                        <span className="text-[14px] md:text-[15px] font-bold text-black group-hover:text-black/80 tracking-tight">{item.title}</span>
-                        <ChevronRight className="w-4 h-4 text-black/30 group-hover:text-black/60 shrink-0" />
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
-              ) : (
-                <motion.div
+              <motion.div
                   key={`${activeTab}-${activeSubTab}`}
                   initial={{ opacity: 0, x: 10 }}
                   animate={{ opacity: 1, x: 0 }}
@@ -712,8 +751,8 @@ export default function DocsPage() {
                   transition={{ duration: 0.2 }}
                   className="max-w-2xl"
                 >
-                  <div className="flex items-center gap-2 text-[10px] md:text-[11px] font-bold text-black/75 uppercase tracking-widest mb-4 font-sans">
-                    <span>{activeDoc?.title}</span>
+                  <div className="flex items-center gap-2 text-[9px] md:text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-2">
+                    <span>{activeSubTab ? activeDoc?.title : 'Overview'}</span>
                     {activeSubTab && (
                        <>
                           <ChevronRight className="w-3 h-3" />
@@ -722,41 +761,57 @@ export default function DocsPage() {
                     )}
                   </div>
 
-                  <h1 className="text-3xl md:text-5xl font-black text-black mb-6 md:mb-8 tracking-tighter">
-                    {activeSubTab ? activeSubDoc?.title : "Overview"}
+                  <h1 className="text-2xl md:text-4xl font-black text-neutral-600 mb-4 md:mb-6 tracking-tighter">
+                    {activeSubTab ? activeSubDoc?.title : activeDoc?.title}
                   </h1>
 
-                  <div className="prose prose-p:leading-relaxed prose-p:text-[14px] md:prose-p:text-[16px] max-w-none font-bold">
-                     <p className="whitespace-pre-wrap" style={{ color: '#4a4a4a' }}>
+                  <div className="prose prose-p:leading-relaxed prose-p:text-[14px] md:prose-p:text-[16px] max-w-none font-medium">
+                     <p className="whitespace-pre-wrap text-neutral-600">
                         {activeSubTab ? activeSubDoc?.content : activeDoc?.overview}
                      </p>
                   </div>
 
                   {!activeSubTab && activeDoc && (
-                     <div className="mt-8 pt-6">
-                        <div className="rounded-2xl border border-black/5 bg-white/50 p-4 md:p-5">
-                          <h3 className="text-[11px] md:text-[12px] font-black text-black tracking-wider mb-3 font-bold">Explore Subsections</h3>
+                     <div className="mt-8 pt-6 space-y-8">
+                        <div className="rounded-2xl border border-neutral-200/60 bg-white/50 p-4 md:p-5">
+                          <h3 className="text-[11px] md:text-[12px] font-bold text-neutral-500 tracking-wider mb-3">Explore Subsections</h3>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                             {activeDoc.subsections.map(sub => (
                               <button
                                 key={sub.id}
                                 onClick={() => setActiveSubTab(sub.id)}
-                                className="flex items-center justify-between px-4 py-3 md:py-2.5 rounded-xl bg-white border border-black/5 text-left group hover:shadow-sm hover:border-black/20 transition-all shadow-sm"
+                                className="flex items-center justify-between px-4 py-3 md:py-2.5 rounded-xl bg-white border border-neutral-200/60 text-left group hover:shadow-sm hover:border-neutral-300 transition-all shadow-sm"
                               >
-                                <span className="text-[12px] md:text-[13px] font-bold text-black/85 group-hover:text-black tracking-tight">{sub.title}</span>
-                                <ChevronRight className="w-3.5 h-3.5 text-black/10 group-hover:text-black/40 shrink-0" />
+                                <span className="text-[12px] md:text-[13px] font-medium text-neutral-600 group-hover:text-neutral-700 tracking-tight">{sub.title}</span>
+                                <ChevronRight className="w-3.5 h-3.5 text-neutral-400 group-hover:text-neutral-600 shrink-0" />
                               </button>
                             ))}
                           </div>
                         </div>
+                        {activeDoc.id === 'overview' && (
+                          <div className="rounded-2xl border border-neutral-200/60 bg-white/50 p-4 md:p-5">
+                            <h3 className="text-[11px] md:text-[12px] font-bold text-neutral-500 tracking-wider mb-3">Full Documentation</h3>
+                            <div className="space-y-2">
+                              {DOCS_DATA.filter(d => d.id !== 'overview').map((item) => (
+                                <button
+                                  key={item.id}
+                                  onClick={() => { setActiveTab(item.id); setActiveSubTab(null); }}
+                                  className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl bg-white/40 border border-white/60 text-left group hover:bg-white/60 transition-all"
+                                >
+                                  <span className="text-[12px] md:text-[13px] font-medium text-neutral-600 group-hover:text-neutral-700 tracking-tight">{item.title}</span>
+                                  <ChevronRight className="w-3.5 h-3.5 text-neutral-400 group-hover:text-neutral-600 shrink-0" />
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                      </div>
                   )}
                 </motion.div>
-              )}
             </AnimatePresence>
           </div>
 
-          <div className="flex-shrink-0 px-6 md:px-20 py-5 md:py-6 border-t border-black/5 text-[9px] md:text-[11px] font-bold text-gray-800 tracking-[0.2em] flex justify-between items-center bg-white/20 font-sans">
+          <div className="flex-shrink-0 px-6 md:px-20 py-5 md:py-6 border-t border-neutral-200/60 text-[9px] md:text-[11px] font-medium text-neutral-500 tracking-[0.2em] flex justify-between items-center">
             <span className="hidden sm:inline">Swftly Platform Docs</span>
             <span className="sm:hidden">Swftly Docs</span>
             <span>Updated March 2026</span>

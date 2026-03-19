@@ -23,73 +23,99 @@ class PermissionManager:
         """Get database connection"""
         return get_connection()
     
-    @staticmethod
-    def _is_admin_position_value(position) -> bool:
-        """True if position string is admin-like (for legacy users without role_id)."""
-        if position is None:
-            return False
-        return str(position).strip().lower() in ('admin', 'administrator', 'owner', 'manager')
-
     def has_permission(self, employee_id: int, permission_name: str) -> bool:
         """
-        Check if employee has specific permission
-        Checks role permissions first, then employee-specific overrides.
-        Employees with admin-like position but no role_id get full access (legacy fallback).
+        Check if employee has specific permission.
+        Priority: is_admin flag > role_permissions > employee_permission_overrides.
+        Denials are logged to permission_denials table (non-blocking).
         """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
+
+        def _log_denial(establishment_id):
+            try:
+                from flask import request as flask_request
+                endpoint = flask_request.path if flask_request else None
+            except Exception:
+                endpoint = None
+            try:
+                cursor2 = conn.cursor()
+                cursor2.execute("""
+                    INSERT INTO permission_denials (employee_id, establishment_id, permission_name, endpoint)
+                    VALUES (%s, %s, %s, %s)
+                """, (employee_id, establishment_id or 0, permission_name, endpoint))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
         try:
-            # Get employee's role_id (and position for legacy admin check)
+            # Get employee's is_admin flag, role_id, and establishment_id
             cursor.execute("""
-                SELECT role_id, position FROM employees
+                SELECT role_id, is_admin, establishment_id FROM employees
                 WHERE employee_id = %s AND active = 1
             """, (employee_id,))
-            
+
             role_result = cursor.fetchone()
             if not role_result:
                 return False
-            
-            role_id = role_result[0] if isinstance(role_result, tuple) else role_result.get('role_id')
-            position = role_result[1] if isinstance(role_result, tuple) else role_result.get('position')
-            # Legacy: no role_id but position is admin -> full access
+
+            if isinstance(role_result, tuple):
+                role_id, is_admin, establishment_id = role_result[0], role_result[1], role_result[2]
+            else:
+                role_id = role_result.get('role_id')
+                is_admin = role_result.get('is_admin')
+                establishment_id = role_result.get('establishment_id')
+
+            # Admins have unrestricted access
+            if is_admin:
+                return True
+
             if role_id is None:
-                if self._is_admin_position_value(position):
-                    return True
+                _log_denial(establishment_id)
                 return False
-            
+
             # Get permission_id
             cursor.execute("""
                 SELECT permission_id FROM permissions
                 WHERE permission_name = %s
             """, (permission_name,))
-            
+
             perm_result = cursor.fetchone()
             if not perm_result:
+                _log_denial(establishment_id)
                 return False
-            
+
             permission_id = perm_result[0] if isinstance(perm_result, tuple) else perm_result['permission_id']
-            
+
             # Check for employee-specific override first
             cursor.execute("""
                 SELECT granted FROM employee_permission_overrides
                 WHERE employee_id = %s AND permission_id = %s
             """, (employee_id, permission_id))
-            
+
             override = cursor.fetchone()
             if override:
                 granted = override[0] if isinstance(override, tuple) else override['granted']
-                return bool(granted)
-            
+                result = bool(granted)
+                if not result:
+                    _log_denial(establishment_id)
+                return result
+
             # Check role permissions
             cursor.execute("""
                 SELECT granted FROM role_permissions
                 WHERE role_id = %s AND permission_id = %s AND granted = 1
             """, (role_id, permission_id))
-            
+
             role_perm = cursor.fetchone()
-            return bool(role_perm) if role_perm else False
-            
+            result = bool(role_perm) if role_perm else False
+            if not result:
+                _log_denial(establishment_id)
+            return result
+
         finally:
             conn.close()
     
@@ -106,31 +132,33 @@ class PermissionManager:
             
             cursor = conn.cursor()
             
-            # Get employee's role
+            # Get employee's role and admin flag
             cursor.execute("""
-                SELECT role_id, position FROM employees
+                SELECT role_id, is_admin FROM employees
                 WHERE employee_id = %s AND active = 1
             """, (employee_id,))
-            
+
             role_result = cursor.fetchone()
-            role_id = role_result[0] if isinstance(role_result, tuple) else (role_result.get('role_id') if role_result else None)
-            position = (role_result[1] if isinstance(role_result, tuple) else role_result.get('position')) if role_result else None
-            # Legacy: no role_id but position is admin -> return all permissions
             if not role_result:
                 return {}
+            role_id = role_result[0] if isinstance(role_result, tuple) else role_result.get('role_id')
+            is_admin = role_result[1] if isinstance(role_result, tuple) else role_result.get('is_admin')
+
+            # Admins get all permissions
+            if is_admin:
+                all_perms = self.get_all_permissions()
+                grouped = {}
+                for p in all_perms:
+                    cat = p.get('permission_category') or 'other'
+                    if cat not in grouped:
+                        grouped[cat] = []
+                    grouped[cat].append({
+                        'name': p.get('permission_name'),
+                        'description': p.get('description') or p.get('permission_name')
+                    })
+                return grouped
+
             if role_id is None:
-                if self._is_admin_position_value(position):
-                    all_perms = self.get_all_permissions()
-                    grouped = {}
-                    for p in all_perms:
-                        cat = p.get('permission_category') or 'other'
-                        if cat not in grouped:
-                            grouped[cat] = []
-                        grouped[cat].append({
-                            'name': p.get('permission_name'),
-                            'description': p.get('description') or p.get('permission_name')
-                        })
-                    return grouped
                 return {}
             
             # Get all permissions with role and override status
@@ -208,23 +236,35 @@ class PermissionManager:
     
     def grant_permission_to_employee(self, employee_id: int, permission_name: str,
                                     granted_by: int, reason: Optional[str] = None) -> bool:
-        """Grant specific permission to employee (override role)"""
+        """Grant specific permission to employee (override role).
+
+        Privilege escalation guard: the granter must either be an admin (is_admin=TRUE)
+        or themselves have the permission they are trying to grant.
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
+
         try:
+            # Privilege escalation guard
+            cursor.execute("SELECT is_admin FROM employees WHERE employee_id = %s", (granted_by,))
+            granter_row = cursor.fetchone()
+            granter_is_admin = bool((granter_row[0] if isinstance(granter_row, tuple) else (granter_row or {}).get('is_admin')) if granter_row else False)
+            if not granter_is_admin:
+                if not self.has_permission(granted_by, permission_name):
+                    return False
+
             # Get permission_id
             cursor.execute("""
                 SELECT permission_id FROM permissions
                 WHERE permission_name = %s
             """, (permission_name,))
-            
+
             result = cursor.fetchone()
             if not result:
                 return False
-            
+
             permission_id = result[0] if isinstance(result, tuple) else result['permission_id']
-            
+
             # Insert or update override
             cursor.execute("""
                 INSERT INTO employee_permission_overrides

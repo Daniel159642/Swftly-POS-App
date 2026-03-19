@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { usePermissions } from '../contexts/PermissionContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { Users } from 'lucide-react';
+import { Users, ChevronDown, ChevronUp } from 'lucide-react';
 
 function EmployeeManagement() {
-  const { hasPermission } = usePermissions();
+  const { hasPermission, isAdmin } = usePermissions();
   const { themeColor, themeMode } = useTheme();
   
   // Convert hex to RGB for rgba usage
@@ -174,13 +174,14 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
   const [expandedRow, setExpandedRow] = useState(null);
   const [showAddEmployeeModal, setShowAddEmployeeModal] = useState(false);
   const [newEmployee, setNewEmployee] = useState({
+    username: '',
     first_name: '',
     last_name: '',
     email: '',
     phone: '',
     position: 'cashier',
     date_started: new Date().toISOString().split('T')[0],
-    account_type: 'pin_only', // 'pin_only' or 'clerk_master'
+    account_type: 'pin_only',
     pin_code: '',
     role_id: null,
     department: '',
@@ -190,6 +191,9 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
   const [creatingEmployee, setCreatingEmployee] = useState(false);
   const [createError, setCreateError] = useState('');
   const [createSuccess, setCreateSuccess] = useState(null);
+  const [grantablePermissions, setGrantablePermissions] = useState([]);
+  const [selectedPermissions, setSelectedPermissions] = useState([]);
+  const [showPermissionsSection, setShowPermissionsSection] = useState(false);
   
   // Determine if dark mode is active
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -216,6 +220,18 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
     loadRoles();
     loadAvailability();
   }, []);
+
+  useEffect(() => {
+    if (showAddEmployeeModal && grantablePermissions.length === 0) {
+      const token = localStorage.getItem('sessionToken') || localStorage.getItem('session_token')
+      fetch('/api/my/grantable-permissions', {
+        headers: token ? { 'X-Session-Token': token } : {}
+      })
+        .then(r => r.json())
+        .then(d => { if (d.success) setGrantablePermissions(d.permissions || []) })
+        .catch(() => {})
+    }
+  }, [showAddEmployeeModal]);
 
   const loadRoles = async () => {
     try {
@@ -312,22 +328,29 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
     setCreateSuccess(null)
 
     try {
+      const token = localStorage.getItem('sessionToken') || localStorage.getItem('session_token')
       const employeeData = {
         ...newEmployee,
         hourly_rate: newEmployee.hourly_rate ? parseFloat(newEmployee.hourly_rate) : null,
-        role_id: newEmployee.role_id || null
+        role_id: newEmployee.role_id || null,
+        permissions: selectedPermissions.length > 0 ? selectedPermissions : undefined,
+        session_token: token || undefined,
+        make_admin: newEmployee.make_admin || undefined,
       }
 
       // Remove empty optional fields
       Object.keys(employeeData).forEach(key => {
-        if (employeeData[key] === '' || employeeData[key] === null) {
+        if (employeeData[key] === '' || employeeData[key] === null || employeeData[key] === undefined) {
           delete employeeData[key]
         }
       })
 
+      const headers = { 'Content-Type': 'application/json' }
+      if (token) headers['X-Session-Token'] = token
+
       const response = await fetch('/api/admin/employees', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(employeeData)
       })
 
@@ -346,6 +369,7 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
 
       // Reset form
       setNewEmployee({
+        username: '',
         first_name: '',
         last_name: '',
         email: '',
@@ -357,8 +381,11 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
         role_id: null,
         department: '',
         hourly_rate: '',
-        employment_type: 'part_time'
+        employment_type: 'part_time',
+        make_admin: false,
       })
+      setSelectedPermissions([])
+      setShowPermissionsSection(false)
 
       // Reload employees list
       setTimeout(() => {
@@ -464,6 +491,8 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
                   setShowAddEmployeeModal(false)
                   setCreateError('')
                   setCreateSuccess(null)
+                  setSelectedPermissions([])
+                  setShowPermissionsSection(false)
                 }}
                 style={{
                   background: 'none',
@@ -479,6 +508,36 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
             </div>
 
             <form onSubmit={handleAddEmployee}>
+              {/* Username / Employee Code */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  marginBottom: '8px',
+                  color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
+                }}>
+                  Username / Employee Code *
+                </label>
+                <input
+                  type="text"
+                  value={newEmployee.username}
+                  onChange={(e) => setNewEmployee({...newEmployee, username: e.target.value.trim()})}
+                  placeholder="e.g. jsmith or EMP001"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
+                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
               {/* Basic Information */}
               <div style={{ marginBottom: '20px' }}>
                 <label style={{
@@ -717,6 +776,91 @@ function EmployeeList({ employees, loading, error, onRefresh }) {
                   ))}
                 </select>
               </div>
+
+              {/* Custom Permissions (shown when granter has grantable permissions) */}
+              {grantablePermissions.length > 0 && (
+                <div style={{ marginBottom: '20px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowPermissionsSection(v => !v)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      background: 'none',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                      borderRadius: '8px',
+                      padding: '10px 14px',
+                      width: '100%',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#f9f9f9',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <span>Custom Permissions {selectedPermissions.length > 0 ? `(${selectedPermissions.length} selected)` : '(Optional)'}</span>
+                    {showPermissionsSection ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </button>
+                  {showPermissionsSection && (
+                    <div style={{
+                      marginTop: '8px',
+                      border: `1px solid ${isDarkMode ? 'var(--border-light, #404040)' : '#ddd'}`,
+                      borderRadius: '8px',
+                      padding: '12px',
+                      backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fafafa',
+                      maxHeight: '240px',
+                      overflowY: 'auto',
+                    }}>
+                      {Object.entries(
+                        grantablePermissions.reduce((acc, p) => {
+                          const cat = p.category || 'other'
+                          if (!acc[cat]) acc[cat] = []
+                          acc[cat].push(p)
+                          return acc
+                        }, {})
+                      ).map(([category, perms]) => (
+                        <div key={category} style={{ marginBottom: '12px' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: isDarkMode ? 'var(--text-tertiary, #888)' : '#888', marginBottom: '6px' }}>
+                            {category}
+                          </div>
+                          {perms.map(p => (
+                            <label key={p.name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', marginBottom: '4px', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={selectedPermissions.includes(p.name)}
+                                onChange={(e) => {
+                                  setSelectedPermissions(prev =>
+                                    e.target.checked ? [...prev, p.name] : prev.filter(n => n !== p.name)
+                                  )
+                                }}
+                              />
+                              <span>{p.description || p.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Make Admin toggle (admin-only) */}
+              {isAdmin && (
+                <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input
+                    type="checkbox"
+                    id="make-admin-toggle"
+                    checked={newEmployee.make_admin || false}
+                    onChange={(e) => setNewEmployee({...newEmployee, make_admin: e.target.checked})}
+                    style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                  />
+                  <label htmlFor="make-admin-toggle" style={{ fontSize: '14px', fontWeight: 500, cursor: 'pointer', color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
+                    Make Admin (full unrestricted access)
+                  </label>
+                </div>
+              )}
 
               {/* Error Message */}
               {createError && (

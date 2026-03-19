@@ -16,7 +16,7 @@ QBO_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
 def get_oauth_url() -> str:
     """Generate the OAuth2 URL for the user to grant access to QuickBooks Online"""
     client_id = os.environ.get("QBO_CLIENT_ID")
-    redirect_uri = os.environ.get("QBO_REDIRECT_URI", "http://localhost:5001/api/quickbooks/callback")
+    redirect_uri = os.environ.get("QBO_REDIRECT_URI", "http://localhost:5001/api/integrations/quickbooks/callback")
     
     if not client_id:
         raise ValueError("QBO_CLIENT_ID environment variable not set.")
@@ -39,7 +39,7 @@ def exchange_code_for_tokens(auth_code: str, realm_id: str):
     """Exchange the authorization code for an access token and refresh token"""
     client_id = os.environ.get("QBO_CLIENT_ID")
     client_secret = os.environ.get("QBO_CLIENT_SECRET")
-    redirect_uri = os.environ.get("QBO_REDIRECT_URI", "http://localhost:5001/api/quickbooks/callback")
+    redirect_uri = os.environ.get("QBO_REDIRECT_URI", "http://localhost:5001/api/integrations/quickbooks/callback")
     
     if not client_id or not client_secret:
         raise ValueError("QBO_CLIENT_ID or QBO_CLIENT_SECRET not set.")

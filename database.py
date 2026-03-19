@@ -70,6 +70,59 @@ except ImportError:
         "This system requires PostgreSQL. Install: pip3 install psycopg2-binary python-dotenv"
     )
 
+def log_extraction_cost(
+    extractor: str,
+    model: str,
+    filename: str = None,
+    file_type: str = None,
+    extraction_method: str = None,
+    input_tokens: int = None,
+    output_tokens: int = None,
+    items_extracted: int = None,
+    avg_confidence: float = None,
+    success: int = 1,
+    error_message: str = None,
+):
+    """Log the token usage and estimated cost of an AI document extraction call."""
+    # Per-model pricing in USD per 1M tokens
+    PRICING = {
+        "claude-opus-4-6":   {"input": 5.00,  "output": 25.00},
+        "claude-sonnet-4-6": {"input": 3.00,  "output": 15.00},
+        "claude-haiku-4-5":  {"input": 1.00,  "output":  5.00},
+        "gpt-4o":            {"input": 2.50,  "output": 10.00},
+        "gpt-4o-mini":       {"input": 0.15,  "output":  0.60},
+    }
+    rates = PRICING.get(model, {"input": 0.0, "output": 0.0})
+    input_cost  = (input_tokens  or 0) / 1_000_000 * rates["input"]
+    output_cost = (output_tokens or 0) / 1_000_000 * rates["output"]
+    total_cost  = input_cost + output_cost
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO extraction_cost_log
+            (extractor, model, filename, file_type, extraction_method,
+             input_tokens, output_tokens,
+             input_cost_usd, output_cost_usd, total_cost_usd,
+             items_extracted, avg_confidence, success, error_message)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            extractor, model, filename, file_type, extraction_method,
+            input_tokens, output_tokens,
+            round(input_cost, 6), round(output_cost, 6), round(total_cost, 6),
+            items_extracted, avg_confidence, success, error_message,
+        ))
+        conn.commit()
+    except Exception as e:
+        print(f"[extraction_cost_log] Failed to write log: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def generate_unique_barcode(pending_shipment_id: int, line_number: int, product_sku: str = '') -> str:
     """
     Generate a unique 12-digit barcode for a shipment item
@@ -150,7 +203,10 @@ def ensure_metadata_tables(conn=None):
         try:
             cursor = conn.cursor()
             cursor.execute("SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'product_metadata'")
-            if cursor.fetchone():
+            has_product_metadata = cursor.fetchone()
+            cursor.execute("SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'extraction_cost_log'")
+            has_cost_log = cursor.fetchone()
+            if has_product_metadata and has_cost_log:
                 if should_close:
                     try:
                         conn.close()
@@ -160,13 +216,17 @@ def ensure_metadata_tables(conn=None):
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS categories (
                     category_id SERIAL PRIMARY KEY,
-                    establishment_id INTEGER NOT NULL DEFAULT 1 REFERENCES establishments(establishment_id) ON DELETE CASCADE,
                     category_name TEXT NOT NULL,
                     description TEXT,
                     parent_category_id INTEGER REFERENCES categories(category_id),
                     is_auto_generated INTEGER DEFAULT 0 CHECK(is_auto_generated IN (0, 1)),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
+            """)
+            # Add establishment_id column if it doesn't exist yet
+            cursor.execute("""
+                ALTER TABLE categories
+                ADD COLUMN IF NOT EXISTS establishment_id INTEGER DEFAULT 1 REFERENCES establishments(establishment_id) ON DELETE CASCADE
             """)
             cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_root_name
@@ -219,10 +279,50 @@ def ensure_metadata_tables(conn=None):
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_product_metadata_product ON product_metadata(product_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_product_metadata_category ON product_metadata(category_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_product_metadata_brand ON product_metadata(brand)")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS extraction_cost_log (
+                    log_id SERIAL PRIMARY KEY,
+                    extractor TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    filename TEXT,
+                    file_type TEXT,
+                    extraction_method TEXT,
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    input_cost_usd NUMERIC(10,6),
+                    output_cost_usd NUMERIC(10,6),
+                    total_cost_usd NUMERIC(10,6),
+                    items_extracted INTEGER,
+                    avg_confidence REAL,
+                    success INTEGER DEFAULT 1 CHECK(success IN (0, 1)),
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_metadata_log_product ON metadata_extraction_log(product_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_search_history_timestamp ON search_history(search_timestamp)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_categories_name ON categories(category_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_category_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_extraction_cost_log_created ON extraction_cost_log(created_at)")
+            cursor.execute("""
+                CREATE OR REPLACE VIEW extraction_cost_by_model AS
+                SELECT
+                    extractor,
+                    model,
+                    COUNT(*)                                          AS total_calls,
+                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END)     AS successful_calls,
+                    SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END)     AS failed_calls,
+                    SUM(input_tokens)                                 AS total_input_tokens,
+                    SUM(output_tokens)                                AS total_output_tokens,
+                    ROUND(SUM(total_cost_usd)::NUMERIC, 6)           AS total_cost_usd,
+                    ROUND(AVG(total_cost_usd)::NUMERIC, 6)           AS avg_cost_per_call,
+                    ROUND(AVG(items_extracted)::NUMERIC, 1)          AS avg_items_extracted,
+                    ROUND(AVG(avg_confidence)::NUMERIC, 3)           AS avg_confidence,
+                    MAX(created_at)                                   AS last_used
+                FROM extraction_cost_log
+                GROUP BY extractor, model
+                ORDER BY total_cost_usd DESC
+            """)
             conn.commit()
         except Exception:
             try:
@@ -3736,6 +3836,215 @@ def is_admin_user(employee_id: int, cursor) -> bool:
 def validate_admin_password(password: str) -> bool:
     """Validate that admin password contains only numbers"""
     return password.isdigit()
+
+
+# ── Default 3-role permission sets ────────────────────────────────────────────
+_ALL_PERMISSIONS = [
+    # Sales
+    ('process_sale', 'sales', 'Process a sale transaction'),
+    ('process_return', 'sales', 'Process returns and refunds'),
+    ('apply_discount', 'sales', 'Apply discounts to items'),
+    ('void_transaction', 'sales', 'Void a transaction'),
+    ('view_sales', 'sales', 'View sales transactions'),
+    ('edit_sale', 'sales', 'Edit completed sales'),
+    # Inventory
+    ('view_inventory', 'inventory', 'View inventory levels and products'),
+    ('add_product', 'inventory', 'Add new products'),
+    ('edit_product', 'inventory', 'Edit product information'),
+    ('delete_product', 'inventory', 'Delete products'),
+    ('adjust_inventory', 'inventory', 'Manually adjust inventory counts'),
+    ('receive_shipment', 'inventory', 'Receive and process shipments'),
+    ('transfer_inventory', 'inventory', 'Transfer inventory between locations'),
+    # Employee/User management
+    ('view_employees', 'users', 'View employee list'),
+    ('add_employee', 'users', 'Add new employees'),
+    ('edit_employee', 'users', 'Edit employee information'),
+    ('delete_employee', 'users', 'Delete employees'),
+    ('manage_permissions', 'users', 'Manage user roles and permissions'),
+    ('view_activity_log', 'users', 'View system activity logs'),
+    # Reports
+    ('view_sales_reports', 'reports', 'View sales reports'),
+    ('view_inventory_reports', 'reports', 'View inventory reports'),
+    ('view_employee_reports', 'reports', 'View employee performance reports'),
+    ('view_financial_reports', 'reports', 'View financial reports'),
+    ('export_reports', 'reports', 'Export reports to file'),
+    # Settings
+    ('modify_settings', 'settings', 'Modify system settings'),
+    ('manage_vendors', 'settings', 'Manage vendor information'),
+    ('manage_customers', 'settings', 'Manage customer database'),
+    ('backup_database', 'settings', 'Create database backups'),
+    ('view_audit_logs', 'settings', 'View system audit logs'),
+]
+
+_MANAGER_PERMISSIONS = {
+    'process_sale', 'process_return', 'apply_discount', 'void_transaction', 'view_sales', 'edit_sale',
+    'view_inventory', 'add_product', 'edit_product', 'adjust_inventory', 'receive_shipment', 'transfer_inventory',
+    'view_employees', 'add_employee', 'edit_employee', 'view_activity_log',
+    'view_sales_reports', 'view_inventory_reports', 'view_employee_reports', 'view_financial_reports', 'export_reports',
+    'modify_settings', 'manage_vendors', 'manage_customers', 'view_audit_logs',
+}
+
+_EMPLOYEE_PERMISSIONS = {
+    'process_sale', 'process_return', 'apply_discount', 'view_sales',
+    'view_inventory',
+    'view_employees',
+    'view_sales_reports', 'view_inventory_reports', 'export_reports',
+}
+
+
+def ensure_rbac_seeded(establishment_id: int) -> None:
+    """Seed the 3 default roles + all permissions for an establishment if not already present.
+
+    Roles: admin (all), manager (all except manage_permissions/delete_product/backup_database),
+    employee (basic POS). Safe to call multiple times — uses ON CONFLICT DO NOTHING.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        # Seed permissions (global, no establishment scope)
+        for perm_name, category, description in _ALL_PERMISSIONS:
+            cursor.execute("""
+                INSERT INTO permissions (permission_name, permission_category, description)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (permission_name) DO NOTHING
+            """, (perm_name, category, description))
+
+        # Seed 3 roles
+        roles_to_create = [
+            ('admin', 'Full system access — unrestricted', 1),
+            ('manager', 'Manage staff, inventory and reports; no permission management', 0),
+            ('employee', 'Basic POS: process sales, view inventory', 0),
+        ]
+        role_ids = {}
+        for role_name, description, is_system in roles_to_create:
+            cursor.execute("""
+                INSERT INTO roles (establishment_id, role_name, description, is_system_role)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                RETURNING role_id
+            """, (establishment_id, role_name, description, is_system))
+            result = cursor.fetchone()
+            if result:
+                role_ids[role_name] = result[0]
+            else:
+                cursor.execute(
+                    "SELECT role_id FROM roles WHERE role_name = %s AND establishment_id = %s",
+                    (role_name, establishment_id)
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    role_ids[role_name] = existing[0]
+
+        # Fetch all permission ids
+        cursor.execute("SELECT permission_name, permission_id FROM permissions")
+        perm_map = {
+            (r[0] if isinstance(r, tuple) else r.get('permission_name')):
+            (r[1] if isinstance(r, tuple) else r.get('permission_id'))
+            for r in cursor.fetchall()
+        }
+
+        def _assign(role_name, allowed_names):
+            if role_name not in role_ids:
+                return
+            rid = role_ids[role_name]
+            for pname, pid in perm_map.items():
+                if allowed_names is None or pname in allowed_names:
+                    cursor.execute("""
+                        INSERT INTO role_permissions (role_id, permission_id, granted)
+                        VALUES (%s, %s, 1) ON CONFLICT DO NOTHING
+                    """, (rid, pid))
+
+        _assign('admin', None)  # None = all permissions
+        _assign('manager', _MANAGER_PERMISSIONS)
+        _assign('employee', _EMPLOYEE_PERMISSIONS)
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"ensure_rbac_seeded failed: {e}")
+        raise
+    finally:
+        conn.close()
+
+
+def create_admin_account(establishment_id: int, email: str, password: str, name: str) -> dict:
+    """Create an admin employee account for an establishment and return a session token.
+
+    Calls ensure_rbac_seeded() first so roles always exist.
+    The password must be numeric (validate_admin_password check).
+    """
+    if not validate_admin_password(password):
+        return {'success': False, 'message': 'Password must be numeric'}
+    if not email or not name:
+        return {'success': False, 'message': 'Email and name are required'}
+
+    try:
+        ensure_rbac_seeded(establishment_id)
+    except Exception as e:
+        logger.warning(f"ensure_rbac_seeded failed in create_admin_account: {e}")
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        # Verify establishment exists
+        cursor.execute("SELECT establishment_id FROM establishments WHERE establishment_id = %s", (establishment_id,))
+        if not cursor.fetchone():
+            conn.close()
+            return {'success': False, 'message': 'Establishment not found'}
+
+        # Check for duplicate email
+        cursor.execute("SELECT employee_id FROM employees WHERE lower(email) = lower(%s) AND establishment_id = %s", (email.strip(), establishment_id))
+        if cursor.fetchone():
+            conn.close()
+            return {'success': False, 'message': 'An account with that email already exists'}
+
+        # Get admin role id for this establishment
+        cursor.execute("SELECT role_id FROM roles WHERE role_name = 'admin' AND establishment_id = %s", (establishment_id,))
+        role_row = cursor.fetchone()
+        role_id = role_row[0] if role_row else None
+
+        # Split name
+        parts = name.strip().split(' ', 1)
+        first_name = parts[0]
+        last_name = parts[1] if len(parts) > 1 else ''
+
+        password_hash = hash_password(password)
+        employee_code = secrets.token_hex(4).upper()
+
+        cursor.execute("""
+            INSERT INTO employees (
+                establishment_id, first_name, last_name, position, email,
+                password_hash, employee_code, is_admin, role_id, active, date_started
+            ) VALUES (%s, %s, %s, 'admin', %s, %s, %s, TRUE, %s, 1, CURRENT_DATE)
+            RETURNING employee_id
+        """, (establishment_id, first_name, last_name, email.strip(), password_hash, employee_code, role_id))
+
+        result = cursor.fetchone()
+        employee_id = result[0] if isinstance(result, tuple) else result['employee_id']
+
+        # Create 24h session
+        session_token = secrets.token_urlsafe(32)
+        cursor.execute("""
+            INSERT INTO employee_sessions (employee_id, establishment_id, session_token, expires_at)
+            VALUES (%s, %s, %s, NOW() + INTERVAL '24 hours')
+        """, (employee_id, establishment_id, session_token))
+
+        conn.commit()
+        return {
+            'success': True,
+            'employee_id': employee_id,
+            'session_token': session_token,
+            'is_admin': True,
+        }
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"create_admin_account error: {e}")
+        return {'success': False, 'message': str(e)}
+    finally:
+        conn.close()
+
 
 def add_employee(
     employee_code: Optional[str] = None,
@@ -7715,14 +8024,14 @@ def employee_login(
     if has_username:
         cursor.execute("""
             SELECT employee_id, first_name, last_name, position, active, password_hash,
-                   username, employee_code, establishment_id
+                   username, employee_code, establishment_id, is_admin
             FROM employees
             WHERE username = %s OR employee_code = %s
         """, (login_identifier, login_identifier))
     else:
         cursor.execute("""
             SELECT employee_id, first_name, last_name, position, active, password_hash,
-                   employee_code, establishment_id
+                   employee_code, establishment_id, is_admin
             FROM employees
             WHERE employee_code = %s
         """, (login_identifier,))
@@ -7836,6 +8145,7 @@ def employee_login(
         'employee_id': employee['employee_id'],
         'employee_name': f"{employee['first_name']} {employee['last_name']}",
         'position': employee['position'],
+        'is_admin': bool(employee.get('is_admin', False)),
         'session_token': session_token
     }
 
@@ -8018,7 +8328,7 @@ def verify_session(session_token: str) -> Dict[str, Any]:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         
         cursor.execute("""
-            SELECT es.*, e.first_name, e.last_name, e.position, e.active, e.email
+            SELECT es.*, e.first_name, e.last_name, e.position, e.active, e.email, e.is_admin
             FROM employee_sessions es
             JOIN employees e ON es.employee_id = e.employee_id
             WHERE es.session_token = %s
@@ -8053,7 +8363,8 @@ def verify_session(session_token: str) -> Dict[str, Any]:
                 'establishment_id': session_dict.get('establishment_id'),
                 'employee_name': f"{session_dict.get('first_name', '')} {session_dict.get('last_name', '')}".strip(),
                 'position': session_dict.get('position', ''),
-                'email': session_dict.get('email', '')
+                'email': session_dict.get('email', ''),
+                'is_admin': bool(session_dict.get('is_admin', False)),
             }
         
         return {'valid': False}
@@ -10047,7 +10358,19 @@ def report_shipment_issue(pending_shipment_id: int, pending_item_id: Optional[in
     
     conn.commit()
     conn.close()
-    
+
+    # If shipment is already completed, post accounting for this issue immediately
+    try:
+        conn2 = get_connection()
+        cur2 = conn2.cursor()
+        cur2.execute("SELECT status FROM pending_shipments WHERE pending_shipment_id = %s", (pending_shipment_id,))
+        row = cur2.fetchone()
+        conn2.close()
+        if row and (row[0] or '').startswith(('approved', 'completed')):
+            _post_shipment_issue_entries(pending_shipment_id, employee_id)
+    except Exception as e:
+        print(f"⚠ Accounting: could not check shipment status for issue accounting – {e}")
+
     return issue_id
 
 
@@ -10314,6 +10637,112 @@ def get_verification_progress(pending_shipment_id: int) -> Dict[str, Any]:
                       progress['total_expected_quantity']),
         'shipment': shipment
     }
+
+
+# ── Shipment accounting helpers ───────────────────────────────────────────────
+
+def _post_shipment_received_entry(pending_shipment_id: int, approved_shipment_id: int,
+                                   total_cost: float, employee_id: int) -> None:
+    """DR Inventory / CR Accounts Payable for goods received."""
+    try:
+        result = create_journal_entry(
+            entry_date=datetime.now().date().isoformat(),
+            transaction_source='shipment',
+            source_id=approved_shipment_id,
+            description=f'Inventory received – Shipment #{pending_shipment_id}',
+            line_items=[
+                {'account_number': '1200', 'debit_amount': total_cost,  'credit_amount': 0,
+                 'description': 'Inventory received'},
+                {'account_number': '2000', 'debit_amount': 0, 'credit_amount': total_cost,
+                 'description': 'Accounts payable to vendor'},
+            ],
+            employee_id=employee_id,
+        )
+        if result.get('success'):
+            post_journal_entry(result['journal_entry_id'], employee_id)
+            print(f"✓ Accounting: posted inventory receipt entry {result.get('entry_number')} (${total_cost:.2f})")
+        else:
+            print(f"⚠ Accounting: failed to post receipt entry – {result.get('message')}")
+    except Exception as e:
+        print(f"⚠ Accounting: exception posting receipt entry – {e}")
+
+
+def _post_shipment_issue_entries(pending_shipment_id: int, employee_id: int) -> None:
+    """For each damage/expiry issue on this shipment, DR write-off expense / CR Inventory."""
+    DAMAGE_TYPES = {'damaged', 'expired', 'broken', 'defective', 'spoiled'}
+    MISSING_TYPES = {'missing', 'short_shipped', 'undershipment', 'theft'}
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT si.issue_id, si.issue_type, si.quantity_affected,
+                   psi.unit_cost, psi.product_name
+            FROM shipment_issues si
+            LEFT JOIN pending_shipment_items psi ON si.pending_item_id = psi.pending_item_id
+            WHERE si.pending_shipment_id = %s
+              AND si.accounting_posted IS NOT TRUE
+              AND si.quantity_affected > 0
+              AND psi.unit_cost IS NOT NULL AND psi.unit_cost > 0
+        """, (pending_shipment_id,))
+        issues = cursor.fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"⚠ Accounting: could not fetch issues for shipment {pending_shipment_id} – {e}")
+        return
+
+    for issue in issues:
+        issue = dict(issue)
+        issue_type = (issue.get('issue_type') or '').lower()
+        qty = int(issue.get('quantity_affected') or 0)
+        unit_cost = float(issue.get('unit_cost') or 0)
+        amount = round(qty * unit_cost, 4)
+        if amount <= 0:
+            continue
+
+        product_name = issue.get('product_name') or 'item'
+
+        if issue_type in DAMAGE_TYPES:
+            expense_acct = '5300'  # Inventory Write-Off
+            desc_prefix = 'Damaged/spoiled goods'
+        elif issue_type in MISSING_TYPES:
+            expense_acct = '5310'  # Theft & Shrinkage
+            desc_prefix = 'Missing/short-shipped goods'
+        else:
+            continue  # wrong_item, overshipment, etc. – no automatic write-off
+
+        try:
+            result = create_journal_entry(
+                entry_date=datetime.now().date().isoformat(),
+                transaction_source='shipment_issue',
+                source_id=issue['issue_id'],
+                description=f'{desc_prefix} – {product_name} (Shipment #{pending_shipment_id})',
+                line_items=[
+                    {'account_number': expense_acct, 'debit_amount': amount, 'credit_amount': 0,
+                     'description': f'{desc_prefix}: {qty} × ${unit_cost:.4f}'},
+                    {'account_number': '1200', 'debit_amount': 0, 'credit_amount': amount,
+                     'description': 'Inventory reduction'},
+                ],
+                employee_id=employee_id,
+            )
+            if result.get('success'):
+                post_journal_entry(result['journal_entry_id'], employee_id)
+                print(f"✓ Accounting: posted issue write-off entry {result.get('entry_number')} for issue #{issue['issue_id']} (${amount:.2f})")
+                # Mark issue as accounted
+                try:
+                    conn2 = get_connection()
+                    cur2 = conn2.cursor()
+                    cur2.execute("UPDATE shipment_issues SET accounting_posted = TRUE WHERE issue_id = %s", (issue['issue_id'],))
+                    conn2.commit()
+                    conn2.close()
+                except Exception:
+                    pass
+            else:
+                print(f"⚠ Accounting: failed issue write-off – {result.get('message')}")
+        except Exception as e:
+            print(f"⚠ Accounting: exception on issue #{issue['issue_id']} – {e}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 def complete_verification(pending_shipment_id: int, employee_id: int, notes: Optional[str] = None) -> Dict[str, Any]:
     """Complete verification and move to approved shipments"""
@@ -10682,16 +11111,23 @@ def complete_verification(pending_shipment_id: int, employee_id: int, notes: Opt
         SET ended_at = CURRENT_TIMESTAMP
         WHERE pending_shipment_id = %s AND ended_at IS NULL
     """, (pending_shipment_id,))
-    
+
     conn.commit()
     conn.close()
-    
+
     print(f"✓ Shipment {pending_shipment_id} completed successfully!")
     print(f"  - Approved shipment ID: {approved_shipment_id}")
     print(f"  - Total items: {shipment['total_received']}")
     print(f"  - Total cost: ${float(shipment['total_cost']):.2f}")
     print(f"  - Issues: {shipment['issue_count']}")
-    
+
+    # ── Accounting journal entries ──────────────────────────────────────────
+    total_verified_cost = float(shipment['total_cost'])
+    if total_verified_cost > 0:
+        _post_shipment_received_entry(pending_shipment_id, approved_shipment_id, total_verified_cost, employee_id)
+    _post_shipment_issue_entries(pending_shipment_id, employee_id)
+    # ───────────────────────────────────────────────────────────────────────
+
     return {
         'success': True,
         'approved_shipment_id': approved_shipment_id,
@@ -11076,23 +11512,27 @@ def get_store_location_settings() -> Optional[Dict[str, Any]]:
         conn.close()
 
 def update_store_location_settings(
-    store_name: Optional[str] = None,
-    latitude: Optional[float] = None,
-    longitude: Optional[float] = None,
-    address: Optional[str] = None,
-    allowed_radius_meters: Optional[float] = None,
-    require_location: Optional[int] = None,
-    city: Optional[str] = None,
-    state: Optional[str] = None,
-    zip_code: Optional[str] = None,
-    country: Optional[str] = None,
-    store_phone: Optional[str] = None,
-    store_email: Optional[str] = None,
-    store_website: Optional[str] = None,
-    store_type: Optional[str] = None,
-    store_logo: Optional[str] = None,
-    store_hours: Optional[Dict[str, Any]] = None,
+    **kwargs
 ) -> bool:
+    """Update store location settings. Supports any column as a keyword argument."""
+    store_name = kwargs.get('store_name')
+    latitude = kwargs.get('latitude')
+    longitude = kwargs.get('longitude')
+    address = kwargs.get('address')
+    allowed_radius_meters = kwargs.get('allowed_radius_meters')
+    require_location = kwargs.get('require_location')
+    city = kwargs.get('city')
+    state = kwargs.get('state')
+    zip_code = kwargs.get('zip_code') # frontend might send zip or zip_code
+    if zip_code is None: zip_code = kwargs.get('zip')
+    country = kwargs.get('country')
+    store_phone = kwargs.get('store_phone')
+    store_email = kwargs.get('store_email')
+    store_website = kwargs.get('store_website')
+    store_type = kwargs.get('store_type')
+    store_logo = kwargs.get('store_logo')
+    store_hours = kwargs.get('store_hours')
+
     """Update store location settings. New fields (city, state, zip, country, store_phone, store_email, store_website, store_type, store_logo, store_hours) are applied if the columns exist."""
     import json
     conn = get_connection()
@@ -11125,9 +11565,9 @@ def update_store_location_settings(
 
             updates = []
             params = []
-            if store_name is not None:
+            if "store_name" in kwargs and kwargs["store_name"] is not None:
                 updates.append("store_name = %s")
-                params.append(store_name)
+                params.append(kwargs["store_name"])
             if latitude is not None:
                 updates.append("latitude = %s")
                 params.append(latitude)
@@ -11167,9 +11607,10 @@ def update_store_location_settings(
             if store_type is not None and "store_type" in existing_columns:
                 updates.append("store_type = %s")
                 params.append(store_type)
-            if store_logo is not None and "store_logo" in existing_columns:
+            if "store_logo" in kwargs and "store_logo" in existing_columns:
+                # Explicitly allow None for logo to clear it
                 updates.append("store_logo = %s")
-                params.append(store_logo)
+                params.append(kwargs["store_logo"])
             if store_hours is not None and "store_hours" in existing_columns:
                 updates.append("store_hours = %s::jsonb")
                 params.append(json.dumps(store_hours))

@@ -1454,7 +1454,7 @@ function SecurityTab() {
   )
 }
 
-const SETTINGS_TAB_IDS = ['location', 'pos', 'cash', 'notifications', 'rewards', 'integration', 'admin', 'security']
+const SETTINGS_TAB_IDS = ['location', 'pos', 'cash', 'notifications', 'rewards', 'integrations', 'admin', 'security']
 
 const NO_PERMISSION_MSG = "You don't have permission"
 const EMPLOYEE_ALLOWED_SETTINGS_TABS = ['cash', 'location'] // Employee can only open Cash Register and Store Information (location read-only)
@@ -1480,7 +1480,8 @@ const DEFAULT_NEW_ORDER_TOAST_OPTIONS = {
   volume: 0.5, // 0-1
   sound_until_dismiss: false, // repeat sound until user dismisses
   auto_dismiss_sec: 0, // 0 = only when clicked, 4 = auto after 4 sec
-  click_action: 'go_to_order' // 'go_to_order' | 'print_receipt' | 'dismiss_only'
+  click_action: 'go_to_order', // 'go_to_order' | 'print_receipt' | 'dismiss_only'
+  order_type_filter: ['all'] // ['all'] or ['pos','delivery','pickup','doordash','ubereats','shopify']
 }
 
 function SquareMigrationCard({ isDarkMode, themeColorRgb, showToast, compactPrimaryButtonStyle, inputBaseStyle, getInputFocusHandlers, FormField, FormLabel, searchParams }) {
@@ -1813,6 +1814,26 @@ function SquareMigrationCard({ isDarkMode, themeColorRgb, showToast, compactPrim
   )
 }
 
+function getIntegrationLogoSrc(id) {
+  switch (id) {
+    case 'shopify': return '/shopify.svg'
+    case 'doordash': return '/doordash.svg'
+    case 'uber_eats': return '/uber-15.svg'
+    case 'gmail': return '/gmail.svg'
+    case 'stripe': return '/stripe.svg'
+    case 'telegram': return '/telegram.svg'
+    case 'slack': return '/slack.svg'
+    case 'discord': return '/discord.svg'
+    case 'whatsapp': return '/whatsapp.svg'
+    case 'adp': return '/adp.svg'
+    case 'gusto': return '/gusto.svg'
+    case 'justworks': return '/justworks.svg'
+    case 'quickbooks': return '/quickbooks.png'
+    case 'square': return '/square.svg'
+    default: return null
+  }
+}
+
 function Settings() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { themeMode, themeColor } = useTheme()
@@ -1925,6 +1946,7 @@ function Settings() {
   })
   const [integrationsLoading, setIntegrationsLoading] = useState(false)
   const [integrationsSaving, setIntegrationsSaving] = useState(null) // 'shopify' | 'doordash' | 'uber_eats' | null
+  const [activeIntegrationSettings, setActiveIntegrationSettings] = useState(null) // 'shopify' | 'doordash' | 'uber_eats' | null
   const [shopifySyncLoading, setShopifySyncLoading] = useState(false)
   const [shopifyProductsSyncLoading, setShopifyProductsSyncLoading] = useState(false)
   const [shopifySyncDropdownOpen, setShopifySyncDropdownOpen] = useState(false)
@@ -1969,7 +1991,7 @@ function Settings() {
   const [qboLoading, setQboLoading] = useState(false)
   const [qboSyncLoading, setQboSyncLoading] = useState({ accounts: false, customers: false, vendors: false, transactions: false, inventory: false })
   useEffect(() => {
-    if (activeTab !== 'integration') return
+    if (activeTab !== 'integrations' && activeIntegrationSettings !== 'quickbooks') return
     setQboLoading(true)
     fetch('/api/integrations/quickbooks/status', {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('sessionToken') || ''}` }
@@ -1978,7 +2000,7 @@ function Settings() {
       .then(data => setQboStatus(data))
       .catch(() => setQboStatus(null))
       .finally(() => setQboLoading(false))
-  }, [activeTab])
+  }, [activeTab, activeIntegrationSettings])
   useEffect(() => {
     if (!doordashSetupModalOpen) return
     const cfg = integrations?.doordash?.config?.doordash_hours
@@ -1993,7 +2015,7 @@ function Settings() {
     }
   }, [doordashSetupModalOpen])
   useEffect(() => {
-    if (activeTab !== 'integration') return
+    if (activeTab !== 'integrations') return
     setIntegrationsLoading(true)
     cachedFetch('/api/integrations')
       .then(res => res.json())
@@ -2032,7 +2054,11 @@ function Settings() {
   }, [activeTab])
 
   useEffect(() => {
-    if (activeTab !== 'integration') return
+    setActiveIntegrationSettings(null)
+  }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab !== 'integrations') return
     fetch('/api/integrations/doordash/latest-store-deactivation')
       .then(res => res.json())
       .then((data) => {
@@ -2064,7 +2090,10 @@ function Settings() {
     setIntegrationsSaving(provider)
     const state = integrations[provider]
     const configToSend = { ...(state.config || {}) }
-    if (provider === 'shopify' && configToSend.webhook_secret === '') delete configToSend.webhook_secret
+    if (provider === 'shopify') {
+      if (configToSend.webhook_secret === '') delete configToSend.webhook_secret
+      configToSend.price_multiplier = typeof configToSend.price_multiplier === 'number' ? configToSend.price_multiplier : 1
+    }
     try {
       const res = await fetch('/api/integrations', {
         method: 'POST',
@@ -2571,6 +2600,11 @@ function Settings() {
   const storeLocationLoadedRef = useRef(false)
   const storeLocationSaveTimeoutRef = useRef(null)
   const previousActiveTabRef = useRef('location')
+  const [expandedStoreSection, setExpandedStoreSection] = useState(null) // 'name' | 'address' | 'contact' | 'hours' | null
+  const [expandedPosSection, setExpandedPosSection] = useState(null) // 'register' | 'orders' | 'receipts' | null
+  const [expandedOrderOption, setExpandedOrderOption] = useState(null) // 'delivery' | 'pickup' | null
+  const [expandedRewardsSection, setExpandedRewardsSection] = useState(null) // 'info' | 'points' | 'campaigns' | null
+  const [expandedRewardDropdown, setExpandedRewardDropdown] = useState(null) // 'points' | 'percentage' | 'fixed' | null
   const [displaySettings, setDisplaySettings] = useState({
     tip_enabled: false,
     tip_after_payment: false,
@@ -2779,27 +2813,55 @@ function Settings() {
     notify_admin_on_clockout: false,
     admin_email_ids: [],
     notify_employee_self: false,
+    // Clock-in: per-alert email/sms/notify/recipients
+    clockin_email_enabled: true,
+    clockin_sms_enabled: false,
+    clockin_notify_employee: false,
+    clockin_admin_email_ids: [],
+    clockin_admin_sms_ids: [],
+    // Clock-out: same
+    clockout_email_enabled: true,
+    clockout_sms_enabled: false,
+    clockout_notify_employee: false,
+    clockout_admin_email_ids: [],
+    clockout_admin_sms_ids: [],
+    // Late alert
     late_alert_enabled: false,
     late_alert_threshold_min: 10,
     late_alert_to_employee: false,
     late_alert_to_admin: true,
+    late_alert_email_enabled: true,
+    late_alert_sms_enabled: false,
+    late_alert_admin_email_ids: [],
+    late_alert_admin_sms_ids: [],
     late_alert_delay_min: 15,
+    // Overtime
     overtime_alert_enabled: false,
     overtime_threshold_hours: 8.0,
+    overtime_notify_employee: false,
+    overtime_email_enabled: true,
+    overtime_sms_enabled: false,
+    overtime_admin_email_ids: [],
+    overtime_admin_sms_ids: [],
   })
   const [clockinNotifSaving, setClockinNotifSaving] = useState(false)
   const [registerNotifSettings, setRegisterNotifSettings] = useState({
+    register_email_enabled: false,
+    register_sms_enabled: false,
     notify_admin_on_open: false,
     notify_admin_on_close: false,
     notify_admin_on_drop: false,
     notify_admin_on_withdraw: false,
     notify_employee_self: false,
     admin_email_ids: [],
+    admin_sms_ids: [],
   })
   const [registerNotifSaving, setRegisterNotifSaving] = useState(false)
   const [scheduleNotifSettings, setScheduleNotifSettings] = useState({
     employee_schedule_view: 'shifts_only',
     notify_on_edit: true,
+    schedule_notify_email_enabled: true,
+    schedule_notify_sms_enabled: false,
     admin_email_ids: [],
   })
   const [scheduleNotifSaving, setScheduleNotifSaving] = useState(false)
@@ -2989,8 +3051,6 @@ function Settings() {
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState(null)
-  const [toast, setToast] = useState(null) // { message, type: 'success' | 'error' }
   const [sidebarMinimized, setSidebarMinimized] = useState(false)
   const [hoveringSettings, setHoveringSettings] = useState(false)
   const [showTooltip, setShowTooltip] = useState(false)
@@ -3007,13 +3067,6 @@ function Settings() {
     }, 100)
     return () => clearTimeout(timer)
   }, [])
-
-  // Auto-dismiss toast after 4 seconds
-  useEffect(() => {
-    if (!toast) return
-    const t = setTimeout(() => setToast(null), 4000)
-    return () => clearTimeout(t)
-  }, [toast])
 
   // Convert hex to RGB
   const hexToRgb = (hex) => {
@@ -3057,14 +3110,14 @@ function Settings() {
       })
       const json = await res.json()
       if (json.success) {
-        setMessage({ type: 'success', text: 'Setting saved.' })
+        showToast('Setting saved.', 'success')
         return true
       } else {
-        setMessage({ type: 'error', text: json.message || 'Failed to save' })
+        showToast(json.message || 'Failed to save', 'error')
         return false
       }
     } catch (e) {
-      setMessage({ type: 'error', text: 'Failed to save setting' })
+      showToast('Failed to save setting', 'error')
       return false
     }
   }
@@ -3079,12 +3132,12 @@ function Settings() {
       const json = await res.json()
       if (json.success) {
         setDeliveryPayOnDeliveryCashOnly(!!value)
-        setMessage({ type: 'success', text: 'Delivery payment setting saved.' })
+        showToast('Delivery payment setting saved.', 'success')
       } else {
-        setMessage({ type: 'error', text: json.message || 'Failed to save' })
+        showToast(json.message || 'Failed to save', 'error')
       }
     } catch (e) {
-      setMessage({ type: 'error', text: 'Failed to save delivery setting' })
+      showToast('Failed to save delivery setting', 'error')
     }
   }
 
@@ -3313,7 +3366,18 @@ function Settings() {
       // Also load clockin notification settings
       cachedFetch('/api/clockin-notification-settings?store_id=1', { headers: { 'X-Session-Token': localStorage.getItem('sessionToken') || '' } })
         .then(r => r.json())
-        .then(d => { if (d && d.success && d.data) setClockinNotifSettings(prev => ({ ...prev, ...d.data })) })
+        .then(d => {
+          if (d && d.success && d.data) {
+            const data = d.data
+            setClockinNotifSettings(prev => ({
+              ...prev,
+              ...data,
+              clockin_admin_email_ids: data.clockin_admin_email_ids ?? data.admin_email_ids ?? prev.clockin_admin_email_ids,
+              clockout_admin_email_ids: data.clockout_admin_email_ids ?? data.admin_email_ids ?? prev.clockout_admin_email_ids,
+              late_alert_admin_email_ids: data.late_alert_admin_email_ids ?? data.admin_email_ids ?? prev.late_alert_admin_email_ids,
+            }))
+          }
+        })
         .catch(() => { })
       // Load schedule notification settings
       cachedFetch('/api/schedule-notification-settings?store_id=1', { headers: { 'X-Session-Token': localStorage.getItem('sessionToken') || '' } })
@@ -3323,7 +3387,19 @@ function Settings() {
       // Load register notification settings
       cachedFetch('/api/register-notification-settings?store_id=1', { headers: { 'X-Session-Token': localStorage.getItem('sessionToken') || '' } })
         .then(r => r.json())
-        .then(d => { if (d && d.success && d.data) setRegisterNotifSettings(prev => ({ ...prev, ...d.data })) })
+        .then(d => {
+          if (d && d.success && d.data) {
+            const data = d.data
+            const hadEvents = !!(data.notify_admin_on_open || data.notify_admin_on_close || data.notify_admin_on_drop)
+            setRegisterNotifSettings(prev => ({
+              ...prev,
+              ...data,
+              register_email_enabled: data.register_email_enabled ?? hadEvents,
+              register_sms_enabled: data.register_sms_enabled ?? false,
+              admin_sms_ids: data.admin_sms_ids ?? prev.admin_sms_ids ?? []
+            }))
+          }
+        })
         .catch(() => { })
       const token = localStorage.getItem('sessionToken') || ''
       cachedFetch(`/api/email-templates?store_id=1&session_token=${encodeURIComponent(token)}`, { headers: { 'X-Session-Token': token } })
@@ -3541,12 +3617,12 @@ function Settings() {
       if (data.success) {
         await loadReceiptTemplates()
         setReceiptSettings(prev => ({ ...prev, template_preset: prev.template_preset?.startsWith('template_') ? 'modern' : prev.template_preset }))
-        setMessage({ type: 'success', text: `Cleared ${data.deleted || 0} template(s).` })
+        showToast(`Cleared ${data.deleted || 0} template(s).`, 'success')
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to clear templates' })
+        showToast(data.message || 'Failed to clear templates', 'error')
       }
     } catch (e) {
-      setMessage({ type: 'error', text: e.message || 'Failed to clear templates' })
+      showToast(e.message || 'Failed to clear templates', 'error')
     }
   }
 
@@ -3563,21 +3639,19 @@ function Settings() {
       if (data.success && data.template) {
         await loadReceiptTemplates()
         setReceiptSettings(prev => ({ ...prev, template_preset: `template_${data.template.id}` }))
-        setMessage({ type: 'success', text: `Template "${data.template.name}" saved.` })
-        setTimeout(() => setMessage(null), 2500)
+        showToast(`Template "${data.template.name}" saved.`, 'success')
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to save template' })
+        showToast(data.message || 'Failed to save template', 'error')
       }
     } catch (error) {
       console.error('Error saving template:', error)
-      setMessage({ type: 'error', text: 'Failed to save template' })
+      showToast('Failed to save template', 'error')
     }
   }
 
   const resetReceiptToDefault = () => {
     setReceiptSettings({ ...DEFAULT_RECEIPT_TEMPLATE })
-    setMessage({ type: 'success', text: 'Receipt template reset to default.' })
-    setTimeout(() => setMessage(null), 2500)
+    showToast('Receipt template reset to default.', 'success')
   }
 
   const saveReceiptSettingsOnly = async (settings) => {
@@ -3597,8 +3671,7 @@ function Settings() {
       })
       const data = await res.json()
       if (data.success) {
-        setMessage({ type: 'success', text: 'Receipt template saved.' })
-        setTimeout(() => setMessage(null), 2000)
+        showToast('Receipt template saved.', 'success')
       }
     } catch (e) {
       console.error('Error saving receipt settings:', e)
@@ -3614,7 +3687,7 @@ function Settings() {
       })
       if (!response.ok) {
         const err = await response.json().catch(() => ({}))
-        setMessage?.({ type: 'error', text: err.message || 'Failed to generate receipt' })
+        showToast(err.message || 'Failed to generate receipt', 'error')
         return
       }
       const blob = await response.blob()
@@ -3629,10 +3702,9 @@ function Settings() {
         window.URL.revokeObjectURL(url)
         document.body.removeChild(a)
       }, 100)
-      setMessage?.({ type: 'success', text: 'Receipt downloaded.' })
-      setTimeout(() => setMessage?.(null), 2000)
+      showToast('Receipt downloaded.', 'success')
     } catch (e) {
-      setMessage?.({ type: 'error', text: e.message || 'Failed to generate receipt' })
+      showToast(e.message || 'Failed to generate receipt', 'error')
     }
   }
 
@@ -3813,7 +3885,6 @@ function Settings() {
 
   const saveCashSettings = async () => {
     setSaving(true)
-    setMessage(null)
     try {
       const sessionToken = localStorage.getItem('sessionToken')
       const payload = {
@@ -3835,15 +3906,14 @@ function Settings() {
 
       const data = await response.json()
       if (data.success) {
-        setMessage({ type: 'success', text: 'Cash settings saved successfully!' })
-        setTimeout(() => setMessage(null), 3000)
+        showToast('Cash settings saved successfully!', 'success')
         loadCashSettings()
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to save cash settings' })
+        showToast(data.message || 'Failed to save cash settings', 'error')
       }
     } catch (error) {
       console.error('Error saving cash settings:', error)
-      setMessage({ type: 'error', text: 'Failed to save cash settings' })
+      showToast('Failed to save cash settings', 'error')
     } finally {
       setSaving(false)
     }
@@ -3915,7 +3985,7 @@ function Settings() {
 
       const data = await response.json()
       if (data.success) {
-        setToast({ message: 'Cash drop saved successfully!', type: 'success' })
+        showToast('Cash drop saved successfully!', 'success')
         setShowCountDropModal(false)
         // Reset form
         setDailyCount({
@@ -3939,11 +4009,11 @@ function Settings() {
         // Reload events to update the table
         await loadRegisterEvents()
       } else {
-        setToast({ message: data.message || 'Failed to save cash drop', type: 'error' })
+        showToast(data.message || 'Failed to save cash drop', 'error')
       }
     } catch (error) {
       console.error('Error saving cash drop:', error)
-      setToast({ message: 'Failed to save cash drop', type: 'error' })
+      showToast('Failed to save cash drop', 'error')
     } finally {
       setSaving(false)
     }
@@ -4060,7 +4130,7 @@ function Settings() {
 
       const data = await response.json()
       if (data.success) {
-        setToast({ message: data.message || 'Register opened successfully!', type: 'success' })
+        showToast(data.message || 'Register opened successfully!', 'success')
         setShowOpenModal(false)
         setOpenRegisterForm({
           register_id: cashSettings.register_id,
@@ -4083,11 +4153,11 @@ function Settings() {
         // Reload sessions and events to update the table
         await loadRegisterSessions()
       } else {
-        setToast({ message: data.message || 'Failed to open register', type: 'error' })
+        showToast(data.message || 'Failed to open register', 'error')
       }
     } catch (error) {
       console.error('Error opening register:', error)
-      setToast({ message: 'Failed to open register', type: 'error' })
+      showToast('Failed to open register', 'error')
     } finally {
       setSaving(false)
     }
@@ -4141,7 +4211,7 @@ function Settings() {
 
       const data = await response.json()
       if (data.success) {
-        setToast({ message: data.message || 'Register closed successfully!', type: 'success' })
+        showToast(data.message || 'Register closed successfully!', 'success')
         setShowCloseModal(false)
         setCloseRegisterForm({
           cash_mode: 'total',
@@ -4162,11 +4232,11 @@ function Settings() {
         // Reload sessions and events to update the table with close row
         await loadRegisterSessions()
       } else {
-        setToast({ message: data.message || 'Failed to close register', type: 'error' })
+        showToast(data.message || 'Failed to close register', 'error')
       }
     } catch (error) {
       console.error('Error closing register:', error)
-      setToast({ message: 'Failed to close register', type: 'error' })
+      showToast('Failed to close register', 'error')
     } finally {
       setSaving(false)
     }
@@ -4196,7 +4266,7 @@ function Settings() {
 
       const data = await response.json()
       if (data.success) {
-        setToast({ message: 'Money taken out successfully!', type: 'success' })
+        showToast('Money taken out successfully!', 'success')
         setShowTakeOutModal(false)
         setTakeOutForm({
           amount: 0,
@@ -4206,11 +4276,11 @@ function Settings() {
         // Reload events to update the table
         await loadRegisterEvents()
       } else {
-        setToast({ message: data.message || 'Failed to take out money', type: 'error' })
+        showToast(data.message || 'Failed to take out money', 'error')
       }
     } catch (error) {
       console.error('Error taking out money:', error)
-      setToast({ message: 'Failed to take out money', type: 'error' })
+      showToast('Failed to take out money', 'error')
     } finally {
       setSaving(false)
     }
@@ -4235,7 +4305,6 @@ function Settings() {
 
   const saveRewardsSettings = async () => {
     setSaving(true)
-    setMessage(null)
     try {
       const sessionToken = localStorage.getItem('sessionToken')
       const response = await fetch('/api/customer-rewards-settings', {
@@ -4264,14 +4333,13 @@ function Settings() {
 
       const data = await response.json()
       if (data.success) {
-        setMessage({ type: 'success', text: 'Customer rewards settings saved successfully!' })
-        setTimeout(() => setMessage(null), 3000)
+        showToast('Customer rewards settings saved successfully!', 'success')
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to save rewards settings' })
+        showToast(data.message || 'Failed to save rewards settings', 'error')
       }
     } catch (error) {
       console.error('Error saving rewards settings:', error)
-      setMessage({ type: 'error', text: 'Failed to save rewards settings' })
+      showToast('Failed to save rewards settings', 'error')
     } finally {
       setSaving(false)
     }
@@ -4279,7 +4347,6 @@ function Settings() {
 
   const savePosSettings = async () => {
     setSaving(true)
-    setMessage(null)
     try {
       // Save POS settings
       const posResponse = await fetch('/api/pos-settings', {
@@ -4336,14 +4403,13 @@ function Settings() {
       const receiptData = await receiptResponse.json()
 
       if (posData.success && displayData.success && receiptData.success) {
-        setMessage({ type: 'success', text: 'POS settings saved successfully!' })
-        setTimeout(() => setMessage(null), 3000)
+        showToast('POS settings saved successfully!', 'success')
       } else {
-        setMessage({ type: 'error', text: posData.message || displayData.message || receiptData.message || 'Failed to save POS settings' })
+        showToast(posData.message || displayData.message || receiptData.message || 'Failed to save POS settings', 'error')
       }
     } catch (error) {
       console.error('Error saving POS settings:', error)
-      setMessage({ type: 'error', text: 'Failed to save POS settings' })
+      showToast('Failed to save POS settings', 'error')
     } finally {
       setSaving(false)
     }
@@ -4351,7 +4417,6 @@ function Settings() {
 
   const saveDisplaySettings = async () => {
     setSaving(true)
-    setMessage(null)
     try {
       const sessionToken = localStorage.getItem('sessionToken')
       const response = await fetch('/api/customer-display/settings', {
@@ -4373,14 +4438,13 @@ function Settings() {
 
       const data = await response.json()
       if (data.success) {
-        setMessage({ type: 'success', text: 'Display settings saved successfully!' })
-        setTimeout(() => setMessage(null), 3000)
+        showToast('Display settings saved successfully!', 'success')
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to save display settings' })
+        showToast(data.message || 'Failed to save display settings', 'error')
       }
     } catch (error) {
       console.error('Error saving display settings:', error)
-      setMessage({ type: 'error', text: 'Failed to save display settings' })
+      showToast('Failed to save display settings', 'error')
     } finally {
       setSaving(false)
     }
@@ -4389,7 +4453,6 @@ function Settings() {
   const saveStoreLocationSettings = async (isAutoSave = false) => {
     if (!isAutoSave) {
       setSaving(true)
-      setMessage(null)
     }
     try {
       const token = localStorage.getItem('sessionToken')
@@ -4420,15 +4483,14 @@ function Settings() {
           store_website: storeLocationSettings.store_website ?? prev.store_website
         }))
         if (!isAutoSave) {
-          setMessage({ type: 'success', text: 'Store location settings saved successfully!' })
-          setTimeout(() => setMessage(null), 3000)
+          showToast('Store location settings saved successfully!', 'success')
         }
       } else {
-        if (!isAutoSave) setMessage({ type: 'error', text: data.message || 'Failed to save store location settings' })
+        if (!isAutoSave) showToast(data.message || 'Failed to save store location settings', 'error')
       }
     } catch (error) {
       console.error('Error saving store location settings:', error)
-      if (!isAutoSave) setMessage({ type: 'error', text: 'Failed to save store location settings' })
+      if (!isAutoSave) showToast('Failed to save store location settings', 'error')
     } finally {
       if (!isAutoSave) setSaving(false)
     }
@@ -4515,7 +4577,7 @@ function Settings() {
 
   const handleSetCurrentLocation = async () => {
     try {
-      setMessage({ type: 'info', text: 'Getting your current location...' })
+      showToast('Getting your current location...', 'info', { autoDismiss: 8000 })
       const location = await getCurrentLocation()
       setStoreLocationSettings({
         ...storeLocationSettings,
@@ -4523,11 +4585,9 @@ function Settings() {
         longitude: location.longitude,
         address: location.address || storeLocationSettings.address
       })
-      setMessage({ type: 'success', text: 'Location set successfully!' })
-      setTimeout(() => setMessage(null), 3000)
+      showToast('Location set successfully!', 'success')
     } catch (error) {
-      setMessage({ type: 'error', text: `Failed to get location: ${error.message}` })
-      setTimeout(() => setMessage(null), 5000)
+      showToast(`Failed to get location: ${error.message}`, 'error')
     }
   }
 
@@ -4539,7 +4599,7 @@ function Settings() {
     { id: 'cash', label: 'Cash Register', icon: DollarSign },
     { id: 'notifications', label: 'Notifications', icon: MessageSquare },
     { id: 'rewards', label: 'Customer Rewards', icon: Gift },
-    { id: 'integration', label: 'Integrations', icon: Plug },
+    { id: 'integrations', label: 'Integrations', icon: Plug },
     ...(hasAdminAccess ? [{ id: 'admin', label: 'Admin', icon: Shield }] : [])
   ]
 
@@ -4766,22 +4826,6 @@ function Settings() {
           ...((activeTab === 'cash' || activeTab === 'admin') ? { height: 'calc(100vh - 56px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' } : {})
         }}
       >
-        {message && (
-          <div style={{
-            padding: '16px 20px',
-            marginBottom: '12px',
-            borderRadius: '10px',
-            backgroundColor: message.type === 'success'
-              ? (isDarkMode ? 'rgba(76, 175, 80, 0.2)' : '#e8f5e9')
-              : (isDarkMode ? 'rgba(244, 67, 54, 0.2)' : '#ffebee'),
-            color: message.type === 'success' ? '#4caf50' : '#f44336',
-            border: `1px solid ${message.type === 'success' ? '#4caf50' : '#f44336'}`,
-            boxShadow: isDarkMode ? '0 2px 4px rgba(0,0,0,0.3)' : '0 2px 4px rgba(0,0,0,0.1)'
-          }}>
-            {message.text}
-          </div>
-        )}
-
         {/* Content – skeleton when loading so nav and shell are visible immediately */}
         <div style={(activeTab === 'cash' || activeTab === 'admin') ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' } : undefined}>
           {loading ? (
@@ -4794,7 +4838,7 @@ function Settings() {
           ) : (
             <>
               {/* Save Button - Hidden for location, cash, and pos tabs (pos has its own at bottom) */}
-              {activeTab !== 'location' && activeTab !== 'cash' && activeTab !== 'pos' && activeTab !== 'rewards' && activeTab !== 'notifications' && activeTab !== 'integration' && activeTab !== 'admin' && (
+              {activeTab !== 'location' && activeTab !== 'cash' && activeTab !== 'pos' && activeTab !== 'rewards' && activeTab !== 'notifications' && activeTab !== 'integrations' && activeTab !== 'admin' && (
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
                   <button
                     type="button"
@@ -4818,10 +4862,13 @@ function Settings() {
 
               {/* Store Information Settings Tab */}
               {activeTab === 'location' && (
-                <div style={{ maxWidth: '480px', marginLeft: 'auto', marginRight: 'auto' }}>
+                <div style={{ maxWidth: '640px', margin: '0 auto', width: '100%', paddingBottom: '40px' }}>
                   <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
                     Store Information
                   </FormTitle>
+                  <p style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '24px' }}>
+                    Name, address, hours, and branding for your store.
+                  </p>
                   {!hasAdminAccess && (
                     <div style={{ marginBottom: '16px', padding: '10px 14px', borderRadius: '8px', backgroundColor: isDarkMode ? 'rgba(255,193,7,0.15)' : 'rgba(255,193,7,0.2)', color: isDarkMode ? '#ffc107' : '#b38600', fontSize: '14px' }}>
                       View only — you don't have permission to edit.
@@ -4829,299 +4876,155 @@ function Settings() {
                   )}
                   <fieldset disabled={!hasAdminAccess} style={{ border: 'none', margin: 0, padding: 0 }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      {/* Store Name, Type, and Logo */}
-                      <FormField style={{ marginBottom: '8px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                          <input
-                            type="text"
-                            placeholder="Enter store name"
-                            value={storeLocationSettings.store_name ?? ''}
-                            onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_name: e.target.value })}
-                            style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          />
-                          <CustomDropdown
-                            value={storeLocationSettings.store_type ?? ''}
-                            onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_type: e.target.value })}
-                            options={[
-                              { value: 'retail', label: 'Retail Store' },
-                              { value: 'restaurant', label: 'Restaurant' },
-                              { value: 'cafe', label: 'Cafe' },
-                              { value: 'grocery', label: 'Grocery Store' },
-                              { value: 'pharmacy', label: 'Pharmacy' },
-                              { value: 'convenience', label: 'Convenience Store' },
-                              { value: 'other', label: 'Other' }
-                            ]}
-                            placeholder="Select store type"
-                            isDarkMode={isDarkMode}
-                            themeColorRgb={themeColorRgb}
-                            compactTrigger
-                          />
-                          <div style={{ width: '100%' }}>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0]
-                                if (file) {
-                                  const reader = new FileReader()
-                                  reader.onloadend = () => {
-                                    setStoreLocationSettings({ ...storeLocationSettings, store_logo: reader.result })
-                                  }
-                                  reader.readAsDataURL(file)
-                                }
-                              }}
-                              style={{ display: 'none' }}
-                              id="logo-upload"
-                            />
-                            <label
-                              htmlFor="logo-upload"
-                              style={{
-                                ...compactCancelButtonStyle(isDarkMode, false),
-                                width: '100%',
-                                height: '32px',
-                                minHeight: '32px',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                              }}
-                            >
-                              Upload logo
-                            </label>
+                      {/* Store Name */}
+                      <div style={{ borderRadius: '16px', border: isDarkMode ? '1px solid #333' : '1px solid #e2e8f0', backgroundColor: '#fff', overflow: 'hidden', transition: 'all 0.2s ease' }}>
+                        <div onClick={() => setExpandedStoreSection(expandedStoreSection === 'name' ? null : 'name')} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '16px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1e293b' }}>Store Name</div>
+                            <div style={{ fontSize: '12px', color: '#64748b' }}>Name, type, and logo for your store.</div>
                           </div>
-                          {storeLocationSettings.store_logo && (
-                            <div style={{ marginTop: '8px' }}>
-                              <img
-                                src={storeLocationSettings.store_logo}
-                                alt="Store logo preview"
-                                style={{
-                                  maxWidth: '200px',
-                                  maxHeight: '100px',
-                                  borderRadius: '8px',
-                                  border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`
-                                }}
-                                onError={(e) => {
-                                  e.target.style.display = 'none'
-                                }}
-                              />
-                            </div>
-                          )}
+                          {expandedStoreSection === 'name' ? <ChevronDown size={20} color="#94a3b8" /> : <ChevronRight size={20} color="#94a3b8" />}
                         </div>
-                      </FormField>
+                        {expandedStoreSection === 'name' && (
+                          <div style={{ padding: '0 20px 20px 20px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                              <input type="text" placeholder="Enter store name" value={storeLocationSettings.store_name ?? ''} onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_name: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                              <CustomDropdown value={storeLocationSettings.store_type ?? ''} onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_type: e.target.value })} options={[{ value: 'retail', label: 'Retail Store' }, { value: 'restaurant', label: 'Restaurant' }, { value: 'cafe', label: 'Cafe' }, { value: 'grocery', label: 'Grocery Store' }, { value: 'pharmacy', label: 'Pharmacy' }, { value: 'convenience', label: 'Convenience Store' }, { value: 'other', label: 'Other' }]} placeholder="Select store type" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} compactTrigger />
+                              <div style={{ width: '100%' }}>
+                                <input type="file" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => setStoreLocationSettings({ ...storeLocationSettings, store_logo: reader.result }); reader.readAsDataURL(file); } }} style={{ display: 'none' }} id="logo-upload" />
+                                <label htmlFor="logo-upload" style={{ ...compactCancelButtonStyle(isDarkMode, false), width: '100%', height: '32px', minHeight: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Upload logo</label>
+                              </div>
+                              {storeLocationSettings.store_logo && (
+                                <div style={{ marginTop: '8px' }}>
+                                  <img src={storeLocationSettings.store_logo} alt="Store logo preview" style={{ maxWidth: '200px', maxHeight: '100px', borderRadius: '8px', border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}` }} onError={(e) => { e.target.style.display = 'none' }} />
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                                <button type="button" className="button-50" role="button" disabled={saving} onClick={saveStoreLocationSettings}>
+                                  <span className="button-50__Content">{saving ? 'Saving…' : 'Save Settings'}</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
                       {/* Store Address */}
-                      <FormField style={{ marginBottom: '8px' }}>
-                        <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 600 }}>
-                          Store Address
-                        </FormTitle>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                          <input
-                            type="text"
-                            placeholder="Street Address"
-                            value={storeLocationSettings.address ?? ''}
-                            onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, address: e.target.value })}
-                            style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          />
-                          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '12px' }}>
-                            <input
-                              type="text"
-                              placeholder="City"
-                              value={storeLocationSettings.city ?? ''}
-                              onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, city: e.target.value })}
-                              style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                            />
-                            <input
-                              type="text"
-                              placeholder="State"
-                              value={storeLocationSettings.state ?? ''}
-                              onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, state: e.target.value })}
-                              style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                            />
-                            <input
-                              type="text"
-                              placeholder="ZIP Code"
-                              value={storeLocationSettings.zip ?? ''}
-                              onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, zip: e.target.value })}
-                              style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                              {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                            />
+                      <div style={{ borderRadius: '16px', border: isDarkMode ? '1px solid #333' : '1px solid #e2e8f0', backgroundColor: '#fff', overflow: 'hidden', transition: 'all 0.2s ease' }}>
+                        <div onClick={() => setExpandedStoreSection(expandedStoreSection === 'address' ? null : 'address')} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '16px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1e293b' }}>Store Address</div>
+                            <div style={{ fontSize: '12px', color: '#64748b' }}>Street, city, state, ZIP, and country.</div>
                           </div>
-                          <input
-                            type="text"
-                            placeholder="Country"
-                            value={storeLocationSettings.country ?? ''}
-                            onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, country: e.target.value })}
-                            style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          />
+                          {expandedStoreSection === 'address' ? <ChevronDown size={20} color="#94a3b8" /> : <ChevronRight size={20} color="#94a3b8" />}
                         </div>
-                      </FormField>
+                        {expandedStoreSection === 'address' && (
+                          <div style={{ padding: '0 20px 20px 20px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                              <input type="text" placeholder="Street Address" value={storeLocationSettings.address ?? ''} onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, address: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '12px' }}>
+                                <input type="text" placeholder="City" value={storeLocationSettings.city ?? ''} onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, city: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                                <input type="text" placeholder="State" value={storeLocationSettings.state ?? ''} onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, state: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                                <input type="text" placeholder="ZIP Code" value={storeLocationSettings.zip ?? ''} onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, zip: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                              </div>
+                              <input type="text" placeholder="Country" value={storeLocationSettings.country ?? ''} onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, country: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                                <button type="button" className="button-50" role="button" disabled={saving} onClick={saveStoreLocationSettings}>
+                                  <span className="button-50__Content">{saving ? 'Saving…' : 'Save Settings'}</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
                       {/* Contact Information */}
-                      <FormField style={{ marginBottom: '8px' }}>
-                        <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 600 }}>
-                          Contact Information
-                        </FormTitle>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                          <input
-                            type="tel"
-                            placeholder="Phone Number"
-                            value={storeLocationSettings.store_phone ?? ''}
-                            onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_phone: e.target.value })}
-                            style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          />
-                          <input
-                            type="email"
-                            placeholder="Email Address"
-                            value={storeLocationSettings.store_email ?? ''}
-                            onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_email: e.target.value })}
-                            style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          />
-                          <input
-                            type="url"
-                            placeholder="Website URL"
-                            value={storeLocationSettings.store_website ?? ''}
-                            onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_website: e.target.value })}
-                            style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          />
+                      <div style={{ borderRadius: '16px', border: isDarkMode ? '1px solid #333' : '1px solid #e2e8f0', backgroundColor: '#fff', overflow: 'hidden', transition: 'all 0.2s ease' }}>
+                        <div onClick={() => setExpandedStoreSection(expandedStoreSection === 'contact' ? null : 'contact')} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '16px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1e293b' }}>Contact Information</div>
+                            <div style={{ fontSize: '12px', color: '#64748b' }}>Phone, email, and website.</div>
+                          </div>
+                          {expandedStoreSection === 'contact' ? <ChevronDown size={20} color="#94a3b8" /> : <ChevronRight size={20} color="#94a3b8" />}
                         </div>
-                      </FormField>
+                        {expandedStoreSection === 'contact' && (
+                          <div style={{ padding: '0 20px 20px 20px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                              <input type="tel" placeholder="Phone Number" value={storeLocationSettings.store_phone ?? ''} onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_phone: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                              <input type="email" placeholder="Email Address" value={storeLocationSettings.store_email ?? ''} onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_email: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                              <input type="url" placeholder="Website URL" value={storeLocationSettings.store_website ?? ''} onChange={(e) => setStoreLocationSettings({ ...storeLocationSettings, store_website: e.target.value })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                                <button type="button" className="button-50" role="button" disabled={saving} onClick={saveStoreLocationSettings}>
+                                  <span className="button-50__Content">{saving ? 'Saving…' : 'Save Settings'}</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
                       {/* Store Hours */}
-                      <FormField style={{ marginBottom: '8px' }}>
-                        <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '16px', fontSize: '15px', fontWeight: 600 }}>
-                          Store Hours
-                        </FormTitle>
-                        {(() => {
-                          const dayOrder = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-                          const dayLabels = { sunday: 'Sunday', monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday' }
-                          return (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                              {dayOrder.map((hoursKey) => {
-                                const dayHours = storeLocationSettings.store_hours[hoursKey]
-                                const isOpen = !dayHours?.closed
+                      <div style={{ borderRadius: '16px', border: isDarkMode ? '1px solid #333' : '1px solid #e2e8f0', backgroundColor: '#fff', overflow: 'hidden', transition: 'all 0.2s ease' }}>
+                        <div onClick={() => setExpandedStoreSection(expandedStoreSection === 'hours' ? null : 'hours')} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '16px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1e293b' }}>Store Hours</div>
+                            <div style={{ fontSize: '12px', color: '#64748b' }}>Opening and closing times for each day.</div>
+                          </div>
+                          {expandedStoreSection === 'hours' ? <ChevronDown size={20} color="#94a3b8" /> : <ChevronRight size={20} color="#94a3b8" />}
+                        </div>
+                        {expandedStoreSection === 'hours' && (
+                          <div style={{ padding: '0 20px 20px 20px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9' }}>
+                            <div style={{ marginTop: '12px' }}>
+                              {(() => {
+                                const dayOrder = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+                                const dayLabels = { sunday: 'Sunday', monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday' }
                                 return (
-                                  <div
-                                    key={hoursKey}
-                                    style={{
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '12px',
-                                      flexWrap: 'wrap'
-                                    }}
-                                  >
-                                    <span style={{ width: '90px', flexShrink: 0, fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>
-                                      {dayLabels[hoursKey]}
-                                    </span>
-                                    {isOpen ? (
-                                      <>
-                                        <input
-                                          type="time"
-                                          value={dayHours?.open || '09:00'}
-                                          onChange={(e) => {
-                                            const newHours = { ...storeLocationSettings.store_hours }
-                                            newHours[hoursKey] = { ...newHours[hoursKey], open: e.target.value }
-                                            setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours })
-                                          }}
-                                          style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box' }}
-                                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                                        />
-                                        <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>–</span>
-                                        <input
-                                          type="time"
-                                          value={dayHours?.close || '17:00'}
-                                          onChange={(e) => {
-                                            const newHours = { ...storeLocationSettings.store_hours }
-                                            newHours[hoursKey] = { ...newHours[hoursKey], close: e.target.value }
-                                            setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours })
-                                          }}
-                                          style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box' }}
-                                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                                        />
-                                      </>
-                                    ) : (
-                                      <>
-                                        <div style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', cursor: 'default' }}>
-                                          Closed
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                    {dayOrder.map((hoursKey) => {
+                                      const dayHours = storeLocationSettings.store_hours[hoursKey]
+                                      const isOpen = !dayHours?.closed
+                                      return (
+                                        <div key={hoursKey} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                                          <span style={{ flexShrink: 0, fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>{dayLabels[hoursKey]}</span>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                                            {isOpen ? (
+                                              <>
+                                                <input type="time" value={dayHours?.open || '09:00'} onChange={(e) => { const newHours = { ...storeLocationSettings.store_hours }; newHours[hoursKey] = { ...newHours[hoursKey], open: e.target.value }; setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours }) }} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box' }} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                                                <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>–</span>
+                                                <input type="time" value={dayHours?.close || '17:00'} onChange={(e) => { const newHours = { ...storeLocationSettings.store_hours }; newHours[hoursKey] = { ...newHours[hoursKey], close: e.target.value }; setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours }) }} style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box' }} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} />
+                                              </>
+                                            ) : (
+                                              <>
+                                                <div style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', cursor: 'default' }}>Closed</div>
+                                                <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>–</span>
+                                                <div style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', cursor: 'default' }}>Closed</div>
+                                              </>
+                                            )}
+                                            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}>
+                                              <div className="checkbox-wrapper-2">
+                                                <input type="checkbox" className="sc-gJwTLC ikxBAC" checked={isOpen || false} onChange={(e) => { const newHours = { ...storeLocationSettings.store_hours }; newHours[hoursKey] = { ...newHours[hoursKey], closed: !e.target.checked }; setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours }) }} />
+                                              </div>
+                                            </label>
+                                          </div>
                                         </div>
-                                        <span style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666' }}>–</span>
-                                        <div style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '110px', height: '32px', minHeight: '32px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', cursor: 'default' }}>
-                                          Closed
-                                        </div>
-                                      </>
-                                    )}
-                                    <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}>
-                                      <div className="checkbox-wrapper-2">
-                                        <input
-                                          type="checkbox"
-                                          className="sc-gJwTLC ikxBAC"
-                                          checked={isOpen || false}
-                                          onChange={(e) => {
-                                            const newHours = { ...storeLocationSettings.store_hours }
-                                            newHours[hoursKey] = { ...newHours[hoursKey], closed: !e.target.checked }
-                                            setStoreLocationSettings({ ...storeLocationSettings, store_hours: newHours })
-                                          }}
-                                        />
-                                      </div>
-                                    </label>
+                                      )
+                                    })}
                                   </div>
                                 )
-                              })}
+                              })()}
                             </div>
-                          )
-                        })()}
-                      </FormField>
-
-                      {/* Save Button + Add to DoorDash hours */}
-                      <div style={{
-                        display: 'flex',
-                        justifyContent: 'flex-end',
-                        alignItems: 'center',
-                        gap: '12px',
-                        marginTop: '16px',
-                        flexWrap: 'wrap'
-                      }}>
-                        {integrations?.doordash?.enabled && (
-                          <button
-                            type="button"
-                            className="button-50 button-50--doordash"
-                            role="button"
-                            onClick={pushDoordashStoreHours}
-                            disabled={doordashPushStoreHoursLoading}
-                            style={{
-                              opacity: doordashPushStoreHoursLoading ? 0.6 : 1,
-                              cursor: doordashPushStoreHoursLoading ? 'not-allowed' : 'pointer'
-                            }}
-                          >
-                            <span className="button-50__Content">
-                              {doordashPushStoreHoursLoading ? 'Pushing…' : 'Add to DoorDash hours'}
-                            </span>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="button-26 button-26--header"
-                          role="button"
-                          onClick={saveStoreLocationSettings}
-                          disabled={saving}
-                          style={{
-                            opacity: saving ? 0.6 : 1,
-                            cursor: saving ? 'not-allowed' : 'pointer'
-                          }}
-                        >
-                          <div className="button-26__content">
-                            <span className="button-26__text text">
-                              {saving ? 'Saving Store Information...' : 'Save Store Information'}
-                            </span>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: '20px', flexWrap: 'wrap' }}>
+                              {integrations?.doordash?.enabled && (
+                                <button type="button" className="button-50 button-50--doordash" role="button" onClick={pushDoordashStoreHours} disabled={doordashPushStoreHoursLoading} style={{ opacity: doordashPushStoreHoursLoading ? 0.6 : 1, cursor: doordashPushStoreHoursLoading ? 'not-allowed' : 'pointer' }}>
+                                  <span className="button-50__Content">{doordashPushStoreHoursLoading ? 'Pushing…' : 'Add to DoorDash hours'}</span>
+                                </button>
+                              )}
+                              <button type="button" className="button-50" role="button" disabled={saving} onClick={saveStoreLocationSettings}>
+                                <span className="button-50__Content">{saving ? 'Saving…' : 'Save Settings'}</span>
+                              </button>
+                            </div>
                           </div>
-                        </button>
+                        )}
                       </div>
                     </div>
                   </fieldset>
@@ -5130,97 +5033,26 @@ function Settings() {
 
               {/* Customer Rewards Settings Tab */}
               {activeTab === 'rewards' && (
-                <div style={{ maxWidth: '520px', marginLeft: 'auto', marginRight: 'auto' }}>
-                  <style>{`
-            .checkbox-wrapper-2 .ikxBAC {
-              appearance: none;
-              background-color: #dfe1e4;
-              border-radius: 72px;
-              border-style: none;
-              flex-shrink: 0;
-              height: 20px;
-              margin: 0;
-              position: relative;
-              width: 30px;
-            }
-
-            .checkbox-wrapper-2 .ikxBAC::before {
-              bottom: -6px;
-              content: "";
-              left: -6px;
-              position: absolute;
-              right: -6px;
-              top: -6px;
-            }
-
-            .checkbox-wrapper-2 .ikxBAC,
-            .checkbox-wrapper-2 .ikxBAC::after {
-              transition: all 100ms ease-out;
-            }
-
-            .checkbox-wrapper-2 .ikxBAC::after {
-              background-color: #fff;
-              border-radius: 50%;
-              content: "";
-              height: 14px;
-              left: 3px;
-              position: absolute;
-              top: 3px;
-              width: 14px;
-            }
-
-            .checkbox-wrapper-2 input[type=checkbox] {
-              cursor: default;
-            }
-
-            .checkbox-wrapper-2 .ikxBAC:hover {
-              background-color: #c9cbcd;
-              transition-duration: 0s;
-            }
-
-            .checkbox-wrapper-2 .ikxBAC:checked {
-              background-color: var(--theme-color, #6ba3f0);
-            }
-
-            .checkbox-wrapper-2 .ikxBAC:checked::after {
-              background-color: #fff;
-              left: 13px;
-            }
-
-            .checkbox-wrapper-2 :focus:not(.focus-visible) {
-              outline: 0;
-            }
-
-            .checkbox-wrapper-2 .ikxBAC:checked:hover {
-              filter: brightness(0.9);
-            }
-          `}</style>
-                  <h2 style={{
-                    marginBottom: '8px',
-                    fontSize: '16px',
-                    fontWeight: 700,
-                    color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                  }}>
-                    Customer Rewards Program
-                  </h2>
-                  <p style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '20px', marginTop: 0 }}>
-                    Let customers earn and redeem rewards. Choose what info you need at checkout, then enable one or more reward types: points, percentage off, or a fixed discount.
+                <div style={{ maxWidth: '640px', margin: '0 auto', width: '100%', paddingBottom: '40px' }}>
+                  <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
+                    Customer Rewards
+                  </FormTitle>
+                  <p style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '24px' }}>
+                    Points, discounts, and requirements for customer loyalty programs.
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {/* Customer Info Requirements */}
-                    <div>
-                      <h3 style={{
-                        marginBottom: '4px',
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}>
-                        Customer Information Requirements
-                      </h3>
-                      <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '12px', marginTop: 0 }}>
-                        When rewards are enabled, you can require email and/or phone so you can track who earns and redeems.
-                      </p>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ borderRadius: '16px', border: isDarkMode ? '1px solid #333' : '1px solid #e2e8f0', backgroundColor: isDarkMode ? 'var(--bg-secondary, #1e1e1e)' : '#fff', overflow: 'hidden', transition: 'all 0.2s ease' }}>
+                      <div onClick={() => setExpandedRewardsSection(expandedRewardsSection === 'info' ? null : 'info')} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1e293b' }}>Customer Info Requirements</div>
+                          <div style={{ fontSize: '12px', color: '#64748b' }}>Require email and/or phone to earn or use rewards.</div>
+                        </div>
+                        <ChevronDown size={20} color="#94a3b8" style={{ transform: expandedRewardsSection === 'info' ? 'rotate(180deg)' : 'none' }} />
+                      </div>
+                      {expandedRewardsSection === 'info' && (
+                        <div style={{ padding: '0 20px 20px 20px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
                         <label style={{
                           display: 'flex',
                           alignItems: 'flex-start',
@@ -5267,282 +5099,167 @@ function Settings() {
                             <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customer must enter a phone number to earn or use rewards.</div>
                           </div>
                         </label>
-                      </div>
-                    </div>
-
-                    {/* Points */}
-                    <div style={{ marginBottom: '16px', opacity: rewardsSettings.points_enabled ? 1 : 0.7 }}>
-                      <h3 style={{
-                        marginBottom: '4px',
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}>
-                        Points (earn points per dollar spent)
-                      </h3>
-                      <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '12px', marginTop: 0 }}>
-                        Customers earn points on each purchase and can redeem them for a discount later.
-                      </p>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
-                        <div className="checkbox-wrapper-2">
-                          <input
-                            type="checkbox"
-                            className="sc-gJwTLC ikxBAC"
-                            checked={rewardsSettings.points_enabled}
-                            onChange={(e) => setRewardsSettings({ ...rewardsSettings, points_enabled: e.target.checked, reward_type: e.target.checked ? 'points' : rewardsSettings.reward_type })}
-                          />
-                        </div>
-                        <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Enable points</span>
-                      </label>
-                      <div style={{ pointerEvents: rewardsSettings.points_enabled ? 'auto' : 'none' }}>
-                        <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Points per Dollar Spent</FormLabel>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          value={rewardsSettings.points_per_dollar ?? ''}
-                          onChange={(e) => setRewardsSettings({ ...rewardsSettings, points_per_dollar: parseFloat(e.target.value) || 1.0 })}
-                          style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          disabled={!rewardsSettings.points_enabled}
-                        />
-                        <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px', marginTop: '12px' }}>Value per point ($)</FormLabel>
-                        <input
-                          type="number"
-                          step="0.001"
-                          min="0"
-                          max="1"
-                          placeholder="0.01"
-                          value={rewardsSettings.points_redemption_value ?? ''}
-                          onChange={(e) => setRewardsSettings({ ...rewardsSettings, points_redemption_value: e.target.value === '' ? '' : parseFloat(e.target.value) })}
-                          style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          disabled={!rewardsSettings.points_enabled}
-                        />
-                        <p style={{ marginTop: '4px', marginBottom: 0, fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666' }}>
-                          e.g. 0.01 = 1¢ per point (100 points = $1)
-                        </p>
-                        <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px', marginTop: '12px' }}>Minimum spend to earn ($)</FormLabel>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={rewardsSettings.minimum_spend_points ?? ''}
-                          onChange={(e) => setRewardsSettings({ ...rewardsSettings, minimum_spend_points: parseFloat(e.target.value) || 0.0 })}
-                          style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          disabled={!rewardsSettings.points_enabled}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Percentage discount */}
-                    <div style={{ marginBottom: '16px', opacity: rewardsSettings.percentage_enabled ? 1 : 0.7 }}>
-                      <h3 style={{
-                        marginBottom: '4px',
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}>
-                        Percentage discount
-                      </h3>
-                      <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '12px', marginTop: 0 }}>
-                        Give enrolled customers a percent off their order (e.g. 10% off).
-                      </p>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
-                        <div className="checkbox-wrapper-2">
-                          <input
-                            type="checkbox"
-                            className="sc-gJwTLC ikxBAC"
-                            checked={rewardsSettings.percentage_enabled}
-                            onChange={(e) => setRewardsSettings({ ...rewardsSettings, percentage_enabled: e.target.checked, reward_type: e.target.checked ? 'percentage' : rewardsSettings.reward_type })}
-                          />
-                        </div>
-                        <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Enable percentage discount</span>
-                      </label>
-                      <div style={{ pointerEvents: rewardsSettings.percentage_enabled ? 'auto' : 'none' }}>
-                        <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Percentage Discount (%)</FormLabel>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          max="100"
-                          value={rewardsSettings.percentage_discount ?? ''}
-                          onChange={(e) => setRewardsSettings({ ...rewardsSettings, percentage_discount: parseFloat(e.target.value) || 0.0 })}
-                          style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          disabled={!rewardsSettings.percentage_enabled}
-                        />
-                        <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px', marginTop: '12px' }}>Minimum spend to earn ($)</FormLabel>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={rewardsSettings.minimum_spend_percentage ?? ''}
-                          onChange={(e) => setRewardsSettings({ ...rewardsSettings, minimum_spend_percentage: parseFloat(e.target.value) || 0.0 })}
-                          style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          disabled={!rewardsSettings.percentage_enabled}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Fixed discount */}
-                    <div style={{ marginBottom: '16px', opacity: rewardsSettings.fixed_enabled ? 1 : 0.7 }}>
-                      <h3 style={{
-                        marginBottom: '4px',
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}>
-                        Fixed discount amount
-                      </h3>
-                      <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '12px', marginTop: 0 }}>
-                        Give enrolled customers a set dollar amount off (e.g. $5 off).
-                      </p>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '12px' }}>
-                        <div className="checkbox-wrapper-2">
-                          <input
-                            type="checkbox"
-                            className="sc-gJwTLC ikxBAC"
-                            checked={rewardsSettings.fixed_enabled}
-                            onChange={(e) => setRewardsSettings({ ...rewardsSettings, fixed_enabled: e.target.checked, reward_type: e.target.checked ? 'fixed' : rewardsSettings.reward_type })}
-                          />
-                        </div>
-                        <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Enable fixed discount</span>
-                      </label>
-                      <div style={{ pointerEvents: rewardsSettings.fixed_enabled ? 'auto' : 'none' }}>
-                        <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Fixed Discount Amount ($)</FormLabel>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={rewardsSettings.fixed_discount ?? ''}
-                          onChange={(e) => setRewardsSettings({ ...rewardsSettings, fixed_discount: parseFloat(e.target.value) || 0.0 })}
-                          style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          disabled={!rewardsSettings.fixed_enabled}
-                        />
-                        <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px', marginTop: '12px' }}>Minimum spend to earn ($)</FormLabel>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={rewardsSettings.minimum_spend_fixed ?? ''}
-                          onChange={(e) => setRewardsSettings({ ...rewardsSettings, minimum_spend_fixed: parseFloat(e.target.value) || 0.0 })}
-                          style={inputBaseStyle(isDarkMode, themeColorRgb)}
-                          {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                          disabled={!rewardsSettings.fixed_enabled}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Rewards campaigns / Promotions */}
-                    <div style={{ marginTop: '24px' }}>
-                      <h3 style={{
-                        marginBottom: '12px',
-                        fontSize: '15px',
-                        fontWeight: 600,
-                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#333'
-                      }}>
-                        Rewards campaigns & promotions
-                      </h3>
-                      <p style={{
-                        marginBottom: '12px',
-                        fontSize: '14px',
-                        color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666'
-                      }}>
-                        Create promo discounts, product discounts, or buy-one-get-one offers.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewCampaign(defaultNewCampaign())
-                          setShowCreateCampaignModal(true)
-                        }}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          padding: '10px 16px',
-                          backgroundColor: `rgba(${themeColorRgb}, 0.15)`,
-                          color: `rgb(${themeColorRgb})`,
-                          border: `1px solid rgba(${themeColorRgb}, 0.4)`,
-                          borderRadius: '8px',
-                          fontSize: '14px',
-                          fontWeight: 600,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <Plus size={18} />
-                        Create campaign
-                      </button>
-                      {rewardsCampaigns.length > 0 && (
-                        <ul style={{ marginTop: '16px', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {rewardsCampaigns.map((c, i) => (
-                            <li
-                              key={c.id ?? i}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                padding: '12px 14px',
-                                backgroundColor: isDarkMode ? 'var(--bg-secondary, #2a2a2a)' : '#f0f0f0',
-                                borderRadius: '8px',
-                                border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#ddd'}`
-                              }}
-                            >
-                              <div>
-                                <span style={{ fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>{c.name || 'Unnamed campaign'}</span>
-                                <span style={{ marginLeft: '10px', fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666' }}>
-                                  {c.type === 'promo_discount' && 'Promo discount'}
-                                  {c.type === 'product_discount' && 'Product discount'}
-                                  {c.type === 'bogo' && 'Buy one get one'}
-                                </span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setRewardsCampaigns(prev => {
-                                    const next = prev.filter((_, idx) => idx !== i)
-                                    localStorage.setItem('rewards_campaigns', JSON.stringify(next))
-                                    return next
-                                  })
-                                }}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: isDarkMode ? '#999' : '#666' }}
-                                aria-label="Delete campaign"
-                              >
-                                <Trash2 size={18} />
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                              <button type="button" className="button-50" role="button" disabled={saving} onClick={saveRewardsSettings}>
+                                <span className="button-50__Content">{saving ? 'Saving…' : 'Save Settings'}</span>
                               </button>
-                            </li>
-                          ))}
-                        </ul>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
 
-                    {/* Save Button */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
-                      <button
-                        type="button"
-                        className="button-26 button-26--header"
-                        role="button"
-                        onClick={saveRewardsSettings}
-                        disabled={saving}
-                        style={{
-                          opacity: saving ? 0.6 : 1,
-                          cursor: saving ? 'not-allowed' : 'pointer'
-                        }}
-                      >
-                        <div className="button-26__content">
-                          <span className="button-26__text text">
-                            {saving ? 'Saving...' : 'Save Rewards Settings'}
-                          </span>
+                    {/* Points & Discounts */}
+                    <div style={{ borderRadius: '16px', border: isDarkMode ? '1px solid #333' : '1px solid #e2e8f0', backgroundColor: isDarkMode ? 'var(--bg-secondary, #1e1e1e)' : '#fff', overflow: 'hidden', transition: 'all 0.2s ease' }}>
+                      <div onClick={() => setExpandedRewardsSection(expandedRewardsSection === 'points' ? null : 'points')} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1e293b' }}>Points & Discounts</div>
+                          <div style={{ fontSize: '12px', color: '#64748b' }}>Points per dollar, percentage discount, and fixed discount.</div>
                         </div>
-                      </button>
+                        <ChevronDown size={20} color="#94a3b8" style={{ transform: expandedRewardsSection === 'points' ? 'rotate(180deg)' : 'none' }} />
+                      </div>
+                      {expandedRewardsSection === 'points' && (
+                        <div style={{ padding: '0 20px 20px 20px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '12px' }}>
+                            {/* Points – row with switch + chevron, dropdown when enabled */}
+                            <div onClick={(e) => { if (rewardsSettings.points_enabled) { e.stopPropagation(); setExpandedRewardDropdown(expandedRewardDropdown === 'points' ? null : 'points'); } }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: !(rewardsSettings.points_enabled && expandedRewardDropdown === 'points') ? (isDarkMode ? '1px solid #333' : '1px solid #f1f5f9') : 'none', gap: '12px', cursor: rewardsSettings.points_enabled ? 'pointer' : 'default' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Enable points</div>
+                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '1px' }}>Customers earn points per dollar spent and redeem for discounts.</div>
+                              </div>
+                              <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={rewardsSettings.points_enabled} onChange={(e) => setRewardsSettings({ ...rewardsSettings, points_enabled: e.target.checked, reward_type: e.target.checked ? 'points' : rewardsSettings.reward_type })} /></div>
+                                {rewardsSettings.points_enabled ? <button type="button" onClick={() => setExpandedRewardDropdown(expandedRewardDropdown === 'points' ? null : 'points')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', display: 'flex', alignItems: 'center' }} aria-label={expandedRewardDropdown === 'points' ? 'Collapse' : 'Expand'}><ChevronDown size={18} style={{ transform: expandedRewardDropdown === 'points' ? 'rotate(180deg)' : 'none', color: isDarkMode ? '#94a3b8' : '#64748b' }} /></button> : <span style={{ width: 26, flexShrink: 0 }} />}
+                              </div>
+                            </div>
+                            {rewardsSettings.points_enabled && expandedRewardDropdown === 'points' && (
+                              <div style={{ padding: '16px 4px', display: 'flex', flexDirection: 'column', gap: '12px', borderBottom: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9', paddingBottom: '12px', marginBottom: '4px' }}>
+                                <div><FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Points per Dollar</FormLabel><input type="number" step="0.1" min="0" value={rewardsSettings.points_per_dollar ?? ''} onChange={(e) => setRewardsSettings({ ...rewardsSettings, points_per_dollar: parseFloat(e.target.value) || 1.0 })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} /></div>
+                                <div><FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Value per point ($)</FormLabel><input type="number" step="0.001" min="0" max="1" placeholder="0.01" value={rewardsSettings.points_redemption_value ?? ''} onChange={(e) => setRewardsSettings({ ...rewardsSettings, points_redemption_value: e.target.value === '' ? '' : parseFloat(e.target.value) })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} /><p style={{ marginTop: '4px', marginBottom: 0, fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666' }}>e.g. 0.01 = 1¢ per point</p></div>
+                                <div><FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Minimum spend to earn ($)</FormLabel><input type="number" step="0.01" min="0" value={rewardsSettings.minimum_spend_points ?? ''} onChange={(e) => setRewardsSettings({ ...rewardsSettings, minimum_spend_points: parseFloat(e.target.value) || 0.0 })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} /></div>
+                              </div>
+                            )}
+                            {/* Percentage discount */}
+                            <div onClick={(e) => { if (rewardsSettings.percentage_enabled) { e.stopPropagation(); setExpandedRewardDropdown(expandedRewardDropdown === 'percentage' ? null : 'percentage'); } }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: !(rewardsSettings.percentage_enabled && expandedRewardDropdown === 'percentage') ? (isDarkMode ? '1px solid #333' : '1px solid #f1f5f9') : 'none', gap: '12px', cursor: rewardsSettings.percentage_enabled ? 'pointer' : 'default' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Percentage discount</div>
+                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '1px' }}>Give enrolled customers a percent off (e.g. 10% off).</div>
+                              </div>
+                              <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={rewardsSettings.percentage_enabled} onChange={(e) => setRewardsSettings({ ...rewardsSettings, percentage_enabled: e.target.checked, reward_type: e.target.checked ? 'percentage' : rewardsSettings.reward_type })} /></div>
+                                {rewardsSettings.percentage_enabled ? <button type="button" onClick={() => setExpandedRewardDropdown(expandedRewardDropdown === 'percentage' ? null : 'percentage')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', display: 'flex', alignItems: 'center' }} aria-label={expandedRewardDropdown === 'percentage' ? 'Collapse' : 'Expand'}><ChevronDown size={18} style={{ transform: expandedRewardDropdown === 'percentage' ? 'rotate(180deg)' : 'none', color: isDarkMode ? '#94a3b8' : '#64748b' }} /></button> : <span style={{ width: 26, flexShrink: 0 }} />}
+                              </div>
+                            </div>
+                            {rewardsSettings.percentage_enabled && expandedRewardDropdown === 'percentage' && (
+                              <div style={{ padding: '16px 4px', display: 'flex', flexDirection: 'column', gap: '12px', borderBottom: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9', paddingBottom: '12px', marginBottom: '4px' }}>
+                                <div><FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Percentage (%)</FormLabel><input type="number" step="0.1" min="0" max="100" value={rewardsSettings.percentage_discount ?? ''} onChange={(e) => setRewardsSettings({ ...rewardsSettings, percentage_discount: parseFloat(e.target.value) || 0.0 })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} /></div>
+                                <div><FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Minimum spend ($)</FormLabel><input type="number" step="0.01" min="0" value={rewardsSettings.minimum_spend_percentage ?? ''} onChange={(e) => setRewardsSettings({ ...rewardsSettings, minimum_spend_percentage: parseFloat(e.target.value) || 0.0 })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} /></div>
+                              </div>
+                            )}
+                            {/* Fixed discount */}
+                            <div onClick={(e) => { if (rewardsSettings.fixed_enabled) { e.stopPropagation(); setExpandedRewardDropdown(expandedRewardDropdown === 'fixed' ? null : 'fixed'); } }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: !(rewardsSettings.fixed_enabled && expandedRewardDropdown === 'fixed') ? (isDarkMode ? '1px solid #333' : '1px solid #f1f5f9') : 'none', gap: '12px', cursor: rewardsSettings.fixed_enabled ? 'pointer' : 'default' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Fixed discount</div>
+                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '1px' }}>Give enrolled customers a set dollar amount off (e.g. $5 off).</div>
+                              </div>
+                              <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={rewardsSettings.fixed_enabled} onChange={(e) => setRewardsSettings({ ...rewardsSettings, fixed_enabled: e.target.checked, reward_type: e.target.checked ? 'fixed' : rewardsSettings.reward_type })} /></div>
+                                {rewardsSettings.fixed_enabled ? <button type="button" onClick={() => setExpandedRewardDropdown(expandedRewardDropdown === 'fixed' ? null : 'fixed')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', display: 'flex', alignItems: 'center' }} aria-label={expandedRewardDropdown === 'fixed' ? 'Collapse' : 'Expand'}><ChevronDown size={18} style={{ transform: expandedRewardDropdown === 'fixed' ? 'rotate(180deg)' : 'none', color: isDarkMode ? '#94a3b8' : '#64748b' }} /></button> : <span style={{ width: 26, flexShrink: 0 }} />}
+                              </div>
+                            </div>
+                            {rewardsSettings.fixed_enabled && expandedRewardDropdown === 'fixed' && (
+                              <div style={{ padding: '16px 4px', display: 'flex', flexDirection: 'column', gap: '12px', borderBottom: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9', paddingBottom: '12px', marginBottom: '4px' }}>
+                                <div><FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Fixed amount ($)</FormLabel><input type="number" step="0.01" min="0" value={rewardsSettings.fixed_discount ?? ''} onChange={(e) => setRewardsSettings({ ...rewardsSettings, fixed_discount: parseFloat(e.target.value) || 0.0 })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} /></div>
+                                <div><FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '6px' }}>Minimum spend ($)</FormLabel><input type="number" step="0.01" min="0" value={rewardsSettings.minimum_spend_fixed ?? ''} onChange={(e) => setRewardsSettings({ ...rewardsSettings, minimum_spend_fixed: parseFloat(e.target.value) || 0.0 })} style={inputBaseStyle(isDarkMode, themeColorRgb)} {...getInputFocusHandlers(themeColorRgb, isDarkMode)} /></div>
+                              </div>
+                            )}
+                            {/* Discount presets – row with chevron only, no switch */}
+                            <div onClick={(e) => { e.stopPropagation(); setExpandedRewardDropdown(expandedRewardDropdown === 'discount_presets' ? null : 'discount_presets'); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: expandedRewardDropdown !== 'discount_presets' ? (isDarkMode ? '1px solid #333' : '1px solid #f1f5f9') : 'none', gap: '12px', cursor: 'pointer' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Discount presets</div>
+                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '1px' }}>Quick-select discount options for the POS discount modal.</div>
+                              </div>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); setExpandedRewardDropdown(expandedRewardDropdown === 'discount_presets' ? null : 'discount_presets'); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', display: 'flex', alignItems: 'center' }} aria-label={expandedRewardDropdown === 'discount_presets' ? 'Collapse' : 'Expand'}><ChevronDown size={18} style={{ transform: expandedRewardDropdown === 'discount_presets' ? 'rotate(180deg)' : 'none', color: isDarkMode ? '#94a3b8' : '#64748b' }} /></button>
+                            </div>
+                            {expandedRewardDropdown === 'discount_presets' && (
+                              <div style={{ padding: '16px 4px', display: 'flex', flexDirection: 'column', gap: '12px', borderBottom: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9', paddingBottom: '12px', marginBottom: '4px' }}>
+                                <style>{`
+                                  .discount-preset-percent-input::-webkit-outer-spin-button,
+                                  .discount-preset-percent-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+                                  .discount-preset-percent-input { -moz-appearance: textfield; appearance: textfield; }
+                                `}</style>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                  {(posSettings.discount_presets || []).map((preset, index) => (
+                                    <div key={preset.id + String(index)} style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                      <input
+                                        type="text"
+                                        value={preset.label}
+                                        onChange={(e) => {
+                                          const next = [...(posSettings.discount_presets || [])]
+                                          next[index] = { ...next[index], label: e.target.value }
+                                          setPosSettings({ ...posSettings, discount_presets: next })
+                                        }}
+                                        placeholder="Label"
+                                        style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '140px', maxWidth: '180px' }}
+                                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                                      />
+                                      <input
+                                        type="number"
+                                        className="discount-preset-percent-input"
+                                        min={0}
+                                        max={100}
+                                        step={0.5}
+                                        value={preset.percent}
+                                        onChange={(e) => {
+                                          const v = parseFloat(e.target.value)
+                                          if (Number.isNaN(v)) return
+                                          const next = [...(posSettings.discount_presets || [])]
+                                          next[index] = { ...next[index], percent: Math.max(0, Math.min(100, v)) }
+                                          setPosSettings({ ...posSettings, discount_presets: next })
+                                        }}
+                                        placeholder="%"
+                                        style={{ ...inputBaseStyle(isDarkMode, themeColorRgb), width: '72px', boxSizing: 'border-box' }}
+                                        {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                                      />
+                                      <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary)' : '#666' }}>%</span>
+                                      <button type="button" onClick={() => { const next = (posSettings.discount_presets || []).filter((_, i) => i !== index); setPosSettings({ ...posSettings, discount_presets: next }) }} style={{ padding: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '4px' }} aria-label="Remove discount"><X size={18} /></button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <button type="button" onClick={() => { const presets = posSettings.discount_presets || []; const usedIds = new Set(presets.map(p => (p.id || '').toLowerCase())); let id = 'custom'; let n = 1; while (usedIds.has(id)) { id = `custom_${n}`; n++ }; setPosSettings({ ...posSettings, discount_presets: [...presets, { id, label: 'New discount', percent: 10 }] }) }} style={{ marginTop: '4px', padding: '8px 14px', fontSize: '14px', borderRadius: '6px', border: `1px solid ${isDarkMode ? 'var(--border-light, #444)' : '#ccc'}`, backgroundColor: 'transparent', color: isDarkMode ? 'var(--text-primary)' : '#333', cursor: 'pointer' }}>Add discount</button>
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                              <button type="button" className="button-50" role="button" disabled={saving} onClick={async () => { await saveRewardsSettings(); await savePosSettings(); }}>
+                                <span className="button-50__Content">{saving ? 'Saving…' : 'Save Settings'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Create campaign modal */}
-                    {showCreateCampaignModal && (
+                    {/* Campaigns & Promotions – Coming soon */}
+                    <div style={{ borderRadius: '16px', border: isDarkMode ? '1px solid #333' : '1px solid #e2e8f0', backgroundColor: isDarkMode ? 'var(--bg-secondary, #1e1e1e)' : '#fff', overflow: 'hidden', transition: 'all 0.2s ease' }}>
+                      <div onClick={() => setExpandedRewardsSection(expandedRewardsSection === 'campaigns' ? null : 'campaigns')} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1e293b' }}>Campaigns & Promotions</div>
+                          <div style={{ fontSize: '12px', color: '#64748b' }}>Promo discounts, product discounts, and buy-one-get-one offers.</div>
+                        </div>
+                        <ChevronDown size={20} color="#94a3b8" style={{ transform: expandedRewardsSection === 'campaigns' ? 'rotate(180deg)' : 'none' }} />
+                      </div>
+                      {expandedRewardsSection === 'campaigns' && (
+                        <div style={{ padding: '20px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9' }}>
+                          <div style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#64748b', textAlign: 'center', padding: '24px 0' }}>
+                            Coming soon
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Create campaign modal */}
+                  {showCreateCampaignModal && (
                       <div
                         style={{
                           position: 'fixed',
@@ -6002,691 +5719,217 @@ function Settings() {
                         </div>
                       </div>
                     )}
-                  </div>
                 </div>
               )}
 
               {/* POS Settings Tab */}
               {activeTab === 'pos' && (
-                <div style={{ maxWidth: '480px', marginLeft: 'auto', marginRight: 'auto' }}>
+                <>
+                <div style={{ maxWidth: '640px', margin: '0 auto', width: '100%', paddingBottom: '40px' }}>
                   <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '12px' }}>
                     POS Configuration
                   </FormTitle>
+                  <p style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '24px' }}>
+                    Register type, receipts, checkout UI, and order options.
+                  </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {/* Register Type */}
-                    <FormField>
-                      <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', fontSize: '15px', fontWeight: 600 }}>
-                        Register Type
-                      </FormTitle>
-                      <CustomDropdown
-                        value={posSettings.register_type}
-                        onChange={(e) => setPosSettings({ ...posSettings, register_type: e.target.value })}
-                        options={[
-                          { value: 'one_screen', label: 'One Screen Register' },
-                          { value: 'two_screen', label: 'Two Screen Register' }
-                        ]}
-                        placeholder="Select register type"
-                        isDarkMode={isDarkMode}
-                        themeColorRgb={themeColorRgb}
-                        style={{ maxWidth: '320px' }}
-                      />
-                    </FormField>
-
-                    {/* Orders & Delivery: master switches + sub options */}
-                    <div style={{ marginTop: '16px' }}>
-                      <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '4px', fontSize: '15px', fontWeight: 600 }}>
-                        Orders &amp; Delivery
-                      </FormTitle>
-                      <p style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '14px', marginTop: 0 }}>
-                        Choose which order types to offer and how customers can pay or schedule.
-                      </p>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-                          <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
-                            <input
-                              type="checkbox"
-                              className="sc-gJwTLC ikxBAC"
-                              checked={allowDelivery}
-                              onChange={async (e) => {
-                                const v = e.target.checked
-                                const ok = await saveOrderDeliverySetting('allow_delivery', v)
-                                if (ok) setAllowDelivery(v)
-                              }}
-                            />
-                          </div>
-                          <div>
-                            <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Delivery</span>
-                            <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customers can place orders for delivery to an address.</div>
-                          </div>
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-                          <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
-                            <input
-                              type="checkbox"
-                              className="sc-gJwTLC ikxBAC"
-                              checked={allowPickup}
-                              onChange={async (e) => {
-                                const v = e.target.checked
-                                const ok = await saveOrderDeliverySetting('allow_pickup', v)
-                                if (ok) setAllowPickup(v)
-                              }}
-                            />
-                          </div>
-                          <div>
-                            <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Pickup</span>
-                            <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customers can place orders to pick up in store.</div>
-                          </div>
-                        </label>
-                      </div>
-                      <div style={{ marginTop: '20px', borderLeft: `3px solid ${isDarkMode ? 'var(--border-light, #444)' : '#ddd'}`, paddingLeft: '12px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', marginBottom: '4px' }}>Options</div>
-                        <p style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '12px', marginTop: 0 }}>
-                          Additional settings for how orders can be paid and scheduled.
-                        </p>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-                            <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
-                              <input
-                                type="checkbox"
-                                className="sc-gJwTLC ikxBAC"
-                                checked={allowPayAtPickup}
-                                onChange={async (e) => {
-                                  const v = e.target.checked
-                                  const ok = await saveOrderDeliverySetting('allow_pay_at_pickup', v)
-                                  if (ok) setAllowPayAtPickup(v)
-                                }}
-                              />
-                            </div>
-                            <div>
-                              <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow pay at pickup</span>
-                              <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customer pays when they arrive to pick up the order.</div>
-                            </div>
-                          </label>
-                          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-                            <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
-                              <input
-                                type="checkbox"
-                                className="sc-gJwTLC ikxBAC"
-                                checked={deliveryPayOnDeliveryCashOnly}
-                                onChange={(e) => saveDeliveryPayOnDeliveryCashOnly(e.target.checked)}
-                              />
-                            </div>
-                            <div>
-                              <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow pay at delivery (cash)</span>
-                              <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customer can pay with cash when the order is delivered.</div>
-                            </div>
-                          </label>
-                          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-                            <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
-                              <input
-                                type="checkbox"
-                                className="sc-gJwTLC ikxBAC"
-                                checked={deliveryFeeEnabled}
-                                onChange={async (e) => {
-                                  const v = e.target.checked
-                                  const ok = await saveOrderDeliverySetting('delivery_fee_enabled', v)
-                                  if (ok) setDeliveryFeeEnabled(v)
-                                }}
-                              />
-                            </div>
-                            <div>
-                              <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Delivery fee</span>
-                              <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Add a delivery fee to delivery orders (amount can be set in order/delivery settings).</div>
-                            </div>
-                          </label>
-                          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-                            <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
-                              <input
-                                type="checkbox"
-                                className="sc-gJwTLC ikxBAC"
-                                checked={allowScheduledPickup}
-                                onChange={async (e) => {
-                                  const v = e.target.checked
-                                  const ok = await saveOrderDeliverySetting('allow_scheduled_pickup', v)
-                                  if (ok) setAllowScheduledPickup(v)
-                                }}
-                              />
-                            </div>
-                            <div>
-                              <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow scheduled pickup</span>
-                              <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customers can choose a date and time to pick up their order.</div>
-                            </div>
-                          </label>
-                          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-                            <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
-                              <input
-                                type="checkbox"
-                                className="sc-gJwTLC ikxBAC"
-                                checked={allowScheduledDelivery}
-                                onChange={async (e) => {
-                                  const v = e.target.checked
-                                  const ok = await saveOrderDeliverySetting('allow_scheduled_delivery', v)
-                                  if (ok) setAllowScheduledDelivery(v)
-                                }}
-                              />
-                            </div>
-                            <div>
-                              <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Allow scheduled delivery</span>
-                              <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Customers can choose a date and time for delivery.</div>
-                            </div>
-                          </label>
+                    {/* Register */}
+                    <div style={{ borderRadius: '16px', border: isDarkMode ? '1px solid #333' : '1px solid #e2e8f0', backgroundColor: '#fff', overflow: 'hidden', transition: 'all 0.2s ease' }}>
+                      <div onClick={() => setExpandedPosSection(expandedPosSection === 'register' ? null : 'register')} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1e293b' }}>Register</div>
+                          <div style={{ fontSize: '12px', color: '#64748b' }}>Register type and customer checkout UI.</div>
                         </div>
+                        {expandedPosSection === 'register' ? <ChevronDown size={20} color="#94a3b8" /> : <ChevronRight size={20} color="#94a3b8" />}
                       </div>
-
-                      {/* Discount presets: customize labels and percentages shown in POS discount modal */}
-                      <div style={{ marginTop: '24px' }}>
-                        <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '4px', fontSize: '15px', fontWeight: 600 }}>
-                          Discount presets
-                        </FormTitle>
-                        <p style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginBottom: '14px', marginTop: 0 }}>
-                          Edit the discount types and percentages shown in the POS discount modal. These appear as quick-select buttons (e.g. Student 10%, Employee 15%).
-                        </p>
-                        <style>{`
-                  .discount-preset-percent-input::-webkit-outer-spin-button,
-                  .discount-preset-percent-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-                  .discount-preset-percent-input { -moz-appearance: textfield; appearance: textfield; }
-                `}</style>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          {(posSettings.discount_presets || []).map((preset, index) => (
-                            <div
-                              key={preset.id + String(index)}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '10px',
-                                flexWrap: 'wrap'
-                              }}
-                            >
-                              <input
-                                type="text"
-                                value={preset.label}
-                                onChange={(e) => {
-                                  const next = [...(posSettings.discount_presets || [])]
-                                  next[index] = { ...next[index], label: e.target.value }
-                                  setPosSettings({ ...posSettings, discount_presets: next })
-                                }}
-                                placeholder="Label"
-                                style={{
-                                  ...inputBaseStyle(isDarkMode, themeColorRgb),
-                                  width: '140px',
-                                  maxWidth: '180px'
-                                }}
-                                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                              />
-                              <input
-                                type="number"
-                                className="discount-preset-percent-input"
-                                min={0}
-                                max={100}
-                                step={0.5}
-                                value={preset.percent}
-                                onChange={(e) => {
-                                  const v = parseFloat(e.target.value)
-                                  if (Number.isNaN(v)) return
-                                  const next = [...(posSettings.discount_presets || [])]
-                                  next[index] = { ...next[index], percent: Math.max(0, Math.min(100, v)) }
-                                  setPosSettings({ ...posSettings, discount_presets: next })
-                                }}
-                                placeholder="%"
-                                style={{
-                                  ...inputBaseStyle(isDarkMode, themeColorRgb),
-                                  width: '72px',
-                                  boxSizing: 'border-box'
-                                }}
-                                {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
-                              />
-                              <span style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-tertiary)' : '#666' }}>%</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const next = (posSettings.discount_presets || []).filter((_, i) => i !== index)
-                                  setPosSettings({ ...posSettings, discount_presets: next })
-                                }}
-                                style={{
-                                  padding: '6px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666',
-                                  background: 'none',
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                  borderRadius: '4px'
-                                }}
-                                aria-label="Remove discount"
-                              >
-                                <X size={18} />
-                              </button>
+                      {expandedPosSection === 'register' && (
+                        <div style={{ padding: '0 20px 20px 20px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                            <FormField>
+                              <FormLabel isDarkMode={isDarkMode} style={{ marginBottom: '4px', display: 'block' }}>Register Type</FormLabel>
+                              <CustomDropdown value={posSettings.register_type} onChange={(e) => setPosSettings({ ...posSettings, register_type: e.target.value })} options={[{ value: 'one_screen', label: 'One Screen Register' }, { value: 'two_screen', label: 'Two Screen Register' }]} placeholder="Select register type" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} style={{ maxWidth: '320px' }} />
+                            </FormField>
+                            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+                              <div className="checkbox-wrapper-2" style={{ flexShrink: 0, marginTop: '2px' }}>
+                                <input type="checkbox" className="sc-gJwTLC ikxBAC" checked={posSettings.register_type === 'two_screen'} onChange={(e) => setPosSettings({ ...posSettings, register_type: e.target.checked ? 'two_screen' : 'one_screen' })} />
+                              </div>
+                              <div>
+                                <span style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Have customer checkout UI</span>
+                                <div style={{ fontSize: '12px', color: isDarkMode ? 'var(--text-tertiary, #999)' : '#666', marginTop: '2px' }}>Show a second screen for customers to review order and pay.</div>
+                              </div>
+                            </label>
+                            {posSettings.register_type === 'two_screen' && !checkoutUiEditModalOpen && (
+                              <div style={{ marginTop: '8px' }}>
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', marginBottom: '8px' }}>Checkout UI Preview</div>
+                                <div role="button" tabIndex={0} onClick={() => setCheckoutUiEditModalOpen(true)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCheckoutUiEditModalOpen(true); } }} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', cursor: 'pointer', outline: 'none', borderRadius: '12px', overflow: 'hidden', border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', width: 'fit-content' }} ref={checkoutPreviewContainerRef}>
+                                  <div style={{ width: CHECKOUT_PREVIEW_CONTAINER_WIDTH, aspectRatio: `${CHECKOUT_PREVIEW_WIDTH} / ${CHECKOUT_PREVIEW_HEIGHT}`, position: 'relative' }}>
+                                    <div style={{ position: 'absolute', top: 0, left: 0, width: CHECKOUT_PREVIEW_WIDTH, height: CHECKOUT_PREVIEW_HEIGHT, transform: `scale(${checkoutPreviewScale})`, transformOrigin: 'top left', overflow: 'hidden', borderRadius: '8px' }}>
+                                      <div style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: 'transparent' }}>
+                                        {checkoutUiTab === 'review_order' && (() => {
+                                          const s = checkoutUiSettings.review_order || {}
+                                          const bg = s.backgroundColor || '#e8f0fe'
+                                          const btn = s.buttonColor || '#4a90e2'
+                                          const tc = s.textColor || '#1a1a1a'
+                                          const titleStyle = getCheckoutTextStyle(s, 'title')
+                                          const bodyStyle = getCheckoutTextStyle(s, 'body')
+                                          const btnTextStyle = getCheckoutTextStyle(s, 'button')
+                                          const styleId = s.button_style || 'default'
+                                          const btnRgb = hexToRgb(btn)
+                                          return (
+                                            <div className="customer-display-popup-container" style={{ ['--customer-display-theme-color-rgb']: btnRgb, padding: '20px', width: '100%', height: '100%', minHeight: CHECKOUT_PREVIEW_HEIGHT, boxSizing: 'border-box', backgroundColor: bg, color: tc, fontFamily: titleStyle.fontFamily || 'system-ui', fontWeight: titleStyle.fontWeight || '600', maxWidth: '100%', maxHeight: '100%', borderRadius: 0, boxShadow: 'none', overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                                              <div className="transaction-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+                                                <div style={{ height: '32px', marginBottom: '4px' }} />
+                                                <div className="screen-header" style={{ marginTop: 0, marginBottom: '20px' }}><h2 style={titleStyle}>Review Your Order</h2></div>
+                                                <div className="items-list" style={bodyStyle}>
+                                                  <div className="item-row"><span className="item-name">Sample Item</span><span className="item-price">$9.99</span></div>
+                                                  <div className="item-row"><span className="item-name">Another Item</span><span className="item-quantity">× 2</span><span className="item-price">$24.00</span></div>
+                                                </div>
+                                                <div className="totals-section" style={bodyStyle}>
+                                                  <div className="total-row"><span>Subtotal:</span><span>$33.99</span></div>
+                                                  <div className="total-row"><span>Tax:</span><span>$2.72</span></div>
+                                                  <div className="total-row final"><span>Total:</span><span>$36.71</span></div>
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '20px', width: '100%', marginTop: '20px' }}>
+                                                  {renderCheckoutPreviewButton('Cash', styleId, btn, btnTextStyle)}
+                                                  {renderCheckoutPreviewButton('Card', styleId, btn, btnTextStyle)}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          )
+                                        })()}
+                                        {checkoutUiTab !== 'review_order' && (
+                                          <div style={{ width: CHECKOUT_PREVIEW_WIDTH, height: CHECKOUT_PREVIEW_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e8f0fe', color: '#666', fontSize: '14px' }}>Preview</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Click to edit</div>
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                              <button type="button" className="button-50" role="button" disabled={saving} onClick={savePosSettings}><span className="button-50__Content">{saving ? 'Saving…' : 'Save Settings'}</span></button>
                             </div>
-                          ))}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const presets = posSettings.discount_presets || []
-                            const usedIds = new Set(presets.map(p => (p.id || '').toLowerCase()))
-                            let id = 'custom'
-                            let n = 1
-                            while (usedIds.has(id)) { id = `custom_${n}`; n++ }
-                            setPosSettings({
-                              ...posSettings,
-                              discount_presets: [...presets, { id, label: 'New discount', percent: 10 }]
-                            })
-                          }}
-                          style={{
-                            marginTop: '12px',
-                            padding: '8px 14px',
-                            fontSize: '14px',
-                            borderRadius: '6px',
-                            border: `1px solid ${isDarkMode ? 'var(--border-light, #444)' : '#ccc'}`,
-                            backgroundColor: 'transparent',
-                            color: isDarkMode ? 'var(--text-primary)' : '#333',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Add discount
-                        </button>
-                      </div>
-
-                      <div style={{
-                        marginTop: '12px',
-                        display: 'flex',
-                        justifyContent: 'flex-end'
-                      }}>
-                        <button
-                          type="button"
-                          className="button-26 button-26--header"
-                          role="button"
-                          onClick={savePosSettings}
-                          disabled={saving}
-                          style={{
-                            opacity: saving ? 0.6 : 1,
-                            cursor: saving ? 'not-allowed' : 'pointer'
-                          }}
-                        >
-                          <div className="button-26__content">
-                            <span className="button-26__text text">
-                              {saving ? 'Saving…' : 'Save settings'}
-                            </span>
                           </div>
-                        </button>
-                      </div>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Receipt Preview and Checkout UI Preview – each title above its preview; group centered */}
-                    <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center' }}>
-                      <div style={{ display: 'flex', flexDirection: 'row', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'center' }}>
-                        {!receiptEditModalOpen && (
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => setReceiptEditModalOpen(true)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReceiptEditModalOpen(true); } }}
-                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', outline: 'none' }}
-                          >
-                            <div style={{ marginBottom: '8px', textAlign: 'center', width: '100%' }}>
-                              <div style={{ fontSize: '15px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Receipt Preview</div>
-                              <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '2px' }}>Click to edit</div>
-                            </div>
-                            <ReceiptPreview
-                              settings={receiptSettings}
-                              id="receipt-preview-print"
-                              isDarkMode={isDarkMode}
-                              themeColorRgb={themeColorRgb}
-                            />
-                          </div>
-                        )}
-                        {!checkoutUiEditModalOpen && (
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => setCheckoutUiEditModalOpen(true)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCheckoutUiEditModalOpen(true); } }}
-                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', outline: 'none' }}
-                          >
-                            <div style={{ marginBottom: '8px', textAlign: 'center', width: '100%' }}>
-                              <div style={{ fontSize: '15px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333' }}>Checkout UI Preview</div>
-                              <div style={{ fontSize: '13px', color: isDarkMode ? 'var(--text-secondary, #999)' : '#666', marginTop: '2px' }}>Click to edit</div>
-                            </div>
-                            <div
-                              style={{
-                                width: CHECKOUT_PREVIEW_CONTAINER_WIDTH,
-                                maxWidth: '100%',
-                                aspectRatio: `${CHECKOUT_PREVIEW_WIDTH} / ${CHECKOUT_PREVIEW_HEIGHT}`,
-                                borderRadius: '12px',
-                                overflow: 'hidden',
-                                border: isDarkMode ? '1px solid var(--border-color, #404040)' : '1px solid #ddd',
-                                boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                                position: 'relative'
-                              }}
-                              ref={checkoutPreviewContainerRef}
-                            >
-                              {/* 800×600 content scaled to fill; absolute so it doesn't drive container size – fills correctly on first paint */}
-                              <div style={{ position: 'absolute', top: 0, left: 0, width: CHECKOUT_PREVIEW_WIDTH, height: CHECKOUT_PREVIEW_HEIGHT, transform: `scale(${checkoutPreviewScale})`, transformOrigin: 'top left', overflow: 'hidden', borderRadius: '8px' }}>
-                                <div style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: 'transparent' }}>
-                                  {checkoutUiTab === 'review_order' && (() => {
-                                    const s = checkoutUiSettings.review_order || {}
-                                    const bg = s.backgroundColor || '#e8f0fe'
-                                    const btn = s.buttonColor || '#4a90e2'
-                                    const tc = s.textColor || '#1a1a1a'
-                                    const titleStyle = getCheckoutTextStyle(s, 'title')
-                                    const bodyStyle = getCheckoutTextStyle(s, 'body')
-                                    const btnTextStyle = getCheckoutTextStyle(s, 'button')
-                                    const styleId = s.button_style || 'default'
-                                    const btnRgb = hexToRgb(btn)
-                                    return (
-                                      <div className="customer-display-popup-container" style={{
-                                        ['--customer-display-theme-color-rgb']: btnRgb,
-                                        padding: '20px',
-                                        width: '100%',
-                                        height: '100%',
-                                        minHeight: CHECKOUT_PREVIEW_HEIGHT,
-                                        boxSizing: 'border-box',
-                                        backgroundColor: bg,
-                                        color: tc,
-                                        fontFamily: titleStyle.fontFamily || 'system-ui',
-                                        fontWeight: titleStyle.fontWeight || '600',
-                                        maxWidth: '100%',
-                                        maxHeight: '100%',
-                                        borderRadius: 0,
-                                        boxShadow: 'none',
-                                        overflow: 'hidden',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        flex: 1
-                                      }}>
-                                        <div className="transaction-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
-                                          <div style={{ height: '32px', marginBottom: '4px' }} />
-                                          <div className="screen-header" style={{ marginTop: 0, marginBottom: '20px' }}>
-                                            <h2 style={titleStyle}>Review Your Order</h2>
-                                          </div>
-                                          <div className="items-list" style={bodyStyle}>
-                                            <div className="item-row">
-                                              <span className="item-name">Sample Item</span>
-                                              <span className="item-price">$9.99</span>
-                                            </div>
-                                            <div className="item-row">
-                                              <span className="item-name">Another Item</span>
-                                              <span className="item-quantity">× 2</span>
-                                              <span className="item-price">$24.00</span>
-                                            </div>
-                                          </div>
-                                          <div className="totals-section" style={bodyStyle}>
-                                            <div className="total-row"><span>Subtotal:</span><span>$33.99</span></div>
-                                            <div className="total-row"><span>Tax:</span><span>$2.72</span></div>
-                                            <div className="total-row final"><span>Total:</span><span>$36.71</span></div>
-                                          </div>
-                                          <div style={{ display: 'flex', gap: '20px', width: '100%', marginTop: '20px' }}>
-                                            {renderCheckoutPreviewButton('Cash', styleId, btn, btnTextStyle)}
-                                            {renderCheckoutPreviewButton('Card', styleId, btn, btnTextStyle)}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )
-                                  })()}
-                                  {checkoutUiTab === 'cash_confirmation' && (() => {
-                                    const s = checkoutUiSettings.cash_confirmation || {}
-                                    const bg = s.backgroundColor || '#e8f0fe'
-                                    const btn = s.buttonColor || '#4a90e2'
-                                    const tc = s.textColor || '#1a1a1a'
-                                    const titleStyle = getCheckoutTextStyle(s, 'title')
-                                    const bodyStyle = getCheckoutTextStyle(s, 'body')
-                                    const btnRgb = hexToRgb(btn)
-                                    return (
-                                      <div className="customer-display-popup-container" style={{
-                                        ['--customer-display-theme-color-rgb']: btnRgb,
-                                        padding: '20px',
-                                        width: '100%',
-                                        height: '100%',
-                                        minHeight: CHECKOUT_PREVIEW_HEIGHT,
-                                        boxSizing: 'border-box',
-                                        backgroundColor: bg,
-                                        color: tc,
-                                        fontFamily: titleStyle.fontFamily || 'system-ui',
-                                        fontWeight: titleStyle.fontWeight || '600',
-                                        maxWidth: '100%',
-                                        maxHeight: '100%',
-                                        borderRadius: 0,
-                                        boxShadow: 'none',
-                                        overflow: 'hidden',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        flex: 1
-                                      }}>
-                                        <div className="payment-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
-                                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: '10px', marginTop: '-10px' }}>
-                                            <span style={{ padding: '6px 12px', fontSize: '12px', opacity: 0 }}>Cancel</span>
-                                            <span style={{ padding: '6px 12px', fontSize: '12px', opacity: 0 }}>Continue</span>
-                                          </div>
-                                          <div className="screen-header" style={{ width: '100%', marginBottom: '20px' }}>
-                                            <h2 style={{ margin: 0, ...titleStyle }}>Please give the cash amount to the cashier</h2>
-                                          </div>
-                                          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-                                            <div className="totals-section" style={{ background: `rgba(${btnRgb}, 0.15)`, borderRadius: '15px', padding: '20px', width: '100%', ...bodyStyle }}>
-                                              <div className="total-row"><span>Subtotal:</span><span>$33.99</span></div>
-                                              <div className="total-row"><span>Tax:</span><span>$2.72</span></div>
-                                              <div className="total-row final"><span>Total:</span><span>$36.71</span></div>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )
-                                  })()}
-                                  {checkoutUiTab === 'tip_selection' && (() => {
-                                    const s = checkoutUiSettings.tip_selection || {}
-                                    const bg = s.backgroundColor || '#e8f0fe'
-                                    const btn = s.buttonColor || '#4a90e2'
-                                    const tc = s.textColor || '#1a1a1a'
-                                    const titleStyle = getCheckoutTextStyle(s, 'title')
-                                    const btnTextStyle = getCheckoutTextStyle(s, 'button')
-                                    const btnRgb = hexToRgb(btn)
-                                    const tipBtnBase = {
-                                      aspectRatio: '1',
-                                      minHeight: 0,
-                                      padding: '16px',
-                                      backgroundColor: btn,
-                                      color: '#fff',
-                                      border: 'none',
-                                      borderRadius: '8px',
-                                      textAlign: 'center',
-                                      cursor: 'default',
-                                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                                      display: 'flex',
-                                      flexDirection: 'column',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      ...btnTextStyle
-                                    }
-                                    return (
-                                      <div className="customer-display-popup-container" style={{
-                                        ['--customer-display-theme-color-rgb']: btnRgb,
-                                        padding: '20px',
-                                        width: '100%',
-                                        height: '100%',
-                                        minHeight: CHECKOUT_PREVIEW_HEIGHT,
-                                        boxSizing: 'border-box',
-                                        backgroundColor: bg,
-                                        color: tc,
-                                        fontFamily: titleStyle.fontFamily || 'system-ui',
-                                        fontWeight: titleStyle.fontWeight || '600',
-                                        maxWidth: '100%',
-                                        maxHeight: '100%',
-                                        borderRadius: 0,
-                                        boxShadow: 'none',
-                                        overflow: 'hidden',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        flex: 1
-                                      }}>
-                                        <div className="payment-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
-                                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%', marginBottom: '8px' }}>
-                                            <span />
-                                          </div>
-                                          <div className="screen-header" style={titleStyle}>
-                                            <h2>Add a tip?</h2>
-                                          </div>
-                                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', width: '100%', maxWidth: '400px', margin: '0 auto', flex: 1, alignContent: 'start' }}>
-                                            {[15, 18, 20].map((pct) => (
-                                              <div key={pct} style={{ ...tipBtnBase }}>
-                                                <div style={{ fontSize: 'clamp(28px, 6vw, 36px)', fontWeight: 600, marginBottom: '4px' }}>{pct}%</div>
-                                                <div style={{ fontSize: 'clamp(16px, 3.5vw, 20px)', opacity: 0.95 }}>${(36.71 * pct / 100).toFixed(2)}</div>
-                                              </div>
-                                            ))}
-                                            <div style={{ ...tipBtnBase }}>
-                                              No tip
-                                            </div>
-                                            <div style={{
-                                              gridColumn: '1 / -1',
-                                              padding: '20px 16px',
-                                              backgroundColor: `rgba(${btnRgb}, 0.35)`,
-                                              color: tc,
-                                              border: `2px solid ${btn}`,
-                                              borderRadius: '8px',
-                                              textAlign: 'center',
-                                              cursor: 'default',
-                                              boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-                                              display: 'flex',
-                                              flexDirection: 'column',
-                                              alignItems: 'center',
-                                              justifyContent: 'center',
-                                              fontSize: 'clamp(18px, 4vw, 22px)',
-                                              fontWeight: 600,
-                                              ...btnTextStyle
-                                            }}>
-                                              Custom
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )
-                                  })()}
-                                  {checkoutUiTab === 'card' && (() => {
-                                    const s = checkoutUiSettings.card || {}
-                                    const bg = s.backgroundColor || '#e8f0fe'
-                                    const tc = s.textColor || '#1a1a1a'
-                                    const bodyStyle = getCheckoutTextStyle(s, 'body')
-                                    const instructionText = s.instruction_text ?? 'Please insert or tap your card'
-                                    return (
-                                      <div className="customer-display-popup-container" style={{
-                                        padding: '20px',
-                                        width: '100%',
-                                        height: '100%',
-                                        minHeight: CHECKOUT_PREVIEW_HEIGHT,
-                                        boxSizing: 'border-box',
-                                        backgroundColor: bg,
-                                        color: tc,
-                                        fontFamily: bodyStyle.fontFamily || 'system-ui',
-                                        maxWidth: '100%',
-                                        maxHeight: '100%',
-                                        borderRadius: 0,
-                                        boxShadow: 'none',
-                                        overflow: 'hidden',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        flex: 1
-                                      }}>
-                                        <div className="card-processing-screen-popup" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', justifyContent: 'flex-start', alignItems: 'stretch' }}>
-                                          <div style={{ height: '32px', marginBottom: '10px', marginTop: '-10px' }} />
-                                          <div className="card-animation" style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px', marginTop: '24px' }}>
-                                            <img src="/contactless-svgrepo-com.svg" alt="" style={{ width: '200px', height: '200px', color: 'inherit' }} />
-                                          </div>
-                                          <div className="card-instruction" style={{ fontSize: '1.25rem', textAlign: 'center', ...bodyStyle }}>
-                                            {instructionText}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )
-                                  })()}
-                                  {checkoutUiTab === 'receipt' && (() => {
-                                    const s = checkoutUiSettings.receipt || {}
-                                    const opts = s.receipt_options_offered || {}
-                                    const showPrint = opts.print !== false
-                                    const showEmail = opts.email !== false
-                                    const showNoReceipt = opts.no_receipt !== false
-                                    const hasAnyOption = showPrint || showEmail || showNoReceipt
-                                    const bg = s.backgroundColor || '#e8f0fe'
-                                    const btn = s.buttonColor || '#4a90e2'
-                                    const tc = s.textColor || '#1a1a1a'
-                                    const titleStyle = getCheckoutTextStyle(s, 'title')
-                                    const bodyStyle = getCheckoutTextStyle(s, 'body')
-                                    const btnTextStyle = getCheckoutTextStyle(s, 'button')
-                                    const styleId = s.button_style || 'default'
-                                    const sigBg = s.signature_background || '#ffffff'
-                                    const sigBorderW = s.signature_border_width ?? 2
-                                    const sigBorderColor = s.signature_border_color || 'rgba(0,0,0,0.2)'
-                                    const sigInk = s.signature_ink_color || '#000000'
-                                    const btnRgb = hexToRgb(btn)
-                                    return (
-                                      <div className="customer-display-popup-container" style={{
-                                        ['--customer-display-theme-color-rgb']: btnRgb,
-                                        padding: '20px',
-                                        width: '100%',
-                                        height: '100%',
-                                        minHeight: CHECKOUT_PREVIEW_HEIGHT,
-                                        boxSizing: 'border-box',
-                                        backgroundColor: bg,
-                                        color: tc,
-                                        fontFamily: titleStyle.fontFamily || 'system-ui',
-                                        fontWeight: titleStyle.fontWeight || '600',
-                                        maxWidth: '100%',
-                                        maxHeight: '100%',
-                                        borderRadius: 0,
-                                        boxShadow: 'none',
-                                        overflow: 'hidden',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        flex: 1
-                                      }}>
-                                        <div className="receipt-screen-popup" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
-                                          <div className="screen-header" style={{ width: '100%', marginBottom: '30px' }}>
-                                            <h2 style={titleStyle}>Sign Below</h2>
-                                          </div>
-                                          <div style={{
-                                            width: '100%',
-                                            height: '250px',
-                                            border: `${sigBorderW}px solid ${sigBorderColor}`,
-                                            borderRadius: '8px',
-                                            backgroundColor: sigBg,
-                                            marginBottom: '30px',
-                                            position: 'relative',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            color: sigInk,
-                                            ...bodyStyle
-                                          }}>
-                                            Signature area
-                                          </div>
-                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', marginTop: '20px' }}>
-                                            {!hasAnyOption ? (
-                                              <>
-                                                <div style={{ textAlign: 'center', fontSize: '18px', color: tc, opacity: 0.9 }}>Thank you for your purchase</div>
-                                                {renderCheckoutPreviewButton('Done', styleId, btn, btnTextStyle, true)}
-                                              </>
-                                            ) : (
-                                              <>
-                                                <div style={{ display: 'flex', gap: '20px', width: '100%' }}>
-                                                  {showPrint && renderCheckoutPreviewButton('Print', styleId, btn, btnTextStyle)}
-                                                  {showNoReceipt && renderCheckoutPreviewButton('No Receipt', styleId, btn, btnTextStyle)}
-                                                </div>
-                                                {showEmail && renderCheckoutPreviewButton('Email', styleId, btn, btnTextStyle, true)}
-                                              </>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )
-                                  })()}
-                                </div>
+                    {/* Orders */}
+                    <div style={{ borderRadius: '16px', border: isDarkMode ? '1px solid #333' : '1px solid #e2e8f0', backgroundColor: '#fff', overflow: 'hidden', transition: 'all 0.2s ease' }}>
+                      <div onClick={() => setExpandedPosSection(expandedPosSection === 'orders' ? null : 'orders')} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1e293b' }}>Orders</div>
+                          <div style={{ fontSize: '12px', color: '#64748b' }}>Delivery and pickup options.</div>
+                        </div>
+                        <ChevronDown size={20} color="#94a3b8" style={{ transform: expandedPosSection === 'orders' ? 'rotate(180deg)' : 'none' }} />
+                      </div>
+                      {expandedPosSection === 'orders' && (
+                        <div style={{ padding: '0 20px 20px 20px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '12px' }}>
+                            {/* Delivery – row with switch on right + chevron when enabled */}
+                            <div onClick={(e) => { if (allowDelivery) { e.stopPropagation(); setExpandedOrderOption(expandedOrderOption === 'delivery' ? null : 'delivery'); } }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: !(allowDelivery && expandedOrderOption === 'delivery') ? (isDarkMode ? '1px solid #333' : '1px solid #f1f5f9') : 'none', gap: '12px', cursor: allowDelivery ? 'pointer' : 'default' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Delivery</div>
+                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '1px' }}>Customers can place orders for delivery.</div>
+                              </div>
+                              <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={allowDelivery} onChange={async (e) => { const v = e.target.checked; const ok = await saveOrderDeliverySetting('allow_delivery', v); if (ok) setAllowDelivery(v) }} /></div>
+                                {allowDelivery ? <button type="button" onClick={() => setExpandedOrderOption(expandedOrderOption === 'delivery' ? null : 'delivery')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', display: 'flex', alignItems: 'center' }} aria-label={expandedOrderOption === 'delivery' ? 'Collapse' : 'Expand'}><ChevronDown size={18} style={{ transform: expandedOrderOption === 'delivery' ? 'rotate(180deg)' : 'none', color: isDarkMode ? '#94a3b8' : '#64748b' }} /></button> : <span style={{ width: 26, flexShrink: 0 }} />}
                               </div>
                             </div>
+                            {allowDelivery && expandedOrderOption === 'delivery' && (
+                              <div style={{ padding: '12px 0', display: 'flex', flexDirection: 'column', gap: '4px', borderBottom: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9', marginBottom: '4px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', gap: '12px' }}>
+                                  <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Allow scheduled delivery</span>
+                                  <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={allowScheduledDelivery} onChange={async (e) => { const v = e.target.checked; const ok = await saveOrderDeliverySetting('allow_scheduled_delivery', v); if (ok) setAllowScheduledDelivery(v) }} /></div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', gap: '12px' }}>
+                                  <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Delivery fee</span>
+                                  <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={deliveryFeeEnabled} onChange={async (e) => { const v = e.target.checked; const ok = await saveOrderDeliverySetting('delivery_fee_enabled', v); if (ok) setDeliveryFeeEnabled(v) }} /></div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', gap: '12px' }}>
+                                  <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Allow pay at delivery</span>
+                                  <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={deliveryPayOnDeliveryCashOnly} onChange={(e) => saveDeliveryPayOnDeliveryCashOnly(e.target.checked)} /></div>
+                                </div>
+                              </div>
+                            )}
+                            {/* Pickup – row with switch on right + chevron when enabled */}
+                            <div onClick={(e) => { if (allowPickup) { e.stopPropagation(); setExpandedOrderOption(expandedOrderOption === 'pickup' ? null : 'pickup'); } }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: !(allowPickup && expandedOrderOption === 'pickup') ? (isDarkMode ? '1px solid #333' : '1px solid #f1f5f9') : 'none', gap: '12px', cursor: allowPickup ? 'pointer' : 'default' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Pickup</div>
+                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '1px' }}>Customers can place orders to pick up in store.</div>
+                              </div>
+                              <div onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={allowPickup} onChange={async (e) => { const v = e.target.checked; const ok = await saveOrderDeliverySetting('allow_pickup', v); if (ok) setAllowPickup(v) }} /></div>
+                                {allowPickup ? <button type="button" onClick={() => setExpandedOrderOption(expandedOrderOption === 'pickup' ? null : 'pickup')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', display: 'flex', alignItems: 'center' }} aria-label={expandedOrderOption === 'pickup' ? 'Collapse' : 'Expand'}><ChevronDown size={18} style={{ transform: expandedOrderOption === 'pickup' ? 'rotate(180deg)' : 'none', color: isDarkMode ? '#94a3b8' : '#64748b' }} /></button> : <span style={{ width: 26, flexShrink: 0 }} />}
+                              </div>
+                            </div>
+                            {allowPickup && expandedOrderOption === 'pickup' && (
+                              <div style={{ padding: '12px 0', display: 'flex', flexDirection: 'column', gap: '4px', borderBottom: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9', marginBottom: '4px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', gap: '12px' }}>
+                                  <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Allow pay at pickup</span>
+                                  <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={allowPayAtPickup} onChange={async (e) => { const v = e.target.checked; const ok = await saveOrderDeliverySetting('allow_pay_at_pickup', v); if (ok) setAllowPayAtPickup(v) }} /></div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', gap: '12px' }}>
+                                  <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Allow scheduled pickup</span>
+                                  <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={allowScheduledPickup} onChange={async (e) => { const v = e.target.checked; const ok = await saveOrderDeliverySetting('allow_scheduled_pickup', v); if (ok) setAllowScheduledPickup(v) }} /></div>
+                                </div>
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                              <button type="button" className="button-50" role="button" disabled={saving} onClick={savePosSettings}><span className="button-50__Content">{saving ? 'Saving…' : 'Save Settings'}</span></button>
+                            </div>
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Checkout UI Edit modal – left: controls, right: exact checkout preview */}
-                    {checkoutUiEditModalOpen && (
+                    {/* Receipts */}
+                    <div style={{ borderRadius: '16px', border: isDarkMode ? '1px solid #333' : '1px solid #e2e8f0', backgroundColor: '#fff', overflow: 'hidden', transition: 'all 0.2s ease' }}>
+                      <div onClick={() => setExpandedPosSection(expandedPosSection === 'receipts' ? null : 'receipts')} style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px', cursor: 'pointer' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: isDarkMode ? 'var(--text-primary)' : '#1e293b' }}>Receipts</div>
+                          <div style={{ fontSize: '12px', color: '#64748b' }}>Email, print, and receipt preview.</div>
+                        </div>
+                        <ChevronDown size={20} color="#94a3b8" style={{ transform: expandedPosSection === 'receipts' ? 'rotate(180deg)' : 'none' }} />
+                      </div>
+                      {expandedPosSection === 'receipts' && (
+                        <div style={{ padding: '0 20px 20px 20px', borderTop: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9', gap: '12px' }}>
+                              <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Allow email receipts</span>
+                              <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={(checkoutUiSettings.receipt?.receipt_options_offered?.email !== false)} onChange={(e) => setCheckoutUiSettings(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), receipt_options_offered: { ...(prev.receipt?.receipt_options_offered || { print: true, email: true, no_receipt: true }), email: e.target.checked } } }))} /></div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9', gap: '12px' }}>
+                              <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Allow print receipt</span>
+                              <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={(checkoutUiSettings.receipt?.receipt_options_offered?.print !== false)} onChange={(e) => setCheckoutUiSettings(prev => ({ ...prev, receipt: { ...(prev.receipt || {}), receipt_options_offered: { ...(prev.receipt?.receipt_options_offered || { print: true, email: true, no_receipt: true }), print: e.target.checked } } }))} /></div>
+                            </div>
+                            {!receiptEditModalOpen && (
+                              <div style={{ marginTop: '8px' }}>
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: isDarkMode ? 'var(--text-primary, #fff)' : '#333', marginBottom: '8px' }}>Receipt Preview</div>
+                                <div role="button" tabIndex={0} onClick={() => setReceiptEditModalOpen(true)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReceiptEditModalOpen(true); } }} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', cursor: 'pointer', outline: 'none', width: 'fit-content' }}>
+                                  <ReceiptPreview settings={receiptSettings} id="receipt-preview-print" isDarkMode={isDarkMode} themeColorRgb={themeColorRgb} />
+                                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Click to edit</div>
+                                </div>
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: isDarkMode ? '1px solid #333' : '1px solid #f1f5f9', gap: '12px' }}>
+                              <span style={{ fontSize: '14px', fontWeight: 500, color: isDarkMode ? '#fff' : '#1a1a1a' }}>Require signature</span>
+                              <div className="checkbox-wrapper-2" style={{ flexShrink: 0 }}><input type="checkbox" className="sc-gJwTLC ikxBAC" checked={displaySettings.require_signature === 'required'} onChange={(e) => setDisplaySettings(prev => ({ ...prev, require_signature: e.target.checked ? 'required' : 'not_required' }))} /></div>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                              <button type="button" className="button-50" role="button" disabled={saving} onClick={async () => { await savePosSettings(); saveDisplaySettings(); }}><span className="button-50__Content">{saving ? 'Saving…' : 'Save Settings'}</span></button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+              {/* Checkout UI Edit modal – left: controls, right: exact checkout preview */}
+              {checkoutUiEditModalOpen && (
                       <div
                         style={{ ...modalOverlayStyle(isDarkMode, 99999), padding: '24px' }}
                         onClick={() => setCheckoutUiEditModalOpen(false)}
@@ -7050,7 +6293,6 @@ function Settings() {
                                     role="button"
                                     onClick={async () => {
                                       setSaving(true)
-                                      setMessage(null)
                                       try {
                                         const sessionToken = localStorage.getItem('sessionToken')
                                         const res = await fetch('/api/customer-display/settings', {
@@ -7065,15 +6307,14 @@ function Settings() {
                                             setCheckoutUiSettings(mergeCheckoutUiFromApi(saved))
                                           }
                                           setCheckoutUiEditModalOpen(false)
-                                          setMessage({ type: 'success', text: 'Saved' })
-                                          setTimeout(() => setMessage(null), 3000)
+                                          showToast('Saved', 'success')
                                           loadDisplaySettings().catch(() => { })
                                         } else {
-                                          setMessage({ type: 'error', text: data.message || 'Failed to save' })
+                                          showToast(data.message || 'Failed to save', 'error')
                                         }
                                       } catch (err) {
                                         console.error(err)
-                                        setMessage({ type: 'error', text: 'Failed to save' })
+                                        showToast('Failed to save', 'error')
                                       } finally {
                                         setSaving(false)
                                       }
@@ -8076,7 +7317,7 @@ function Settings() {
                                   <button type="button" className="button-26 button-26--header" role="button" onClick={() => setReceiptEditModalOpen(false)}>
                                     <div className="button-26__content"><span className="button-26__text text">Cancel</span></div>
                                   </button>
-                                  <button type="button" className="button-26 button-26--header" role="button" disabled={saving} onClick={async () => { setSaving(true); setMessage(null); try { await saveReceiptSettingsOnly(receiptSettings); setReceiptEditModalOpen(false); setMessage({ type: 'success', text: 'Saved' }); setTimeout(() => setMessage(null), 3000); loadDisplaySettings().catch(() => { }); } catch (e) { setMessage({ type: 'error', text: 'Failed to save' }); } finally { setSaving(false); } }}>
+                                  <button type="button" className="button-26 button-26--header" role="button" disabled={saving} onClick={async () => { setSaving(true); try { await saveReceiptSettingsOnly(receiptSettings); setReceiptEditModalOpen(false); showToast('Saved', 'success'); loadDisplaySettings().catch(() => { }); } catch (e) { showToast('Failed to save', 'error'); } finally { setSaving(false); } }}>
                                     <div className="button-26__content"><span className="button-26__text text">{saving ? 'Saving…' : 'Save'}</span></div>
                                   </button>
                                 </div>
@@ -8279,12 +7520,11 @@ function Settings() {
                                                         if (data.success && data.template) {
                                                           loadReceiptTemplates()
                                                           setReceiptSettings(prev => ({ ...prev, template_preset: `template_${data.template.id}` }))
-                                                          setMessage({ type: 'success', text: `Template "${data.template.name}" saved.` })
-                                                          setTimeout(() => setMessage(null), 2500)
+                                                          showToast(`Template "${data.template.name}" saved.`, 'success')
                                                         } else {
-                                                          setMessage({ type: 'error', text: data.message || 'Failed to save template' })
+                                                          showToast(data.message || 'Failed to save template', 'error')
                                                         }
-                                                      }).catch(() => setMessage({ type: 'error', text: 'Failed to save template' }))
+                                                      }).catch(() => showToast('Failed to save template', 'error'))
                                                     }
                                                   } else if (e.key === 'Escape') {
                                                     setReceiptShowNewTemplateInput(false)
@@ -8327,13 +7567,12 @@ function Settings() {
                                                       if (data.success && data.template) {
                                                         await loadReceiptTemplates()
                                                         setReceiptSettings(prev => ({ ...prev, template_preset: `template_${data.template.id}` }))
-                                                        setMessage({ type: 'success', text: `Template "${data.template.name}" saved.` })
-                                                        setTimeout(() => setMessage(null), 2500)
+                                                        showToast(`Template "${data.template.name}" saved.`, 'success')
                                                       } else {
-                                                        setMessage({ type: 'error', text: data.message || 'Failed to save template' })
+                                                        showToast(data.message || 'Failed to save template', 'error')
                                                       }
                                                     } catch (e) {
-                                                      setMessage({ type: 'error', text: 'Failed to save template' })
+                                                      showToast('Failed to save template', 'error')
                                                     }
                                                   }}
                                                   disabled={!receiptNewTemplateName.trim()}
@@ -8430,17 +7669,18 @@ function Settings() {
                         </div>
                       </div>
                     )}
-                  </div>
-                </div>
+                </>
               )}
 
               {/* Notifications Tab */}
               {activeTab === 'notifications' && (
-                <>
-                  <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px' }}>
+                <div style={{ maxWidth: '640px', margin: '0 auto', width: '100%', paddingBottom: '40px' }}>
+                  <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px', textAlign: 'left' }}>
                     Notifications
                   </FormTitle>
-                  <div style={{ maxWidth: '560px', margin: '0 auto', width: '100%' }}>
+                  <p style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '24px', textAlign: 'left' }}>
+                    Configure email and SMS alerts for orders, clock-ins, register activity, and scheduling.
+                  </p>
                   <NotificationSettingsPanel
                     isDarkMode={isDarkMode}
                     themeColorRgb={themeColorRgb}
@@ -8543,16 +7783,13 @@ function Settings() {
                       }
                     }}
                   />
-
-
-                  </div>
-                </>
+                </div>
               )}
 
               {/* Email Template Modal – top level so it opens from receipt editor (POS tab) or notifications */}
 
-              {/* Integrations Tab */}
-              {activeTab === 'integration' && (
+              {/* Legacy Integrations Tab (hidden) */}
+              {activeTab === 'integration_legacy' && (
                 <div style={{ maxWidth: '720px', marginLeft: 'auto', marginRight: 'auto' }}>
                   <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px' }}>
                     Integrations
@@ -9505,6 +8742,664 @@ function Settings() {
                 </div>
               )}
 
+              {/* Integrations Tab – card grid + side panel */}
+              {activeTab === 'integrations' && (
+                <div style={{ maxWidth: '1000px', margin: '0 auto', paddingBottom: '40px' }}>
+                  <FormTitle isDarkMode={isDarkMode} style={{ marginBottom: '8px' }}>
+                    Integrations
+                  </FormTitle>
+                  <p style={{ fontSize: '14px', color: isDarkMode ? 'var(--text-secondary)' : '#666', marginBottom: '24px', maxWidth: '640px' }}>
+                    Connect Shopify, DoorDash, Uber Eats, Gmail, Stripe, and more. Use the toggle to turn an integration on or off, then click <strong>Settings</strong> to configure details in a focused side panel.
+                  </p>
+                  {integrationsLoading ? (
+                    <div style={{ padding: '24px', color: isDarkMode ? '#999' : '#666' }}>Loading…</div>
+                  ) : (
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                        gap: '20px'
+                      }}
+                    >
+                      {[
+                        { id: 'shopify', label: 'Shopify', logo: '/shopify.svg', description: 'Sync orders and products with your online store.' },
+                        { id: 'doordash', label: 'DoorDash', logo: '/doordash.svg', description: 'Receive delivery orders directly in your POS.' },
+                        { id: 'uber_eats', label: 'Uber Eats', logo: '/uber-15.svg', description: 'Connect your Uber Eats storefront to this location.' },
+                        { id: 'gmail', label: 'Gmail', logo: '/gmail.svg', description: 'Send order receipts and notifications via email.' },
+                        { id: 'stripe', label: 'Stripe', logo: '/stripe.svg', description: 'Process online payments and deposits.' },
+                        { id: 'telegram', label: 'Telegram', logo: '/telegram.svg', description: 'Send alerts directly to your Telegram chat.' },
+                        { id: 'slack', label: 'Slack', logo: '/slack.svg', description: 'Post alerts and updates to your Slack workspace.' },
+                        { id: 'discord', label: 'Discord', logo: '/discord.svg', description: 'Deliver notifications to Discord channels.' },
+                        { id: 'whatsapp', label: 'WhatsApp', logo: '/whatsapp.svg', description: 'Send business messages via WhatsApp.' },
+                        { id: 'adp', label: 'ADP', logo: '/adp.svg', description: 'Sync timesheets and payroll summaries.' },
+                        { id: 'gusto', label: 'Gusto', logo: '/gusto.svg', description: 'Export hours and tips to payroll.' },
+                        { id: 'justworks', label: 'Justworks', logo: '/justworks.svg', description: 'Connect employee hours to HR & benefits.' },
+                        { id: 'quickbooks', label: 'QuickBooks', logo: '/quickbooks.png', description: 'Post summaries to your accounting ledger.' },
+                        { id: 'square', label: 'Square', logo: '/square.svg', description: 'Migrate data from Square to this POS.' }
+                      ].map(({ id, label, logo, description }) => {
+                        const state = integrations[id] || { enabled: false, config: {} }
+                        return (
+                          <div
+                            key={id}
+                            className="integration-card"
+                            style={{
+                              borderRadius: '16px',
+                              border: isDarkMode ? '1px solid rgba(148,163,184,0.3)' : '1px solid #e5e7eb',
+                              background: isDarkMode ? 'rgba(15,23,42,0.95)' : '#f9fafb',
+                              padding: 0,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              overflow: 'hidden'
+                            }}
+                          >
+                            {/* Top: icon, name, description */}
+                            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', padding: '16px 18px 12px 18px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                                {logo && (
+                                  <div
+                                    style={{
+                                      width: '40px',
+                                      height: '40px',
+                                      borderRadius: 10,
+                                      background: isDarkMode ? '#020617' : '#e5e7eb',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      flexShrink: 0
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        width: '34px',
+                                        height: '34px',
+                                        borderRadius: 9,
+                                        background: '#ffffff',
+                                        border: isDarkMode ? '1px solid rgba(148,163,184,0.25)' : '1px solid #e2e8f0',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                      }}
+                                    >
+                                      <img src={logo} alt="" style={{ maxWidth: '78%', maxHeight: '78%', objectFit: 'contain' }} />
+                                    </div>
+                                  </div>
+                                )}
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontWeight: 600, fontSize: '15px', color: isDarkMode ? 'var(--text-primary)' : '#111827', marginBottom: 2 }}>{label}</div>
+                                  <p style={{ fontSize: '13px', color: isDarkMode ? '#9ca3af' : '#4b5563', margin: 0 }}>
+                                    {description}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Divider */}
+                            <div style={{ borderTop: isDarkMode ? '1px solid rgba(15,23,42,1)' : '1px solid #e5e7eb' }} />
+
+                            {/* Bottom: Settings button + toggle, like reference */}
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '10px 16px 12px 16px',
+                                gap: '12px'
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="button-26"
+                                onClick={() => setActiveIntegrationSettings(id)}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  padding: '6px 12px',
+                                  borderRadius: 8,
+                                  border: isDarkMode ? '1px solid #374151' : '1px solid #d1d5db',
+                                  background: isDarkMode ? '#111827' : '#ffffff',
+                                  fontSize: 13,
+                                  boxShadow: 'none'
+                                }}
+                              >
+                                <SettingsIcon size={14} />
+                                <span>Settings</span>
+                              </button>
+                              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', flexShrink: 0 }}>
+                                <div className="checkbox-wrapper-2 integration-toggle" style={{ flexShrink: 0 }}>
+                                  <input
+                                    type="checkbox"
+                                    className="sc-gJwTLC ikxBAC"
+                                    checked={!!state.enabled}
+                                    onChange={() =>
+                                      setIntegrations(prev => ({
+                                        ...prev,
+                                        [id]: { ...prev[id], enabled: !prev[id]?.enabled }
+                                      }))
+                                    }
+                                  />
+                                </div>
+                              </label>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Integration Settings Side Panel */}
+              {activeIntegrationSettings && (
+                <div
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    pointerEvents: 'none',
+                    zIndex: 10000,
+                    display: 'flex',
+                    justifyContent: 'flex-end'
+                  }}
+                >
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      pointerEvents: 'auto',
+                      width: '100%',
+                      maxWidth: 420,
+                      height: 'auto',
+                      maxHeight: 'calc(100vh - 24px)',
+                      margin: '12px 24px 12px 24px',
+                      backgroundColor: isDarkMode ? '#0b1120' : '#ffffff',
+                      boxShadow: isDarkMode ? '-20px 0 60px rgba(0,0,0,0.7)' : '-20px 0 60px rgba(15,23,42,0.25)',
+                      borderRadius: 16,
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding: '16px 20px 12px 20px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {(() => {
+                          const logo = getIntegrationLogoSrc(activeIntegrationSettings)
+                          if (!logo) return null
+                          return (
+                            <div
+                              style={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: 9,
+                                background: isDarkMode ? '#020617' : '#e5e7eb',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: 30,
+                                  height: 30,
+                                  borderRadius: 7,
+                                  background: '#ffffff',
+                                  border: isDarkMode ? '1px solid rgba(148,163,184,0.25)' : '1px solid #e2e8f0',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                              >
+                                <img src={logo} alt="" style={{ maxWidth: '76%', maxHeight: '76%', objectFit: 'contain' }} />
+                              </div>
+                            </div>
+                          )
+                        })()}
+                        <div style={{ fontWeight: 600, fontSize: 16 }}>
+                          {activeIntegrationSettings === 'shopify' && 'Shopify settings'}
+                          {activeIntegrationSettings === 'doordash' && 'DoorDash settings'}
+                          {activeIntegrationSettings === 'uber_eats' && 'Uber Eats settings'}
+                          {activeIntegrationSettings === 'gmail' && 'Gmail settings'}
+                          {activeIntegrationSettings === 'stripe' && 'Stripe settings'}
+                          {activeIntegrationSettings === 'telegram' && 'Telegram settings'}
+                          {activeIntegrationSettings === 'slack' && 'Slack settings'}
+                          {activeIntegrationSettings === 'discord' && 'Discord settings'}
+                          {activeIntegrationSettings === 'whatsapp' && 'WhatsApp settings'}
+                          {activeIntegrationSettings === 'adp' && 'ADP settings'}
+                          {activeIntegrationSettings === 'gusto' && 'Gusto settings'}
+                          {activeIntegrationSettings === 'justworks' && 'Justworks settings'}
+                          {activeIntegrationSettings === 'quickbooks' && 'QuickBooks settings'}
+                          {activeIntegrationSettings === 'square' && 'Square settings'}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveIntegrationSettings(null)}
+                        style={{
+                          border: 'none',
+                          background: 'none',
+                          cursor: 'pointer',
+                          fontSize: 20,
+                          color: isDarkMode ? '#9ca3af' : '#6b7280'
+                        }}
+                        aria-label="Close"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
+                      {activeIntegrationSettings === 'shopify' && (
+                        <>
+                          <p style={{ fontSize: '14px', color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '20px', lineHeight: 1.5 }}>
+                            Sync orders and products from your Shopify store. New online orders can appear in Recent Orders, and you can pull inventory to keep stock in sync.
+                          </p>
+
+                          <div style={{ marginBottom: '20px', paddingBottom: '20px', borderBottom: isDarkMode ? '1px solid #334155' : '1px solid #e2e8f0' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '8px' }}>Step 1 — Store URL</div>
+                            <FormField isDarkMode={isDarkMode} label="">
+                              <input
+                                type="text"
+                                value={integrations.shopify?.config?.store_url || ''}
+                                onChange={(e) =>
+                                  setIntegrations((prev) => ({
+                                    ...prev,
+                                    shopify: {
+                                      ...prev.shopify,
+                                      config: {
+                                        ...(prev.shopify?.config || {}),
+                                        store_url: e.target.value
+                                      }
+                                    }
+                                  }))
+                                }
+                                placeholder="mystore.myshopify.com"
+                                style={inputBaseStyle(isDarkMode, '34, 197, 94')}
+                                {...getInputFocusHandlers('34, 197, 94', isDarkMode)}
+                              />
+                            </FormField>
+                            <p style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b', marginTop: '4px', marginBottom: 0 }}>Enter your store URL (e.g. mystore.myshopify.com). You can find this in your Shopify admin URL.</p>
+                          </div>
+
+                          <div style={{ marginBottom: '20px', paddingBottom: '20px', borderBottom: isDarkMode ? '1px solid #334155' : '1px solid #e2e8f0' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '8px' }}>Step 2 — Connect</div>
+                            {(() => {
+                              const config = integrations.shopify?.config || {}
+                              const hasConnection = !!config.api_key && !!config.store_url
+                              const su = (config.store_url || '').trim()
+                              const isTauri = typeof window !== 'undefined' && window.__TAURI__
+                              let shop = su.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/\.myshopify\.com.*/, '')
+                              if (!shop) shop = ''
+                              else if (!shop.includes('.myshopify.com')) shop = shop + '.myshopify.com'
+                              const connectUrl =
+                                shop && typeof window !== 'undefined'
+                                  ? `${window.location.origin}/api/integrations/shopify/connect?shop=${encodeURIComponent(shop)}${isTauri ? '&from=tauri' : ''}`
+                                  : null
+
+                              if (hasConnection) {
+                                return (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                                    <CheckCircle size={18} style={{ color: '#22c55e', flexShrink: 0 }} />
+                                    <div>
+                                      <div style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? '#fff' : '#1e293b' }}>Connected</div>
+                                      <div style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b' }}>{(config.store_url || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '')}</div>
+                                    </div>
+                                  </div>
+                                )
+                              }
+
+                              return (
+                                <>
+                                  <p style={{ fontSize: '13px', color: isDarkMode ? '#cbd5e1' : '#475569', marginBottom: '12px', lineHeight: 1.5 }}>
+                                    Click Connect to open Shopify in your browser. Approve access when prompted, then you’ll be returned here automatically.
+                                  </p>
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
+                                    {connectUrl ? (
+                                      isTauri ? (
+                                        <button
+                                          type="button"
+                                          className="button-50 button-50--shopify"
+                                          onClick={async () => {
+                                            try {
+                                              const { open } = await import('@tauri-apps/plugin-shell')
+                                              await open(connectUrl)
+                                              showToast('Shopify authorization opened in your browser. Approve there, then return here.', 'success')
+                                            } catch (e) {
+                                              showToast('Failed to open Shopify connect', 'error')
+                                            }
+                                          }}
+                                        >
+                                          <span className="button-50__Content">Connect</span>
+                                        </button>
+                                      ) : (
+                                        <a href={connectUrl} className="button-50 button-50--shopify" target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                                          <span className="button-50__Content">Connect</span>
+                                        </a>
+                                      )
+                                    ) : (
+                                      <span className="button-50 button-50--shopify" style={{ cursor: 'not-allowed', opacity: 0.6 }}>
+                                        <span className="button-50__Content">Connect</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                  <details style={{ marginTop: '12px' }}>
+                                    <summary style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b', cursor: 'pointer' }}>Having trouble? Paste token manually</summary>
+                                    <div style={{ marginTop: '10px' }}>
+                                      <p style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '8px', lineHeight: 1.5 }}>
+                                        Shopify Admin → Settings → Apps and sales channels → Develop apps → Create an app → Configure Admin API (add read_orders, read_products) → Install → Reveal token
+                                      </p>
+                                      <FormField isDarkMode={isDarkMode} label="">
+                                        <textarea
+                                          value={integrations.shopify?.config?.api_key || ''}
+                                          onChange={(e) =>
+                                            setIntegrations((prev) => ({
+                                              ...prev,
+                                              shopify: {
+                                                ...prev.shopify,
+                                                config: {
+                                                  ...(prev.shopify?.config || {}),
+                                                  api_key: e.target.value
+                                                }
+                                              }
+                                            }))
+                                          }
+                                          placeholder="shpat_xxxxx..."
+                                          rows={2}
+                                          style={{ ...inputBaseStyle(isDarkMode, '34, 197, 94'), resize: 'vertical' }}
+                                          {...getInputFocusHandlers('34, 197, 94', isDarkMode)}
+                                        />
+                                      </FormField>
+                                    </div>
+                                  </details>
+                                </>
+                              )
+                            })()}
+                          </div>
+
+                          <div style={{ marginBottom: '20px', paddingBottom: '20px', borderBottom: isDarkMode ? '1px solid #334155' : '1px solid #e2e8f0' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '8px' }}>Step 3 — Instant order notifications</div>
+                            <p style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '10px', lineHeight: 1.5 }}>
+                              Add a webhook so new Shopify orders appear in Recent Orders as soon as they’re placed:
+                            </p>
+                            <ol style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b', margin: '0 0 12px 0', paddingLeft: '18px', lineHeight: 1.6 }}>
+                              <li>Shopify Admin → Settings → Notifications → Webhooks</li>
+                              <li>Order creation → Create webhook</li>
+                              <li>Callback URL: <code style={{ background: isDarkMode ? '#334155' : '#e2e8f0', padding: '2px 6px', borderRadius: 4, fontSize: '11px',
+                                overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', display: 'inline-block' }}>
+                                {typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/shopify/orders` : '/api/webhooks/shopify/orders'}
+                              </code></li>
+                              <li>Copy the signing secret and paste it below</li>
+                            </ol>
+                            <FormField isDarkMode={isDarkMode} label="Webhook signing secret" style={{ marginBottom: '8px' }}>
+                              <input
+                                type="password"
+                                value={integrations.shopify?.config?.webhook_secret || ''}
+                                onChange={(e) =>
+                                  setIntegrations((prev) => ({
+                                    ...prev,
+                                    shopify: {
+                                      ...prev.shopify,
+                                      config: {
+                                        ...(prev.shopify?.config || {}),
+                                        webhook_secret: e.target.value
+                                      }
+                                    }
+                                  }))
+                                }
+                                placeholder="From webhook setup"
+                                style={inputBaseStyle(isDarkMode, '34, 197, 94')}
+                                {...getInputFocusHandlers('34, 197, 94', isDarkMode)}
+                              />
+                            </FormField>
+                          </div>
+
+                          <div>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '8px' }}>Step 4 — Sync data</div>
+                            <p style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '12px', lineHeight: 1.5 }}>
+                              Pull orders and products from Shopify. With the webhook above, new orders arrive automatically; use these to backfill or refresh.
+                            </p>
+                            {(() => {
+                              const config = integrations.shopify?.config || {}
+                              const hasSyncInfo = config.last_synced_at || config.last_synced_order_id || config.products_synced_at || config.last_synced_product_id
+                              return hasSyncInfo ? (
+                                <div style={{ marginBottom: '12px', padding: '10px 12px', borderRadius: '8px', background: isDarkMode ? 'rgba(100,148,62,0.12)' : 'rgba(100,148,62,0.08)', fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b' }}>
+                                  {(config.last_synced_at || config.last_synced_order_id) && (
+                                    <div>Orders: {config.last_synced_at ? new Date(config.last_synced_at).toLocaleString() : config.last_synced_order_id ? `#${config.last_synced_order_id}` : '-'}</div>
+                                  )}
+                                  {(config.products_synced_at || config.last_synced_product_id) && (
+                                    <div style={{ marginTop: config.last_synced_at || config.last_synced_order_id ? '4px' : 0 }}>Products: {config.products_synced_at ? new Date(config.products_synced_at).toLocaleString() : config.last_synced_product_id ? `#${config.last_synced_product_id}` : '-'}</div>
+                                  )}
+                                </div>
+                              ) : null
+                            })()}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="button-50 button-50--shopify"
+                                disabled={shopifySyncLoading || shopifyProductsSyncLoading}
+                                onClick={syncShopifyNow}
+                              >
+                                <span className="button-50__Content">{shopifySyncLoading ? 'Syncing…' : 'Sync orders'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="button-50 button-50--shopify"
+                                disabled={shopifySyncLoading || shopifyProductsSyncLoading}
+                                onClick={syncShopifyProductsNow}
+                              >
+                                <span className="button-50__Content">{shopifyProductsSyncLoading ? 'Syncing…' : 'Sync products'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      {activeIntegrationSettings === 'doordash' && (
+                        <FormField isDarkMode={isDarkMode} label="API key">
+                          <input
+                            type="password"
+                            autoComplete="off"
+                            value={integrations.doordash?.config?.api_key || ''}
+                            onChange={(e) =>
+                              setIntegrations((prev) => ({
+                                ...prev,
+                                doordash: {
+                                  ...prev.doordash,
+                                  config: {
+                                    ...(prev.doordash?.config || {}),
+                                    api_key: e.target.value
+                                  }
+                                }
+                              }))
+                            }
+                            placeholder="From DoorDash Developer Portal"
+                            style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                          />
+                        </FormField>
+                      )}
+                      {activeIntegrationSettings === 'uber_eats' && (
+                        <FormField isDarkMode={isDarkMode} label="API key">
+                          <input
+                            type="password"
+                            autoComplete="off"
+                            value={integrations.uber_eats?.config?.api_key || ''}
+                            onChange={(e) =>
+                              setIntegrations((prev) => ({
+                                ...prev,
+                                uber_eats: {
+                                  ...prev.uber_eats,
+                                  config: {
+                                    ...(prev.uber_eats?.config || {}),
+                                    api_key: e.target.value
+                                  }
+                                }
+                              }))
+                            }
+                            placeholder="From Uber Eats portal"
+                            style={inputBaseStyle(isDarkMode, themeColorRgb)}
+                            {...getInputFocusHandlers(themeColorRgb, isDarkMode)}
+                          />
+                        </FormField>
+                      )}
+                      {activeIntegrationSettings === 'quickbooks' && (
+                        <>
+                          <p style={{ fontSize: '14px', color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '20px', lineHeight: 1.5 }}>
+                            Sync sales, refunds, accounts, customers, and vendors with QuickBooks Online. Connect once, then use the sync buttons below to pull or push data.
+                          </p>
+
+                          <div style={{ marginBottom: '20px', paddingBottom: '20px', borderBottom: isDarkMode ? '1px solid #334155' : '1px solid #e2e8f0' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '8px' }}>Step 1 — Connect</div>
+                            {qboLoading ? (
+                              <span style={{ fontSize: '14px', color: isDarkMode ? '#94a3b8' : '#64748b' }}>Loading…</span>
+                            ) : qboStatus?.connected ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                                <CheckCircle size={18} style={{ color: '#22c55e', flexShrink: 0 }} />
+                                <div>
+                                  <div style={{ fontSize: '14px', fontWeight: 600, color: isDarkMode ? '#fff' : '#1e293b' }}>Connected</div>
+                                  <div style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b' }}>QuickBooks Online is linked. Use the sync buttons below to pull or push data.</div>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <p style={{ fontSize: '13px', color: isDarkMode ? '#cbd5e1' : '#475569', marginBottom: '12px', lineHeight: 1.5 }}>
+                                  Click Connect to open QuickBooks in your browser. Sign in and approve access when prompted. You’ll be returned here automatically.
+                                </p>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
+                                  <button
+                                    type="button"
+                                    className="button-50 button-50--quickbooks"
+                                    onClick={async () => {
+                                      try {
+                                        const res = await fetch('/api/integrations/quickbooks/connect-url', {
+                                          headers: { 'Authorization': `Bearer ${localStorage.getItem('sessionToken') || ''}` }
+                                        })
+                                        const d = await res.json()
+                                        const isTauri = typeof window !== 'undefined' && window.__TAURI__
+                                        if (d.url) {
+                                          if (isTauri) {
+                                            const { open } = await import('@tauri-apps/plugin-shell')
+                                            await open(d.url)
+                                            showToast('QuickBooks authorization opened in your browser. Approve there, then return here.', 'success')
+                                          } else {
+                                            window.location.href = d.url
+                                          }
+                                        } else {
+                                          showToast(d.message || 'Could not get connection URL', 'error')
+                                        }
+                                      } catch (e) {
+                                        showToast('Failed to fetch connection URL', 'error')
+                                      }
+                                    }}
+                                  >
+                                    <span className="button-50__Content">Connect</span>
+                                  </button>
+                                </div>
+                                <details style={{ marginTop: '12px' }}>
+                                  <summary style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b', cursor: 'pointer' }}>Server not configured?</summary>
+                                  <p style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b', marginTop: '10px', lineHeight: 1.5 }}>
+                                    Add QBO_CLIENT_ID and QBO_CLIENT_SECRET to your server .env file. Create an app at developer.intuit.com → Keys & credentials, then add the redirect URL: <code style={{ background: isDarkMode ? '#334155' : '#e2e8f0', padding: '2px 6px', borderRadius: 4, fontSize: '11px' }}>{typeof window !== 'undefined' ? `${window.location.origin}/api/integrations/quickbooks/callback` : '/api/integrations/quickbooks/callback'}</code>
+                                  </p>
+                                </details>
+                              </>
+                            )}
+                          </div>
+
+                          {qboStatus?.connected && (
+                            <div>
+                              <div style={{ fontSize: '12px', fontWeight: 600, color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '8px' }}>Step 2 — Sync data</div>
+                              <p style={{ fontSize: '12px', color: isDarkMode ? '#94a3b8' : '#64748b', marginBottom: '12px', lineHeight: 1.5 }}>
+                                Pull accounts, customers, vendors, inventory, or transactions from QuickBooks. Push sales and refunds to QuickBooks.
+                              </p>
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+                                {['accounts', 'customers', 'vendors', 'inventory', 'transactions'].map(type => (
+                                  <button
+                                    key={type}
+                                    type="button"
+                                    className="button-50 button-50--quickbooks"
+                                    disabled={Object.values(qboSyncLoading).some(Boolean)}
+                                    onClick={async () => {
+                                      setQboSyncLoading(p => ({ ...p, [type]: true }))
+                                      try {
+                                        const res = await fetch(`/api/integrations/quickbooks/sync/${type}`, {
+                                          method: 'POST',
+                                          headers: { 'Authorization': `Bearer ${localStorage.getItem('sessionToken') || ''}` }
+                                        })
+                                        const data = await res.json()
+                                        if (data.success) showToast(data.message || 'Sync successful', 'success')
+                                        else showToast(data.message || 'Sync failed', 'error')
+                                      } catch (e) {
+                                        showToast('Failed to sync', 'error')
+                                      } finally {
+                                        setQboSyncLoading(p => ({ ...p, [type]: false }))
+                                      }
+                                    }}
+                                  >
+                                    <span className="button-50__Content">
+                                      {qboSyncLoading[type] ? 'Syncing…' : `Sync ${type.charAt(0).toUpperCase() + type.slice(1)}`}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      {['telegram', 'slack', 'discord', 'whatsapp'].includes(activeIntegrationSettings) && (
+                        <p style={{ fontSize: '14px', color: isDarkMode ? '#9ca3af' : '#6b7280' }}>Coming soon</p>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        padding: '12px 20px 16px 20px',
+                        display: 'flex',
+                        justifyContent: 'flex-end',
+                        alignItems: 'center',
+                        gap: '24px',
+                        borderTop: `1px solid ${isDarkMode ? '#334155' : '#e2e8f0'}`
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setActiveIntegrationSettings(null)}
+                        style={{
+                          padding: 0,
+                          border: 'none',
+                          background: 'none',
+                          fontSize: '0.8125rem',
+                          fontWeight: 450,
+                          color: isDarkMode ? '#94a3b8' : '#64748b',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {['telegram', 'slack', 'discord', 'whatsapp', 'quickbooks'].includes(activeIntegrationSettings) ? 'Close' : 'Cancel'}
+                      </button>
+                      {!['telegram', 'slack', 'discord', 'whatsapp', 'quickbooks'].includes(activeIntegrationSettings) && (
+                        <button
+                          type="button"
+                          className={
+                            activeIntegrationSettings === 'shopify'
+                              ? 'button-50 button-50--shopify'
+                              : activeIntegrationSettings === 'doordash'
+                              ? 'button-50 button-50--doordash'
+                              : 'button-50'
+                          }
+                          onClick={() => saveIntegration(activeIntegrationSettings)}
+                          disabled={integrationsSaving === activeIntegrationSettings}
+                          style={{ minHeight: 0 }}
+                        >
+                          <span className="button-50__Content">
+                            {integrationsSaving === activeIntegrationSettings ? 'Saving…' : 'Save settings'}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Security Tab */}
               {activeTab === 'security' && <SecurityTab />}
 
@@ -9518,9 +9413,9 @@ function Settings() {
               {activeTab === 'cash' && (
                 <div style={{
                   width: '100%',
-                  maxWidth: '600px',
-                  marginLeft: 'auto',
-                  marginRight: 'auto',
+                  maxWidth: '640px',
+                  margin: '0 auto',
+                  paddingBottom: '40px',
                   display: 'flex',
                   flexDirection: 'column',
                   flex: 1,
@@ -11123,40 +11018,6 @@ function Settings() {
           )}
         </div>
       </div>
-
-      {/* Toast notification */}
-      {toast && (
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            position: 'fixed',
-            bottom: '24px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            padding: '12px 20px',
-            backgroundColor: isDarkMode ? 'var(--bg-secondary, #2d2d2d)' : '#fff',
-            color: isDarkMode ? 'var(--text-primary, #fff)' : '#333',
-            border: `1px solid ${isDarkMode ? 'var(--border-color, #404040)' : '#ddd'}`,
-            borderRadius: '12px',
-            boxShadow: isDarkMode ? '0 4px 20px rgba(0,0,0,0.4)' : '0 4px 20px rgba(0,0,0,0.15)',
-            zIndex: 10001,
-            fontSize: '14px',
-            fontWeight: 500,
-            maxWidth: '90vw'
-          }}
-        >
-          {toast.type === 'error' ? (
-            <XCircle size={20} style={{ flexShrink: 0, color: '#d32f2f' }} />
-          ) : (
-            <CheckCircle size={20} style={{ flexShrink: 0, color: `rgb(${themeColorRgb})` }} />
-          )}
-          <span>{toast.message}</span>
-        </div>
-      )}
     </div>
   )
 }

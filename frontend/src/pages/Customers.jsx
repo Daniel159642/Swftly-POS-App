@@ -38,6 +38,11 @@ export default function Customers() {
   const actionsMenuRef = useRef(null)
   const dropdownRef = useRef(null)
   const tableContainerRef = useRef(null)
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined'
+      ? window.matchMedia('(max-width: 768px)').matches
+      : false
+  )
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -52,6 +57,16 @@ export default function Customers() {
     document.addEventListener('click', handleClickOutside)
     return () => document.removeEventListener('click', handleClickOutside)
   }, [actionsOpenFor])
+
+  // Track mobile breakpoint for responsive columns
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 768px)')
+    const handler = (e) => setIsMobile(e.matches)
+    handler(mq)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
 
   // Reposition dropdown on scroll/resize so it stays anchored to the button
   useEffect(() => {
@@ -400,20 +415,40 @@ export default function Customers() {
             <thead>
               <tr style={{ backgroundColor: theadBg }}>
                 <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Name</th>
-                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Email</th>
-                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Phone</th>
+                {!isMobile && (
+                  <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Email</th>
+                )}
+                {!isMobile && (
+                  <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Phone</th>
+                )}
                 <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Points</th>
-                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '56px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Actions</th>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '56px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>
+                  {isMobile ? '' : 'Actions'}
+                </th>
               </tr>
             </thead>
             <tbody>
               {Array.from({ length: 8 }, (_, i) => (
                 <tr key={i}>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee' }}><div style={{ height: '14px', width: `${70 + (i % 3) * 10}%`, maxWidth: '140px', borderRadius: '4px', backgroundColor: '#e8e8e8' }} /></td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee' }}><div style={{ height: '14px', width: `${60 + (i % 2) * 15}%`, maxWidth: '160px', borderRadius: '4px', backgroundColor: '#eee' }} /></td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee' }}><div style={{ height: '14px', width: '90px', borderRadius: '4px', backgroundColor: '#eee' }} /></td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', textAlign: 'right' }}><div style={{ height: '14px', width: '36px', marginLeft: 'auto', borderRadius: '4px', backgroundColor: '#eee' }} /></td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', textAlign: 'right' }}><div style={{ height: '24px', width: '24px', marginLeft: 'auto', borderRadius: '6px', backgroundColor: '#eee' }} /></td>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee' }}>
+                    <div style={{ height: '14px', width: `${70 + (i % 3) * 10}%`, maxWidth: '140px', borderRadius: '4px', backgroundColor: '#e8e8e8' }} />
+                  </td>
+                  {!isMobile && (
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee' }}>
+                      <div style={{ height: '14px', width: `${60 + (i % 2) * 15}%`, maxWidth: '160px', borderRadius: '4px', backgroundColor: '#eee' }} />
+                    </td>
+                  )}
+                  {!isMobile && (
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee' }}>
+                      <div style={{ height: '14px', width: '90px', borderRadius: '4px', backgroundColor: '#eee' }} />
+                    </td>
+                  )}
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', textAlign: 'right' }}>
+                    <div style={{ height: '14px', width: '36px', marginLeft: 'auto', borderRadius: '4px', backgroundColor: '#eee' }} />
+                  </td>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', textAlign: 'right' }}>
+                    <div style={{ height: '24px', width: '24px', marginLeft: 'auto', borderRadius: '6px', backgroundColor: '#eee' }} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -427,10 +462,16 @@ export default function Customers() {
             <thead>
               <tr style={{ backgroundColor: theadBg }}>
                 <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Name</th>
-                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Email</th>
-                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Phone</th>
+                {!isMobile && (
+                  <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Email</th>
+                )}
+                {!isMobile && (
+                  <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Phone</th>
+                )}
                 <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Points</th>
-                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '56px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>Actions</th>
+                <th style={{ position: 'sticky', top: 0, zIndex: 1, padding: '12px', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #dee2e6', color: theadColor, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px', width: '56px', backgroundColor: theadBg, boxShadow: '0 1px 0 0 #dee2e6' }}>
+                  {isMobile ? '' : 'Actions'}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -444,8 +485,12 @@ export default function Customers() {
                     }}
                   >
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.customer_name || '—'}</td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.email || '—'}</td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.phone || '—'}</td>
+                    {!isMobile && (
+                      <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.email || '—'}</td>
+                    )}
+                    {!isMobile && (
+                      <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333' }}>{c.phone || '—'}</td>
+                    )}
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #eee', fontSize: '14px', color: '#333', textAlign: 'right', fontWeight: 600 }}>
                       {c.loyalty_points != null ? Number(c.loyalty_points) : 0}
                     </td>
@@ -492,6 +537,14 @@ export default function Customers() {
                         ) : (
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px', fontSize: '14px' }}>
                             <div>
+                              {isMobile && (
+                                <>
+                                  <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Email</div>
+                                  <div style={{ color: '#333', marginBottom: '8px' }}>{c.email || '—'}</div>
+                                  <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Phone</div>
+                                  <div style={{ color: '#333' }}>{c.phone || '—'}</div>
+                                </>
+                              )}
                               <div style={{ fontWeight: 600, color: '#374151', marginBottom: '4px' }}>Address</div>
                               <div style={{ color: '#333' }}>{c.address && c.address.trim() ? c.address : '—'}</div>
                             </div>

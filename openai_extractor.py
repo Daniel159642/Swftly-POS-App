@@ -29,6 +29,9 @@ class OpenAIExtractor:
 
         result = self._parse_response(response)
         result["extraction_method"] = "text"
+        result["_input_tokens"] = getattr(response.usage, "prompt_tokens", None)
+        result["_output_tokens"] = getattr(response.usage, "completion_tokens", None)
+        result["_model"] = self.model
         return result
 
     def extract_via_vision(self, file_path):
@@ -48,6 +51,9 @@ class OpenAIExtractor:
 
         result = self._parse_response(response)
         result["extraction_method"] = "vision"
+        result["_input_tokens"] = getattr(response.usage, "prompt_tokens", None)
+        result["_output_tokens"] = getattr(response.usage, "completion_tokens", None)
+        result["_model"] = self.model
         return result
 
     def extract_via_hybrid(self, text, file_path):

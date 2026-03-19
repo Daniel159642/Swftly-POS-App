@@ -1,7 +1,9 @@
-import React, { useState, useEffect, createContext, useContext } from 'react'
+import React, { useState, useEffect, createContext, useContext, useRef, useLayoutEffect, useCallback } from 'react'
 
 export const MobileNavContext = createContext({
-  setContextualNavItems: () => {}
+  setContextualNavItems: () => {},
+  setStoreName: () => {},
+  setStoreLogo: () => {}
 })
 
 export const useMobileNav = () => useContext(MobileNavContext)
@@ -52,6 +54,7 @@ import { lazy, Suspense } from 'react'
 const Accounting = lazy(() => import('./pages/Accounting'))
 import CashRegister from './pages/CashRegister'
 import Customers from './pages/Customers'
+import SetupWizard from './pages/SetupWizard'
 import OfflineBanner from './components/OfflineBanner'
 import NotificationPanel from './components/NotificationPanel'
 import MobileNavBar from './components/MobileNavBar'
@@ -153,7 +156,8 @@ const loginSuccessHandler = (result, setSessionToken, setEmployee, restoreOfflin
   const emp = {
     employee_id: result.employee_id,
     employee_name: result.employee_name,
-    position: result.position
+    position: result.position,
+    is_admin: result.is_admin === true
   }
   setSessionToken(result.session_token)
   setEmployee(emp)
@@ -163,6 +167,8 @@ const loginSuccessHandler = (result, setSessionToken, setEmployee, restoreOfflin
 
 function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLogout, sessionVerifying }) {
   const { fetchPermissions, setEmployee: setPermissionEmployee, restoreOfflineSession } = usePermissions()
+  const navigate = useNavigate()
+  const location = useLocation()
 
   useEffect(() => {
     if (!employee?.employee_id) return
@@ -175,12 +181,25 @@ function AppContent({ sessionToken, setSessionToken, employee, setEmployee, onLo
     setPermissionEmployee(employee)
   }, [employee?.employee_id, sessionToken])
 
+  // Setup detection: redirect to /setup if no admin exists yet.
+  // Skip if: already on /setup, has a session, or localStorage bypass key is set.
+  useEffect(() => {
+    if (sessionToken) return
+    if (location.pathname === '/setup') return
+    if (localStorage.getItem('pos_skip_setup') === '1') return
+    fetch('/api/setup/status')
+      .then(r => r.json())
+      .then(d => { if (d.needs_setup) navigate('/setup', { replace: true }) })
+      .catch(() => {})
+  }, [sessionToken, location.pathname])
+
   const onLogin = (result) => loginSuccessHandler(result, setSessionToken, setEmployee, restoreOfflineSession)
 
   return (
     <>
       <DeepLinkHandler />
       <Routes>
+        <Route path="/setup" element={<SetupWizard />} />
         <Route path="/login" element={
           sessionToken && employee ? (
             <Navigate to="/dashboard" replace />
@@ -354,6 +373,10 @@ function Layout({ children, employee, onLogout }) {
   const showBanner = !isOnline || isSyncing || pendingCount > 0
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false)
+  const userDropdownRef = useRef(null)
+  const [storeName, setStoreName] = useState('')
+  const [storeLogo, setStoreLogo] = useState(null)
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
   const [touchStart, setTouchStart] = useState(null)
   const [touchEnd, setTouchEnd] = useState(null)
@@ -404,23 +427,75 @@ function Layout({ children, employee, onLogout }) {
   }
 
   useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (userDropdownRef.current && !userDropdownRef.current.contains(event.target)) {
+        setUserDropdownOpen(false)
+      }
+    }
+    if (userDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [userDropdownOpen])
+
+  const fetchBranding = useCallback((e) => {
+    // If data is passed in the event detail, use it immediately
+    if (e && e.detail) {
+      if (typeof e.detail.store_name !== 'undefined') setStoreName(e.detail.store_name)
+      if (typeof e.detail.store_logo !== 'undefined') setStoreLogo(e.detail.store_logo)
+      return
+    }
+
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('sessionToken') : null
+    
+    // Fetch store location settings (prioritize name and logo from here)
+    cachedFetch('/api/store-location-settings', {}, { skipCache: true }).then(async res => {
+      const data = await res.json()
+      const settings = data.settings || {}
+      if (settings.store_name) setStoreName(settings.store_name)
+      // Always update store_logo, even if null/empty
+      setStoreLogo(settings.store_logo || null)
+    }).catch(() => { })
+
+    // Fetch receipt settings (fallback logo)
+    cachedFetch('/api/receipt-settings', {}, { skipCache: true }).then(async res => {
+      const data = await res.json()
+      const settings = data.settings || {}
+      // Only set if not already set by location settings
+      if (settings.store_logo) setStoreLogo(prev => prev || settings.store_logo)
+      // Also fallback store name if still empty
+      if (settings.store_name) setStoreName(prev => prev || settings.store_name)
+    }).catch(() => { })
+  }, [])
+
+  useEffect(() => {
     if (!navigator.onLine) return
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('sessionToken') : null
+    
+    // Initial fetch
+    fetchBranding()
+
+    // Background pre-fetching
     cachedFetch('/api/inventory?limit=50&offset=0').then(() => { }).catch(() => { })
     cachedFetch('/api/inventory?item_type=product&include_variants=1').then(() => { }).catch(() => { })
     cachedFetch('/api/vendors').then(() => { }).catch(() => { })
     cachedFetch('/api/categories').then(() => { }).catch(() => { })
     cachedFetch('/api/pos-bootstrap').then(() => { }).catch(() => { })
     cachedFetch('/api/settings-bootstrap', { headers: { 'X-Session-Token': token || '' } }).then(() => { }).catch(() => { })
-    cachedFetch('/api/receipt-settings').then(() => { }).catch(() => { })
     cachedFetch('/api/pos-settings').then(() => { }).catch(() => { })
-    cachedFetch('/api/store-location-settings').then(() => { }).catch(() => { })
+
     if (token) {
       cachedFetch('/api/order-delivery-settings', { headers: { 'X-Session-Token': token } }).then(() => { }).catch(() => { })
       cachedFetch(`/api/register/session?session_token=${token}`).then(() => { }).catch(() => { })
       cachedFetch(`/api/register/session?status=open&session_token=${token}`).then(() => { }).catch(() => { })
     }
-  }, [])
+
+    // Listen for branding updates from other components
+    window.addEventListener('branding_updated', fetchBranding)
+    return () => window.removeEventListener('branding_updated', fetchBranding)
+  }, [fetchBranding])
 
   const handleHeaderDrag = (e) => {
     if (e.target.closest('button')) return
@@ -597,7 +672,7 @@ function Layout({ children, employee, onLogout }) {
             flexShrink: 0,
             backgroundColor: isMobile ? 'transparent' : 'var(--bg-primary, #fff)',
             borderBottom: isMobile ? 'none' : '3px solid var(--border-color, #ddd)',
-            padding: isMobile ? '8px 16px' : '12px 20px',
+            padding: isMobile ? '8px 16px' : '8px 20px',
             paddingLeft: !isMobile && isTauri ? 72 : (isMobile ? 12 : 20),
             display: 'flex',
             justifyContent: 'space-between',
@@ -637,19 +712,40 @@ function Layout({ children, employee, onLogout }) {
                 backgroundColor: 'transparent',
                 border: 'none',
                 cursor: 'pointer',
-                fontSize: '26px',
-                fontWeight: 400,
-                fontFamily: 'Tanker, sans-serif',
-                letterSpacing: '1px',
-                color: '#4a90e2',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
                 lineHeight: 1.2
               }}
             >
-              SWFTLY
+              <span 
+                style={{
+                  fontSize: storeName.length > 15 ? '14px' : '16px',
+                  fontWeight: 600,
+                  fontFamily: 'Geist, "Inter", -apple-system, system-ui, sans-serif',
+                  letterSpacing: '-0.02em',
+                  color: 'var(--text-secondary, #4b5563)',
+                  opacity: 0.9
+                }}
+              >
+                {storeName || 'Store'}
+              </span>
+              {storeLogo && (
+                <img 
+                  src={storeLogo} 
+                  alt="Logo" 
+                  style={{ 
+                    height: '20px', 
+                    width: '20px', 
+                    objectFit: 'contain',
+                    borderRadius: '4px' 
+                  }} 
+                />
+              )}
             </button>
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           {!isMobile && employee && (
             <>
               <button
@@ -666,49 +762,153 @@ function Layout({ children, employee, onLogout }) {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  position: 'relative'
+                  position: 'relative',
+                  marginRight: '8px'
                 }}
               >
-                <Bell size={28} style={{ color: '#888' }} />
+                <Bell size={24} style={{ color: 'var(--text-tertiary, #888)' }} />
                 {notificationCount > 0 && (
                   <span
                     style={{
                       position: 'absolute',
-                      top: 0,
-                      right: 0,
-                      minWidth: 20,
-                      height: 20,
+                      top: -4,
+                      right: -4,
+                      minWidth: 18,
+                      height: 18,
                       borderRadius: '50%',
                       backgroundColor: '#ef4444',
                       color: '#fff',
-                      fontSize: 12,
+                      fontSize: 10,
                       fontWeight: 700,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       padding: '0 4px',
-                      boxSizing: 'border-box'
+                      boxSizing: 'border-box',
+                      border: '2px solid var(--bg-primary, #fff)'
                     }}
                   >
                     {notificationCount > 99 ? '99+' : notificationCount}
                   </span>
                 )}
               </button>
+              
+              <div style={{ position: 'relative' }} ref={userDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '4px 12px',
+                    borderRadius: '24px',
+                    border: '1px solid var(--border-color, #ddd)',
+                    background: userDropdownOpen ? 'var(--bg-secondary, #f0f0f0)' : 'transparent',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    outline: 'none'
+                  }}
+                  className="user-profile-trigger"
+                >
+                  <div 
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      backgroundColor: '#4a90e2',
+                      color: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      letterSpacing: '0.4px'
+                    }}
+                  >
+                    {getInitials(employee?.employee_name)}
+                  </div>
+                  <span style={{ fontSize: '14px', fontWeight: '500', color: 'var(--text-primary, #333)' }}>
+                    {employee?.employee_name}
+                  </span>
+                </button>
+
+                {userDropdownOpen && (
+                  <div 
+                    className="user-dropdown-menu"
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      marginTop: '4px',
+                      borderRadius: '12px',
+                      padding: '4px',
+                      zIndex: 1100,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '2px'
+                    }}
+                  >
+                    <button
+                      onClick={() => { navigate('/profile'); setUserDropdownOpen(false); }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        padding: '8px 12px',
+                        border: 'none',
+                        textAlign: 'left',
+                        color: 'var(--text-primary)',
+                      }}
+                    >
+                      <User size={15} style={{ color: '#888' }} />
+                      <span style={{ fontSize: '13.5px', fontWeight: '500' }}>Profile</span>
+                    </button>
+                    <button
+                      onClick={() => { navigate('/settings'); setUserDropdownOpen(false); }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        padding: '8px 12px',
+                        border: 'none',
+                        textAlign: 'left',
+                        color: 'var(--text-primary)',
+                      }}
+                    >
+                      <Settings size={15} style={{ color: '#888' }} />
+                      <span style={{ fontSize: '13.5px', fontWeight: '500' }}>Settings</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <button
                 type="button"
-                className="button-26 button-26--header"
-                role="button"
-                onClick={() => navigate('/settings')}
-                title="Settings"
+                className="logout-icon-button"
+                onClick={onLogout}
+                title="Logout"
+                style={{
+                  padding: '8px',
+                  borderRadius: '50%',
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#888',
+                  transition: 'background 0.2s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-secondary, #f5f5f5)'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
               >
-                <div className="button-26__content">
-                  <Settings size={14} style={{ marginRight: '6px', color: '#888' }} />
-                  <span className="button-26__text text">Settings</span>
-                </div>
+                <LogOut size={20} />
               </button>
             </>
           )}
-          {isMobile ? (
+          {isMobile && (
              <div style={{ position: 'relative' }}>
                <button
                   onClick={() => setNotificationPanelOpen(true)}
@@ -724,34 +924,6 @@ function Layout({ children, employee, onLogout }) {
                   </span>
                 )}
              </div>
-          ) : (
-            <button
-              type="button"
-              className="button-26 button-26--header"
-              role="button"
-              onClick={() => navigate('/profile')}
-              title="Profile"
-            >
-              <div className="button-26__content">
-                <User size={14} style={{ marginRight: '6px', color: '#888' }} />
-                <span className="button-26__text text">Profile</span>
-              </div>
-            </button>
-          )}
-          {!isMobile && (
-            <button
-              type="button"
-              className="button-26 button-26--header"
-              role="button"
-              onClick={onLogout}
-              title="Logout"
-              style={{ marginRight: '-6px' }}
-            >
-              <div className="button-26__content" style={{ paddingRight: '6px' }}>
-                <LogOut size={14} style={{ marginRight: '6px', color: '#888' }} />
-                <span className="button-26__text text">Logout</span>
-              </div>
-            </button>
           )}
         </div>
       </div>
@@ -765,7 +937,7 @@ function Layout({ children, employee, onLogout }) {
         />
       )}
       <OfflineBanner />
-      <MobileNavContext.Provider value={{ setContextualNavItems }}>
+      <MobileNavContext.Provider value={{ setContextualNavItems, setStoreName, setStoreLogo }}>
         <main
           style={{
             flex: 1,
@@ -858,7 +1030,8 @@ function App() {
         const emp = {
           employee_id: result.employee_id,
           employee_name: result.employee_name,
-          position: result.position
+          position: result.position,
+          is_admin: result.is_admin === true
         }
         setEmployee(emp)
         setStoredEmployee(emp)

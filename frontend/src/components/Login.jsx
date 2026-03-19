@@ -50,6 +50,11 @@ function Login({ onLogin }) {
   const { themeColor } = useTheme()
   // isTauri must be computed before state so loadSavedStoreCode uses the correct TTL
   const isTauri = typeof window !== 'undefined' && (window.__TAURI__ || window.__TAURI_INTERNALS__)
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined'
+      ? window.matchMedia('(max-width: 768px)').matches
+      : false
+  )
   const [employeeCode, setEmployeeCode] = useState('')
   const [password, setPassword] = useState('')
   const initialStore = loadSavedStoreCode(isTauri)
@@ -182,6 +187,16 @@ function Login({ onLogin }) {
     fetchEmployees()
   }, [])
 
+  // Track mobile breakpoint on web so we can use the phone's own numpad
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 768px)')
+    const handler = (e) => setIsMobile(e.matches)
+    handler(mq)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
   useEffect(() => {
     return () => {
       if (revealTimeoutRef.current) {
@@ -199,7 +214,6 @@ function Login({ onLogin }) {
       setRevealLastDigit(false)
     }
   }, [password])
-
   const fetchEmployees = async () => {
     try {
       const response = await apiFetch('/api/employees')
@@ -247,6 +261,8 @@ function Login({ onLogin }) {
   // Handle keyboard number input for numpad PIN
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // On mobile website, let the native keyboard handle PIN input
+      if (!isTauri && isMobile) return
       // Skip only when typing in text inputs (not select—allow PIN entry after choosing employee)
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         return
@@ -275,7 +291,7 @@ function Login({ onLogin }) {
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [handleNumpadClick])
+  }, [handleNumpadClick, isMobile, isTauri])
 
   const tryOfflineLogin = async () => {
     const list = getEmployeesCache(true)
@@ -412,13 +428,6 @@ function Login({ onLogin }) {
       setLoading(false)
     }
   }
-
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth <= 768)
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
 
   const handleHeaderDrag = (e) => {
     if (e.target.closest('button')) return
@@ -557,170 +566,224 @@ function Login({ onLogin }) {
             />
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'flex-end',
-              minHeight: '50px',
-              marginBottom: '15px',
-              paddingBottom: '8px',
-              borderBottom: '2px solid #333',
-              width: '100%',
-              maxWidth: '200px'
-            }}
-          >
-            <span
-              className={passwordJitter ? 'password-jitter' : ''}
-              style={{
-                fontFamily: 'monospace',
-                fontSize: '28px',
-                letterSpacing: '8px',
-                color: '#111',
-                textAlign: 'center',
-                display: 'inline-block'
-              }}
-            >
-              {password.split('').map((char, i) =>
-                i === password.length - 1 && revealLastDigit ? char : '•'
-              ).join('')}
-            </span>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: '8px',
-              marginTop: '15px',
-              marginBottom: '8px',
-              width: '100%',
-              maxWidth: '264px'
-            }}
-          >
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-              <button
-                key={num}
-                type="button"
-                onClick={() => handleNumpadClick(num.toString())}
+          {(!isTauri && isMobile) ? (
+            <div style={{ width: '100%', maxWidth: '260px', margin: '0 auto 24px auto' }}>
+              <label
+                htmlFor="pin-input"
+                style={{ display: 'block', fontSize: '13px', color: '#555', marginBottom: '6px', textAlign: 'center' }}
+              >
+                Enter PIN
+              </label>
+              <input
+                id="pin-input"
+                type="tel"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                value={password}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, '').slice(0, 6)
+                  setPassword(digits)
+                }}
                 style={{
-                  width: '80px',
-                  height: '80px',
-                  padding: 0,
-                  fontSize: '28px',
-                  fontWeight: 600,
-                  backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  color: '#fff',
-                  border: '1px solid rgba(255, 255, 255, 0.2)',
-                  borderRadius: '50%',
-                  cursor: 'pointer',
-                  boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                  transition: 'all 0.3s ease',
+                  width: '100%',
+                  padding: '10px 14px',
+                  fontSize: '20px',
+                  textAlign: 'center',
+                  letterSpacing: '8px',
+                  borderRadius: '10px',
+                  border: `2px solid rgba(${themeColorRgb}, 0.6)`,
+                  outline: 'none'
+                }}
+              />
+              <div style={{ marginTop: '16px', textAlign: 'center' }}>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    padding: '10px 24px',
+                    fontSize: '15px',
+                    fontWeight: 600,
+                    borderRadius: '999px',
+                    border: 'none',
+                    backgroundColor: loading ? '#ccc' : `rgba(${themeColorRgb}, 0.9)`,
+                    color: '#fff',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    boxShadow: `0 4px 10px rgba(${themeColorRgb}, 0.4)`
+                  }}
+                >
+                  {loading ? '...' : 'Login'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div
+                style={{
                   display: 'flex',
-                  alignItems: 'center',
                   justifyContent: 'center',
-                  margin: '0 auto'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.85)`
-                  e.target.style.transform = 'scale(0.95)'
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
-                  e.target.style.transform = 'scale(1)'
+                  alignItems: 'flex-end',
+                  minHeight: '50px',
+                  marginBottom: '15px',
+                  paddingBottom: '8px',
+                  borderBottom: '2px solid #333',
+                  width: '100%',
+                  maxWidth: '200px'
                 }}
               >
-                {num}
-              </button>
-            ))}
-          </div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: '8px',
-              marginBottom: '20px',
-              width: '100%',
-              maxWidth: '264px'
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => handleNumpadClick('backspace')}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                fontSize: '24px',
-                fontWeight: 500,
-                color: '#111',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto'
-              }}
-            >
-              ⌫
-            </button>
-            <button
-              type="button"
-              onClick={() => handleNumpadClick('0')}
-              style={{
-                width: '80px',
-                height: '80px',
-                padding: 0,
-                fontSize: '28px',
-                fontWeight: 600,
-                backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                color: '#fff',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                borderRadius: '50%',
-                cursor: 'pointer',
-                boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                transition: 'all 0.3s ease',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto'
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.85)`
-                e.target.style.transform = 'scale(0.95)'
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
-                e.target.style.transform = 'scale(1)'
-              }}
-            >
-              0
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                fontSize: '16px',
-                fontWeight: 500,
-                color: loading ? '#999' : '#111',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto'
-              }}
-            >
-              {loading ? '...' : 'Login'}
-            </button>
-          </div>
+                <span
+                  className={passwordJitter ? 'password-jitter' : ''}
+                  style={{
+                    fontFamily: 'monospace',
+                    fontSize: '28px',
+                    letterSpacing: '8px',
+                    color: '#111',
+                    textAlign: 'center',
+                    display: 'inline-block'
+                  }}
+                >
+                  {password.split('').map((char, i) =>
+                    i === password.length - 1 && revealLastDigit ? char : '•'
+                  ).join('')}
+                </span>
+              </div>
 
-          <div style={{ marginTop: '16px', textAlign: 'center' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: '8px',
+                  marginTop: '15px',
+                  marginBottom: '8px',
+                  width: '100%',
+                  maxWidth: '264px'
+                }}
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => handleNumpadClick(num.toString())}
+                    style={{
+                      width: '80px',
+                      height: '80px',
+                      padding: 0,
+                      fontSize: '28px',
+                      fontWeight: 600,
+                      backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                      backdropFilter: 'blur(10px)',
+                      WebkitBackdropFilter: 'blur(10px)',
+                      color: '#fff',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      borderRadius: '50%',
+                      cursor: 'pointer',
+                      boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                      transition: 'all 0.3s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      margin: '0 auto'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.85)`
+                      e.target.style.transform = 'scale(0.95)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+                      e.target.style.transform = 'scale(1)'
+                    }}
+                  >
+                    {num}
+                  </button>
+                ))}
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: '8px',
+                  marginBottom: '20px',
+                  width: '100%',
+                  maxWidth: '264px'
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleNumpadClick('backspace')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    fontSize: '24px',
+                    fontWeight: 500,
+                    color: '#111',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto'
+                  }}
+                >
+                  ⌫
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleNumpadClick('0')}
+                  style={{
+                    width: '80px',
+                    height: '80px',
+                    padding: 0,
+                    fontSize: '28px',
+                    fontWeight: 600,
+                    backgroundColor: `rgba(${themeColorRgb}, 0.7)`,
+                    backdropFilter: 'blur(10px)',
+                    WebkitBackdropFilter: 'blur(10px)',
+                    color: '#fff',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    borderRadius: '50%',
+                    cursor: 'pointer',
+                    boxShadow: `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
+                    transition: 'all 0.3s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.85)`
+                    e.target.style.transform = 'scale(0.95)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = `rgba(${themeColorRgb}, 0.7)`
+                    e.target.style.transform = 'scale(1)'
+                  }}
+                >
+                  0
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    fontSize: '16px',
+                    fontWeight: 500,
+                    color: loading ? '#999' : '#111',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto'
+                  }}
+                >
+                  {loading ? '...' : 'Login'}
+                </button>
+              </div>
+            </>
+          )}
+
+          <div style={{ marginTop: '16px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
             <a
               href="/master-login"
               style={{
@@ -734,6 +797,28 @@ function Login({ onLogin }) {
             >
               Manager / Admin Login
             </a>
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem('sessionToken')
+                localStorage.removeItem('pos_employee')
+                localStorage.removeItem(STORE_CODE_KEY)
+                localStorage.removeItem('pos_skip_setup')
+                sessionStorage.setItem('pos_goto_setup', '1')
+                window.location.href = '/setup'
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '12px',
+                color: '#bbb',
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                padding: 0,
+              }}
+            >
+              Forget this login
+            </button>
           </div>
         </form>
       </div>

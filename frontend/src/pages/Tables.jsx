@@ -77,7 +77,9 @@ const TABLE_CATEGORIES = {
     'approved_shipment_items',
     'pending_shipments',
     'pending_shipment_items',
-    'shipment_verification_settings'
+    'shipment_verification_settings',
+    'extraction_cost_log',
+    'extraction_cost_by_model'
   ],
   'Management': [
     'employees',

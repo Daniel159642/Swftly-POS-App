@@ -165,6 +165,204 @@ function POS({ employeeId, employeeName }) {
   const searchInputRef = useRef(null) // focus after scan so scanner's Enter doesn't trigger Pay
   const isMobile = useIsMobilePOS()
   const isBrowsingMobile = isMobile && (searchTerm.length >= 1 || selectedCategory !== 'All')
+  const mobileSearchAreaRef = useRef(null)
+  const [mobileBrowseOverlayTop, setMobileBrowseOverlayTop] = useState(0)
+
+  useEffect(() => {
+    if (!isMobile) return
+    const update = () => {
+      const rect = mobileSearchAreaRef.current?.getBoundingClientRect?.()
+      if (!rect) return
+      // Place overlay directly under search + filters
+      setMobileBrowseOverlayTop(Math.max(0, Math.round(rect.bottom)))
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [isMobile, searchTerm, selectedCategory, searchFilterChips.length])
+
+  const renderProductList = () => {
+    return (
+      <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+        {loading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }} aria-busy="true" aria-label="Loading products">
+            {Array.from({ length: 10 }, (_, i) => (
+              <div
+                key={i}
+                style={{
+                  padding: '8px 12px',
+                  border: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#eee'}`,
+                  borderRadius: '4px',
+                  display: 'flex',
+                  gap: '12px',
+                  alignItems: 'center',
+                  backgroundColor: isDarkMode ? 'rgba(255,255,255,0.03)' : '#fafafa'
+                }}
+              >
+                <div style={{
+                  width: '50px',
+                  height: '50px',
+                  minWidth: '50px',
+                  borderRadius: '4px',
+                  backgroundColor: isDarkMode ? 'rgba(255,255,255,0.08)' : '#e8e8e8'
+                }} />
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{
+                    height: '14px',
+                    width: `${60 + (i % 3) * 15}%`,
+                    maxWidth: '200px',
+                    borderRadius: '4px',
+                    backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e0e0e0'
+                  }} />
+                  <div style={{
+                    height: '11px',
+                    width: `${40 + (i % 2) * 20}%`,
+                    maxWidth: '120px',
+                    borderRadius: '4px',
+                    backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : '#eee'
+                  }} />
+                </div>
+                <div style={{
+                  height: '16px',
+                  width: '48px',
+                  borderRadius: '4px',
+                  backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e0e0e0'
+                }} />
+              </div>
+            ))}
+          </div>
+        ) : searchTerm.length >= 2 ? (
+          searchResults.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+              No products found
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {searchResults.map(product => {
+                const productImage = product.photo
+                let imageUrl = null
+                if (productImage) {
+                  if (productImage.startsWith('http://') || productImage.startsWith('https://')) {
+                    imageUrl = productImage
+                  } else if (productImage.startsWith('/')) {
+                    imageUrl = productImage
+                  } else if (productImage.startsWith('uploads/')) {
+                    imageUrl = `/${productImage}`
+                  } else {
+                    imageUrl = `/uploads/${productImage}`
+                  }
+                }
+                const isLowStock = typeof product.quantity === 'number' && product.quantity <= 5
+                const isOutOfStock = typeof product.quantity === 'number' && product.quantity <= 0
+                const price = resolveProductPrice(product)
+                const isSelected = !!selectedProduct && selectedProduct.id === product.id
+                return (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => handleProductClick(product)}
+                    disabled={showPaymentForm}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: `1px solid ${isSelected ? `rgba(${themeColorRgb}, 0.8)` : (isDarkMode ? 'var(--border-light, #333)' : '#eee')}`,
+                      backgroundColor: isSelected
+                        ? (isDarkMode ? 'rgba(59,130,246,0.15)' : 'rgba(59,130,246,0.06)')
+                        : (isDarkMode ? 'rgba(255,255,255,0.02)' : '#fff'),
+                      display: 'flex',
+                      gap: '10px',
+                      alignItems: 'center',
+                      width: '100%',
+                      cursor: showPaymentForm ? 'not-allowed' : 'pointer',
+                      boxShadow: isSelected ? `0 4px 10px rgba(${themeColorRgb}, 0.35)` : 'none',
+                      opacity: showPaymentForm ? 0.3 : 1,
+                      textAlign: 'left'
+                    }}
+                  >
+                    <div style={{
+                      width: '48px',
+                      height: '48px',
+                      minWidth: '48px',
+                      borderRadius: '6px',
+                      backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : '#f4f4f4',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden'
+                    }}>
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt={product.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => { e.currentTarget.style.display = 'none' }}
+                        />
+                      ) : (
+                        <span style={{ fontSize: '20px', color: '#bbb' }}>🛍️</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <div style={{
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#222'
+                      }}>
+                        {product.name || 'Unnamed product'}
+                      </div>
+                      <div style={{
+                        fontSize: '12px',
+                        color: isDarkMode ? 'var(--text-secondary, #aaa)' : '#666'
+                      }}>
+                        {product.sku || product.barcode || product.category || 'No SKU'}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                        {typeof product.quantity === 'number' && (
+                          <span style={{
+                            fontSize: '11px',
+                            padding: '2px 6px',
+                            borderRadius: '999px',
+                            backgroundColor: isOutOfStock
+                              ? (isDarkMode ? 'rgba(244,67,54,0.13)' : 'rgba(244,67,54,0.12)')
+                              : isLowStock
+                                ? (isDarkMode ? 'rgba(255,193,7,0.18)' : 'rgba(255,193,7,0.15)')
+                                : (isDarkMode ? 'rgba(76,175,80,0.15)' : 'rgba(76,175,80,0.08)'),
+                            color: isOutOfStock
+                              ? '#f44336'
+                              : isLowStock
+                                ? '#ff9800'
+                                : '#2e7d32'
+                          }}>
+                            {isOutOfStock
+                              ? 'Out of stock'
+                              : isLowStock
+                                ? `Low stock (${product.quantity})`
+                                : `In stock (${product.quantity})`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{
+                        fontSize: '15px',
+                        fontWeight: 700,
+                        color: isDarkMode ? 'var(--text-primary, #fff)' : '#222'
+                      }}>
+                        {price != null ? `$${price.toFixed(2)}` : '--'}
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )
+        ) : (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#999', fontSize: '14px' }}>
+            Start typing at least 2 characters to search products.
+          </div>
+        )}
+      </div>
+    )
+  }
 
   // Default filter config so intelligent search works even if API fails (sm, roni, 1/2 pep, etc.)
   const DEFAULT_POS_FILTERS = {
@@ -802,10 +1000,13 @@ function POS({ employeeId, employeeName }) {
         notes: notesStr
       }]
     })
+
+    // Reset search/browse state so the list closes on mobile after adding to cart
     setSearchTerm('')
     setSearchResults([])
     setSearchFilterChips([])
     setPendingQuantityForChip(null)
+    setSelectedCategory('All')
     setShowVariantModal(false)
     setProductForVariant(null)
   }
@@ -2517,6 +2718,26 @@ function POS({ employeeId, employeeName }) {
         minHeight: 0,
         overflow: 'hidden'
       }}>
+        {/* Mobile browse overlay: covers cart + totals, but keeps search + filters visible */}
+        {isMobile && isBrowsingMobile && (
+          <div
+            style={{
+              position: 'fixed',
+              left: 0,
+              right: 0,
+              top: mobileBrowseOverlayTop,
+              bottom: '92px', // keep mobile bottom nav accessible
+              backgroundColor: isDarkMode ? 'var(--bg-primary, #1a1a1a)' : '#fff',
+              zIndex: 3500,
+              overflow: 'hidden',
+              borderTop: `1px solid ${isDarkMode ? 'var(--border-light, #333)' : '#eee'}`
+            }}
+          >
+            <div style={{ height: '100%', padding: '12px 12px 16px 12px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              {renderProductList()}
+            </div>
+          </div>
+        )}
         {/* Left Column - Cart (and search on mobile) */}
         <div style={{
           flex: '1',
@@ -2529,9 +2750,9 @@ function POS({ employeeId, employeeName }) {
           borderBottom: isMobile ? '1px solid #eee' : 'none'
         }}>
           {isMobile && (
-            <>
+            <div ref={mobileSearchAreaRef}>
               {/* Mobile Search + Categories pinned above cart */}
-              {/* Search Bar: chips inside bar + input, then scan button */}
+              {/* Search Bar: chips inside bar + input */}
               <div style={{ marginBottom: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div
@@ -2682,10 +2903,10 @@ function POS({ employeeId, employeeName }) {
                   </div>
                 </div>
               </div>
-            </>
+            </div>
           )}
           {/* Cart Items */}
-          <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', display: isBrowsingMobile ? 'none' : 'block' }}>
+          <div style={{ flex: 1, overflowY: 'auto', marginBottom: isMobile ? '12px' : '20px' }}>
             {cart.length === 0 ? (
               <div style={{
                 textAlign: 'center',
@@ -3310,37 +3531,7 @@ function POS({ employeeId, employeeName }) {
                       </>
                     )}
 
-                    {/* Mobile: only Add Customer button (pickup/delivery opened from nav bar Order button) */}
-                    {isMobile && (
-                      <button
-                        type="button"
-                        onClick={handleCreateCustomer}
-                        disabled={showPaymentForm}
-                        style={{
-                          padding: '4px',
-                          width: '40px',
-                          height: '40px',
-                          backgroundColor: showPaymentForm ? `rgba(${themeColorRgb}, 0.3)` : `rgba(${themeColorRgb}, 0.7)`,
-                          backdropFilter: 'blur(10px)',
-                          WebkitBackdropFilter: 'blur(10px)',
-                          color: '#fff',
-                          border: '1px solid rgba(255, 255, 255, 0.2)',
-                          borderRadius: '8px',
-                          cursor: showPaymentForm ? 'not-allowed' : 'pointer',
-                          fontSize: '14px',
-                          fontWeight: 600,
-                          boxShadow: showPaymentForm ? `0 2px 8px rgba(${themeColorRgb}, 0.2)` : `0 4px 15px rgba(${themeColorRgb}, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)`,
-                          transition: 'all 0.3s ease',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          opacity: showPaymentForm ? 0.3 : 1
-                        }}
-                        title="Add Customer"
-                      >
-                        <UserPlus size={24} />
-                      </button>
-                    )}
+                    {/* Mobile Add Customer is in the bottom nav */}
                   </div>
                   {!isMobile && customerSearchResults.length > 0 && (
                     <div style={{
@@ -3637,12 +3828,15 @@ function POS({ employeeId, employeeName }) {
           flex: '1',
           padding: isMobile ? '8px 12px 12px 12px' : '20px 20px 0 20px',
           minWidth: 0,
-          display: isMobile && !isBrowsingMobile ? 'none' : 'flex',
+          display: isMobile ? 'none' : 'flex',
           flexDirection: 'column',
           height: '100%',
           overflow: 'hidden'
         }}>
-          {showChangeScreen ? (
+          {(isMobile && isBrowsingMobile) ? (
+            // Mobile browse mode: product list should cover the whole view (no totals/order summary).
+            renderProductList()
+          ) : showChangeScreen ? (
             <>
               <div style={{
                 display: 'flex',

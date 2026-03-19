@@ -48,7 +48,28 @@ export function ToastProvider({ children }) {
           role="status"
           aria-live="polite"
           style={
-            toast.variant === 'sidebar'
+            toast.variant === 'topRight'
+              ? {
+                position: 'fixed',
+                top: '24px',
+                right: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '12px 20px',
+                backgroundColor: 'var(--bg-secondary, #2d2d2d)',
+                color: 'var(--text-primary, #fff)',
+                border: '1px solid var(--border-color, #404040)',
+                borderRadius: '24px',
+                boxShadow: '0 2px 12px rgba(0,0,0,0.2)',
+                zIndex: 10001,
+                fontSize: '14px',
+                fontWeight: 500,
+                maxWidth: '90vw',
+                cursor: toast.action?.onClick ? 'pointer' : 'default',
+                animation: 'toastSlideInTop 0.3s ease-out'
+              }
+              : toast.variant === 'sidebar'
               ? {
                 position: 'fixed',
                 top: '24px',
@@ -127,6 +148,10 @@ export function ToastProvider({ children }) {
         </div>
       )}
       <style>{`
+        @keyframes toastSlideInTop {
+          from { transform: translateY(-100%); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
         @keyframes slideInSidebar {
           from { transform: translateX(120%); opacity: 0; }
           to { transform: translateX(0); opacity: 1; }

@@ -159,17 +159,16 @@ def get_notification_preferences(store_id: int) -> Dict[str, Dict[str, Any]]:
                     prefs[k]['email'] = bool(v)
     return prefs
 
-def should_send(store_id: int, category: str, channel: str, order_source: Optional[str] = None) -> bool:
+def should_send(store_id: int, category: str, channel: str, order_source: Optional[str] = None, order_type: Optional[str] = None) -> bool:
     """Check if a notification of a certain channel/category should be sent.
     
-    Now optionally considers order_source for source filtering.
+    For orders: considers source_filter (order_source + order_type). Filter can include
+    'pos' (in-house), 'delivery', 'pickup', 'doordash', 'ubereats', 'shopify'.
     """
     prefs = get_notification_preferences(store_id)
     cat_prefs = prefs.get(category, {})
     
     # Check simple boolean check-switch
-    # React frontend might use 'email' or 'sms' keys
-    # or expanded ones like 'email_enabled'
     enabled = cat_prefs.get(channel)
     if enabled is None:
         enabled = cat_prefs.get(f"{channel}_enabled")
@@ -177,13 +176,28 @@ def should_send(store_id: int, category: str, channel: str, order_source: Option
     if not enabled:
         return False
         
-    # Source filter (primarily for orders)
-    if category == 'orders' and order_source:
-        source_filter = cat_prefs.get('source_filter') or ['all']
+    # Source/type filter (primarily for orders)
+    if category == 'orders':
+        # SMS uses source_filter_sms if set; otherwise falls back to source_filter
+        if channel == 'sms':
+            source_filter = cat_prefs.get('source_filter_sms')
+            if source_filter is None:
+                source_filter = cat_prefs.get('source_filter') or ['all']
+            else:
+                source_filter = source_filter or ['all']
+        else:
+            source_filter = cat_prefs.get('source_filter') or ['all']
         if 'all' not in source_filter and source_filter:
-            normalized_source = str(order_source).strip().lower()
-            if normalized_source not in [str(f).lower() for f in source_filter]:
-                return False
+            normalized_source = (order_source or '').strip().lower()
+            normalized_type = (order_type or '').strip().lower()
+            filter_lower = [str(f).lower() for f in source_filter]
+            # Match by order_source (pos, doordash, ubereats, shopify) or order_type (delivery, pickup)
+            if normalized_source in filter_lower or normalized_type in filter_lower:
+                return True
+            # pos = in-house (no source or pos)
+            if (not normalized_source or normalized_source in ('pos', 'inhouse', 'in_house')) and 'pos' in filter_lower:
+                return True
+            return False
                 
     return True
 
@@ -248,16 +262,16 @@ def get_notification_recipients(store_id: int, category: str, channel: str) -> L
             
     return recipients
 
-def get_order_email_recipients(store_id: int, order_source: str = '') -> List[str]:
-    """Legacy wrapper for get_notification_recipients and source filtering check."""
-    if not should_send(store_id, 'orders', 'email', order_source):
+def get_order_email_recipients(store_id: int, order_source: str = '', order_type: str = '') -> List[str]:
+    """Legacy wrapper for get_notification_recipients and source/type filtering check."""
+    if not should_send(store_id, 'orders', 'email', order_source, order_type):
         return []
     return get_notification_recipients(store_id, 'orders', 'email')
 
 
-def get_order_sms_recipients(store_id: int, order_source: str = '') -> List[str]:
-    """Wrapper for get_notification_recipients and source filtering check for SMS."""
-    if not should_send(store_id, 'orders', 'sms', order_source):
+def get_order_sms_recipients(store_id: int, order_source: str = '', order_type: str = '') -> List[str]:
+    """Wrapper for get_notification_recipients and source/type filtering check for SMS."""
+    if not should_send(store_id, 'orders', 'sms', order_source, order_type):
         return []
     return get_notification_recipients(store_id, 'orders', 'sms')
 
@@ -1351,6 +1365,22 @@ def get_clockin_notification_settings(store_id: int = 1) -> Dict:
                         'late_alert_threshold_min','late_alert_to_employee','late_alert_to_admin',
                         'late_alert_delay_min','overtime_alert_enabled','overtime_threshold_hours','updated_at']
                 d = dict(zip(cols, row))
+            # Merge settings_ext (extended per-alert settings)
+            ext = d.get('settings_ext')
+            if isinstance(ext, dict):
+                for k, v in ext.items():
+                    if k not in d or d[k] is None:
+                        d[k] = v
+            elif isinstance(ext, str):
+                try:
+                    import json
+                    parsed = json.loads(ext) if ext else {}
+                    if isinstance(parsed, dict):
+                        for k, v in parsed.items():
+                            if k not in d or d[k] is None:
+                                d[k] = v
+                except Exception:
+                    pass
             return d
     except Exception as e:
         logger.debug("clockin settings fetch error: %s", e)
@@ -1360,10 +1390,29 @@ def get_clockin_notification_settings(store_id: int = 1) -> Dict:
 def save_clockin_notification_settings(store_id: int, settings: Dict) -> bool:
     """Upsert clockin_notification_settings for store_id."""
     try:
+        import json
         from database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("""
+
+        # Build settings_ext from extended fields
+        ext_keys = [
+            'clockin_email_enabled', 'clockin_sms_enabled', 'clockin_notify_employee',
+            'clockin_admin_email_ids', 'clockin_admin_sms_ids',
+            'clockout_email_enabled', 'clockout_sms_enabled', 'clockout_notify_employee',
+            'clockout_admin_email_ids', 'clockout_admin_sms_ids',
+            'late_alert_email_enabled', 'late_alert_sms_enabled',
+            'late_alert_admin_email_ids', 'late_alert_admin_sms_ids',
+            'overtime_notify_employee', 'overtime_email_enabled', 'overtime_sms_enabled',
+            'overtime_admin_email_ids', 'overtime_admin_sms_ids',
+        ]
+        settings_ext = {k: settings.get(k) for k in ext_keys if k in settings}
+        for k, v in list(settings_ext.items()):
+            if v is None:
+                del settings_ext[k]
+        ext_json = json.dumps(settings_ext) if settings_ext else '{}'
+
+        base_sql = """
             INSERT INTO clockin_notification_settings
                 (store_id, notify_admin_on_clockin, notify_admin_on_clockout, admin_email_ids,
                  notify_employee_self, late_alert_enabled, late_alert_threshold_min,
@@ -1383,7 +1432,8 @@ def save_clockin_notification_settings(store_id: int, settings: Dict) -> bool:
                 overtime_alert_enabled   = EXCLUDED.overtime_alert_enabled,
                 overtime_threshold_hours = EXCLUDED.overtime_threshold_hours,
                 updated_at               = NOW()
-        """, (
+        """
+        base_params = (
             store_id,
             settings.get('notify_admin_on_clockin', False),
             settings.get('notify_admin_on_clockout', False),
@@ -1396,7 +1446,16 @@ def save_clockin_notification_settings(store_id: int, settings: Dict) -> bool:
             settings.get('late_alert_delay_min', 15),
             settings.get('overtime_alert_enabled', False),
             settings.get('overtime_threshold_hours', 8.0),
-        ))
+        )
+        cur.execute(base_sql, base_params)
+        # Update settings_ext if column exists
+        try:
+            cur.execute(
+                "UPDATE clockin_notification_settings SET settings_ext = %s::jsonb WHERE store_id = %s",
+                (ext_json, store_id)
+            )
+        except Exception:
+            pass  # settings_ext column may not exist before migration
         conn.commit()
         conn.close()
         return True

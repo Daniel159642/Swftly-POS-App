@@ -1,8 +1,8 @@
 import { Resend } from 'resend';
 import { NextResponse } from 'next/server';
+import { addLeadToSheet, draftEmail } from '@/lib/google';
+import { getEmailContent } from '@/lib/email-templates';
 
-// Initialize Resend with your API key
-// You should add RESEND_API_KEY to your .env file
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(request: Request) {
@@ -15,11 +15,56 @@ export async function POST(request: Request) {
             return NextResponse.json({ message: 'Bot detected' }, { status: 400 });
         }
 
+        const lead = {
+            firstName,
+            lastName,
+            email,
+            businessName,
+            businessType,
+            currentPos,
+            painPoints,
+            source: 'FORM', // Distinguish form signup from manual signup
+        };
+
+        // 1. Add to Google Sheet
+        try {
+            await addLeadToSheet(lead);
+        } catch (err) {
+            console.error('Failed to add lead to sheet:', err);
+            // Non-blocking error: we still want to send the confirmation email
+        }
+
+        // 2. Draft Initial Genuinen Email in Gmail (if connected)
+        try {
+            const initialEmail = await getEmailContent('INITIAL', lead);
+            if (initialEmail) {
+                await draftEmail(email, initialEmail.subject, initialEmail.html);
+            }
+        } catch (err) {
+             console.error('Failed to draft Gmail email:', err);
+             // Non-blocking error
+        }
+
+        // 3. Send Confirmation Email to Lead (via Resend)
+        try {
+            const confirmation = await getEmailContent('CONFIRMATION', lead);
+            if (confirmation) {
+                await resend.emails.send({
+                    from: 'Swftly <onboarding@resend.dev>',
+                    to: [email],
+                    subject: confirmation.subject,
+                    html: confirmation.html,
+                });
+            }
+        } catch (err) {
+            console.error('Failed to send confirmation email:', err);
+        }
+
+        // Send notification to admin (original logic)
         const fullName = lastName ? `${firstName} ${lastName}` : firstName;
         const subject = businessName ? `New Waitlist: ${businessName} (${fullName})` : `New Waitlist: ${fullName}`;
-
-        const { data, error } = await resend.emails.send({
-            from: 'Swftly <onboarding@resend.dev>',
+        await resend.emails.send({
+            from: 'Swftly Admin <onboarding@resend.dev>',
             to: ['drlny11d@gmail.com'],
             subject: subject,
             html: `
@@ -34,17 +79,13 @@ export async function POST(request: Request) {
                         <p><strong>Pain Points & Improvements:</strong></p>
                         <p>${painPoints || 'None provided.'}</p>
                     </div>
-                    <p style="font-size: 12px; color: #888; margin-top: 30px;">Sent via Swftly Website</p>
                 </div>
             `,
         });
 
-        if (error) {
-            return NextResponse.json({ error }, { status: 400 });
-        }
-
-        return NextResponse.json({ data });
+        return NextResponse.json({ success: true });
     } catch (error) {
-        return NextResponse.json({ error: 'Failed to send email' }, { status: 500 });
+        console.error('API Error:', error);
+        return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
     }
 }
