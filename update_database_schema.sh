@@ -167,17 +167,22 @@ fi
 
 # -----------------------------------------------------------------------------
 # Step 7: Set is_admin = TRUE on admin employee
-# The permission system checks employees.is_admin for unrestricted access.
+# The permission system checks employees.is_admin — not position strings.
 # create_admin_account.py and init_admin_permissions.py don't set this flag.
 # -----------------------------------------------------------------------------
 step "Step 7: Setting is_admin flag on admin account..."
-psql "$DB_CONN" -c "
-    UPDATE employees
-    SET is_admin = TRUE
-    WHERE LOWER(TRIM(COALESCE(position, ''))) = 'admin'
-      AND active = 1;
-" 2>&1 | sed 's/^/  /' || true
-ok "is_admin flag set"
+
+# Set by position = admin
+psql "$DB_CONN" -c "UPDATE employees SET is_admin = TRUE WHERE LOWER(TRIM(COALESCE(position,''))) = 'admin' AND active = 1;" 2>&1 | sed 's/^/  /' || true
+
+# Fallback: also set by employee_code = ADMIN001 in case position was changed
+psql "$DB_CONN" -c "UPDATE employees SET is_admin = TRUE WHERE LOWER(employee_code) = 'admin001' AND active = 1;" 2>&1 | sed 's/^/  /' || true
+
+# Verify — show the admin row
+echo "  Verifying admin employee:"
+psql "$DB_CONN" -c "SELECT employee_id, employee_code, position, is_admin, active FROM employees WHERE LOWER(employee_code) = 'admin001';" 2>&1 | sed 's/^/  /'
+
+ok "is_admin step complete"
 
 # -----------------------------------------------------------------------------
 # Done
@@ -193,4 +198,10 @@ echo ""
 echo "  Default login:"
 echo "    Employee Code: ADMIN001"
 echo "    Password:      123456"
+echo ""
+echo -e "  ${YELLOW}IMPORTANT:${RESET} Clear your browser's localStorage before logging in."
+echo "  The old session token is stale and will cause 'employee_id required' errors."
+echo ""
+echo "  In Chrome/Safari: DevTools → Application → Local Storage → Clear All"
+echo "  Or just open an Incognito/Private window."
 echo ""
