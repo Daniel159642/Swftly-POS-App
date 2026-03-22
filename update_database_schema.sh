@@ -52,56 +52,82 @@ ok "psql: $(psql --version)"
 ok "database_schema_dump.sql found"
 
 # -----------------------------------------------------------------------------
-# Load .env
+# Load .env using Python (avoids xargs quoting issues)
 # -----------------------------------------------------------------------------
 step "Step 1: Loading environment..."
 
 [ -f .env ] || fail ".env not found. Copy .env.example to .env and configure it."
 
-set +e
-export $(grep -v '^#' .env | grep -v '^\s*$' | xargs) 2>/dev/null
-set -e
+# Use Python to safely parse .env and extract DB connection vars
+eval "$(python3 - <<'PYEOF'
+import re, os
+vals = {}
+with open('.env') as f:
+    for line in f:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)', line)
+        if m:
+            vals[m.group(1)] = m.group(2).strip().strip('"').strip("'")
+
+url = vals.get('DATABASE_URL','').strip()
+if url and url.startswith('postgresql://'):
+    # Parse postgresql://user:pass@host:port/dbname
+    rest = url[len('postgresql://'):]
+    userinfo, hostinfo = rest.split('@', 1)
+    user = userinfo.split(':')[0]
+    hostport, dbname = hostinfo.split('/', 1)
+    dbname = dbname.split('?')[0]
+    if ':' in hostport:
+        host, port = hostport.rsplit(':', 1)
+    else:
+        host, port = hostport, '5432'
+    print(f"DB_HOST={host}")
+    print(f"DB_PORT={port}")
+    print(f"DB_NAME={dbname}")
+    print(f"DB_USER={user}")
+    print(f"DB_PASS={userinfo.split(':', 1)[1] if ':' in userinfo else ''}")
+    print(f"DATABASE_URL={url}")
+else:
+    host = vals.get('DB_HOST', 'localhost')
+    port = vals.get('DB_PORT', '5432')
+    name = vals.get('DB_NAME', 'pos_db')
+    user = vals.get('DB_USER', 'postgres')
+    pw   = vals.get('DB_PASSWORD', 'postgres')
+    print(f"DB_HOST={host}")
+    print(f"DB_PORT={port}")
+    print(f"DB_NAME={name}")
+    print(f"DB_USER={user}")
+    print(f"DB_PASS={pw}")
+    print(f"DATABASE_URL=postgresql://{user}:{pw}@{host}:{port}/{name}")
+PYEOF
+)"
+
 ok ".env loaded"
-
-# Resolve connection info
-if [ -n "$DATABASE_URL" ]; then
-    DB_CONN="$DATABASE_URL"
-    DB_NAME=$(echo "$DATABASE_URL" | sed 's|.*\/||' | sed 's|?.*||')
-    DB_HOST=$(echo "$DATABASE_URL" | sed 's|.*@||' | sed 's|:.*||' | sed 's|\/.*||')
-    DB_PORT=$(echo "$DATABASE_URL" | sed 's|.*:[0-9]*/||' ; echo "$DATABASE_URL" | grep -oE ':[0-9]+/' | tr -d ':/' || echo "5432")
-    DB_USER=$(echo "$DATABASE_URL" | sed 's|.*://||' | sed 's|:.*||')
-    DB_HOST="${DB_HOST:-localhost}"
-    DB_PORT="${DB_PORT:-5432}"
-else
-    DB_HOST="${DB_HOST:-localhost}"
-    DB_PORT="${DB_PORT:-5432}"
-    DB_NAME="${DB_NAME:-pos_db}"
-    DB_USER="${DB_USER:-postgres}"
-    DB_PASS="${DB_PASSWORD:-postgres}"
-    DB_CONN="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
-fi
-
-DB_NAME="${DB_NAME:-pos_db}"
 echo "  Target: ${DB_HOST}:${DB_PORT}/${DB_NAME} as ${DB_USER}"
+
+# Connection string to the target DB
+DB_CONN="$DATABASE_URL"
+# Connection string to the postgres admin DB (for drop/create)
+ADMIN_CONN="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/postgres"
 
 # -----------------------------------------------------------------------------
 # Drop and recreate database
 # -----------------------------------------------------------------------------
 step "Step 2: Dropping existing database '$DB_NAME'..."
 
-# Terminate all connections first
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres \
+# Terminate all active connections first
+psql "$ADMIN_CONN" \
     -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME}' AND pid <> pg_backend_pid();" \
     2>/dev/null || true
 
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres \
-    -c "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null \
+psql "$ADMIN_CONN" -c "DROP DATABASE IF EXISTS ${DB_NAME};" \
     && ok "Dropped database '$DB_NAME'" \
     || warn "Could not drop — may not exist yet (continuing)"
 
 step "Step 3: Creating fresh database '$DB_NAME'..."
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres \
-    -c "CREATE DATABASE ${DB_NAME};" \
+psql "$ADMIN_CONN" -c "CREATE DATABASE ${DB_NAME};" \
     && ok "Created database '$DB_NAME'" \
     || fail "Could not create database. Check your PostgreSQL user has CREATE DATABASE permission."
 
