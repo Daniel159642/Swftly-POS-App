@@ -58,9 +58,10 @@ step "Step 1: Loading environment..."
 
 [ -f .env ] || fail ".env not found. Copy .env.example to .env and configure it."
 
-# Use Python to safely parse .env and extract DB connection vars
-eval "$(python3 - <<'PYEOF'
-import re, os
+# Use Python to safely parse .env — write to temp file to avoid heredoc-in-$() issues
+_PY_PARSER=$(mktemp /tmp/pos_parse_env_XXXXXX.py)
+cat > "$_PY_PARSER" << 'PYEOF'
+import re
 vals = {}
 with open('.env') as f:
     for line in f:
@@ -73,36 +74,34 @@ with open('.env') as f:
 
 url = vals.get('DATABASE_URL','').strip()
 if url and url.startswith('postgresql://'):
-    # Parse postgresql://user:pass@host:port/dbname
     rest = url[len('postgresql://'):]
     userinfo, hostinfo = rest.split('@', 1)
     user = userinfo.split(':')[0]
     hostport, dbname = hostinfo.split('/', 1)
     dbname = dbname.split('?')[0]
-    if ':' in hostport:
-        host, port = hostport.rsplit(':', 1)
-    else:
-        host, port = hostport, '5432'
-    print(f"DB_HOST={host}")
-    print(f"DB_PORT={port}")
-    print(f"DB_NAME={dbname}")
-    print(f"DB_USER={user}")
-    print(f"DB_PASS={userinfo.split(':', 1)[1] if ':' in userinfo else ''}")
-    print(f"DATABASE_URL={url}")
+    host, port = (hostport.rsplit(':', 1) if ':' in hostport else (hostport, '5432'))
+    pw = userinfo.split(':', 1)[1] if ':' in userinfo else ''
+    print(f"DB_HOST='{host}'")
+    print(f"DB_PORT='{port}'")
+    print(f"DB_NAME='{dbname}'")
+    print(f"DB_USER='{user}'")
+    print(f"DB_PASS='{pw}'")
+    print(f"DATABASE_URL='{url}'")
 else:
     host = vals.get('DB_HOST', 'localhost')
     port = vals.get('DB_PORT', '5432')
     name = vals.get('DB_NAME', 'pos_db')
     user = vals.get('DB_USER', 'postgres')
     pw   = vals.get('DB_PASSWORD', 'postgres')
-    print(f"DB_HOST={host}")
-    print(f"DB_PORT={port}")
-    print(f"DB_NAME={name}")
-    print(f"DB_USER={user}")
-    print(f"DB_PASS={pw}")
-    print(f"DATABASE_URL=postgresql://{user}:{pw}@{host}:{port}/{name}")
+    print(f"DB_HOST='{host}'")
+    print(f"DB_PORT='{port}'")
+    print(f"DB_NAME='{name}'")
+    print(f"DB_USER='{user}'")
+    print(f"DB_PASS='{pw}'")
+    print(f"DATABASE_URL='postgresql://{user}:{pw}@{host}:{port}/{name}'")
 PYEOF
-)"
+eval "$(python3 "$_PY_PARSER")"
+rm -f "$_PY_PARSER"
 
 ok ".env loaded"
 echo "  Target: ${DB_HOST}:${DB_PORT}/${DB_NAME} as ${DB_USER}"
