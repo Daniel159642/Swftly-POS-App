@@ -166,6 +166,20 @@ else
 fi
 
 # -----------------------------------------------------------------------------
+# Step 7: Set is_admin = TRUE on admin employee
+# The permission system checks employees.is_admin for unrestricted access.
+# create_admin_account.py and init_admin_permissions.py don't set this flag.
+# -----------------------------------------------------------------------------
+step "Step 7: Setting is_admin flag on admin account..."
+psql "$DB_CONN" -c "
+    UPDATE employees
+    SET is_admin = TRUE
+    WHERE LOWER(TRIM(COALESCE(position, ''))) = 'admin'
+      AND active = 1;
+" 2>&1 | sed 's/^/  /' || true
+ok "is_admin flag set"
+
+# -----------------------------------------------------------------------------
 # Done
 # -----------------------------------------------------------------------------
 echo ""
