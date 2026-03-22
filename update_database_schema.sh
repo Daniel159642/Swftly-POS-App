@@ -106,6 +106,9 @@ rm -f "$_PY_PARSER"
 ok ".env loaded"
 echo "  Target: ${DB_HOST}:${DB_PORT}/${DB_NAME} as ${DB_USER}"
 
+# Disable psql pager so output doesn't pause waiting for keypress
+export PAGER=cat
+
 # Connection string to the target DB
 DB_CONN="$DATABASE_URL"
 # Connection string to the postgres admin DB (for drop/create)
