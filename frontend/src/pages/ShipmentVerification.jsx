@@ -3797,7 +3797,13 @@ function UploadShipmentForm({ onClose, onSuccess }) {
 
     try {
       const sessionToken = localStorage.getItem('sessionToken')
-      
+
+      if (!sessionToken || sessionToken === 'null') {
+        setToast({ message: 'Session expired. Please log out and log back in.', type: 'error' })
+        setUploading(false)
+        return
+      }
+
       // If this is a draft, confirm it instead of creating a new shipment
       if (draftId) {
         const confirmFormData = new FormData()

@@ -2549,16 +2549,16 @@ def api_upload_shipment():
     try:
         # Get employee ID from session
         employee_id = None
-        session_token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        if not session_token:
-            session_token = request.form.get('session_token')
-        if session_token:
+        session_token = request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+        if not session_token or session_token.lower() in ('null', 'undefined', ''):
+            session_token = (request.form.get('session_token') or '').strip()
+        if session_token and session_token.lower() not in ('null', 'undefined'):
             session_data = verify_session(session_token)
             if session_data and session_data.get('valid'):
                 employee_id = session_data.get('employee_id')
-        
+
         if not employee_id:
-            return jsonify({'success': False, 'message': 'Employee ID required'}), 401
+            return jsonify({'success': False, 'message': 'Session expired — please log out and log back in.'}), 401
         
         # Check if this is a preview confirmation (has items data)
         items_data = request.form.get('items')
