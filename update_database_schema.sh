@@ -142,47 +142,21 @@ psql "$DB_CONN" -f database_schema_dump.sql 2>&1 | grep -i "error" | grep -v "al
 ok "Schema restored"
 
 # -----------------------------------------------------------------------------
-# Admin account + permissions
+# Steps 5-7: Create admin account with full permissions (is_admin=TRUE)
+# Uses seed_dev_admin.py which calls database.create_admin_account() directly.
+# That function seeds roles+permissions AND sets is_admin=TRUE in the INSERT.
+# The old create_admin_account.py + init_admin_permissions.py approach was
+# fragile: it never set is_admin=TRUE in the INSERT, requiring a separate UPDATE.
 # -----------------------------------------------------------------------------
-step "Step 5: Creating admin account..."
-if [ -f "create_admin_account.py" ]; then
-    python3 create_admin_account.py <<'EOF' 2>&1 | sed 's/^/  /' || true
-ADMIN001
-Admin
-User
-123456
-EOF
-    ok "Admin account step complete"
+step "Step 5: Creating admin account with full permissions..."
+if [ -f "seed_dev_admin.py" ]; then
+    python3 seed_dev_admin.py 2>&1 | sed 's/^/  /'
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+        fail "Admin setup failed — check output above"
+    fi
 else
-    warn "create_admin_account.py not found — skipping"
+    fail "seed_dev_admin.py not found"
 fi
-
-step "Step 6: Initializing permissions (RBAC)..."
-if [ -f "init_admin_permissions.py" ]; then
-    python3 init_admin_permissions.py 2>&1 | sed 's/^/  /' || true
-    ok "Permissions initialized"
-else
-    warn "init_admin_permissions.py not found — skipping"
-fi
-
-# -----------------------------------------------------------------------------
-# Step 7: Set is_admin = TRUE on admin employee
-# The permission system checks employees.is_admin — not position strings.
-# create_admin_account.py and init_admin_permissions.py don't set this flag.
-# -----------------------------------------------------------------------------
-step "Step 7: Setting is_admin flag on admin account..."
-
-# Set by position = admin
-psql "$DB_CONN" -c "UPDATE employees SET is_admin = TRUE WHERE LOWER(TRIM(COALESCE(position,''))) = 'admin' AND active = 1;" 2>&1 | sed 's/^/  /' || true
-
-# Fallback: also set by employee_code = ADMIN001 in case position was changed
-psql "$DB_CONN" -c "UPDATE employees SET is_admin = TRUE WHERE LOWER(employee_code) = 'admin001' AND active = 1;" 2>&1 | sed 's/^/  /' || true
-
-# Verify — show the admin row
-echo "  Verifying admin employee:"
-psql "$DB_CONN" -c "SELECT employee_id, employee_code, position, is_admin, active FROM employees WHERE LOWER(employee_code) = 'admin001';" 2>&1 | sed 's/^/  /'
-
-ok "is_admin step complete"
 
 # -----------------------------------------------------------------------------
 # Done
@@ -196,7 +170,7 @@ echo "  Start the backend:   python3 web_viewer.py"
 echo "  Start the frontend:  cd frontend && npm run dev"
 echo ""
 echo "  Default login:"
-echo "    Employee Code: ADMIN001"
+echo "    Employee Code: (shown above in seed_dev_admin output)"
 echo "    Password:      123456"
 echo ""
 echo -e "  ${YELLOW}IMPORTANT:${RESET} Clear your browser's localStorage before logging in."
