@@ -47,7 +47,8 @@ for r in rows:
 
 # Permissions count
 cursor.execute("SELECT COUNT(*) FROM permissions")
-pcount = cursor.fetchone()[0]
+row = cursor.fetchone()
+pcount = row['count'] if isinstance(row, dict) else row[0]
 print(f"\n  Permissions seeded: {pcount}")
 
 # Role permissions

@@ -1873,24 +1873,32 @@ export default function Home() {
 
           {[
             {
-              q: 'How do shipments get imported?',
-              a: 'Upload PDFs, spreadsheets, or images. Swftly extracts products, pricing, and SKUs, then prepares inventory updates for approval.'
+              q: 'Can Swftly tell me how my business is performing?',
+              a: 'Yes. Swftly surfaces revenue trends, best-selling items, and slow periods — and proactively messages you with insights you\'d otherwise miss.'
             },
             {
-              q: 'How does mismatch detection work?',
-              a: 'Swftly compares the vendor document against expected items and pricing, then flags discrepancies before you publish inventory.'
+              q: 'What happens when there\'s a shipping issue?',
+              a: 'Swftly contacts the vendor directly to resolve it. It keeps you informed throughout and only escalates to you when it needs a decision.'
             },
             {
-              q: 'Can Swftly notify vendors automatically?',
-              a: 'Yes. Swftly can draft and send discrepancy emails so vendors can correct invoices or issue credits quickly.'
+              q: 'Does Swftly handle my bookkeeping?',
+              a: 'Yes. Swftly automatically categorizes transactions, reconciles your accounts, and keeps your books up to date — no manual entry required.'
             },
             {
-              q: 'What hardware can I use?',
-              a: 'Run Swftly on mobile or desktop. Keep your existing scanners, printers, cash drawers, and terminals.'
+              q: 'Can Swftly build my employee schedule?',
+              a: 'Yes. Swftly analyzes your order trends and automatically schedules fewer staff during slow periods — so you\'re never paying for idle employees.'
             },
             {
-              q: 'Do you take a percentage of transactions?',
-              a: 'No. Swftly does not take a percentage of your transactions.'
+              q: 'How do I talk to Swftly?',
+              a: 'You can talk to Swftly from your phone through Slack, WhatsApp, or iMessage — just like texting a regular employee.'
+            },
+            {
+              q: 'Can Swftly talk to vendors?',
+              a: 'Yes. Swftly contacts vendors directly, places orders, and resolves claims on your behalf.'
+            },
+            {
+              q: 'How do I know what Swftly is doing?',
+              a: 'Before taking action, Swftly messages you with what it\'s about to do and explains its reasoning. Just hit confirm. You control its permissions, notifications, and reporting.'
             }
           ].map((item, idx) => {
             const isOpen = openFaqIndex === idx;
