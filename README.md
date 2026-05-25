@@ -4,6 +4,8 @@
 
 🎥 **[Watch the demo](https://youtu.be/lUpioJJJ_nU)**
 
+![Swftly POS dashboard](docs/assets/swftly-dashboard.png)
+
 **An agentic point-of-sale system that runs the back office of a brick-and-mortar store so
 the staff don't have to.** Most of what kills a small retail or restaurant operation isn't
 the selling — it's everything around it: keying vendor invoices into inventory, balancing
@@ -99,16 +101,14 @@ at a flat low monthly price with no hardware lock-in, it bundles POS, accounting
 and marketing — undercutting incumbents like Square and Toast while automating work they
 leave manual.
 
-### Status & team
+### Status
 Swftly is in **late prototype / beta**, with a working platform across **web, desktop, and
-mobile**, an early case-study cohort, and a waitlist of prospective stores. It's built by
-co-founders **Daniel Lopez** (lead engineer — system architecture, ML, and UI) and **Daniel
-Budnyatsky** (accounting systems, payments, and third-party integrations), advised by **Indaria
-Jones** (Couri Hatchery, Whitman School of Management) and **Dr. Paul Fodor** (Professor of
-Computer Science, Stony Brook University).
+mobile**, an early case-study cohort, and a waitlist of prospective stores.
 
-> This summary condenses Swftly's executive overview. Detailed financials, projections, and
-> fundraising materials are maintained separately and are not part of this repository.
+> 📄 **Full executive summary:** [docs/Executive_Summary.pdf](docs/Executive_Summary.pdf)
+>
+> This section condenses Swftly's executive overview; the PDF covers the full company,
+> market, and product narrative.
 
 ---
 
