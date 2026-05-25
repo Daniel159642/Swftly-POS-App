@@ -1,107 +1,200 @@
 # Swftly POS
 
-A full-featured, modern point-of-sale and retail management platform. Swftly runs as a
-**web app**, a **desktop app** (Tauri), and a **customer-facing display**, backed by a
-Python/Flask API and PostgreSQL. It combines checkout, inventory, shipments, accounting,
-scheduling, and reporting in one system, with AI-assisted document processing and
-integrations for QuickBooks, Shopify, Square, DoorDash, and Google Calendar.
+A full-featured, multi-location point-of-sale and retail/restaurant management platform.
+Swftly pairs a fast checkout register with a complete back office — inventory, purchasing,
+double-entry accounting, employee scheduling, customer loyalty, and analytics — plus
+AI-assisted document processing and first-class integrations with QuickBooks, Shopify,
+Square, DoorDash, Stripe, and Google Calendar.
+
+It runs as a **web app**, a **cross-platform desktop app** (Tauri), and a **customer-facing
+display**, backed by a Python/Flask API with real-time updates over Socket.IO and a
+PostgreSQL database (local or hosted on Supabase).
 
 > **License:** Apache License 2.0 — see [LICENSE](LICENSE).
+
+---
+
+## Table of Contents
+- [Highlights](#highlights)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+- [Configuration](#configuration)
+- [Repository Layout](#repository-layout)
+- [Documentation](#documentation)
+- [License](#license)
+
+---
+
+## Highlights
+
+- 🛒 **Complete POS** — cart, discounts, tips, split tender, returns/exchanges, gift cards, and a live customer display
+- 📦 **Inventory & receiving** — variants, recipes/ingredients, categories, lot & expiration tracking, and AI document-based shipment intake
+- 📒 **Real double-entry accounting** — every sale, refund, cash movement, and shipment auto-journalizes to a chart of accounts, with P&L, balance sheet, cash flow, trial balance, and A/R / A/P aging
+- 🔌 **Deep integrations** — QuickBooks Online, Shopify, DoorDash, Square migration, Stripe Terminal, Google Calendar
+- 🤖 **AI built in** — OpenAI / Claude vision extraction of vendor documents, free local product metadata tagging, and deep-learning product-image matching
+- 👥 **RBAC + audit** — roles, per-employee permission overrides, PIN overrides, passkeys/WebAuthn, and a full audit trail
+- 📴 **Offline-first** — the web client caches reads and queues writes in IndexedDB, syncing automatically when back online
+- 🏢 **Multi-location / multi-tenant** — nearly every table is establishment-scoped
 
 ---
 
 ## Features
 
 ### Point of Sale
-- Checkout register with cart, discounts, returns, and split/multiple payment methods
-- Cash register / drawer control with open/close reconciliation
-- Customer-facing display (CDS) that updates live as items are rung up
-- Digital and printable receipt generation
-- Barcode and QR scanning (camera-based and hardware scanners)
-- Restaurant-style table management and order assignment
+- Checkout register with real-time cart, line discounts, tips, and automatic change calculation
+- Multiple and split payment methods: cash, credit/debit, mobile wallets, check, store credit, gift card
+- Returns and exchanges with an approval workflow (request → approve/reject → refund)
+- Gift cards with sale, redemption, and breakage accounting
+- **Customer-facing display (CDS)** that mirrors the transaction live over Socket.IO — items, totals, payment status, tip prompts, and receipt-delivery choice
+- Receipt generation (print, email, or SMS) with customizable templates, store branding, and embedded barcodes/QR codes
 
-### Inventory & Vendors
-- Product catalog with SKUs, pricing, cost, categories, photos, and variants/ingredients
-- Vendor management and per-vendor inventory tracking
-- **FIFO inventory tracing** — see exactly which vendor's stock remains after sales
-- Automatic stock updates via database triggers on shipment receipt and sale
-- AI-powered product image matching and metadata extraction
+### Cash Register Control
+- Open/close register sessions with starting and ending cash counts
+- Record cash in/out, deposits, withdrawals, and adjustments with reasons
+- Automatic reconciliation of expected vs. actual cash, with discrepancy detection and daily counts
+- Cash over/short posts automatically to the general ledger
 
-### Shipments & Document Processing
-- Upload vendor documents (PDF, Excel, CSV, Word, images)
-- AI extraction (OpenAI text + vision) of SKU, quantity, cost, lot numbers, expirations
-- Pending-shipment review flow: auto-match by SKU, verify quantities, flag discrepancies
-- Approve to transfer into live inventory automatically
+### Inventory & Products
+- Product catalog with SKUs, pricing, cost, photos, barcodes, and hierarchical categories
+- **Product variants** (e.g. Small / Medium / Large) with per-variant pricing
+- **Recipes / ingredients** — track ingredient stock consumed by composite products without selling ingredients directly
+- Quantity adjustments with reasons, archive/unarchive, and reorder points
+- Lot number and expiration-date tracking (food/pharma-friendly)
+- AI **metadata extraction** that suggests categories and tags products, plus deep-learning **image matching** to identify products from photos
 
-### Accounting
-- Chart of accounts and double-entry accounting subsystem
-- QuickBooks Online (QBO) sync of transactions and accounts
-- Square historical data migration/import
+### Shipments & Receiving
+- Upload vendor documents in any format — **PDF, Excel, CSV, Word, or scanned images/photos**
+- AI extraction (OpenAI `gpt-4o` and/or Claude with native PDF + vision) pulls SKU, name, quantity, unit cost, lot numbers, and expirations, with confidence scoring
+- Quality-aware routing: text extraction for clean docs, vision for images, hybrid for mixed content
+- Guided verification: scan items in, auto-match by SKU, flag discrepancies and damage, then approve to update live inventory
+- Draft and pending-shipment states with verification progress tracking
 
-### Employees, Users & Security
-- Role-based access control (RBAC) with an `is_admin` flag and configurable roles
-- PIN-based POS overrides for sensitive actions
-- Passkey / WebAuthn sign-in and bcrypt-backed sessions
-- Store codes, session tokens, and a privilege-escalation guard with denial audit logging
-- Encrypted storage of sensitive API keys and tokens (e.g. QBO credentials)
+### Accounting (Double-Entry General Ledger)
+- A rules-driven posting engine journalizes every operational event — sales, voids, returns, cash drops, register close (over/short), shipment receipts, inventory write-offs/shrinkage, gift cards, loyalty, and third-party platform fees
+- Chart of accounts with hierarchy, opening balances, and system accounts; vertical-specific accounts for restaurant and service businesses
+- Accounts Receivable (customer invoices + payments) and Accounts Payable (vendor bills + bill payments) with payment application and overdue tracking
+- Financial reports: **Profit & Loss, Balance Sheet, Cash Flow, Trial Balance**, and **A/R / A/P aging** (with comparative periods)
+- Posting/voiding lifecycle with double-entry balance validation enforced in the database
+- 1099 vendor tracking, classes (profit/cost centers), and fiscal periods
 
-### Scheduling & Calendar
-- Employee scheduling and shift generation
-- Google Calendar / iCal sync for appointments and shifts
+### Employees, Scheduling & Time
+- Employee profiles with positions, departments, pay rates, and emergency contacts
+- Time clock (clock in/out, breaks, total hours) and per-employee activity logs
+- **Automated schedule generation** with balanced, cost-optimized, or preference-prioritized algorithms, respecting availability, store hours, and min/max-hours constraints
+- Draft → publish scheduling workflow with conflict detection and shift notifications
 
-### Statistics & Reporting
-- Sales, inventory, and performance dashboards (Recharts)
-- PDF report generation
+### Customers & Loyalty
+- Customer profiles with lookup at checkout and full purchase history
+- Configurable rewards: points-per-dollar, percentage discount, or fixed discount with minimum-spend rules
+- Point redemption for discounts/store credit and saved receipt-delivery preferences
+- Linked to the accounting customer ledger for invoicing and balances
+
+### Security & Access Control
+- Role-based access control with default roles plus **per-employee permission overrides**
+- Authentication options: employee/admin **PIN login**, session tokens, **WebAuthn / passkeys**, and optional **Clerk** hosted auth
+- PIN-based manager overrides for sensitive POS actions
+- Encrypted storage of sensitive API keys/tokens (e.g. QuickBooks credentials)
+- Comprehensive **audit log** (inserts/updates/deletes, approvals, voids, returns, logins, clock events) captured via database triggers with old/new values and the responsible employee
 
 ### Notifications
-- SMS and in-app notifications, with per-register notification settings
+- Channels: **email** (Gmail for dev, AWS SES for production), **SMS** (AWS SNS), and in-app
+- Event categories with granular toggles: orders (with source filters — POS, pickup, delivery, DoorDash, Uber Eats, Shopify), reports, scheduling, clock-ins, receipts
+- HTML email templates with variable substitution and embedded logos/barcodes; SMS templates with opt-out management
+
+### Analytics & Reporting
+- Dashboards for sales, revenue, returns, popular products, and restock recommendations
+- Payment-method breakdowns and employee performance views
+- Charts via Recharts; PDF/Excel export
 
 ### Integrations
-| Service | Purpose |
-| --- | --- |
-| QuickBooks Online | Accounting / transaction sync |
-| Shopify | E-commerce catalog & order sync |
-| Square | Historical data migration |
-| DoorDash | Delivery / retail orders |
-| Google Calendar | Scheduling sync |
-| Clerk | Hosted auth (frontend) |
+| Service | Type | Direction | What it does |
+| --- | --- | --- | --- |
+| **QuickBooks Online** | Accounting | Bidirectional (OAuth 2.0) | Sync chart of accounts, customers, vendors, items; post sales/refunds as receipts |
+| **Shopify** | E-commerce | Inbound | Pull orders and product variants; journalize online sales |
+| **DoorDash** | Delivery/retail | Bidirectional | Push menu & hours, receive orders via webhook, confirm/adjust/cancel, live order manager, store activation |
+| **Square** | Migration | Inbound | One-time import of historical catalog, orders, payments, and team |
+| **Stripe** | Payments | — | Stripe Connect onboarding and Terminal reader payments (payment intents, capture, cancel) |
+| **Google Calendar** | Scheduling | Outbound (OAuth 2.0 + iCal) | Publish shifts, shipment windows, and meetings to employee calendars |
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Clients                                                  │
-│  • frontend/        React 18 + Vite web UI (register,     │
-│                     dashboards, settings)                 │
-│  • src-tauri/       Tauri 2 (Rust) desktop wrapper        │
-│  • Customer Display customer_display_system.py            │
-└───────────────────────────┬─────────────────────────────┘
-                            │ REST / WebSocket
-┌───────────────────────────┴─────────────────────────────┐
-│  Server (Python)                                          │
-│  • web_viewer.py    Flask app + Socket.IO (core/legacy)   │
-│  • backend/         Structured API: controllers, models,  │
-│                     services, middleware                  │
-│  • database.py      Query layer (PostgreSQL)              │
-│  • *_service.py     Integrations (QBO, Shopify, DoorDash) │
-│  • *_extractor.py   AI document/metadata extraction       │
-└───────────────────────────┬─────────────────────────────┘
-                            │
-                    ┌───────┴────────┐
-                    │  PostgreSQL    │  (local or Supabase)
-                    └────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Clients                                                       │
+│  • frontend/        React 18 + Vite SPA (register, dashboards, │
+│                     inventory, accounting, settings, calendar) │
+│  • src-tauri/       Tauri 2 (Rust) cross-platform desktop app  │
+│  • Customer Display Socket.IO-driven customer-facing screen    │
+└───────────────────────────────┬──────────────────────────────┘
+                                │  REST (/api, /api/v1) + Socket.IO
+┌───────────────────────────────┴──────────────────────────────┐
+│  Server (Python / Flask, port 5001)                            │
+│  • web_viewer.py    Main app: POS, inventory, shipments,       │
+│                     employees, settings, integrations, websockets │
+│  • backend/         Layered accounting API:                    │
+│                     controllers → services → models → db       │
+│                     + middleware (errors, validators)          │
+│  • database.py      POS query layer                            │
+│  • *_service.py     QBO, Shopify, DoorDash, Square, calendar   │
+│  • *_extractor.py   OpenAI / Claude document extraction        │
+│  • notification_service.py  email / SMS / in-app               │
+└───────────────────────────────┬──────────────────────────────┘
+                                │
+                        ┌───────┴────────┐
+                        │  PostgreSQL    │  ~96 tables across the
+                        │  (local /      │  public + accounting schemas,
+                        │   Supabase)    │  audit triggers, GL functions
+                        └────────────────┘
 ```
 
-### Tech stack
-- **Backend:** Python, Flask, Flask-SocketIO, PostgreSQL
-- **AI:** OpenAI (text + vision extraction), PyTorch/torchvision (image matching)
-- **Frontend:** React 18, Vite, TanStack Query, React Router, Recharts, FullCalendar,
-  Framer Motion, three.js, html5-qrcode, JsBarcode, jsPDF
-- **Desktop:** Tauri 2 (Rust)
-- **Auth:** Clerk, WebAuthn/passkeys, bcrypt sessions
-- **Docs:** PyMuPDF, pdfplumber, pandas, python-docx, openpyxl, Pillow
+**Backend shape.** The accounting subsystem under `backend/` follows a clean layered
+pattern (controllers handle HTTP, services hold business logic, models do data access,
+middleware validates input and formats errors). The broader POS surface — orders,
+inventory, shipments, employees, settings, and integrations — lives in `web_viewer.py`
+and `database.py`.
+
+**Data layer.** The schema spans roughly **96 tables** across a `public` schema (POS
+operations) and an `accounting` schema (general ledger), with database **triggers** for
+audit logging, auto-numbering, and timestamp maintenance, and **functions** that compute
+balances and generate financial reports. Almost every table is scoped by
+`establishment_id` for multi-location/multi-tenant use.
+
+**Offline-first client.** The web client wraps fetches with an IndexedDB layer (Dexie):
+cacheable reads (inventory, orders, vendors, settings, register session) are served
+cache-first and revalidated, while writes made offline are queued and drained on
+reconnect.
+
+---
+
+## Tech Stack
+
+**Backend**
+- Python, Flask, Flask-SocketIO (real-time), Flask-CORS
+- PostgreSQL via `psycopg2` (local or Supabase)
+- Auth/security: `bcrypt`, `webauthn` (passkeys), `cryptography`, `PyJWT`, optional `clerk-backend-api`
+- Payments: `stripe`
+- Notifications: `boto3` (AWS SES/SNS), `cairosvg`
+- Reports/receipts: `reportlab`, `python-barcode`, `qrcode`
+
+**AI / ML**
+- OpenAI (`gpt-4o`) and Anthropic Claude — document/shipment extraction (text + vision)
+- `pdfplumber`, `PyMuPDF`, `pandas`, `python-docx`, `openpyxl`, `Pillow` — document parsing
+- `torch` / `torchvision` (EfficientNet/ResNet) — product-image matching
+- `spaCy`, `scikit-learn`, `fuzzywuzzy`, optional Ollama — free local metadata extraction
+- `pyzbar` + `opencv-python` — barcode/QR decoding
+
+**Frontend**
+- React 18, Vite, React Router, TanStack Query
+- Dexie (offline IndexedDB), Socket.IO client, Axios
+- Recharts (charts), FullCalendar (scheduling), Framer Motion / GSAP / three.js (UI/motion)
+- html5-qrcode (scanning), JsBarcode, jsPDF / react-pdf, xlsx, face-api.js, `@simplewebauthn/browser`
+
+**Desktop**
+- Tauri 2 (Rust) with deep-link, fs, http, and shell plugins
 
 ---
 
@@ -111,26 +204,26 @@ integrations for QuickBooks, Shopify, Square, DoorDash, and Google Calendar.
 - Python 3.10+
 - Node.js 18+
 - PostgreSQL 14+ (local) or a Supabase project
-- (Desktop builds) Rust toolchain + Tauri prerequisites
+- (Desktop builds only) Rust toolchain + Tauri prerequisites
 
 ### 1. Database
 ```bash
 # Create the database
-createdb pos_db    # or: psql -c "CREATE DATABASE pos_db;"
+createdb pos_db        # or: psql -c "CREATE DATABASE pos_db;"
 
 # Load the schema
 psql -d pos_db -f database_schema_dump.sql
 ```
 Using Supabase? See [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md). The database URL is
-used only by the backend — clients never see it.
+used **only by the backend** — clients never see it.
 
 ### 2. Configure environment
 ```bash
 cp .env.example .env
-# Fill in DATABASE_URL, OpenAI key, integration credentials, etc.
+# Fill in DATABASE_URL and any integration credentials you need (see Configuration below).
 ```
 
-### 3. Backend
+### 3. Backend (Flask API on port 5001)
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -140,23 +233,45 @@ python3 create_admin_account.py
 python3 init_admin_permissions.py   # required — admin has no access without this
 
 # Run the server
-python3 web_viewer.py
+python3 web_viewer.py                # serves on http://localhost:5001
 ```
 
-### 4. Frontend
+### 4. Frontend (Vite dev server)
 ```bash
 cd frontend
 npm install
-npm run dev          # web dev server
+npm run dev          # web dev server (proxies /api, /socket.io, /uploads → :5001)
 npm run build        # production web build
 ```
+The client reads its API base from `VITE_API_URL` (defaults to same-origin `/api/v1`).
 
 ### 5. Desktop app (optional)
 ```bash
 npm install
-npm run tauri:dev    # run desktop app in dev
+npm run tauri:dev    # run desktop app in dev (uses VITE_API_URL=http://localhost:5001/api/v1)
 npm run tauri:build  # build a desktop binary
 ```
+
+---
+
+## Configuration
+
+Environment variables (set in `.env`; see `.env.example` for the full list — **key names
+only** below):
+
+| Group | Keys |
+| --- | --- |
+| Database | `DATABASE_URL` *(or)* `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`; `DB_POOL_MIN`, `DB_POOL_MAX` |
+| Auth & security | `CLERK_SECRET_KEY`, `ENCRYPTION_KEY` |
+| Payments | `STRIPE_SECRET_KEY` |
+| AI | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` |
+| QuickBooks | `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_REDIRECT_URI` |
+| Shopify | `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_REDIRECT_URI` |
+| Square | `SQUARE_CLIENT_ID`, `SQUARE_CLIENT_SECRET`, `SQUARE_REDIRECT_URI` |
+| Google Calendar | `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, `GOOGLE_CALENDAR_REDIRECT_URI` |
+
+Notifications (AWS SES/SNS) and SMS credentials are configured per establishment via the
+in-app settings, falling back to AWS-managed defaults where available.
 
 ---
 
@@ -164,39 +279,44 @@ npm run tauri:build  # build a desktop binary
 
 | Path | Description |
 | --- | --- |
-| `web_viewer.py` | Main Flask server (routing + core logic) |
-| `database.py` / `database_postgres.py` | Database query layer |
-| `backend/` | Structured API (controllers, models, services, middleware) |
-| `frontend/` | React + Vite web client |
+| `web_viewer.py` | Main Flask server — POS, inventory, shipments, employees, settings, integrations, websockets |
+| `database.py` / `database_postgres.py` | POS query layer and PostgreSQL connection/pooling |
+| `backend/` | Layered accounting API: `controllers/`, `services/`, `models/`, `middleware/` |
+| `frontend/` | React + Vite web client (`src/pages`, `src/components`, `src/services`, `src/contexts`) |
 | `src-tauri/` | Tauri desktop wrapper (Rust) |
 | `migrations/` | Incremental schema migrations |
+| `database_schema_dump.sql` | Full PostgreSQL schema (tables, triggers, functions) |
 | `scripts/` | Deployment and helper scripts |
-| `docs/` | Setup guides and feature documentation |
-| `*_service.py` | Third-party integrations |
-| `*_extractor.py`, `metadata_extraction.py` | AI document/metadata extraction |
-| `customer_display_system.py` | Customer-facing display |
-| `receipt_generator.py` | Receipt rendering |
-
-More detail per feature lives in [`docs/`](docs/) — e.g.
-[`docs/application_overview.md`](docs/application_overview.md),
-[`docs/RBAC_README.md`](docs/RBAC_README.md),
-[`docs/SHIPMENT_DOCUMENT_PROCESSOR.md`](docs/SHIPMENT_DOCUMENT_PROCESSOR.md).
+| `docs/` | Setup guides and per-feature documentation |
+| `quickbooks_sync.py`, `pos_accounting_bridge.py`, `accounting_bootstrap.py` | QuickBooks sync + GL posting engine |
+| `shopify_service.py`, `doordash_service.py`, `square_*.py` | Sales-channel integrations |
+| `calendar_integration.py`, `google_calendar_sync.py` | Calendar/scheduling |
+| `openai_extractor.py`, `claude_extractor.py`, `document_processor.py`, `shipment_processor.py` | AI document extraction |
+| `metadata_extraction.py`, `product_image_matcher.py` | Local ML: metadata tagging + image matching |
+| `notification_service.py` | Email / SMS / in-app notifications |
+| `receipt_generator.py`, `customer_display_system.py`, `schedule_generator.py`, `barcode_scanner.py` | Receipts, CDS, scheduling, barcode decoding |
 
 ---
 
 ## Documentation
 
+Deeper docs live under [`docs/`](docs/):
+
 - [Application overview](docs/application_overview.md)
-- [Complete setup guide](docs/COMPLETE_SETUP_GUIDE.md)
-- [Supabase setup](docs/SUPABASE_SETUP.md)
+- [Complete setup guide](docs/COMPLETE_SETUP_GUIDE.md) · [Supabase setup](docs/SUPABASE_SETUP.md) · [Tauri desktop setup](docs/TAURI_DESKTOP_SETUP.md)
 - [RBAC / permissions](docs/RBAC_README.md)
 - [Shipment document processor](docs/SHIPMENT_DOCUMENT_PROCESSOR.md)
-- [QuickBooks / accounting](docs/features/accounting_subsystem.md)
-- [Barcode scanning](docs/BARCODE_SCANNING_README.md)
-- [Customer display](docs/CUSTOMER_DISPLAY_README.md)
+- [Product variants & ingredients](docs/PRODUCT_VARIANTS_AND_INGREDIENTS.md)
+- [Cash register control](docs/CASH_REGISTER_CONTROL_README.md) · [Customer display](docs/CUSTOMER_DISPLAY_README.md)
+- [Barcode scanning](docs/BARCODE_SCANNING_README.md) · [Image matching](docs/IMAGE_MATCHING_README.md)
+- Per-feature notes in [`docs/features/`](docs/features/) (POS core, inventory, shipments, accounting, employees, customers, calendar, tables, statistics, notifications, settings)
+- Integration setup: [QuickBooks/Clerk](docs/CLERK_SETUP.md), [Shopify](docs/SHOPIFY_SETUP.md), [DoorDash](docs/DOORDASH_SETUP.md), [Google Calendar](docs/GOOGLE_CALENDAR_SETUP.md)
 
 ---
 
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
+```
+Copyright 2026 Daniel Lopez
+```
