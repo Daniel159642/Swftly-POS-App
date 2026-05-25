@@ -1,10 +1,32 @@
-# Swftly POS
+# Swftly POS — The Agentic Point of Sale
 
-A full-featured, multi-location point-of-sale and retail/restaurant management platform.
-Swftly pairs a fast checkout register with a complete back office — inventory, purchasing,
-double-entry accounting, employee scheduling, customer loyalty, and analytics — plus
-AI-assisted document processing and first-class integrations with QuickBooks, Shopify,
-Square, DoorDash, Stripe, and Google Calendar.
+**An agentic point-of-sale system that runs the back office of a brick-and-mortar store so
+the staff don't have to.** Most of what kills a small retail or restaurant operation isn't
+the selling — it's everything around it: keying vendor invoices into inventory, balancing
+the drawer, reconciling the books, building next week's schedule, chasing discrepancies,
+and copying the same numbers into QuickBooks. Swftly's goal is to **automate that manual
+work**, turning the POS from a cash register into an operator that handles the busywork in
+the background.
+
+That principle shows up across the product:
+
+- **Receiving without data entry** — drop in a vendor invoice (PDF, photo, spreadsheet, or
+  scanned page) and AI reads it, matches the items to your catalog, flags discrepancies,
+  and updates stock — no manual keying.
+- **Books that keep themselves** — every sale, refund, cash drop, register close, and
+  shipment automatically becomes a balanced double-entry journal and syncs to QuickBooks,
+  so the ledger is always current without a bookkeeper touching it.
+- **Schedules that build themselves** — the scheduler generates a week of shifts from staff
+  availability, store hours, and labor constraints instead of a manager doing it by hand.
+- **A register that reconciles itself** — expected vs. actual cash, over/short, and daily
+  counts are computed and posted automatically at close.
+- **Inventory that watches itself** — restock recommendations, low-stock alerts, and
+  product tagging surface the next action instead of waiting to be looked up.
+
+Beyond the automation, Swftly is a complete, multi-location POS and management platform: a
+fast checkout register plus a full back office covering inventory, purchasing, double-entry
+accounting, employee scheduling, customer loyalty, and analytics — with first-class
+integrations for QuickBooks, Shopify, Square, DoorDash, Stripe, and Google Calendar.
 
 It runs as a **web app**, a **cross-platform desktop app** (Tauri), and a **customer-facing
 display**, backed by a Python/Flask API with real-time updates over Socket.IO and a
