@@ -1,5 +1,9 @@
 # Swftly POS — The Agentic Point of Sale
 
+> **Everything You Need. In One Place.** — [swftly.app](https://swftly.app)
+
+🎥 **[Watch the demo](https://youtu.be/lUpioJJJ_nU)**
+
 **An agentic point-of-sale system that runs the back office of a brick-and-mortar store so
 the staff don't have to.** Most of what kills a small retail or restaurant operation isn't
 the selling — it's everything around it: keying vendor invoices into inventory, balancing
@@ -37,6 +41,7 @@ PostgreSQL database (local or hosted on Supabase).
 ---
 
 ## Table of Contents
+- [Executive Summary](#executive-summary)
 - [Highlights](#highlights)
 - [Features](#features)
 - [Architecture](#architecture)
@@ -46,6 +51,64 @@ PostgreSQL database (local or hosted on Supabase).
 - [Repository Layout](#repository-layout)
 - [Documentation](#documentation)
 - [License](#license)
+
+---
+
+## Executive Summary
+
+**🎥 Demo video: [youtu.be/lUpioJJJ_nU](https://youtu.be/lUpioJJJ_nU)**
+
+Swftly is an all-in-one point-of-sale platform that uses the data collected at checkout to
+**automate running a store**. Sales data and trends drive accounting, inventory, and
+restocking; customer history powers personalized marketing; and employee activity drives
+productivity reports. The platform uses AI agents to process shipments, build schedules, run
+marketing campaigns, and communicate with vendors — significantly reducing the human labor
+required to run a store. Swftly replaces a store's separate POS, inventory, scheduling,
+accounting, and marketing tools with a single subscription.
+
+### The problem
+Customer-facing businesses still run on outdated, time-consuming manual processes — roughly
+**half of owners do accounting by hand**, **~43% track inventory manually**, and **~38% track
+employee time on paper**. Existing POS software can cost up to **$150/month** plus up to
+**$900** in proprietary hardware, yet still leaves managers doing most of the work and paying
+for extra accounting, scheduling, and marketing software on top.
+
+### The solution
+Swftly runs on any device with **no proprietary hardware** and integrates with existing credit
+card terminals. It automates the busywork of running a store:
+
+- **Shipment processing** — upload a vendor invoice and Swftly parses it, updates prices,
+  restocks existing items, creates new products, flags discrepancies, and reaches out to the
+  vendor to resolve them.
+- **Self-maintaining accounting** — IRS-aligned books that update with every transaction.
+- **Intelligent scheduling** — generates shifts from employee availability and traffic.
+- **Proactive inventory** — analyzes sales trends to anticipate restocks and surface expiring
+  or slow-moving stock before it becomes a problem.
+- **Automated marketing** — builds email/SMS campaigns around new and slow-moving inventory.
+- **Owner in the loop** — owners and managers interact with Swftly like an employee, set their
+  preferred level of control, and weigh in only on executive decisions.
+
+The roadmap extends these into **fully agentic workflows**, where AI agents handle day-to-day
+operations autonomously and the owner stays focused on high-level decisions.
+
+### Market & positioning
+The U.S. POS software market was **~$4.7B in 2024**, projected to reach **~$9.8B by 2032**, with
+SMEs (~61% of the market) growing ~12.8% annually. Most small businesses still manage
+operations manually or across disconnected tools. Swftly's wedge is **price + consolidation**:
+at a flat low monthly price with no hardware lock-in, it bundles POS, accounting, scheduling,
+and marketing — undercutting incumbents like Square and Toast while automating work they
+leave manual.
+
+### Status & team
+Swftly is in **late prototype / beta**, with a working platform across **web, desktop, and
+mobile**, an early case-study cohort, and a waitlist of prospective stores. It's built by
+co-founders **Daniel Lopez** (lead engineer — system architecture, ML, and UI) and **Daniel
+Budnyatsky** (accounting systems, payments, and third-party integrations), advised by **Indaria
+Jones** (Couri Hatchery, Whitman School of Management) and **Dr. Paul Fodor** (Professor of
+Computer Science, Stony Brook University).
+
+> This summary condenses Swftly's executive overview. Detailed financials, projections, and
+> fundraising materials are maintained separately and are not part of this repository.
 
 ---
 
