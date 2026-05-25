@@ -52,6 +52,7 @@ PostgreSQL database (local or hosted on Supabase).
 - [Configuration](#configuration)
 - [Repository Layout](#repository-layout)
 - [Documentation](#documentation)
+- [Contributors](#contributors)
 - [License](#license)
 
 ---
@@ -396,6 +397,13 @@ Deeper docs live under [`docs/`](docs/):
 - [Barcode scanning](docs/BARCODE_SCANNING_README.md) · [Image matching](docs/IMAGE_MATCHING_README.md)
 - Per-feature notes in [`docs/features/`](docs/features/) (POS core, inventory, shipments, accounting, employees, customers, calendar, tables, statistics, notifications, settings)
 - Integration setup: [QuickBooks/Clerk](docs/CLERK_SETUP.md), [Shopify](docs/SHOPIFY_SETUP.md), [DoorDash](docs/DOORDASH_SETUP.md), [Google Calendar](docs/GOOGLE_CALENDAR_SETUP.md)
+
+---
+
+## Contributors
+
+- **Daniel Lopez** — Stony Brook University
+- **Daniel Budnyatsky** — Syracuse University
 
 ---
 
