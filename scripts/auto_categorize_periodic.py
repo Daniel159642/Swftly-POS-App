@@ -7,7 +7,7 @@ Usage:
     python3 auto_categorize_periodic.py
 """
 
-from metadata_extraction import FreeMetadataSystem
+from src.metadata_extraction import FreeMetadataSystem
 from sync_categories_to_inventory import sync_categories
 
 def auto_categorize_periodic():

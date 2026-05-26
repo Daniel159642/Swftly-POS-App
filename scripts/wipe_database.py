@@ -22,7 +22,7 @@ except ImportError:
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 
-from database_postgres import get_connection
+from src.database_postgres import get_connection
 
 
 def _table_exists(cursor, table_name: str) -> bool:

@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from functools import wraps
-from database import get_connection
+from src.database import get_connection
 from psycopg2.extras import RealDictCursor
 
 

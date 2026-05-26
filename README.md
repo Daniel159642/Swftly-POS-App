@@ -219,12 +219,12 @@ mobile**, an early case-study cohort, and a waitlist of prospective stores.
                                 │  REST (/api, /api/v1) + Socket.IO
 ┌───────────────────────────────┴──────────────────────────────┐
 │  Server (Python / Flask, port 5001)                            │
-│  • web_viewer.py    Main app: POS, inventory, shipments,       │
+│  • src/web_viewer.py  Main app: POS, inventory, shipments,     │
 │                     employees, settings, integrations, websockets │
 │  • backend/         Layered accounting API:                    │
 │                     controllers → services → models → db       │
 │                     + middleware (errors, validators)          │
-│  • database.py      POS query layer                            │
+│  • src/database.py  POS query layer                            │
 │  • *_service.py     QBO, Shopify, DoorDash, Square, calendar   │
 │  • *_extractor.py   OpenAI / Claude document extraction        │
 │  • notification_service.py  email / SMS / in-app               │
@@ -240,8 +240,8 @@ mobile**, an early case-study cohort, and a waitlist of prospective stores.
 **Backend shape.** The accounting subsystem under `backend/` follows a clean layered
 pattern (controllers handle HTTP, services hold business logic, models do data access,
 middleware validates input and formats errors). The broader POS surface — orders,
-inventory, shipments, employees, settings, and integrations — lives in `web_viewer.py`
-and `database.py`.
+inventory, shipments, employees, settings, and integrations — lives in `src/web_viewer.py`
+and `src/database.py`.
 
 **Data layer.** The schema spans roughly **96 tables** across a `public` schema (POS
 operations) and an `accounting` schema (general ledger), with database **triggers** for
@@ -316,10 +316,10 @@ pip install -r requirements.txt
 
 # Seed an admin account and its permissions
 python3 create_admin_account.py
-python3 scripts/init_admin_permissions.py   # required — admin has no access without this
+python3 -m scripts.init_admin_permissions   # required — admin has no access without this
 
 # Run the server
-python3 web_viewer.py                # serves on http://localhost:5001
+python3 -m src.web_viewer                # serves on http://localhost:5001
 ```
 
 ### 4. Frontend (Vite dev server)
@@ -365,24 +365,25 @@ in-app settings, falling back to AWS-managed defaults where available.
 
 | Path | Description |
 | --- | --- |
-| `web_viewer.py` | Main Flask server — POS, inventory, shipments, employees, settings, integrations, websockets |
-| `database.py` / `database_postgres.py` | POS query layer and PostgreSQL connection/pooling |
+| `src/` | Core Python package — the Flask app, DB layer, services, and integrations (run with `python3 -m src.web_viewer`) |
+| `src/web_viewer.py` | Main Flask server — POS, inventory, shipments, employees, settings, integrations, websockets |
+| `src/database.py` / `src/database_postgres.py` | POS query layer and PostgreSQL connection/pooling |
 | `backend/` | Layered accounting API: `controllers/`, `services/`, `models/`, `middleware/` |
 | `frontend/` | React + Vite web client (`src/pages`, `src/components`, `src/services`, `src/contexts`) |
 | `src-tauri/` | Tauri desktop wrapper (Rust) |
 | `apps/` | Standalone marketing/demo sites (`marketing-site`, `cench-web`, `demo-video`) |
 | `migrations/` | Incremental schema migrations |
 | `database_schema_dump.sql` | Full PostgreSQL schema (tables, triggers, functions) |
-| `scripts/` | Deployment, setup, and helper scripts |
+| `scripts/` | Deployment, setup, and helper scripts (run with `python3 -m scripts.<name>`) |
 | `tests/` | Test suite and fixtures |
 | `docs/` | Setup guides and per-feature documentation |
-| `quickbooks_sync.py`, `pos_accounting_bridge.py`, `accounting_bootstrap.py` | QuickBooks sync + GL posting engine |
-| `shopify_service.py`, `doordash_service.py`, `square_*.py` | Sales-channel integrations |
-| `calendar_integration.py`, `google_calendar_sync.py` | Calendar/scheduling |
-| `openai_extractor.py`, `claude_extractor.py`, `document_processor.py`, `shipment_processor.py` | AI document extraction |
-| `metadata_extraction.py`, `product_image_matcher.py` | Local ML: metadata tagging + image matching |
-| `notification_service.py` | Email / SMS / in-app notifications |
-| `receipt_generator.py`, `customer_display_system.py`, `schedule_generator.py`, `barcode_scanner.py` | Receipts, CDS, scheduling, barcode decoding |
+| `src/quickbooks_sync.py`, `src/pos_accounting_bridge.py`, `src/accounting_bootstrap.py` | QuickBooks sync + GL posting engine |
+| `src/shopify_service.py`, `src/doordash_service.py`, `src/square_*.py` | Sales-channel integrations |
+| `src/calendar_integration.py`, `src/google_calendar_sync.py` | Calendar/scheduling |
+| `src/openai_extractor.py`, `src/claude_extractor.py`, `src/document_processor.py`, `src/shipment_processor.py` | AI document extraction |
+| `src/metadata_extraction.py`, `src/product_image_matcher.py` | Local ML: metadata tagging + image matching |
+| `src/notification_service.py` | Email / SMS / in-app notifications |
+| `src/receipt_generator.py`, `src/customer_display_system.py`, `src/schedule_generator.py`, `src/barcode_scanner.py` | Receipts, CDS, scheduling, barcode decoding |
 
 ---
 

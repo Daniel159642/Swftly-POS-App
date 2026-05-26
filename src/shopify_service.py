@@ -105,7 +105,7 @@ def build_pos_payload_from_shopify_order(
     Resolves line items to product_id via SKU (creates placeholder product if missing).
     Returns None if order has no line items or is cancelled.
     """
-    from database import get_or_create_product_for_shopify
+    from src.database import get_or_create_product_for_shopify
 
     if not shopify_order or not isinstance(shopify_order, dict):
         return None
@@ -189,7 +189,7 @@ def sync_shopify_orders(establishment_id: int) -> Dict[str, Any]:
     create POS orders and journalize to accounting. Update last_synced_order_id in config.
     Returns { success, created: int, errors: list, last_synced_order_id }.
     """
-    from database import get_integrations, create_order, get_connection
+    from src.database import get_integrations, create_order, get_connection
     from psycopg2.extras import RealDictCursor
     import json
 
@@ -272,7 +272,7 @@ def sync_shopify_orders(establishment_id: int) -> Dict[str, Any]:
             if cr.get("success") and cr.get("order_id"):
                 result["created"] += 1
                 try:
-                    from pos_accounting_bridge import journalize_sale_to_accounting
+                    from src.pos_accounting_bridge import journalize_sale_to_accounting
                     journalize_sale_to_accounting(cr["order_id"], employee_id)
                 except Exception as je:
                     result["errors"].append(f"Order {cr.get('order_number')} created but accounting failed: {je}")
@@ -284,7 +284,7 @@ def sync_shopify_orders(establishment_id: int) -> Dict[str, Any]:
     if max_id is not None:
         config["last_synced_order_id"] = max_id
         config["last_synced_at"] = datetime.now(tz=timezone.utc).isoformat()
-        from database import upsert_integration
+        from src.database import upsert_integration
         upsert_integration(establishment_id, "shopify", True, config)
         result["last_synced_order_id"] = max_id
 
@@ -297,7 +297,7 @@ def sync_shopify_products(establishment_id: int) -> Dict[str, Any]:
     Creates or updates products by SKU. Each variant becomes one inventory row.
     Returns { success, created: int, updated: int, errors: list, last_synced_product_id }.
     """
-    from database import get_integrations, get_or_create_product_for_shopify, upsert_integration
+    from src.database import get_integrations, get_or_create_product_for_shopify, upsert_integration
 
     result = {"success": True, "created": 0, "updated": 0, "errors": [], "last_synced_product_id": None}
     integrations = get_integrations(establishment_id)
@@ -321,7 +321,7 @@ def sync_shopify_products(establishment_id: int) -> Dict[str, Any]:
         result["errors"].append("Shopify store URL and Admin API access token are required")
         return result
 
-    from database import get_product_id_by_sku
+    from src.database import get_product_id_by_sku
 
     max_product_id = since_id
     total_created = 0

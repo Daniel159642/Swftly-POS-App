@@ -33,7 +33,7 @@ def hash_password(password: str) -> str:
 
 def main():
     try:
-        from database_postgres import get_cursor
+        from src.database_postgres import get_cursor
     except Exception as e:
         print(f"Failed to import database_postgres: {e}")
         print("Ensure Postgres is running and DB_* / DATABASE_URL are set.")

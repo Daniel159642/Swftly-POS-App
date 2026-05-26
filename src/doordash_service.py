@@ -112,7 +112,7 @@ def _item_special_hours_for_payload(raw: Any) -> Optional[List[Dict[str, Any]]]:
 def _open_hours_from_store_settings() -> List[Dict[str, str]]:
     """Convert store_location_settings.store_hours to DoorDash open_hours format. Returns _DEFAULT_OPEN_HOURS if none."""
     try:
-        from database import get_store_location_settings
+        from src.database import get_store_location_settings
         settings = get_store_location_settings()
         store_hours = (settings or {}).get("store_hours") if isinstance(settings, dict) else None
         if not store_hours or not isinstance(store_hours, dict):
@@ -144,7 +144,7 @@ def build_doordash_menu_pull_response(
     Price is sent in cents (integer). reference is required in menu pull response; id required for MenuUpdate.
     If public_base_url is set, item photo paths are turned into original_image_url (DoorDash POS Integrated Images).
     """
-    from database import get_connection
+    from src.database import get_connection
     from psycopg2.extras import RealDictCursor
 
     conn = get_connection()
@@ -739,7 +739,7 @@ def _resolve_product_id_for_doordash(
                     return pid
             except (TypeError, ValueError):
                 pass
-    from database import get_or_create_product_for_doordash
+    from src.database import get_or_create_product_for_doordash
     return get_or_create_product_for_doordash(establishment_id, ext_id, name, unit_price)
 
 
@@ -828,7 +828,7 @@ def _flatten_order_items(
     recipe_notes = ("Removed: " + ", ".join(removed_names)) if removed_names else None
 
     if not order_items and subtotal_cents > 0:
-        from database import get_or_create_product_for_doordash
+        from src.database import get_or_create_product_for_doordash
         product_id = get_or_create_product_for_doordash(establishment_id, "doordash-order-total", "DoorDash Order", (subtotal_cents / 100.0) * price_multiplier)
         order_items.append({"product_id": product_id, "quantity": 1, "unit_price": round((subtotal_cents / 100.0) * price_multiplier, 2), "discount": 0, "tax_rate": 0})
     return (order_items, recipe_notes, doordash_lines)
@@ -905,7 +905,7 @@ def _add_bag_fee_items(doordash_order: Dict[str, Any], items: List[Dict[str, Any
     custom_fee = doordash_order.get("custom_fee")
     if not isinstance(custom_fee, list):
         return None
-    from database import get_or_create_product_for_doordash
+    from src.database import get_or_create_product_for_doordash
     bag_fee_tax_note = None
     for entry in custom_fee:
         if not isinstance(entry, dict) or (entry.get("type") or "").strip().upper() != "BAG_FEE":

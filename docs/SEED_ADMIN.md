@@ -6,7 +6,7 @@ Creates a default establishment and **admin** employee so you can sign in from t
 
 ```bash
 # From project root
-python3 scripts/seed_admin.py
+python3 -m scripts.seed_admin
 ```
 
 **Credentials:**
@@ -52,7 +52,7 @@ Your Postgres is likely using your **macOS username** as the default role, not `
 4. **Seed admin:**
 
    ```bash
-   python3 scripts/seed_admin.py
+   python3 -m scripts.seed_admin
    ```
 
 5. **Restart the backend** and reload the login page. You should see **Admin User (admin)** in the dropdown.

@@ -75,7 +75,7 @@ Content-Type: application/json
 To add sample drinks and pizzas with size variants:
 
 ```bash
-python3 scripts/seed_drinks_and_pizza.py
+python3 -m scripts.seed_drinks_and_pizza
 ```
 
 Requires migrations `add_product_variants_and_ingredients.sql` and `add_order_items_notes.sql` (and `add_order_items_variant_id` if not already applied).

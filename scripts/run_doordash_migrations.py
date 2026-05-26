@@ -20,7 +20,7 @@ except ImportError:
     pass
 
 def main():
-    from database import get_connection
+    from src.database import get_connection
     migrations_dir = root / 'migrations'
     files = [
         ('add_orders_external_order_id_and_experience.sql', 'Orders external_order_id + experience'),

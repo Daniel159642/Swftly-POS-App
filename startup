@@ -1,6 +1,6 @@
-cd "/Users/daniellopez/POS FR/pos" && source venv/bin/activate && python3 web_viewer.py cd frontend 
+cd "/Users/daniellopez/POS FR/pos" && source venv/bin/activate && python3 -m src.web_viewer cd frontend 
 npm run dev
-cd "/Users/daniellopez/POS FR/pos" && source venv/bin/activate && python3 wipe_database.py
+cd "/Users/daniellopez/POS FR/pos" && source venv/bin/activate && python3 -m scripts.wipe_database
 \
 npm run tauri:dev
 
@@ -11,10 +11,10 @@ the edit recipt modal should defiult when opended be opened to header sectiion a
 the checkout ui edit modal should also use shold us eht e modal background blur syrling.
 
 (.venv) daniellopez@Daniels-MBP pos % cd cench-realwebsite
-cd "/Users/daniellopez/POS FR/pos" && source venv/bin/activate && python3 web_viewer.py
-cd "/Users/daniellopez/POS FR/pos" && source venv/bin/activate && python3 web_viewer.py
+cd "/Users/daniellopez/POS FR/pos" && source venv/bin/activate && python3 -m src.web_viewer
+cd "/Users/daniellopez/POS FR/pos" && source venv/bin/activate && python3 -m src.web_viewer
 
 cd "/Users/daniellopez/POS FR/pos"
 source venv/bin/activate
 export $(grep -v '^#' .env | xargs)   # this brings in DATABASE_URL for Neon
-python3 web_viewer.py
+python3 -m src.web_viewer

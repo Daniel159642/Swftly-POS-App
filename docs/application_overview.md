@@ -4,7 +4,7 @@ This document provides a high-level overview of the major sections and component
 
 ## 1. Top-Level Core Modules (Python)
 The root directory contains several monolithic scripts and core utility modules that drive the primary functionality of the application:
-- **`web_viewer.py`**: The primary web server/Flask application file containing routing and core legacy logic.
+- **`src/web_viewer.py`**: The primary web server/Flask application file containing routing and core legacy logic.
 - **`database.py` & `database_postgres.py`**: Core database interaction modules. `database.py` contains the bulk of the query logic, while postgres-specific logic is isolated where applicable.
 - **`customer_display_system.py`**: Logic for managing the Customer Facing Display (CDS), updating screens when items are rung up.
 - **`receipt_generator.py`**: Handles generating digital or printable receipts for transactions.

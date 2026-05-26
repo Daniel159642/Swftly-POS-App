@@ -7,8 +7,8 @@ Run this periodically to extract metadata for products
 
 import sys
 import json
-from metadata_extraction import FreeMetadataSystem
-from database import get_connection
+from src.metadata_extraction import FreeMetadataSystem
+from src.database import get_connection
 
 def batch_process_all_products(limit=None):
     """

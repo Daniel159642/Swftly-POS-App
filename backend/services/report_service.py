@@ -12,7 +12,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from backend.models.account_model import AccountRepository
 from backend.models.transaction_model import TransactionRepository
-from database_postgres import get_connection
+from src.database_postgres import get_connection
 
 
 def get_store_inventory_value(establishment_id: Optional[int] = None) -> float:

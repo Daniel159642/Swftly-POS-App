@@ -58,7 +58,7 @@ def exchange_code_for_tokens(code: str, redirect_uri: Optional[str] = None) -> D
 
 def get_stored_tokens(employee_id: int) -> Optional[Dict[str, Any]]:
     """Load tokens from DB for an employee."""
-    from database import get_connection
+    from src.database import get_connection
     conn = get_connection()
     if not conn:
         return None
@@ -84,7 +84,7 @@ def get_stored_tokens(employee_id: int) -> Optional[Dict[str, Any]]:
 
 def save_tokens(employee_id: int, access_token: str, refresh_token: Optional[str], token_expiry: Optional[str]) -> None:
     """Upsert tokens for an employee."""
-    from database import get_connection
+    from src.database import get_connection
     conn = get_connection()
     if not conn:
         raise RuntimeError('No database connection')
@@ -240,7 +240,7 @@ def sync_event_to_google(
 
 def update_master_calendar_google_event_id(calendar_id: int, google_event_id: str) -> None:
     """Store Google event id on master_calendar row for future PATCH."""
-    from database import get_connection
+    from src.database import get_connection
     conn = get_connection()
     if not conn:
         return

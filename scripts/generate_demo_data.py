@@ -166,7 +166,7 @@ PICSUM_BASE = 'https://picsum.photos/seed'
 
 
 def get_establishment_id(conn):
-    from database_postgres import get_current_establishment
+    from src.database_postgres import get_current_establishment
     eid = get_current_establishment()
     if eid:
         return eid
@@ -329,8 +329,8 @@ def ensure_inventory_photos(conn, establishment_id):
 
 def add_employee_with_availability(conn, establishment_id, emp_data):
     """Add employee and set availability."""
-    from database import add_employee
-    from database_postgres import set_current_establishment
+    from src.database import add_employee
+    from src.database_postgres import set_current_establishment
 
     set_current_establishment(establishment_id)
     cur = conn.cursor()
@@ -441,8 +441,8 @@ def add_historical_time_clock(conn, establishment_id, employee_ids, days_back=14
 
 def create_demo_orders(establishment_id, employees, products, customers, num_orders=80):
     """Create demo orders via database.create_order, then backdate. Link to customers for order history."""
-    from database import create_order, get_connection
-    from database_postgres import set_current_establishment
+    from src.database import create_order, get_connection
+    from src.database_postgres import set_current_establishment
 
     if not employees or not products:
         print("   Skipping orders: need employees and products")
@@ -549,7 +549,7 @@ def update_customer_points_from_orders(conn, establishment_id):
 
 
 def main():
-    from database import get_connection
+    from src.database import get_connection
 
     conn = get_connection()
     try:

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import anthropic
 
-from config import CLAUDE_CONFIG
+from src.config import CLAUDE_CONFIG
 
 
 class ClaudeExtractor:

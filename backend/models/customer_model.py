@@ -11,7 +11,7 @@ import os
 import re
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from database_postgres import get_cursor
+from src.database_postgres import get_cursor
 
 
 def _row_to_dict(row) -> Dict[str, Any]:

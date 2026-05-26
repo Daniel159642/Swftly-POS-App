@@ -29,7 +29,7 @@ ADMIN_PASSWORD = "123456"
 
 
 def get_or_create_establishment():
-    from database_postgres import get_cursor
+    from src.database_postgres import get_cursor
     cursor = get_cursor()
     conn = cursor.connection
     cursor.execute("SELECT establishment_id, establishment_name FROM establishments ORDER BY establishment_id LIMIT 1")
@@ -64,8 +64,8 @@ def ensure_admin(establishment_id):
     Returns employee_id.
     """
     import psycopg2
-    from database import hash_password, ensure_rbac_seeded
-    from database_postgres import get_cursor
+    from src.database import hash_password, ensure_rbac_seeded
+    from src.database_postgres import get_cursor
 
     # Seed roles + permissions first
     try:
@@ -129,8 +129,8 @@ def ensure_admin(establishment_id):
 
 def _create_fresh(establishment_id):
     """Create a brand new admin via database.create_admin_account() and fix the employee code."""
-    from database import create_admin_account
-    from database_postgres import get_cursor
+    from src.database import create_admin_account
+    from src.database_postgres import get_cursor
 
     result = create_admin_account(establishment_id, ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
     if not result.get("success"):
@@ -168,7 +168,7 @@ def main():
     employee_id = ensure_admin(establishment_id)
 
     # Verify
-    from database_postgres import get_cursor
+    from src.database_postgres import get_cursor
     cursor = get_cursor()
     conn = cursor.connection
     cursor.execute(

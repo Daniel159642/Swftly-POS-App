@@ -1,7 +1,7 @@
 import sys, os
 from dotenv import load_dotenv
 load_dotenv()
-from database_postgres import get_connection
+from src.database_postgres import get_connection
 
 def run():
     conn = get_connection()

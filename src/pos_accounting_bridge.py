@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 # Database for order/shipment data (public schema)
-from database import get_connection
+from src.database import get_connection
 from psycopg2.extras import RealDictCursor
 
 # Accounting backend (accounting schema)
@@ -190,7 +190,7 @@ def _payment_account_for_order(order: Dict[str, Any]) -> str:
 def _ensure_accounting_ready() -> None:
     """Ensure accounting schema and seed accounts exist so journalizing can succeed."""
     try:
-        from accounting_bootstrap import ensure_accounting_schema
+        from src.accounting_bootstrap import ensure_accounting_schema
         ensure_accounting_schema()
     except Exception as e:
         print(f"Accounting bootstrap check: {e}")
@@ -251,14 +251,14 @@ def journalize_sale_to_accounting(order_id: int, employee_id: int) -> Dict[str, 
 
         # Ensure this establishment is provisioned in accounting
         if establishment_id:
-            from accounting_bootstrap import ensure_establishment_accounting
+            from src.accounting_bootstrap import ensure_establishment_accounting
             ensure_establishment_accounting(establishment_id)
 
         # Try rule-engine path first (uses accounting_settings + posting_rules)
         lines = None
         if establishment_id:
             try:
-                from accounting_bootstrap import get_accounting_settings
+                from src.accounting_bootstrap import get_accounting_settings
                 settings = get_accounting_settings(establishment_id)
                 rule = _load_posting_rule(establishment_id, 'pos_sale')
                 if rule and settings:
@@ -349,7 +349,7 @@ def journalize_shipment_received_to_accounting(pending_shipment_id: int, employe
             return {'success': False, 'message': 'Shipment has no cost (no items or zero cost)'}
 
         if establishment_id:
-            from accounting_bootstrap import ensure_establishment_accounting
+            from src.accounting_bootstrap import ensure_establishment_accounting
             ensure_establishment_accounting(establishment_id)
 
         line_items = [
@@ -427,7 +427,7 @@ def journalize_void_sale_to_accounting(order_id: int, employee_id: int) -> Dict[
         lines = None
         if establishment_id:
             try:
-                from accounting_bootstrap import get_accounting_settings
+                from src.accounting_bootstrap import get_accounting_settings
                 settings = get_accounting_settings(establishment_id)
                 rule = _load_posting_rule(establishment_id, 'pos_void')
                 if rule and settings:

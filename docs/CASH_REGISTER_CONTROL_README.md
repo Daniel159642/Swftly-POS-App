@@ -36,7 +36,7 @@ The backend functions have been added to `database.py`:
 
 ### Step 3: Verify API Endpoints
 
-The API endpoints have been added to `web_viewer.py`:
+The API endpoints have been added to `src/web_viewer.py`:
 - `POST /api/register/open` - Open a register
 - `POST /api/register/close` - Close a register
 - `POST /api/register/transaction` - Add cash transaction

@@ -22,7 +22,7 @@ try:
 except ImportError:
     SOCKETIO_AVAILABLE = False
     print("Warning: flask-socketio not installed. Real-time features will be disabled.")
-from database import (
+from src.database import (
     list_products, list_vendors, list_categories, list_shipments, get_sales,
     get_shipment_items, get_shipment_details, get_product,
     employee_login, verify_session, employee_logout,
@@ -53,7 +53,7 @@ from database import (
     create_stripe_connect_account, update_stripe_connect_account, get_stripe_connect_account,
     create_stripe_credentials, update_stripe_credentials, get_stripe_credentials, get_stripe_config,
 )
-from permission_manager import get_permission_manager
+from src.permission_manager import get_permission_manager
 import os
 # QuickBooks-style accounting backend (accounting schema)
 try:
@@ -100,7 +100,7 @@ def get_image_matcher():
     global _image_matcher
     if _image_matcher is None:
         try:
-            from product_image_matcher import ProductImageMatcher
+            from src.product_image_matcher import ProductImageMatcher
             _image_matcher = ProductImageMatcher()
             # Try to load from database first, fallback to file
             try:
@@ -122,7 +122,7 @@ def get_barcode_scanner():
     global _barcode_scanner
     if _barcode_scanner is None:
         try:
-            from barcode_scanner import BarcodeScanner
+            from src.barcode_scanner import BarcodeScanner
             _barcode_scanner = BarcodeScanner()
         except ImportError as e:
             print(f"Warning: Could not import BarcodeScanner: {e}")
@@ -130,7 +130,7 @@ def get_barcode_scanner():
             return None
     return _barcode_scanner
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'templates'))
 
 
 @app.before_request
@@ -166,7 +166,7 @@ get_current_establishment = None
 
 # PostgreSQL connection (local or Supabase via DATABASE_URL)
 try:
-    from database_postgres import (
+    from src.database_postgres import (
         get_connection as get_postgres_connection,
         set_current_establishment as _set_establishment,
         get_current_establishment as _get_establishment
@@ -622,7 +622,7 @@ def _enrich_order_info_for_notification(order_info: dict) -> dict:
     # ── Real Code128 barcode via CID (data: URLs are blocked by Gmail) ──────────
     order_num = info.get('order_number', f'ORD-{order_id}')
     try:
-        from receipt_generator import generate_barcode_data
+        from src.receipt_generator import generate_barcode_data
         bc_bytes = generate_barcode_data(order_num)
         if bc_bytes:
             # Store raw bytes so send_order_notification can attach them as CID
@@ -652,7 +652,7 @@ def _send_order_notification_async(order_info):
     print(f"[notification] queuing email for order {order_info.get('order_number')}", flush=True)
     def _do():
         try:
-            from notification_service import send_order_notification, get_order_email_recipients, get_order_sms_recipients
+            from src.notification_service import send_order_notification, get_order_email_recipients, get_order_sms_recipients
             # Enrich order_info with full DB details before sending
             enriched = _enrich_order_info_for_notification(order_info)
             order_source = (enriched.get('order_source') or '').strip().lower()
@@ -892,7 +892,7 @@ def api_inventory():
     else:
         # GET request (PostgreSQL) - optional filter: item_type=product|ingredient (default: all)
         try:
-            from database import ensure_metadata_tables
+            from src.database import ensure_metadata_tables
             ensure_metadata_tables()
             item_type_filter = request.args.get('item_type', '').lower()
             conn, cursor = _pg_conn()
@@ -1079,7 +1079,7 @@ def api_update_inventory(product_id):
         new_quantity = update_fields.get('current_quantity')
         if new_quantity is not None:
             try:
-                from database import get_connection as _gc
+                from src.database import get_connection as _gc
                 from psycopg2.extras import RealDictCursor as _RDC
                 _c = _gc()
                 _cur = _c.cursor(cursor_factory=_RDC)
@@ -1094,7 +1094,7 @@ def api_update_inventory(product_id):
                 pass
 
         # Update product with audit logging
-        from database import update_product
+        from src.database import update_product
         success = update_product(product_id, employee_id=employee_id, **update_fields)
 
         # If quantity changed, post an inventory adjustment to accounting
@@ -1104,7 +1104,7 @@ def api_update_inventory(product_id):
                 if abs(qty_diff) >= 0.01 and _inv_cost > 0:
                     cost_value = abs(qty_diff) * _inv_cost
                     adjustment_reason = data.get('adjustment_reason') or 'correction'
-                    from pos_accounting_bridge import journalize_inventory_adjustment_to_accounting
+                    from src.pos_accounting_bridge import journalize_inventory_adjustment_to_accounting
                     journalize_inventory_adjustment_to_accounting(
                         adjustment_id=product_id,
                         amount=cost_value if qty_diff < 0 else -cost_value,
@@ -1153,7 +1153,7 @@ def api_inventory_adjust(product_id):
         reason = (body.get('reason') or 'adjustment').strip()
 
         # Fetch product cost and update quantity
-        from database import get_connection as _gc
+        from src.database import get_connection as _gc
         from psycopg2.extras import RealDictCursor as _RDC
         conn = _gc()
         cur = conn.cursor(cursor_factory=_RDC)
@@ -1174,7 +1174,7 @@ def api_inventory_adjust(product_id):
         acct_result = {'skipped': True}
         if product_cost > 0:
             cost_value = abs(quantity_change) * product_cost
-            from pos_accounting_bridge import journalize_inventory_adjustment_to_accounting
+            from src.pos_accounting_bridge import journalize_inventory_adjustment_to_accounting
             acct_result = journalize_inventory_adjustment_to_accounting(
                 adjustment_id=product_id,
                 amount=cost_value if quantity_change < 0 else -cost_value,
@@ -1199,7 +1199,7 @@ def api_inventory_adjust(product_id):
 def api_delete_inventory(product_id):
     """Delete a product from inventory."""
     try:
-        from database import delete_product
+        from src.database import delete_product
         success = delete_product(product_id)
         if success:
             return jsonify({'success': True, 'message': 'Product deleted successfully'}), 200
@@ -1213,7 +1213,7 @@ def api_delete_inventory(product_id):
 def api_archive_inventory(product_id):
     """Archive a product (soft delete)."""
     try:
-        from database import set_archived_product
+        from src.database import set_archived_product
         success = set_archived_product(product_id, archived=True)
         if success:
             return jsonify({'success': True, 'message': 'Product archived successfully'}), 200
@@ -1232,7 +1232,7 @@ def api_archive_inventory(product_id):
 def api_unarchive_inventory(product_id):
     """Unarchive a product."""
     try:
-        from database import set_archived_product
+        from src.database import set_archived_product
         success = set_archived_product(product_id, archived=False)
         if success:
             return jsonify({'success': True, 'message': 'Product unarchived successfully'}), 200
@@ -1254,7 +1254,7 @@ def api_unarchive_inventory(product_id):
 @app.route('/api/inventory/<int:product_id>/variants', methods=['GET', 'POST'])
 def api_product_variants(product_id):
     """Get or add size/variant options for a product (e.g. Small $3, Large $5)."""
-    from database import get_product, get_product_variants, add_product_variant
+    from src.database import get_product, get_product_variants, add_product_variant
     if request.method == 'GET':
         try:
             variants = get_product_variants(product_id)
@@ -1285,7 +1285,7 @@ def api_product_variants(product_id):
 @app.route('/api/inventory/variants/<int:variant_id>', methods=['PUT', 'DELETE'])
 def api_product_variant_by_id(variant_id):
     """Update or delete a product variant."""
-    from database import update_product_variant, delete_product_variant, get_variant_by_id
+    from src.database import update_product_variant, delete_product_variant, get_variant_by_id
     if request.method == 'DELETE':
         try:
             ok = delete_product_variant(variant_id)
@@ -1336,7 +1336,7 @@ def api_product_variant_by_id(variant_id):
 @app.route('/api/inventory/<int:product_id>/ingredients', methods=['GET', 'POST'])
 def api_product_ingredients(product_id):
     """Get or add recipe ingredients for a product (ingredients used to make this product)."""
-    from database import get_product_ingredients, add_product_ingredient
+    from src.database import get_product_ingredients, add_product_ingredient
     if request.method == 'GET':
         try:
             variant_id = request.args.get('variant_id', type=int)
@@ -1370,7 +1370,7 @@ def api_product_ingredients(product_id):
 @app.route('/api/inventory/ingredients/<int:recipe_id>', methods=['DELETE'])
 def api_delete_product_ingredient(recipe_id):
     """Remove an ingredient from a product recipe."""
-    from database import delete_product_ingredient
+    from src.database import delete_product_ingredient
     try:
         ok = delete_product_ingredient(recipe_id)
         return jsonify({'success': ok, 'message': 'Ingredient removed from recipe' if ok else 'Not found'}), 200 if ok else 404
@@ -1382,7 +1382,7 @@ def api_delete_product_ingredient(recipe_id):
 def api_vendor_by_id(vendor_id):
     if request.method == 'DELETE':
         try:
-            from database import delete_vendor
+            from src.database import delete_vendor
             success = delete_vendor(vendor_id)
             if success:
                 return jsonify({'success': True, 'message': 'Vendor deleted successfully'}), 200
@@ -1397,7 +1397,7 @@ def api_vendor_by_id(vendor_id):
 def api_archive_vendor(vendor_id):
     """Archive a vendor (soft delete)."""
     try:
-        from database import set_archived_vendor
+        from src.database import set_archived_vendor
         success = set_archived_vendor(vendor_id, archived=True)
         if success:
             return jsonify({'success': True, 'message': 'Vendor archived successfully'}), 200
@@ -1416,7 +1416,7 @@ def api_archive_vendor(vendor_id):
 def api_unarchive_vendor(vendor_id):
     """Unarchive a vendor."""
     try:
-        from database import set_archived_vendor
+        from src.database import set_archived_vendor
         success = set_archived_vendor(vendor_id, archived=False)
         if success:
             return jsonify({'success': True, 'message': 'Vendor unarchived successfully'}), 200
@@ -1434,7 +1434,7 @@ def api_unarchive_vendor(vendor_id):
 def api_update_vendor_impl(vendor_id):
     """Update a vendor"""
     try:
-        from database import update_vendor
+        from src.database import update_vendor
         data = request.json if request.is_json else request.form.to_dict()
         
         success = update_vendor(
@@ -1502,7 +1502,7 @@ def api_vendors():
 def api_category_by_id(category_id):
     if request.method == 'DELETE':
         try:
-            from database import delete_category
+            from src.database import delete_category
             success = delete_category(category_id)
             if success:
                 return jsonify({'success': True, 'message': 'Category deleted successfully'}), 200
@@ -1519,7 +1519,7 @@ def api_category_by_id(category_id):
 def api_archive_category(category_id):
     """Archive a category (soft delete)."""
     try:
-        from database import set_archived_category
+        from src.database import set_archived_category
         success = set_archived_category(category_id, archived=True)
         if success:
             return jsonify({'success': True, 'message': 'Category archived successfully'}), 200
@@ -1538,7 +1538,7 @@ def api_archive_category(category_id):
 def api_unarchive_category(category_id):
     """Unarchive a category."""
     try:
-        from database import set_archived_category
+        from src.database import set_archived_category
         success = set_archived_category(category_id, archived=False)
         if success:
             return jsonify({'success': True, 'message': 'Category unarchived successfully'}), 200
@@ -1563,7 +1563,7 @@ def api_category_doordash_bulk(category_id):
     """
     try:
         import json as json_mod
-        from database import get_connection
+        from src.database import get_connection
         data = request.json if request.is_json else {}
         add_to_doordash = data.get('add_to_doordash', False)
         item_special_hours = data.get('item_special_hours')
@@ -1630,7 +1630,7 @@ def api_category_doordash_bulk(category_id):
 def api_update_category_impl(category_id):
     """Update a category - supports updating the full category path"""
     try:
-        from database import get_connection, create_or_get_category_with_hierarchy
+        from src.database import get_connection, create_or_get_category_with_hierarchy
         data = request.json if request.is_json else request.form.to_dict()
         category_path = data.get('category_name') or data.get('category_path')
         
@@ -1931,7 +1931,7 @@ def api_update_item_verification(item_id):
                 
                 # Get product_id from pending item and update product photo if it doesn't have one
                 try:
-                    from database import get_product, update_product
+                    from src.database import get_product, update_product
                     conn, cursor = _pg_conn()
                     try:
                         cursor.execute("SELECT product_id FROM pending_shipment_items WHERE pending_item_id = %s", (item_id,))
@@ -2306,7 +2306,7 @@ def api_preview_shipment():
                 return jsonify({'success': False, 'message': f'Error scraping document: {str(e)}'}), 400
         else:
             # AI-powered document extraction
-            from shipment_processor import ShipmentProcessor, ai_products_to_shipment_items
+            from src.shipment_processor import ShipmentProcessor, ai_products_to_shipment_items
             try:
                 processor = ShipmentProcessor()
                 result = processor.process_shipment(file_path)
@@ -2387,7 +2387,7 @@ def api_save_shipment_draft():
         
         draft_id_int = int(draft_id) if draft_id else None
         
-        from database import save_shipment_draft
+        from src.database import save_shipment_draft
         saved_draft_id = save_shipment_draft(
             vendor_id=vendor_id,
             items=items,
@@ -2413,7 +2413,7 @@ def api_save_shipment_draft():
 def api_load_draft(draft_id):
     """Load a shipment draft"""
     try:
-        from database import get_pending_shipment_details
+        from src.database import get_pending_shipment_details
         draft = get_pending_shipment_details(draft_id)
         
         if not draft:
@@ -2478,7 +2478,7 @@ def api_confirm_draft(draft_id):
                 return jsonify({'success': False, 'message': 'Invalid items data'}), 400
             
             # Update draft with new items
-            from database import save_shipment_draft
+            from src.database import save_shipment_draft
             vendor_id = request.form.get('vendor_id')
             if vendor_id:
                 try:
@@ -2487,7 +2487,7 @@ def api_confirm_draft(draft_id):
                     return jsonify({'success': False, 'message': 'Invalid vendor ID'}), 400
                 
                 # Get current draft to preserve other fields
-                from database import get_pending_shipment
+                from src.database import get_pending_shipment
                 current_draft = get_pending_shipment(draft_id)
                 if not current_draft or current_draft.get('status') != 'draft':
                     return jsonify({'success': False, 'message': 'Draft not found'}), 404
@@ -2505,7 +2505,7 @@ def api_confirm_draft(draft_id):
                 )
         
         # Update status to 'in_progress'
-        from database import get_connection
+        from src.database import get_connection
         conn = get_connection()
         cursor = conn.cursor()
         
@@ -2524,7 +2524,7 @@ def api_confirm_draft(draft_id):
             conn.commit()
             
             # Get updated shipment info
-            from database import get_pending_shipment_details
+            from src.database import get_pending_shipment_details
             shipment = get_pending_shipment_details(draft_id)
             
             return jsonify({
@@ -2761,7 +2761,7 @@ def api_login():
 
         # Rate limiting: check before attempting login
         try:
-            from database import check_login_rate_limit, record_login_attempt
+            from src.database import check_login_rate_limit, record_login_attempt
             if not check_login_rate_limit(identifier, ip_address=ip_address):
                 return jsonify({
                     'success': False,
@@ -2814,7 +2814,7 @@ def api_admin_login():
 
         # Rate limiting keyed on email
         try:
-            from database import check_login_rate_limit, record_login_attempt
+            from src.database import check_login_rate_limit, record_login_attempt
             if not check_login_rate_limit(email, ip_address=ip_address):
                 return jsonify({
                     'success': False,
@@ -2823,7 +2823,7 @@ def api_admin_login():
         except ImportError:
             pass
 
-        from database import manager_login
+        from src.database import manager_login
         result = manager_login(
             email=email,
             password=password,
@@ -2988,7 +2988,7 @@ def api_setup_update_establishment():
             # Set accounting vertical to match store type
             if store_type:
                 try:
-                    from accounting_bootstrap import set_establishment_vertical
+                    from src.accounting_bootstrap import set_establishment_vertical
                     vertical_map = {'restaurant': 'restaurant', 'cafe': 'restaurant', 'service': 'service'}
                     vertical = vertical_map.get(store_type, 'retail')
                     set_establishment_vertical(establishment_id, vertical)
@@ -3040,7 +3040,7 @@ def api_setup_create_admin():
             if not emp or emp.get('establishment_id') != establishment_id:
                 return jsonify({'success': False, 'message': 'Admin session required to add more admins'}), 403
 
-        from database import create_admin_account
+        from src.database import create_admin_account
         result = create_admin_account(establishment_id, email, password, name)
         status = 200 if result.get('success') else 400
         return jsonify(result), status
@@ -3078,7 +3078,7 @@ def api_grantable_permissions():
             return jsonify({'success': True, 'permissions': perms})
 
         # Non-admin: return their own granted permissions
-        from permission_manager import get_permission_manager
+        from src.permission_manager import get_permission_manager
         pm = get_permission_manager()
         grouped = pm.get_employee_permissions(emp['employee_id'])
         perms = []
@@ -3179,7 +3179,7 @@ def api_webauthn_register_begin():
         employee = _get_session_employee(MANAGER_POSITIONS)
         if not employee:
             return jsonify({'success': False, 'message': 'Authentication required'}), 401
-        from database import webauthn_register_begin
+        from src.database import webauthn_register_begin
         result = webauthn_register_begin(employee['employee_id'])
         return jsonify(result), (200 if result.get('success') else 400)
     except Exception as e:
@@ -3199,7 +3199,7 @@ def api_webauthn_register_complete():
         device_name = (data.get('device_name') or '').strip() or None
         if not credential:
             return jsonify({'success': False, 'message': 'credential is required'}), 400
-        from database import webauthn_register_complete
+        from src.database import webauthn_register_complete
         result = webauthn_register_complete(employee['employee_id'], credential, device_name)
         return jsonify(result), (200 if result.get('success') else 400)
     except Exception as e:
@@ -3213,7 +3213,7 @@ def api_webauthn_login_begin():
     try:
         data = request.json or {}
         email = (data.get('email') or '').strip() or None
-        from database import webauthn_login_begin
+        from src.database import webauthn_login_begin
         result = webauthn_login_begin(email)
         return jsonify(result), (200 if result.get('success') else 400)
     except Exception as e:
@@ -3230,7 +3230,7 @@ def api_webauthn_login_complete():
         if not credential:
             return jsonify({'success': False, 'message': 'credential is required'}), 400
         ip = request.remote_addr or '127.0.0.1'
-        from database import webauthn_login_complete, record_login_attempt
+        from src.database import webauthn_login_complete, record_login_attempt
         result = webauthn_login_complete(
             credential,
             ip_address=ip,
@@ -3254,7 +3254,7 @@ def api_webauthn_list_mine():
         employee = _get_session_employee(MANAGER_POSITIONS)
         if not employee:
             return jsonify({'success': False, 'message': 'Authentication required'}), 401
-        from database import list_webauthn_credentials
+        from src.database import list_webauthn_credentials
         return jsonify(list_webauthn_credentials(employee['employee_id']))
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -3276,7 +3276,7 @@ def api_webauthn_delete_credential(cred_id):
         if int(target_employee_id) != int(employee['employee_id']) and not is_admin:
             return jsonify({'success': False, 'message': 'Access denied'}), 403
 
-        from database import delete_webauthn_credential
+        from src.database import delete_webauthn_credential
         result = delete_webauthn_credential(cred_id, int(target_employee_id))
         return jsonify(result), (200 if result.get('success') else 400)
     except Exception as e:
@@ -3290,7 +3290,7 @@ def api_webauthn_list_all():
         employee = _get_session_employee(('admin',))
         if not employee:
             return jsonify({'success': False, 'message': 'Admin access required'}), 403
-        from database import list_all_webauthn_credentials
+        from src.database import list_all_webauthn_credentials
         return jsonify(list_all_webauthn_credentials())
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -3312,7 +3312,7 @@ def api_webauthn_rename_credential(cred_id):
         is_admin = (employee.get('position') or '').lower() in ('admin', 'administrator')
         if int(target_emp_id) != int(employee['employee_id']) and not is_admin:
             return jsonify({'success': False, 'message': 'Access denied'}), 403
-        from database_postgres import get_connection
+        from src.database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
@@ -3369,7 +3369,7 @@ def api_create_order():
             return jsonify({'success': False, 'message': 'Invalid request data'}), 400
         
         data = request.json
-        from database import create_order
+        from src.database import create_order
         settings = get_establishment_settings(None)
         # Use store default sales tax % when tax_rate not provided or zero
         tax_rate = data.get('tax_rate')
@@ -3510,7 +3510,7 @@ def api_create_order():
         if (result.get('success') and result.get('order_id') and employee_id
                 and pay_status != 'pending'):
                 try:
-                    from pos_accounting_bridge import journalize_sale_to_accounting
+                    from src.pos_accounting_bridge import journalize_sale_to_accounting
                     jr = journalize_sale_to_accounting(result['order_id'], int(employee_id))
                     if not jr.get('success'):
                         print(f"Accounting journalize_sale (order {result['order_id']}): {jr.get('message', 'unknown')}")
@@ -3538,7 +3538,7 @@ def api_create_order():
 def api_generate_transaction_receipt(transaction_id):
     """Generate receipt PDF for a transaction"""
     try:
-        from receipt_generator import generate_transaction_receipt
+        from src.receipt_generator import generate_transaction_receipt
         
         pdf_bytes = generate_transaction_receipt(transaction_id)
         
@@ -3558,7 +3558,7 @@ def api_generate_transaction_receipt(transaction_id):
 def api_generate_test_receipt():
     """Generate a test receipt PDF from current template settings (for Settings Print test)."""
     try:
-        from receipt_generator import generate_test_receipt_pdf
+        from src.receipt_generator import generate_test_receipt_pdf
         data = request.get_json(silent=True) or {}
         settings_override = data.get('settings') or data
         pdf_bytes = generate_test_receipt_pdf(settings_override=settings_override)
@@ -3575,7 +3575,7 @@ def api_generate_test_receipt():
 def api_generate_receipt(order_id):
     """Generate receipt PDF for an order"""
     try:
-        from receipt_generator import generate_receipt_with_barcode
+        from src.receipt_generator import generate_receipt_with_barcode
         
         pdf_bytes = generate_receipt_with_barcode(order_id)
         
@@ -3595,7 +3595,7 @@ def api_generate_receipt(order_id):
 def api_get_receipt_settings():
     """Get receipt settings"""
     try:
-        from receipt_generator import get_receipt_settings
+        from src.receipt_generator import get_receipt_settings
         settings = get_receipt_settings()
         return jsonify({'success': True, 'settings': settings})
     except Exception as e:
@@ -4115,7 +4115,7 @@ def api_pos_bootstrap():
                 pos_search_filters = _default_pos_search_filters()
 
             # 4) Inventory (products + variants) – same shape as GET /api/inventory?item_type=product&include_variants=1
-            from database import ensure_metadata_tables, list_categories
+            from src.database import ensure_metadata_tables, list_categories
             ensure_metadata_tables()
             sql = """
                 SELECT i.*, v.vendor_name, pm.keywords, pm.tags, pm.attributes, pm.brand, pm.color, pm.size,
@@ -4254,7 +4254,7 @@ def api_update_pos_search_filters():
         if data is None:
             return jsonify({'success': False, 'message': 'Invalid JSON'}), 400
         filters = data.get('filter_groups') is not None and {'filter_groups': data.get('filter_groups')} or data
-        from database import update_establishment_settings
+        from src.database import update_establishment_settings
         ok = update_establishment_settings(None, {'pos_search_filters': filters})
         if not ok:
             return jsonify({'success': False, 'message': 'Failed to update settings'}), 500
@@ -4578,7 +4578,7 @@ def api_void_order(order_id):
             employee_id = data.get('employee_id')
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID or session required'}), 401
-        from database import void_order
+        from src.database import void_order
         result = void_order(order_id=order_id, employee_id=employee_id, reason=data.get('reason'))
         if result.get('success'):
             return jsonify(result), 200
@@ -4604,7 +4604,7 @@ def api_update_order_status(order_id):
                 employee_id = session_data.get('employee_id')
         if not employee_id:
             employee_id = data.get('employee_id')
-        from database import update_order_status, get_order_details
+        from src.database import update_order_status, get_order_details
         result = update_order_status(
             order_id=order_id,
             order_status=order_status.strip(),
@@ -4614,7 +4614,7 @@ def api_update_order_status(order_id):
         )
         if result.get('success') and data.get('payment_status') == 'completed' and employee_id:
             try:
-                from pos_accounting_bridge import journalize_sale_to_accounting
+                from src.pos_accounting_bridge import journalize_sale_to_accounting
                 journalize_sale_to_accounting(order_id, int(employee_id))
             except Exception as je:
                 print(f"Accounting journalize_sale (order {order_id}) after mark-paid: {je}")
@@ -4624,13 +4624,13 @@ def api_update_order_status(order_id):
                 try:
                     o = get_order_details(order_id)
                     if o and (o.get('order_source') or '').strip().lower() == 'doordash' and (o.get('external_order_id') or '').strip():
-                        from database import get_integrations
+                        from src.database import get_integrations
                         establishment_id = o.get('establishment_id')
                         if establishment_id is not None:
                             integrations = get_integrations(establishment_id)
                             dd = next((i for i in (integrations or []) if i.get('provider') == 'doordash' and i.get('enabled')), None)
                             if dd and isinstance(dd.get('config'), dict):
-                                from doordash_service import notify_doordash_order_ready
+                                from src.doordash_service import notify_doordash_order_ready
                                 merchant_id = str(o.get('order_id') or o.get('order_number') or '')
                                 if notify_doordash_order_ready(o.get('external_order_id'), merchant_id, dd['config']):
                                     result['doordash_ready_sent'] = True
@@ -4640,13 +4640,13 @@ def api_update_order_status(order_id):
                 try:
                     o = get_order_details(order_id)
                     if o and (o.get('order_source') or '').strip().lower() == 'doordash' and (o.get('external_order_id') or '').strip():
-                        from database import get_integrations
+                        from src.database import get_integrations
                         establishment_id = o.get('establishment_id')
                         if establishment_id is not None:
                             integrations = get_integrations(establishment_id)
                             dd = next((i for i in (integrations or []) if i.get('provider') == 'doordash' and i.get('enabled')), None)
                             if dd and isinstance(dd.get('config'), dict):
-                                from doordash_service import cancel_doordash_order
+                                from src.doordash_service import cancel_doordash_order
                                 cancel_doordash_order(o.get('external_order_id'), 'OTHER', 'Voided in POS', dd['config'])
                 except Exception as ex:
                     print(f"Doordash cancel order error: {ex}")
@@ -4662,7 +4662,7 @@ def api_update_order_status(order_id):
 def api_order_doordash_lines(order_id):
     """Return stored DoorDash line_item_id/line_option_id for this order (for building adjustment payloads). Only for DoorDash orders."""
     try:
-        from database import get_order_details, get_doordash_order_lines
+        from src.database import get_order_details, get_doordash_order_lines
         o = get_order_details(order_id)
         if not o or (o.get('order_source') or '').strip().lower() != 'doordash':
             return jsonify({'success': False, 'message': 'Order not found or not a DoorDash order'}), 404
@@ -4683,7 +4683,7 @@ def api_order_doordash_adjustment(order_id):
         items = data.get('items')
         if not items or not isinstance(items, list):
             return jsonify({'success': False, 'message': 'items array required'}), 400
-        from database import get_order_details, get_integrations
+        from src.database import get_order_details, get_integrations
         o = get_order_details(order_id)
         if not o or (o.get('order_source') or '').strip().lower() != 'doordash':
             return jsonify({'success': False, 'message': 'Order not found or not a DoorDash order'}), 404
@@ -4697,7 +4697,7 @@ def api_order_doordash_adjustment(order_id):
         dd = next((i for i in (integrations or []) if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not dd or not isinstance(dd.get('config'), dict):
             return jsonify({'success': False, 'message': 'DoorDash integration not enabled for this store'}), 400
-        from doordash_service import adjust_doordash_order
+        from src.doordash_service import adjust_doordash_order
         success, status_code, message = adjust_doordash_order(external_order_id, items, dd['config'])
         if success:
             return jsonify({'success': True, 'message': message, 'status_code': status_code}), 200
@@ -4722,7 +4722,7 @@ def api_order_doordash_cancel(order_id):
         if cancel_reason not in valid:
             cancel_reason = 'OTHER'
         cancel_details = (data.get('cancel_details') or '').strip() or None
-        from database import get_order_details, get_integrations
+        from src.database import get_order_details, get_integrations
         o = get_order_details(order_id)
         if not o or (o.get('order_source') or '').strip().lower() != 'doordash':
             return jsonify({'success': False, 'message': 'Order not found or not a DoorDash order'}), 404
@@ -4736,7 +4736,7 @@ def api_order_doordash_cancel(order_id):
         dd = next((i for i in (integrations or []) if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not dd or not isinstance(dd.get('config'), dict):
             return jsonify({'success': False, 'message': 'DoorDash integration not enabled for this store'}), 400
-        from doordash_service import cancel_doordash_order
+        from src.doordash_service import cancel_doordash_order
         success, status_code = cancel_doordash_order(external_order_id, cancel_reason, cancel_details, dd['config'])
         if success:
             return jsonify({'success': True, 'message': 'Order cancelled with DoorDash', 'status_code': status_code}), 200
@@ -4755,7 +4755,7 @@ def api_order_doordash_order_manager_url(order_id):
     DoorDash must allowlist your domain for iframe embedding.
     """
     try:
-        from database import get_order_details, get_integrations
+        from src.database import get_order_details, get_integrations
         o = get_order_details(order_id)
         if not o or (o.get('order_source') or '').strip().lower() != 'doordash':
             return jsonify({'success': False, 'message': 'Order not found or not a DoorDash order'}), 404
@@ -4769,7 +4769,7 @@ def api_order_doordash_order_manager_url(order_id):
         dd = next((i for i in (integrations or []) if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not dd or not isinstance(dd.get('config'), dict):
             return jsonify({'success': False, 'message': 'DoorDash integration not enabled for this store'}), 400
-        from doordash_service import build_live_order_manager_url
+        from src.doordash_service import build_live_order_manager_url
         url, err = build_live_order_manager_url(external_order_id, dd['config'])
         if err:
             return jsonify({'success': False, 'message': err}), 400
@@ -4973,7 +4973,7 @@ def api_shopify_callback():
 
         establishment_id = int(state.replace('_tauri', '')) if state and state.replace('_tauri', '').isdigit() else 1
         store_url = f"https://{shop}"
-        from database import upsert_integration
+        from src.database import upsert_integration
         config = {'store_url': store_url, 'api_key': access_token, 'price_multiplier': 1}
         upsert_integration(establishment_id, 'shopify', True, config)
 
@@ -5001,7 +5001,7 @@ def api_get_integrations():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_integrations
+        from src.database import get_integrations
         rows = get_integrations(establishment_id)
         return jsonify({'success': True, 'data': rows})
     except Exception as e:
@@ -5029,7 +5029,7 @@ def api_save_integrations():
             config = {}
         if not isinstance(config, dict):
             config = {}
-        from database import upsert_integration, create_or_get_category_with_hierarchy
+        from src.database import upsert_integration, create_or_get_category_with_hierarchy
         result = upsert_integration(establishment_id, provider, enabled, config)
         if result.get('success'):
             # When DoorDash is enabled, ensure inventory has a "DoorDash" category for items available on DoorDash
@@ -5059,7 +5059,7 @@ def _square_redirect_uri():
 def api_migrations_square_status():
     """Return Square connection status for current establishment: connected, merchant_id, merchant_name, oauth_configured."""
     try:
-        from database import get_establishment_settings
+        from src.database import get_establishment_settings
         establishment_id = get_current_establishment() if get_current_establishment else None
         settings = get_establishment_settings(establishment_id)
         access = (settings.get('square_oauth_access_token') or '').strip()
@@ -5143,8 +5143,8 @@ def api_migrations_square_oauth_callback():
         establishment_id = state_obj.get('eid', 1)
         redirect_uri = _square_redirect_uri()
         sandbox = False
-        from square_migration import exchange_code_for_tokens, verify_connection
-        from database import update_establishment_settings
+        from src.square_migration import exchange_code_for_tokens, verify_connection
+        from src.database import update_establishment_settings
         tokens = exchange_code_for_tokens(code, redirect_uri, client_id, client_secret, sandbox=sandbox)
         access = (tokens.get('access_token') or '').strip()
         refresh = (tokens.get('refresh_token') or '').strip()
@@ -5175,7 +5175,7 @@ def api_migrations_square_disconnect():
     """Clear stored Square OAuth tokens for current establishment."""
     try:
         establishment_id = get_current_establishment() if get_current_establishment else 1
-        from database import update_establishment_settings
+        from src.database import update_establishment_settings
         update_establishment_settings(establishment_id, {
             'square_oauth_access_token': None,
             'square_oauth_refresh_token': None,
@@ -5197,11 +5197,11 @@ def api_migrations_square_verify():
         sandbox = bool(data.get('sandbox', False))
         if not access_token:
             establishment_id = get_current_establishment() if get_current_establishment else None
-            from square_migration import get_valid_square_access_token
+            from src.square_migration import get_valid_square_access_token
             access_token, err = get_valid_square_access_token(establishment_id, sandbox=sandbox)
             if err:
                 return jsonify({'success': False, 'message': err}), 400
-        from square_migration import verify_connection
+        from src.square_migration import verify_connection
         success, message = verify_connection(access_token, sandbox=sandbox)
         if success:
             return jsonify({'success': True, 'message': message}), 200
@@ -5219,7 +5219,7 @@ def api_migrations_square_run():
         sandbox = bool(data.get('sandbox', False))
         if not access_token:
             establishment_id = get_current_establishment() if get_current_establishment else None
-            from square_migration import get_valid_square_access_token
+            from src.square_migration import get_valid_square_access_token
             access_token, err = get_valid_square_access_token(establishment_id, sandbox=sandbox)
             if err:
                 return jsonify({'success': False, 'message': err}), 400
@@ -5229,7 +5229,7 @@ def api_migrations_square_run():
         establishment_id = None
         if get_current_establishment is not None:
             establishment_id = get_current_establishment()
-        from square_migration import run_migration
+        from src.square_migration import run_migration
         result = run_migration(
             access_token=access_token,
             sandbox=sandbox,
@@ -5262,7 +5262,7 @@ def api_migrations_square_upload():
             return jsonify({'success': False, 'message': 'No file selected'}), 400
         content = f.read()
         filename = (f.filename or '').strip()
-        from square_import import parse_square_items_file, run_square_file_import
+        from src.square_import import parse_square_items_file, run_square_file_import
         rows, parse_errors = parse_square_items_file(content, filename=filename)
         if parse_errors:
             return jsonify({'success': False, 'message': '; '.join(parse_errors), 'imported': 0, 'errors': parse_errors}), 400
@@ -5298,7 +5298,7 @@ def api_orders_from_integration():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_integrations, create_order, get_connection
+        from src.database import get_integrations, create_order, get_connection
         from psycopg2.extras import RealDictCursor
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == order_source and i.get('enabled')), None)
@@ -5364,7 +5364,7 @@ def api_orders_from_integration():
         if result.get('success') and result.get('order_id'):
             order_id = result['order_id']
             try:
-                from pos_accounting_bridge import journalize_sale_to_accounting
+                from src.pos_accounting_bridge import journalize_sale_to_accounting
                 journalize_sale_to_accounting(order_id, int(employee_id))
             except Exception as je:
                 print(f"Accounting journalize_sale (order {order_id}) from integration: {je}")
@@ -5392,7 +5392,7 @@ def api_shopify_sync():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from shopify_service import sync_shopify_orders
+        from src.shopify_service import sync_shopify_orders
         result = sync_shopify_orders(establishment_id)
         if result.get('success') is False:
             return jsonify({
@@ -5422,7 +5422,7 @@ def api_shopify_sync_products():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from shopify_service import sync_shopify_products
+        from src.shopify_service import sync_shopify_products
         result = sync_shopify_products(establishment_id)
         if result.get('success') is False:
             return jsonify({
@@ -5462,7 +5462,7 @@ def api_webhooks_shopify_orders():
         if not raw:
             return jsonify({'ok': False}), 400
         # Webhook secret from integration config (per-establishment is tricky; use first Shopify integration with webhook_secret)
-        from database import get_connection, get_integrations
+        from src.database import get_connection, get_integrations
         from psycopg2.extras import RealDictCursor
         conn = get_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -5491,8 +5491,8 @@ def api_webhooks_shopify_orders():
             establishment_id = rows[0].get('establishment_id') if isinstance(rows[0], dict) else rows[0][0]
         if not establishment_id:
             return jsonify({'ok': False}), 400
-        from shopify_service import build_pos_payload_from_shopify_order
-        from database import create_order, get_connection
+        from src.shopify_service import build_pos_payload_from_shopify_order
+        from src.database import create_order, get_connection
         from psycopg2.extras import RealDictCursor
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'shopify' and i.get('enabled')), None)
@@ -5537,7 +5537,7 @@ def api_webhooks_shopify_orders():
         )
         if result.get('success') and result.get('order_id'):
             try:
-                from pos_accounting_bridge import journalize_sale_to_accounting
+                from src.pos_accounting_bridge import journalize_sale_to_accounting
                 journalize_sale_to_accounting(result['order_id'], employee_id)
             except Exception:
                 pass
@@ -5570,7 +5570,7 @@ def api_webhooks_doordash_orders():
             return jsonify({'ok': True}), 200
         if event and (event.get("type") or "").strip().upper() != "ORDERCREATE":
             return jsonify({'ok': True}), 200
-        from database import get_connection, get_integrations, create_order
+        from src.database import get_connection, get_integrations, create_order
         from psycopg2.extras import RealDictCursor
         conn = get_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -5584,7 +5584,7 @@ def api_webhooks_doordash_orders():
         if not isinstance(config, dict):
             config = {}
         price_multiplier = float(config.get('price_multiplier') or 1)
-        from doordash_service import build_pos_payload_from_doordash_order, confirm_doordash_order
+        from src.doordash_service import build_pos_payload_from_doordash_order, confirm_doordash_order
         payload = build_pos_payload_from_doordash_order(order, establishment_id, price_multiplier, config=config)
         if not payload:
             return jsonify({'ok': True}), 200
@@ -5597,7 +5597,7 @@ def api_webhooks_doordash_orders():
         emp_row = cur.fetchone()
         conn.close()
         employee_id = (emp_row.get('employee_id') if emp_row and isinstance(emp_row, dict) else (emp_row[0] if emp_row else None)) if emp_row else None
-        from doordash_service import FAILURE_REASON_CONNECTIVITY
+        from src.doordash_service import FAILURE_REASON_CONNECTIVITY
         if not employee_id:
             confirm_doordash_order(str(doordash_order_id or ''), 'pos', success=False, failure_reason=FAILURE_REASON_CONNECTIVITY, config=config)
             return jsonify({'ok': False}), 400
@@ -5630,12 +5630,12 @@ def api_webhooks_doordash_orders():
         )
         if result.get('success') and result.get('order_id'):
             try:
-                from database import save_doordash_order_lines
+                from src.database import save_doordash_order_lines
                 save_doordash_order_lines(result['order_id'], doordash_lines)
             except Exception:
                 pass
             try:
-                from pos_accounting_bridge import journalize_sale_to_accounting
+                from src.pos_accounting_bridge import journalize_sale_to_accounting
                 journalize_sale_to_accounting(result['order_id'], employee_id)
             except Exception:
                 pass
@@ -5666,7 +5666,7 @@ def api_webhooks_doordash_order_release():
         client_order_id = (data.get("client_order_id") or data.get("merchant_supplied_id") or "").strip()
         if not client_order_id:
             return jsonify({'ok': True}), 200
-        from database import get_connection, update_order_status
+        from src.database import get_connection, update_order_status
         from psycopg2.extras import RealDictCursor
         conn = get_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -5705,7 +5705,7 @@ def api_webhooks_doordash_order_adjustment():
         external_id = (order_payload.get("id") or "").strip() or None
         if not external_id:
             return jsonify({'ok': True}), 200
-        from database import get_order_by_external_order_id, get_connection, replace_doordash_order_lines, update_order_totals_from_doordash
+        from src.database import get_order_by_external_order_id, get_connection, replace_doordash_order_lines, update_order_totals_from_doordash
         from psycopg2.extras import RealDictCursor
         pos_order = get_order_by_external_order_id(external_id)
         if not pos_order:
@@ -5723,7 +5723,7 @@ def api_webhooks_doordash_order_adjustment():
         if not isinstance(config, dict):
             config = {}
         price_multiplier = float(config.get('price_multiplier') or 1)
-        from doordash_service import _flatten_order_items
+        from src.doordash_service import _flatten_order_items
         _, _, doordash_lines = _flatten_order_items(order_payload, establishment_id, price_multiplier, config=config)
         try:
             replace_doordash_order_lines(order_id, doordash_lines)
@@ -5776,7 +5776,7 @@ def api_webhooks_doordash_dasher_status():
             }
             if not any(dasher_info.values()):
                 dasher_info = None
-        from database import update_order_dasher_status
+        from src.database import update_order_dasher_status
         update_order_dasher_status(
             external_order_id=external_order_id,
             client_order_id=client_order_id,
@@ -5819,7 +5819,7 @@ def api_webhooks_doordash_store_temporarily_deactivated():
             except (TypeError, ValueError):
                 pass
         if establishment_id is not None:
-            from database import insert_doordash_store_deactivation_event
+            from src.database import insert_doordash_store_deactivation_event
             insert_doordash_store_deactivation_event(
                 establishment_id=establishment_id,
                 doordash_store_id=doordash_store_id,
@@ -5852,14 +5852,14 @@ def api_webhooks_doordash_order_cancellation():
         client_order_id = (data.get('client_order_id') or '').strip() or None
         if not external_order_id and not client_order_id:
             return jsonify({'ok': True}), 200
-        from database import get_order_by_external_order_id, update_order_status
+        from src.database import get_order_by_external_order_id, update_order_status
         pos_order = None
         if external_order_id:
             pos_order = get_order_by_external_order_id(external_order_id)
         if not pos_order and client_order_id:
             try:
                 oid = int(client_order_id)
-                from database import get_order_details
+                from src.database import get_order_details
                 o = get_order_details(oid)
                 if o and (o.get('order_source') or '').strip().lower() == 'doordash':
                     pos_order = {'order_id': o.get('order_id'), 'establishment_id': o.get('establishment_id')}
@@ -5892,7 +5892,7 @@ def api_doordash_menu_pull(location_id):
             establishment_id = int(location_id)
         except (TypeError, ValueError):
             return jsonify({'error': 'Invalid location_id'}), 400
-        from database import get_connection, get_integrations
+        from src.database import get_connection, get_integrations
         from psycopg2.extras import RealDictCursor
         conn = get_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -5907,7 +5907,7 @@ def api_doordash_menu_pull(location_id):
         provider_type = (config.get('provider_type') or 'pos').strip() or 'pos'
         ids_param = request.args.get('ids') or ''
         external_menu_ids = [x.strip() for x in ids_param.split(',') if x.strip()] if ids_param else []
-        from doordash_service import build_doordash_menu_pull_response
+        from src.doordash_service import build_doordash_menu_pull_response
         reference = f"menu-{establishment_id}"
         # Use stored UUID from Menu Status webhook so DoorDash can use it for MenuUpdate; required in menus[].id for updates.
         external_menu_id = config.get('doordash_menu_uuid') or (external_menu_ids[0] if external_menu_ids else None)
@@ -5951,7 +5951,7 @@ def api_webhooks_doordash_menu_status():
             except (TypeError, ValueError):
                 establishment_id = None
             if establishment_id is not None:
-                from database import set_doordash_menu_uuid
+                from src.database import set_doordash_menu_uuid
                 set_doordash_menu_uuid(establishment_id, str(menu_id))
         return jsonify({'ok': True}), 200
     except Exception as e:
@@ -5972,7 +5972,7 @@ def api_doordash_sync():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_integrations
+        from src.database import get_integrations
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not integration:
@@ -6001,8 +6001,8 @@ def api_doordash_push_menu():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_integrations
-        from doordash_service import push_doordash_menu
+        from src.database import get_integrations
+        from src.doordash_service import push_doordash_menu
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not integration:
@@ -6031,8 +6031,8 @@ def api_doordash_push_store_hours():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_integrations, update_store_location_settings
-        from doordash_service import push_doordash_menu
+        from src.database import get_integrations, update_store_location_settings
+        from src.doordash_service import push_doordash_menu
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not integration:
@@ -6061,8 +6061,8 @@ def api_doordash_run_migrations():
     """
     import os
     try:
-        from database import get_connection
-        migrations_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'migrations')
+        from src.database import get_connection
+        migrations_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'migrations')
         files = [
             ('add_orders_external_order_id_and_experience.sql', 'Orders external_order_id + experience'),
             ('add_inventory_item_special_hours.sql', 'Inventory item_special_hours'),
@@ -6120,12 +6120,12 @@ def api_doordash_add_all_items():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_integrations, get_connection
+        from src.database import get_integrations, get_connection
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not integration:
             return jsonify({'success': False, 'message': 'DoorDash integration not enabled'}), 400
-        from database import create_or_get_category_with_hierarchy, assign_category_to_product
+        from src.database import create_or_get_category_with_hierarchy, assign_category_to_product
         conn = get_connection()
         cur = conn.cursor()
         try:
@@ -6181,8 +6181,8 @@ def api_doordash_store_menu():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_integrations
-        from doordash_service import get_doordash_store_menu
+        from src.database import get_integrations
+        from src.doordash_service import get_doordash_store_menu
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not integration:
@@ -6211,8 +6211,8 @@ def api_doordash_store_menu_flat():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_integrations
-        from doordash_service import get_doordash_store_menu, flatten_doordash_store_menu_for_sync
+        from src.database import get_integrations
+        from src.doordash_service import get_doordash_store_menu, flatten_doordash_store_menu_for_sync
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not integration:
@@ -6246,7 +6246,7 @@ def api_doordash_menu_sync():
         mappings = data.get('mappings')
         if not isinstance(mappings, dict):
             return jsonify({'success': False, 'message': 'mappings object required'}), 400
-        from database import get_integrations, upsert_integration
+        from src.database import get_integrations, upsert_integration
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'doordash'), None)
         if not integration:
@@ -6264,7 +6264,7 @@ def api_doordash_menu_sync():
             except (TypeError, ValueError):
                 continue
         config['doordash_item_to_product_id'] = clean
-        from database import create_or_get_category_with_hierarchy, assign_category_to_product
+        from src.database import create_or_get_category_with_hierarchy, assign_category_to_product
         result = upsert_integration(establishment_id, 'doordash', integration.get('enabled', False), config)
         if result.get('success'):
             # Ensure DoorDash category exists and assign each mapped product to it so they appear in inventory under DoorDash
@@ -6295,8 +6295,8 @@ def api_doordash_store_details():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_integrations
-        from doordash_service import get_doordash_store_details
+        from src.database import get_integrations
+        from src.doordash_service import get_doordash_store_details
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not integration:
@@ -6324,8 +6324,8 @@ def api_doordash_menu_details():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_integrations
-        from doordash_service import get_doordash_menu_details
+        from src.database import get_integrations
+        from src.doordash_service import get_doordash_menu_details
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not integration:
@@ -6358,8 +6358,8 @@ def api_doordash_store_status():
         is_active = data.get('is_active')
         if is_active is None:
             return jsonify({'success': False, 'message': 'is_active is required'}), 400
-        from database import get_integrations
-        from doordash_service import update_doordash_store_status
+        from src.database import get_integrations
+        from src.doordash_service import update_doordash_store_status
         integrations = get_integrations(establishment_id)
         integration = next((i for i in integrations if i.get('provider') == 'doordash' and i.get('enabled')), None)
         if not integration:
@@ -6396,7 +6396,7 @@ def api_doordash_latest_store_deactivation():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({}), 200
-        from database import get_latest_doordash_store_deactivation
+        from src.database import get_latest_doordash_store_deactivation
         event = get_latest_doordash_store_deactivation(establishment_id)
         if not event:
             return jsonify({}), 200
@@ -6421,7 +6421,7 @@ def api_create_demo_integration_orders():
         establishment_id = get_current_establishment()
         if not establishment_id:
             return jsonify({'success': False, 'message': 'No establishment'}), 400
-        from database import get_connection, create_order
+        from src.database import get_connection, create_order
         from psycopg2.extras import RealDictCursor
         from datetime import datetime, timedelta
         conn = get_connection()
@@ -6508,7 +6508,7 @@ def api_create_demo_integration_orders():
 def api_orders_latest():
     """Return the most recent order id (for new-order polling / toast)."""
     try:
-        from database import list_orders
+        from src.database import list_orders
         orders = list_orders(limit=1, offset=0)
         if not orders:
             return jsonify({'order_id': None, 'order_number': None})
@@ -6888,7 +6888,7 @@ def api_employee_schedule():
                 return jsonify({'success': False, 'message': 'Invalid request data'}), 400
             
             data = request.json
-            from database import add_schedule, add_calendar_event, get_employee
+            from src.database import add_schedule, add_calendar_event, get_employee
             
             # Get employee info for calendar event
             employee = get_employee(data.get('employee_id'))
@@ -6914,7 +6914,7 @@ def api_employee_schedule():
             session_token = request.headers.get('Authorization') or request.json.get('session_token')
             if session_token:
                 try:
-                    from database import verify_session
+                    from src.database import verify_session
                     session_data = verify_session(session_token)
                     if session_data.get('valid'):
                         created_by = session_data.get('employee_id')
@@ -7152,7 +7152,7 @@ def api_clock_in():
 
             # ── Fire clock-in notification (non-blocking) ──────────────────
             try:
-                from notification_service import send_clockin_notification
+                from src.notification_service import send_clockin_notification
                 import threading
                 emp_email = employee.get('email', '') or ''
                 sched_start = comparison_result.get('scheduled_start_time')
@@ -7235,7 +7235,7 @@ def api_clock_out():
 
             # ── Fire clock-out notification (non-blocking) ─────────────────
             try:
-                from notification_service import send_clockin_notification
+                from src.notification_service import send_clockin_notification
                 import threading
                 emp_email = (employee or {}).get('email', '') or ''
                 threading.Thread(
@@ -7272,7 +7272,7 @@ def api_get_clockin_notification_settings():
     """Get clock-in/out notification settings for a store."""
     try:
         store_id = int(request.args.get('store_id', 1))
-        from notification_service import get_clockin_notification_settings
+        from src.notification_service import get_clockin_notification_settings
         settings = get_clockin_notification_settings(store_id)
         # Convert Decimal/datetime to JSON-safe types
         if 'overtime_threshold_hours' in settings:
@@ -7299,7 +7299,7 @@ def api_save_clockin_notification_settings():
     try:
         data = request.json or {}
         store_id = int(data.get('store_id', 1))
-        from notification_service import save_clockin_notification_settings
+        from src.notification_service import save_clockin_notification_settings
         # Ensure admin_email_ids and extended recipient lists are lists of ints
         data['admin_email_ids'] = _normalize_employee_id_list(data.get('admin_email_ids', []))
         for key in ('clockin_admin_email_ids', 'clockin_admin_sms_ids', 'clockout_admin_email_ids', 'clockout_admin_sms_ids',
@@ -7318,7 +7318,7 @@ def api_get_schedule_notification_settings():
     """Get schedule notification settings for a store."""
     try:
         store_id = int(request.args.get('store_id', 1))
-        from notification_service import get_schedule_notification_settings
+        from src.notification_service import get_schedule_notification_settings
         settings = get_schedule_notification_settings(store_id)
         if 'updated_at' in settings:
             settings['updated_at'] = settings['updated_at'].isoformat() if settings.get('updated_at') else None
@@ -7336,7 +7336,7 @@ def api_save_schedule_notification_settings():
     try:
         data = request.json or {}
         store_id = int(data.get('store_id', 1))
-        from notification_service import save_schedule_notification_settings
+        from src.notification_service import save_schedule_notification_settings
         # Ensure admin_email_ids is a list of ints
         ids = data.get('admin_email_ids', [])
         if isinstance(ids, list):
@@ -7356,7 +7356,7 @@ def api_get_register_notification_settings():
     """Get register notification settings for a store."""
     try:
         store_id = int(request.args.get('store_id', 1))
-        from notification_service import get_register_notification_settings
+        from src.notification_service import get_register_notification_settings
         settings = get_register_notification_settings(store_id)
         if 'updated_at' in settings:
             settings['updated_at'] = settings['updated_at'].isoformat() if settings.get('updated_at') else None
@@ -7373,7 +7373,7 @@ def api_save_register_notification_settings():
     try:
         data = request.json or {}
         store_id = int(data.get('store_id', 1))
-        from notification_service import save_register_notification_settings
+        from src.notification_service import save_register_notification_settings
         ids = data.get('admin_email_ids', [])
         if isinstance(ids, list):
             ids = [int(i) for i in ids if str(i).strip().isdigit()]
@@ -7396,7 +7396,7 @@ def _run_late_alert_scheduler():
     while True:
         _time.sleep(60)
         try:
-            from notification_service import (get_clockin_notification_settings,
+            from src.notification_service import (get_clockin_notification_settings,
                                               send_late_alert_notification)
             settings = get_clockin_notification_settings(_STORE_ID)
             if not settings.get('late_alert_enabled', False):
@@ -8086,7 +8086,7 @@ def api_dashboard_statistics():
         try:
             session_token = request.headers.get('X-Session-Token') or request.headers.get('Authorization', '').replace('Bearer ', '').strip()
             if session_token:
-                from database import verify_session
+                from src.database import verify_session
                 sess = verify_session(session_token)
                 if sess.get('valid'):
                     stats_establishment_id = sess.get('establishment_id')
@@ -8777,11 +8777,11 @@ def api_dashboard_statistics():
         accounting_buckets = []
         try:
             # Ensure schema + tenant provisioning before querying
-            from accounting_bootstrap import ensure_accounting_schema, ensure_establishment_accounting
+            from src.accounting_bootstrap import ensure_accounting_schema, ensure_establishment_accounting
             ensure_accounting_schema()
             if stats_establishment_id:
                 ensure_establishment_accounting(stats_establishment_id)
-            from database import get_income_summary, get_income_buckets
+            from src.database import get_income_summary, get_income_buckets
             revenue_accounting = get_income_summary(start_date, today, establishment_id=stats_establishment_id)
             accounting_buckets = get_income_buckets(start_date, today, granularity, establishment_id=stats_establishment_id)
         except Exception as acc_err:
@@ -8921,7 +8921,7 @@ def api_identify_product():
             temp_path = tmp_file.name
         
         try:
-            from barcode_scanner import smart_product_identification
+            from src.barcode_scanner import smart_product_identification
             
             # Get scanners
             barcode_scanner = get_barcode_scanner() if use_barcode else None
@@ -9015,7 +9015,7 @@ def api_identify_shipment():
                 temp_paths.append(tmp_file.name)
         
         try:
-            from barcode_scanner import smart_product_identification
+            from src.barcode_scanner import smart_product_identification
             
             # Get scanners
             barcode_scanner = get_barcode_scanner() if use_barcode else None
@@ -9210,7 +9210,7 @@ def api_product_barcode_image():
     if should_save:
         value_to_save = encoded_value
         try:
-            from database import update_product
+            from src.database import update_product
             update_product(product_id, barcode=value_to_save)
         except Exception as e:
             traceback.print_exc()
@@ -9348,7 +9348,7 @@ def api_create_return():
             return jsonify({'success': False, 'message': 'Invalid request data'}), 400
         
         data = request.json
-        from database import process_return_immediate
+        from src.database import process_return_immediate
         result = process_return_immediate(
             order_id=data.get('order_id'),
             items_to_return=data.get('items', []),
@@ -9440,8 +9440,8 @@ def api_process_return():
             return jsonify({'success': False, 'message': 'Invalid request data'}), 400
         
         data = request.json
-        from database import process_return_immediate
-        from receipt_generator import generate_return_receipt, generate_exchange_receipt
+        from src.database import process_return_immediate
+        from src.receipt_generator import generate_return_receipt, generate_exchange_receipt
         
         result = process_return_immediate(
             order_id=data.get('order_id'),
@@ -9473,7 +9473,7 @@ def api_process_return():
                     employee_id = session_data.get('employee_id')
         if employee_id and result.get('return_total'):
             try:
-                from pos_accounting_bridge import journalize_return_to_accounting
+                from src.pos_accounting_bridge import journalize_return_to_accounting
                 jr = journalize_return_to_accounting(
                     result['return_id'],
                     data.get('order_id'),
@@ -9548,7 +9548,7 @@ def api_return_receipt_options():
 def api_generate_return_receipt(return_id):
     """Generate return receipt PDF"""
     try:
-        from receipt_generator import generate_return_receipt
+        from src.receipt_generator import generate_return_receipt
         
         pdf_bytes = generate_return_receipt(return_id)
         
@@ -9567,8 +9567,8 @@ def api_generate_return_receipt(return_id):
 def api_generate_exchange_receipt(exchange_credit_id):
     """Generate exchange receipt PDF"""
     try:
-        from receipt_generator import generate_exchange_receipt
-        from database import get_connection
+        from src.receipt_generator import generate_exchange_receipt
+        from src.database import get_connection
         from psycopg2.extras import RealDictCursor
         
         # Get exchange credit details and return_id for credit number
@@ -9614,8 +9614,8 @@ def api_generate_exchange_receipt(exchange_credit_id):
 def api_generate_exchange_completion_receipt(order_id):
     """Generate combined exchange receipt (returned items + new items + new total) for an order that used exchange credit."""
     try:
-        from receipt_generator import generate_exchange_completion_receipt
-        from database import get_connection
+        from src.receipt_generator import generate_exchange_completion_receipt
+        from src.database import get_connection
         from psycopg2.extras import RealDictCursor
 
         conn = get_connection()
@@ -9650,7 +9650,7 @@ def api_apply_exchange_credit():
             return jsonify({'success': False, 'message': 'Invalid request data'}), 400
         
         data = request.json
-        from database import get_connection
+        from src.database import get_connection
         from psycopg2.extras import RealDictCursor
         
         conn = get_connection()
@@ -9738,7 +9738,7 @@ def api_apply_exchange_credit():
                     if _sess.get('valid'):
                         _employee_id = _sess.get('employee_id') or _employee_id
                         _establishment_id = _sess.get('establishment_id')
-                from pos_accounting_bridge import journalize_exchange_credit_applied_to_accounting
+                from src.pos_accounting_bridge import journalize_exchange_credit_applied_to_accounting
                 journalize_exchange_credit_applied_to_accounting(
                     exchange_credit_id=exchange_credit_id,
                     amount=credit_amount,
@@ -9769,7 +9769,7 @@ def api_apply_exchange_credit():
 def api_store_credit_by_order(order_number):
     """Get store credit for an order (by order number) so scanning order barcode adds credit to cart."""
     try:
-        from database import get_connection
+        from src.database import get_connection
         from psycopg2.extras import RealDictCursor
         import re
         conn = get_connection()
@@ -9908,7 +9908,7 @@ def api_store_credit_by_order(order_number):
 def api_get_exchange_credit(credit_number):
     """Get exchange credit by credit number (for scanning at checkout)"""
     try:
-        from database import get_connection
+        from src.database import get_connection
         from psycopg2.extras import RealDictCursor
         
         conn = get_connection()
@@ -10312,7 +10312,7 @@ def api_create_employee():
                 if sess and sess.get('valid'):
                     granter_id = sess.get('employee_id')
             if granter_id:
-                from permission_manager import get_permission_manager
+                from src.permission_manager import get_permission_manager
                 pm = get_permission_manager()
                 for perm_name in permissions_to_grant:
                     ok = pm.grant_permission_to_employee(employee_id, perm_name, granter_id)
@@ -10636,7 +10636,7 @@ def get_employee_from_token():
 def api_generate_schedule():
     """Generate automated schedule"""
     try:
-        from schedule_generator import AutomatedScheduleGenerator
+        from src.schedule_generator import AutomatedScheduleGenerator
         
         employee_id = get_employee_from_token()
         if not employee_id:
@@ -10778,7 +10778,7 @@ def api_get_schedule(period_id):
             conn.close()
             return jsonify({'success': True})
 
-        from schedule_generator import AutomatedScheduleGenerator
+        from src.schedule_generator import AutomatedScheduleGenerator
         scheduler = AutomatedScheduleGenerator()
         summary = scheduler.get_schedule_summary(period_id)
         if not summary:
@@ -10791,7 +10791,7 @@ def api_get_schedule(period_id):
 def _trigger_schedule_update_email(period_id: int, changed_emp_ids: list = None):
     """Fire a background thread to gather shifts and send advanced notifications."""
     try:
-        from notification_service import send_schedule_notification_advanced, send_schedule_notification
+        from src.notification_service import send_schedule_notification_advanced, send_schedule_notification
         import threading
         from datetime import datetime, timedelta
         
@@ -10883,7 +10883,7 @@ def _trigger_schedule_update_email(period_id: int, changed_emp_ids: list = None)
 def api_publish_schedule(period_id):
     """Publish schedule to employees and add to master calendar"""
     try:
-        from schedule_generator import AutomatedScheduleGenerator
+        from src.schedule_generator import AutomatedScheduleGenerator
         
         employee_id = get_employee_from_token()
         if not employee_id:
@@ -10961,7 +10961,7 @@ def api_save_draft(period_id):
 def api_save_template(period_id):
     """Save schedule as template"""
     try:
-        from schedule_generator import AutomatedScheduleGenerator
+        from src.schedule_generator import AutomatedScheduleGenerator
         
         employee_id = get_employee_from_token()
         if not employee_id:
@@ -10989,7 +10989,7 @@ def api_save_template(period_id):
 def api_copy_from_template():
     """Copy schedule from template"""
     try:
-        from schedule_generator import AutomatedScheduleGenerator
+        from src.schedule_generator import AutomatedScheduleGenerator
         
         employee_id = get_employee_from_token()
         if not employee_id:
@@ -11118,7 +11118,7 @@ def api_manage_shift(period_id):
             
             if is_published:
                 affected_emps = list({old_values['employee_id'], data['employee_id']})
-                from notification_service import get_schedule_notification_settings
+                from src.notification_service import get_schedule_notification_settings
                 if get_schedule_notification_settings(1).get('notify_on_edit', True):
                     _trigger_schedule_update_email(period_id, affected_emps)
             
@@ -11154,7 +11154,7 @@ def api_manage_shift(period_id):
                 pass  # Schedule_Changes table may not exist
             
             if is_published:
-                from notification_service import get_schedule_notification_settings
+                from src.notification_service import get_schedule_notification_settings
                 if get_schedule_notification_settings(1).get('notify_on_edit', True):
                     _trigger_schedule_update_email(period_id, [old_values['employee_id']])
         
@@ -11210,7 +11210,7 @@ def api_submit_availability():
 def api_master_calendar():
     """Get master calendar events"""
     try:
-        from database import get_calendar_events
+        from src.database import get_calendar_events
         
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
@@ -11267,7 +11267,7 @@ def api_create_calendar_event():
         if event_type not in valid_types:
             return jsonify({'success': False, 'message': f'event_type must be one of: {", ".join(valid_types)}'}), 400
         
-        from database import add_calendar_event
+        from src.database import add_calendar_event
         
         # Get employee_ids if provided (empty list means for everyone)
         employee_ids = data.get('employee_ids')
@@ -11301,7 +11301,7 @@ def api_create_calendar_event():
 def calendar_feed(token):
     """iCal feed endpoint - accessible by calendar apps"""
     try:
-        from calendar_integration import CalendarIntegrationSystem
+        from src.calendar_integration import CalendarIntegrationSystem
         
         calendar_system = CalendarIntegrationSystem(base_url=request.url_root.rstrip('/'))
         ical_data = calendar_system.generate_ical_feed(token)
@@ -11378,7 +11378,7 @@ def api_calendar_subscription_create():
         
         preferences = data.get('preferences') or data
         
-        from calendar_integration import CalendarIntegrationSystem
+        from src.calendar_integration import CalendarIntegrationSystem
         base_url = request.url_root.rstrip('/')
         if not base_url or base_url.startswith('http://localhost:3000'):
             try:
@@ -11452,7 +11452,7 @@ def get_subscription_urls():
         
         employee_id = session_data['employee_id']
         
-        from calendar_integration import CalendarIntegrationSystem
+        from src.calendar_integration import CalendarIntegrationSystem
         base_url = os.environ.get('CALENDAR_FEED_BASE_URL') or request.host_url.rstrip('/')
         calendar_system = CalendarIntegrationSystem(base_url=base_url)
         
@@ -11480,7 +11480,7 @@ def _ensure_google_calendar_tokens_table():
     try:
         conn = None
         try:
-            from database import get_connection
+            from src.database import get_connection
             conn = get_connection()
             if not conn:
                 return
@@ -11519,7 +11519,7 @@ def api_google_calendar_connect_url():
         if not session_data.get('valid'):
             return jsonify({'success': False, 'message': 'Invalid session'}), 401
         employee_id = session_data['employee_id']
-        from google_calendar_sync import get_oauth_url
+        from src.google_calendar_sync import get_oauth_url
         url = get_oauth_url(state=str(employee_id))
         return jsonify({'success': True, 'url': url})
     except ValueError as e:
@@ -11542,7 +11542,7 @@ def api_google_calendar_callback():
         if not employee_id:
             return redirect('/calendar?google=error&msg=invalid_state')
         _ensure_google_calendar_tokens_table()
-        from google_calendar_sync import exchange_code_for_tokens, save_tokens
+        from src.google_calendar_sync import exchange_code_for_tokens, save_tokens
         redirect_uri = os.environ.get('GOOGLE_CALENDAR_REDIRECT_URI') or (request.host_url.rstrip('/') + '/api/integrations/google-calendar/callback')
         tokens = exchange_code_for_tokens(code, redirect_uri=redirect_uri)
         save_tokens(employee_id, tokens['access_token'], tokens.get('refresh_token'), tokens.get('token_expiry'))
@@ -11564,7 +11564,7 @@ def api_google_calendar_status():
         session_data = verify_session(session_token)
         if not session_data.get('valid'):
             return jsonify({'success': True, 'connected': False})
-        from google_calendar_sync import get_stored_tokens
+        from src.google_calendar_sync import get_stored_tokens
         tokens = get_stored_tokens(session_data['employee_id'])
         return jsonify({'success': True, 'connected': bool(tokens and tokens.get('access_token'))})
     except Exception as e:
@@ -11581,7 +11581,7 @@ def api_quickbooks_connect_url():
         if not session_data.get('valid'):
             return jsonify({'success': False, 'message': 'Invalid session'}), 401
         
-        from quickbooks_sync import get_oauth_url
+        from src.quickbooks_sync import get_oauth_url
         url = get_oauth_url()
         return jsonify({'success': True, 'url': url})
     except ValueError as e:
@@ -11602,7 +11602,7 @@ def api_quickbooks_callback():
         if not code:
             return redirect('http://localhost:5173/settings?tab=integration&qbo=error&msg=missing_code')
             
-        from quickbooks_sync import exchange_code_for_tokens
+        from src.quickbooks_sync import exchange_code_for_tokens
         exchange_code_for_tokens(code, realm_id)
         
         return redirect('http://localhost:5173/settings?tab=integration&qbo=connected')
@@ -11619,7 +11619,7 @@ def api_quickbooks_status():
         if not session_token:
             return jsonify({'success': False, 'message': 'Authentication required'}), 401
             
-        from quickbooks_sync import get_stored_tokens
+        from src.quickbooks_sync import get_stored_tokens
         tokens = get_stored_tokens()
         return jsonify({'success': True, 'connected': tokens is not None})
     except Exception as e:
@@ -11636,7 +11636,7 @@ def api_quickbooks_sync_accounts():
         if not session_data.get('valid'):
             return jsonify({'success': False, 'message': 'Invalid session'}), 401
             
-        from quickbooks_sync import sync_qbo_accounts_to_db
+        from src.quickbooks_sync import sync_qbo_accounts_to_db
         result = sync_qbo_accounts_to_db()
         return jsonify(result)
     except Exception as e:
@@ -11651,7 +11651,7 @@ def api_quickbooks_sync_customers():
         if not session_token: return jsonify({'success': False, 'message': 'Authentication required'}), 401
         session_data = verify_session(session_token)
         if not session_data.get('valid'): return jsonify({'success': False, 'message': 'Invalid session'}), 401
-        from quickbooks_sync import sync_qbo_customers_to_db
+        from src.quickbooks_sync import sync_qbo_customers_to_db
         return jsonify(sync_qbo_customers_to_db())
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -11664,7 +11664,7 @@ def api_quickbooks_sync_vendors():
         if not session_token: return jsonify({'success': False, 'message': 'Authentication required'}), 401
         session_data = verify_session(session_token)
         if not session_data.get('valid'): return jsonify({'success': False, 'message': 'Invalid session'}), 401
-        from quickbooks_sync import sync_qbo_vendors_to_db
+        from src.quickbooks_sync import sync_qbo_vendors_to_db
         return jsonify(sync_qbo_vendors_to_db())
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -11677,7 +11677,7 @@ def api_quickbooks_sync_inventory():
         if not session_token: return jsonify({'success': False, 'message': 'Authentication required'}), 401
         session_data = verify_session(session_token)
         if not session_data.get('valid'): return jsonify({'success': False, 'message': 'Invalid session'}), 401
-        from quickbooks_sync import sync_qbo_products_to_db
+        from src.quickbooks_sync import sync_qbo_products_to_db
         return jsonify(sync_qbo_products_to_db())
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -11690,7 +11690,7 @@ def api_quickbooks_sync_transactions():
         if not session_token: return jsonify({'success': False, 'message': 'Authentication required'}), 401
         session_data = verify_session(session_token)
         if not session_data.get('valid'): return jsonify({'success': False, 'message': 'Invalid session'}), 401
-        from quickbooks_sync import sync_transactions_to_qbo
+        from src.quickbooks_sync import sync_transactions_to_qbo
         return jsonify(sync_transactions_to_qbo())
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -11711,7 +11711,7 @@ def api_google_calendar_sync():
         calendar_id = request.json.get('calendar_id')
         if not calendar_id:
             return jsonify({'success': False, 'message': 'calendar_id required'}), 400
-        from database import get_connection
+        from src.database import get_connection
         from psycopg2.extras import RealDictCursor
         conn = get_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -11725,7 +11725,7 @@ def api_google_calendar_sync():
         if not row:
             return jsonify({'success': False, 'message': 'Event not found'}), 404
         event = dict(row)
-        from google_calendar_sync import sync_event_to_google, update_master_calendar_google_event_id
+        from src.google_calendar_sync import sync_event_to_google, update_master_calendar_google_event_id
         result = sync_event_to_google(
             employee_id,
             event,
@@ -11759,7 +11759,7 @@ def export_event(event_id):
         
         employee_id = session_data.get('employee_id')
         
-        from calendar_integration import CalendarIntegrationSystem
+        from src.calendar_integration import CalendarIntegrationSystem
         calendar_system = CalendarIntegrationSystem()
         
         ical_data = calendar_system.export_single_event_ics(event_id, employee_id)
@@ -11796,7 +11796,7 @@ def create_shift():
         created_by = session_data['employee_id']
         data = request.json
         
-        from calendar_integration import CalendarIntegrationSystem
+        from src.calendar_integration import CalendarIntegrationSystem
         from datetime import datetime
         
         calendar_system = CalendarIntegrationSystem()
@@ -11836,7 +11836,7 @@ def schedule_shipment():
         created_by = session_data['employee_id']
         data = request.json
         
-        from calendar_integration import CalendarIntegrationSystem
+        from src.calendar_integration import CalendarIntegrationSystem
         from datetime import datetime
         
         calendar_system = CalendarIntegrationSystem()
@@ -11963,7 +11963,7 @@ def start_transaction():
         discount = float(data.get('discount', 0) or 0)
         discount_type = (data.get('discount_type') or '').strip() or None
         scheduled_time = data.get('scheduled_time')
-        from customer_display_system import CustomerDisplaySystem
+        from src.customer_display_system import CustomerDisplaySystem
         cds = CustomerDisplaySystem()
         result = cds.start_transaction(employee_id, items, customer_id, discount=discount, discount_type=discount_type, scheduled_time=scheduled_time)
         if SOCKETIO_AVAILABLE and socketio:
@@ -11977,7 +11977,7 @@ def start_transaction():
 def get_transaction(transaction_id):
     """Get transaction details"""
     try:
-        from customer_display_system import CustomerDisplaySystem
+        from src.customer_display_system import CustomerDisplaySystem
         cds = CustomerDisplaySystem()
         
         details = cds.get_transaction_details(transaction_id)
@@ -11993,7 +11993,7 @@ def get_transaction(transaction_id):
 def get_payment_methods():
     """Get available payment methods"""
     try:
-        from customer_display_system import CustomerDisplaySystem
+        from src.customer_display_system import CustomerDisplaySystem
         cds = CustomerDisplaySystem()
         
         methods = cds.get_payment_methods()
@@ -12021,7 +12021,7 @@ def process_payment():
         tip_received = data.get('tip', 0)
         print(f"[TIP DEBUG] /api/payment/process received: tip={tip_received} (type={type(tip_received).__name__}), full body keys={list(data.keys())}")
         
-        from customer_display_system import CustomerDisplaySystem
+        from src.customer_display_system import CustomerDisplaySystem
         cds = CustomerDisplaySystem()
         
         result = cds.process_payment(
@@ -12035,7 +12035,7 @@ def process_payment():
         # When payment completes for an order, ensure sale is journalized to accounting (idempotent)
         if result.get('success') and result.get('order_id'):
             try:
-                from pos_accounting_bridge import journalize_sale_to_accounting
+                from src.pos_accounting_bridge import journalize_sale_to_accounting
                 employee_id = session_data.get('employee_id') or session_data.get('user_id')
                 if employee_id:
                     jr = journalize_sale_to_accounting(int(result['order_id']), int(employee_id))
@@ -12063,7 +12063,7 @@ def save_receipt_preference():
     try:
         data = request.json
         
-        from customer_display_system import CustomerDisplaySystem
+        from src.customer_display_system import CustomerDisplaySystem
         cds = CustomerDisplaySystem()
         
         preference_id = cds.save_receipt_preference(
@@ -12087,7 +12087,7 @@ def save_receipt_preference():
                     conn.close()
                     order_id = (row.get('order_id') if isinstance(row, dict) else (row[0] if row else None))
                     if order_id:
-                        from notification_service import send_receipt_email_for_order
+                        from src.notification_service import send_receipt_email_for_order
                         result = send_receipt_email_for_order(
                             int(data.get('store_id', 1)), int(order_id), to_address,
                             transaction_id=data.get('transaction_id'),
@@ -12139,7 +12139,7 @@ def save_transaction_signature():
 def get_display_settings():
     """Get or update customer display settings"""
     try:
-        from customer_display_system import CustomerDisplaySystem
+        from src.customer_display_system import CustomerDisplaySystem
         cds = CustomerDisplaySystem()
         
         if request.method == 'GET':
@@ -12183,7 +12183,7 @@ def get_display_settings():
 def api_verification_settings():
     """Get or update shipment verification workflow settings"""
     try:
-        from database import ensure_shipment_verification_tables
+        from src.database import ensure_shipment_verification_tables
         ensure_shipment_verification_tables()
         conn, cursor = _pg_conn()
         
@@ -12230,7 +12230,7 @@ def api_update_workflow_step(shipment_id):
         if not step:
             return jsonify({'success': False, 'message': 'Step is required'}), 400
         
-        from database import ensure_shipment_verification_tables
+        from src.database import ensure_shipment_verification_tables
         ensure_shipment_verification_tables()
         conn, cursor = _pg_conn()
         cursor.execute("""
@@ -12282,7 +12282,7 @@ def api_add_to_inventory(shipment_id):
             conn.close()
             # Post to accounting so Accounting page reflects inventory received
             try:
-                from pos_accounting_bridge import journalize_shipment_received_to_accounting
+                from src.pos_accounting_bridge import journalize_shipment_received_to_accounting
                 jr = journalize_shipment_received_to_accounting(shipment_id, employee_id)
                 if not jr.get('success'):
                     print(f"Accounting journalize_shipment (pending_shipment {shipment_id}): {jr.get('message', 'unknown')}")
@@ -12312,7 +12312,7 @@ def api_settings_bootstrap():
 
         # Receipt settings
         try:
-            from receipt_generator import get_receipt_settings
+            from src.receipt_generator import get_receipt_settings
             out['receipt_settings'] = get_receipt_settings()
         except Exception as e:
             out['receipt_settings'] = None
@@ -12401,7 +12401,7 @@ def api_settings_bootstrap():
 
         # Customer display settings
         try:
-            from customer_display_system import CustomerDisplaySystem
+            from src.customer_display_system import CustomerDisplaySystem
             out['display_settings'] = CustomerDisplaySystem().get_display_settings()
         except Exception as e:
             out['display_settings'] = None
@@ -12847,7 +12847,7 @@ def api_validate_stripe_credentials():
             test_mode = 1 if secret_key.startswith('sk_test_') else 0
             
             # Encrypt and save credentials
-            from encryption_utils import encrypt
+            from src.encryption_utils import encrypt
             
             credential_record = create_stripe_credentials(
                 stripe_publishable_key=publishable_key,
@@ -12922,7 +12922,7 @@ def api_stripe_terminal_connection_token():
     The frontend Stripe Terminal JS SDK calls this on startup to connect to readers.
     """
     try:
-        from terminal_adapters import StripeTerminalAdapter
+        from src.terminal_adapters import StripeTerminalAdapter
         data = request.json or {}
         location_id = data.get('location_id')
         adapter = StripeTerminalAdapter()
@@ -12938,7 +12938,7 @@ def api_stripe_terminal_connection_token():
 def api_stripe_terminal_list_readers():
     """List all registered Stripe Terminal readers for this account."""
     try:
-        from terminal_adapters import StripeTerminalAdapter
+        from src.terminal_adapters import StripeTerminalAdapter
         location_id = request.args.get('location_id')
         adapter = StripeTerminalAdapter()
         result = adapter.list_readers(location_id=location_id)
@@ -12961,7 +12961,7 @@ def api_stripe_terminal_register_reader():
         location_id = data.get('location_id')
         if not registration_code or not label:
             return jsonify({'success': False, 'error': 'registration_code and label are required'}), 400
-        from terminal_adapters import StripeTerminalAdapter
+        from src.terminal_adapters import StripeTerminalAdapter
         adapter = StripeTerminalAdapter()
         result = adapter.register_reader(registration_code, label, location_id=location_id)
         return jsonify(result), (200 if result.get('success') else 400)
@@ -12975,7 +12975,7 @@ def api_stripe_terminal_register_reader():
 def api_stripe_terminal_delete_reader(reader_id):
     """Delete / de-register a Stripe Terminal reader."""
     try:
-        from terminal_adapters import StripeTerminalAdapter
+        from src.terminal_adapters import StripeTerminalAdapter
         adapter = StripeTerminalAdapter()
         result = adapter.delete_reader(reader_id)
         return jsonify(result), (200 if result.get('success') else 400)
@@ -12999,7 +12999,7 @@ def api_stripe_terminal_present_payment(reader_id):
         payment_intent_id = data.get('payment_intent_id', '').strip()
         if not payment_intent_id:
             return jsonify({'success': False, 'error': 'payment_intent_id is required'}), 400
-        from terminal_adapters import StripeTerminalAdapter
+        from src.terminal_adapters import StripeTerminalAdapter
         adapter = StripeTerminalAdapter()
         result = adapter.present_to_reader(reader_id, payment_intent_id)
         return jsonify(result), (200 if result.get('success') else 400)
@@ -13013,7 +13013,7 @@ def api_stripe_terminal_present_payment(reader_id):
 def api_stripe_terminal_cancel_reader(reader_id):
     """Cancel the current action on a reader (e.g. waiting for tap)."""
     try:
-        from terminal_adapters import StripeTerminalAdapter
+        from src.terminal_adapters import StripeTerminalAdapter
         adapter = StripeTerminalAdapter()
         result = adapter.cancel_reader_action(reader_id)
         return jsonify(result), (200 if result.get('success') else 400)
@@ -13047,7 +13047,7 @@ def api_create_payment_intent():
         metadata = data.get('metadata') or {}
         adapter_type = data.get('adapter_type', 'manual')
 
-        from terminal_adapters import get_adapter
+        from src.terminal_adapters import get_adapter
         adapter = get_adapter(adapter_type)
         result = adapter.create_payment(
             amount_cents=amount_cents,
@@ -13064,7 +13064,7 @@ def api_create_payment_intent():
 def api_capture_payment_intent(payment_intent_id):
     """Capture a previously authorised PaymentIntent (Stripe Terminal flow)."""
     try:
-        from terminal_adapters import StripeTerminalAdapter
+        from src.terminal_adapters import StripeTerminalAdapter
         adapter = StripeTerminalAdapter()
         result = adapter.capture_payment(payment_intent_id)
         return jsonify(result), (200 if result.get('success') else 400)
@@ -13079,7 +13079,7 @@ def api_cancel_payment_intent(payment_intent_id):
     """Cancel an in-progress PaymentIntent."""
     try:
         adapter_type = (request.json or {}).get('adapter_type', 'manual')
-        from terminal_adapters import get_adapter
+        from src.terminal_adapters import get_adapter
         adapter = get_adapter(adapter_type)
         result = adapter.cancel_payment(payment_intent_id)
         return jsonify(result), (200 if result.get('success') else 400)
@@ -13489,7 +13489,7 @@ def api_sms_send():
         text = (data.get('message_text') or '').strip()[:160]
         if not phone or not text:
             return jsonify({'success': False, 'message': 'Phone number and message required'}), 400
-        from notification_service import send_sms
+        from src.notification_service import send_sms
         result = send_sms(phone, text, store_id, 'manual', data.get('customer_id'))
         if result.get('success'):
             return jsonify({'success': True, 'message': 'SMS sent'})
@@ -13658,7 +13658,7 @@ def api_notification_settings_get():
 
     try:
         store_id = int(request.args.get('store_id', 1))
-        from notification_service import _get_sms_settings, get_notification_preferences
+        from src.notification_service import _get_sms_settings, get_notification_preferences
         s = _get_sms_settings(store_id)
         prefs = get_notification_preferences(store_id)
         out = {'store_id': store_id, 'notification_preferences': prefs}
@@ -13704,7 +13704,7 @@ def api_notification_settings_post():
 def api_get_scheduled_alerts():
     """Get upcoming scheduled order alerts."""
     try:
-        from database_postgres import get_connection
+        from src.database_postgres import get_connection
         from psycopg2.extras import RealDictCursor
         conn = get_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -13743,7 +13743,7 @@ def api_mark_alert_viewed():
         if not alert_id:
             return jsonify({'success': False, 'message': 'alert_id required'}), 400
             
-        from database_postgres import get_connection
+        from src.database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("""
@@ -13782,7 +13782,7 @@ def api_notifications_test_email():
                 'smtp_use_tls': 1,
                 'business_name': data.get('business_name', 'POS'),
             }
-        from notification_service import send_email
+        from src.notification_service import send_email
         result = send_email(to_addr, 'POS Test Email', '<p>This is a test email from your POS notification system.</p>', 'This is a test email from your POS notification system.', store_id, settings_override=override)
         if result.get('success'):
             return jsonify({'success': True, 'message': 'Test email sent'})
@@ -13804,7 +13804,7 @@ def api_notifications_test_sms():
         if not phone:
             return jsonify({'success': False, 'message': 'Phone number required'}), 400
         store_id = int(data.get('store_id', 1))
-        from notification_service import send_sms
+        from src.notification_service import send_sms
         result = send_sms(phone, data.get('message_text', 'Test SMS from POS')[:160], store_id)
         if result.get('success'):
             return jsonify({'success': True, 'message': 'Test SMS sent'})
@@ -13830,7 +13830,7 @@ def api_email_templates_send_test():
         body_html = (data.get('body_html') or data.get('body_html_template') or '<p>Test</p>').strip() or '<p>Test</p>'
         body_text = (data.get('body_text') or data.get('body_text_template') or '').strip()
         store_id = int(data.get('store_id', 1))
-        from notification_service import send_email, _get_email_logo_png_bytes, _EMAIL_LOGO_CID, _EMAIL_LOGO_FILES
+        from src.notification_service import send_email, _get_email_logo_png_bytes, _EMAIL_LOGO_CID, _EMAIL_LOGO_FILES
 
         # Detect order-source logos embedded as relative paths (e.g. src="/doordash-email-logo.svg")
         # in the preview HTML and convert them to CID-attached PNGs so they render in email clients.
@@ -14014,7 +14014,7 @@ def api_email_templates_reset_to_la_maison():
     if not ok:
         return err
     try:
-        from la_maison_templates import LA_MAISON_DEFAULTS
+        from src.la_maison_templates import LA_MAISON_DEFAULTS
         data = request.json or {}
         store_id = int(data.get('store_id', 1))
         conn, cursor = _pg_conn()
@@ -14042,7 +14042,7 @@ def api_email_templates_seed_receipt_presets():
     if not ok:
         return err
     try:
-        from la_maison_templates import LA_MAISON_DEFAULTS
+        from src.la_maison_templates import LA_MAISON_DEFAULTS
         data = request.json or {}
         store_id = int(data.get('store_id', 1))
         conn, cursor = _pg_conn()
@@ -14162,7 +14162,7 @@ def api_email_template_preview():
     if not ok:
         return err
     try:
-        from notification_service import render_template
+        from src.notification_service import render_template
         data = request.json or {}
         subject = (data.get('subject_template') or '').strip()
         body_html = (data.get('body_html_template') or '').strip()
@@ -14209,7 +14209,7 @@ def api_send_receipt_email():
             return jsonify({'success': False, 'message': 'order_id and to_address required'}), 400
         store_id = int(data.get('store_id', 1))
         transaction_id = data.get('transaction_id')
-        from notification_service import send_receipt_email_for_order
+        from src.notification_service import send_receipt_email_for_order
         result = send_receipt_email_for_order(
             store_id, int(order_id), to_address,
             transaction_id=int(transaction_id) if transaction_id else None,
@@ -14261,7 +14261,7 @@ def api_open_register():
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
         
-        from database import open_cash_register
+        from src.database import open_cash_register
         
         result = open_cash_register(
             employee_id=employee_id,
@@ -14272,7 +14272,7 @@ def api_open_register():
         
         if result.get('success'):
             try:
-                from notification_service import send_register_notification
+                from src.notification_service import send_register_notification
                 emp_name = session_result.get('employee_name', 'Employee')
                 emp_email = session_result.get('email', '')
                 send_register_notification(
@@ -14326,7 +14326,7 @@ def api_close_register():
         if ending_cash is None:
             return jsonify({'success': False, 'message': 'ending_cash is required'}), 400
         
-        from database import close_cash_register
+        from src.database import close_cash_register
         
         result = close_cash_register(
             session_id=session_id,
@@ -14339,7 +14339,7 @@ def api_close_register():
             # Post cash over/short to accounting when discrepancy
             if result.get('discrepancy') is not None and abs(float(result.get('discrepancy', 0))) >= 0.01:
                 try:
-                    from pos_accounting_bridge import journalize_register_close_to_accounting
+                    from src.pos_accounting_bridge import journalize_register_close_to_accounting
                     jr = journalize_register_close_to_accounting(
                         session_id,
                         employee_id,
@@ -14353,7 +14353,7 @@ def api_close_register():
                 except Exception as je:
                     print(f"Accounting register close error (session {session_id}): {je}")
             try:
-                from notification_service import send_register_notification
+                from src.notification_service import send_register_notification
                 emp_name = session_result.get('employee_name', 'Employee')
                 emp_email = session_result.get('email', '')
                 send_register_notification(
@@ -14399,7 +14399,7 @@ def api_add_cash_transaction():
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
         
-        from database import add_cash_transaction
+        from src.database import add_cash_transaction
         
         result = add_cash_transaction(
             session_id=data.get('session_id'),
@@ -14413,7 +14413,7 @@ def api_add_cash_transaction():
         if result.get('success'):
             # Post cash in/out to accounting
             try:
-                from pos_accounting_bridge import journalize_cash_transaction_to_accounting
+                from src.pos_accounting_bridge import journalize_cash_transaction_to_accounting
                 jr = journalize_cash_transaction_to_accounting(
                     data.get('session_id'),
                     employee_id,
@@ -14428,7 +14428,7 @@ def api_add_cash_transaction():
             except Exception as je:
                 print(f"Accounting cash transaction error: {je}")
             try:
-                from notification_service import send_register_notification
+                from src.notification_service import send_register_notification
                 emp_name = session_result.get('employee_name', 'Employee')
                 emp_email = session_result.get('email', '')
                 action_type = 'withdraw' if data.get('transaction_type') == 'out' else 'drop'
@@ -14471,7 +14471,7 @@ def api_get_register_session():
         if not session_result.get('valid'):
             return jsonify({'success': False, 'message': 'Invalid session'}), 401
         
-        from database import get_register_session
+        from src.database import get_register_session
         
         session_id = request.args.get('session_id')
         register_id = request.args.get('register_id')
@@ -14514,7 +14514,7 @@ def api_get_register_summary():
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id is required'}), 400
         
-        from database import get_register_summary
+        from src.database import get_register_summary
         
         result = get_register_summary(int(session_id))
         
@@ -14555,7 +14555,7 @@ def api_reconcile_register():
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id is required'}), 400
         
-        from database import reconcile_register_session
+        from src.database import reconcile_register_session
         
         result = reconcile_register_session(
             session_id=session_id,
@@ -14587,7 +14587,7 @@ def api_get_register_events():
         if not session_result.get('valid'):
             return jsonify({'success': False, 'message': 'Invalid session'}), 401
         
-        from database import get_register_events
+        from src.database import get_register_events
         
         register_id = request.args.get('register_id')
         limit = request.args.get('limit', 100)
@@ -14626,7 +14626,7 @@ def api_register_cash_settings():
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
         
-        from database import get_register_cash_settings, save_register_cash_settings
+        from src.database import get_register_cash_settings, save_register_cash_settings
         
         if request.method == 'GET':
             register_id = request.args.get('register_id')
@@ -14686,7 +14686,7 @@ def api_daily_cash_count():
         if not employee_id:
             return jsonify({'success': False, 'message': 'Employee ID not found in session'}), 401
         
-        from database import get_daily_cash_counts, save_daily_cash_count
+        from src.database import get_daily_cash_counts, save_daily_cash_count
         
         if request.method == 'GET':
             register_id = request.args.get('register_id')
@@ -14736,7 +14736,7 @@ def api_daily_cash_count():
                 # Post cash drop to accounting when count_type is drop and amount > 0
                 if count_type == 'drop' and float(total_amount or 0) > 0 and result.get('count_id'):
                     try:
-                        from pos_accounting_bridge import journalize_cash_drop_to_accounting
+                        from src.pos_accounting_bridge import journalize_cash_drop_to_accounting
                         jr = journalize_cash_drop_to_accounting(
                             int(result['count_id']),
                             float(total_amount),
@@ -14750,7 +14750,7 @@ def api_daily_cash_count():
                         print(f"Accounting journalize_cash_drop error: {je}")
                 
                 try:
-                    from notification_service import send_register_notification
+                    from src.notification_service import send_register_notification
                     emp_name = session_result.get('employee_name', 'Employee')
                     emp_email = session_result.get('email', '')
                     action_type = 'drop' if count_type == 'drop' else 'withdraw'
@@ -14789,7 +14789,7 @@ if _ACCOUNTING_BACKEND_AVAILABLE:
         if _accounting_schema_ensured:
             return
         try:
-            from accounting_bootstrap import ensure_accounting_schema
+            from src.accounting_bootstrap import ensure_accounting_schema
             ensure_accounting_schema()
             _accounting_schema_ensured = True
         except Exception as e:
@@ -15130,7 +15130,7 @@ if _ACCOUNTING_BACKEND_AVAILABLE:
     def api_accounting_balance_sheet_comparative():
         return report_controller.get_comparative_balance_sheet()
 
-    ACCOUNTING_REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'accounting_reports')
+    ACCOUNTING_REPORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'uploads', 'accounting_reports')
 
     @app.route('/api/accounting/directory', methods=['GET'])
     def api_accounting_directory():
@@ -15200,7 +15200,7 @@ if _ACCOUNTING_BACKEND_AVAILABLE:
 
             if save_as_pdf:
                 try:
-                    from report_pdf_generator import generate_report_pdf
+                    from src.report_pdf_generator import generate_report_pdf
                     pdf_bytes = generate_report_pdf(content, report_type)
                     if not pdf_bytes:
                         return make_response(jsonify({'success': False, 'message': 'PDF generation failed. Install reportlab: pip install reportlab'}), 500)
@@ -15752,7 +15752,7 @@ def api_dashboard_popular_products():
         est_filter_o  = "AND o.establishment_id  = %(eid)s" if establishment_id else ""
         est_filter_ps = "AND ps.establishment_id = %(eid)s" if establishment_id else ""
 
-        from database import get_connection as _gc
+        from src.database import get_connection as _gc
         from psycopg2.extras import RealDictCursor as _RDC
         conn = _gc()
         cur  = conn.cursor(cursor_factory=_RDC)
@@ -15956,7 +15956,7 @@ def api_dashboard_restock_recommendations():
         est_filter_o  = "AND o.establishment_id  = %(eid)s" if establishment_id else ""
         est_filter_ps = "AND ps.establishment_id = %(eid)s" if establishment_id else ""
 
-        from database import get_connection as _gc
+        from src.database import get_connection as _gc
         from psycopg2.extras import RealDictCursor as _RDC
         conn = _gc()
         cur  = conn.cursor(cursor_factory=_RDC)
@@ -16464,7 +16464,7 @@ def api_gift_card_sale():
             return jsonify({'success': False, 'message': 'Amount must be positive'}), 400
 
         # Insert gift card record
-        from database import get_connection as _gc
+        from src.database import get_connection as _gc
         from psycopg2.extras import RealDictCursor as _RDC
         conn = _gc()
         cur = conn.cursor(cursor_factory=_RDC)
@@ -16478,7 +16478,7 @@ def api_gift_card_sale():
         conn.close()
         gift_card_id = row['id'] if row else 0
 
-        from pos_accounting_bridge import journalize_gift_card_sale_to_accounting
+        from src.pos_accounting_bridge import journalize_gift_card_sale_to_accounting
         acct = journalize_gift_card_sale_to_accounting(gift_card_id, amount, employee_id, establishment_id)
         return jsonify({'success': True, 'gift_card_id': gift_card_id, 'amount': amount, 'accounting': acct}), 201
     except Exception as e:
@@ -16502,7 +16502,7 @@ def api_gift_card_breakage(gift_card_id):
         amount = float(body.get('amount') or 0)
         if amount <= 0:
             return jsonify({'success': False, 'message': 'Amount must be positive'}), 400
-        from pos_accounting_bridge import journalize_gift_card_breakage_to_accounting
+        from src.pos_accounting_bridge import journalize_gift_card_breakage_to_accounting
         acct = journalize_gift_card_breakage_to_accounting(gift_card_id, amount, employee_id, establishment_id)
         return jsonify({'success': True, 'accounting': acct}), 200
     except Exception as e:
@@ -16534,7 +16534,7 @@ def api_accounting_backfill_orders():
         body = request.get_json(force=True, silent=True) or {}
         days_back = int(body.get('days_back', 90))
 
-        from database import get_connection as _gc
+        from src.database import get_connection as _gc
         from psycopg2.extras import RealDictCursor as _RDC
         conn = _gc()
         cur = conn.cursor(cursor_factory=_RDC)
@@ -16561,7 +16561,7 @@ def api_accounting_backfill_orders():
         order_ids = [r['order_id'] for r in rows]
         succeeded, skipped, failed = [], [], []
 
-        from pos_accounting_bridge import journalize_sale_to_accounting
+        from src.pos_accounting_bridge import journalize_sale_to_accounting
         for oid in order_ids:
             try:
                 result = journalize_sale_to_accounting(oid, employee_id)
@@ -16611,7 +16611,7 @@ def api_accounting_reconciliation():
         if not start_date or not end_date:
             return jsonify({'success': False, 'message': 'start_date and end_date required'}), 400
 
-        from database import get_reconciliation_report
+        from src.database import get_reconciliation_report
         report = get_reconciliation_report(start_date, end_date, establishment_id=establishment_id)
         if 'error' in report:
             return jsonify({'success': False, 'message': report['error']}), 500
@@ -16640,7 +16640,7 @@ def api_establishment_vertical(establishment_id):
             return jsonify({'success': False, 'message': 'Invalid session'}), 401
 
         if request.method == 'GET':
-            from accounting_bootstrap import get_accounting_settings
+            from src.accounting_bootstrap import get_accounting_settings
             settings = get_accounting_settings(establishment_id)
             return jsonify({'success': True, 'vertical': settings.get('vertical', 'retail')}), 200
 
@@ -16650,7 +16650,7 @@ def api_establishment_vertical(establishment_id):
         if vertical not in ('restaurant', 'retail', 'service'):
             return jsonify({'success': False, 'message': "vertical must be 'restaurant', 'retail', or 'service'"}), 400
 
-        from accounting_bootstrap import set_establishment_vertical
+        from src.accounting_bootstrap import set_establishment_vertical
         ok = set_establishment_vertical(establishment_id, vertical)
         if not ok:
             return jsonify({'success': False, 'message': 'Failed to update vertical'}), 500
@@ -16910,7 +16910,7 @@ if __name__ == '__main__':
 
     # Start the scheduled orders background worker
     try:
-        from notification_service import scheduled_orders_worker
+        from src.notification_service import scheduled_orders_worker
         _scheduling_thread = threading.Thread(target=scheduled_orders_worker, daemon=True)
         _scheduling_thread.start()
         print("Scheduled orders worker started")

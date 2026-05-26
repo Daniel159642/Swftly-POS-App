@@ -16,16 +16,16 @@ DB_POOL_MAX=3
 
 Then:
 
-- Stop the backend (Ctrl+C in the terminal where `python3 web_viewer.py` is running).
+- Stop the backend (Ctrl+C in the terminal where `python3 -m src.web_viewer` is running).
 - Close any other apps or terminals that use the same Supabase project (other runs of the app, Supabase Studio tabs, scripts).
 - Wait about a minute for idle connections to drop.
-- Start the backend again: `python3 web_viewer.py`
+- Start the backend again: `python3 -m src.web_viewer`
 
 If you still see "max clients reached", wait longer or check **Supabase Dashboard → Database** for active connections.
 
 ## Step 2: Create the accounting tables (fix "invoices does not exist")
 
-From the **`pos`** directory (same folder as `web_viewer.py`), run the migration script. It creates `invoices`, `accounting_customers`, `accounts`, and other accounting tables.
+From the **`pos`** directory (same folder as `src/web_viewer.py`), run the migration script. It creates `invoices`, `accounting_customers`, `accounts`, and other accounting tables.
 
 ```bash
 cd "/Users/danielbudnyatsky/POS 2/pos"

@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.fixture(scope='session')
 def app():
     """Create Flask app for testing"""
-    from web_viewer import app
+    from src.web_viewer import app
     app.config['TESTING'] = True
     app.config['WTF_CSRF_ENABLED'] = False
     return app

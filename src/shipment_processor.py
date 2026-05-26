@@ -6,8 +6,8 @@ Processes any document type and returns products for UI review/confirmation.
 import os
 from pathlib import Path
 
-from config import EXTRACTION_CONFIG
-from document_processor import ShipmentDocumentProcessor
+from src.config import EXTRACTION_CONFIG
+from src.document_processor import ShipmentDocumentProcessor
 
 
 class ShipmentProcessor:
@@ -53,7 +53,7 @@ class ShipmentProcessor:
     def _log_cost(self, result, filename, file_type, success=1, error_message=None):
         """Write an extraction_cost_log row; never raises."""
         try:
-            from database import log_extraction_cost
+            from src.database import log_extraction_cost
             extractor_choice = EXTRACTION_CONFIG.get("extractor", "claude")
             model = result.get("_model") or (
                 "claude-sonnet-4-6" if extractor_choice == "claude" else "gpt-4o"

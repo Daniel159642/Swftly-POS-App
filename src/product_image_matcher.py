@@ -12,7 +12,7 @@ from PIL import Image
 import pickle
 import os
 from typing import List, Dict, Optional, Any
-from database import get_connection
+from src.database import get_connection
 
 
 class ProductImageMatcher:
