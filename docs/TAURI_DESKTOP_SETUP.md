@@ -16,7 +16,7 @@ The desktop app talks to your Python API. In one terminal:
 
 ```bash
 cd /Users/danielbudnyatsky/POS\ 2/pos
-python3 web_viewer.py
+python3 -m src.web_viewer
 ```
 
 Leave this running (default: http://localhost:5001).
@@ -64,7 +64,7 @@ From the **pos** directory (not "POS 2"):
 
 ```bash
 cd pos
-python3 scripts/apply_rounded_icon_corners.py
+python3 -m scripts.apply_rounded_icon_corners
 npm run tauri:build
 ```
 
@@ -85,5 +85,5 @@ A placeholder icon is in `src-tauri/icons/icon.png`. To use your own:
 ## Troubleshooting
 
 - **“Rust not found”** – Install Rust (see Prerequisites), then restart the terminal or run `source "$HOME/.cargo/env"`.
-- **“Failed to connect” in the app** – Start the backend first: `python3 web_viewer.py`.
+- **“Failed to connect” in the app** – Start the backend first: `python3 -m src.web_viewer`.
 - **Build fails on icon** – Ensure `src-tauri/icons/icon.png` exists and is a valid RGBA PNG (e.g. 32×32 or larger).

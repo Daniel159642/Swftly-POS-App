@@ -44,7 +44,7 @@ On the machine where the POS **backend** runs (e.g. your server or your dev mach
 From the project root, with `.env` containing `DATABASE_URL`:
 
 ```bash
-python3 scripts/setup_complete_database.py
+python3 -m scripts.setup_complete_database
 ```
 
 This script:
@@ -71,13 +71,13 @@ After the schema is applied:
 python3 create_admin_account.py
 # Enter employee code (e.g. ADMIN001), name, password when prompted.
 
-python3 scripts/init_admin_permissions.py
+python3 -m scripts.init_admin_permissions
 ```
 
 ## 6. Start the backend
 
 ```bash
-python3 web_viewer.py
+python3 -m src.web_viewer
 ```
 
 The backend will connect to Supabase using `DATABASE_URL` from `.env`. Clients connect only to the backend.
@@ -97,7 +97,7 @@ Keeping the database URL only on the backend ensures clients never need to chang
 From the project root (with `DATABASE_URL` in `.env`):
 
 ```bash
-python3 scripts/check_postgres_connection.py
+python3 -m scripts.check_postgres_connection
 ```
 
 If you see SSL or connection errors with Supabase, append `?sslmode=require` to your `DATABASE_URL`.

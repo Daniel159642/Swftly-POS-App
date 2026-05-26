@@ -109,7 +109,7 @@ for item in identified:
 
 ### Flask API Endpoints
 
-The system integrates with your existing Flask app (`web_viewer.py`):
+The system integrates with your existing Flask app (`src/web_viewer.py`):
 
 #### 1. Identify Product
 

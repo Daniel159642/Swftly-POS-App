@@ -26,13 +26,13 @@ Use the `scripts/setup_admin_pin.py` script to configure the admin account on an
 
 ```bash
 # Show current admin status
-python3 scripts/setup_admin_pin.py
+python3 -m scripts.setup_admin_pin
 
 # Link Clerk ID and auto-generate PIN
-python3 scripts/setup_admin_pin.py user_2abc123def456
+python3 -m scripts.setup_admin_pin user_2abc123def456
 
 # Link Clerk ID and set specific PIN
-python3 scripts/setup_admin_pin.py user_2abc123def456 123456
+python3 -m scripts.setup_admin_pin user_2abc123def456 123456
 ```
 
 ### 3. Use the PIN to Login
@@ -82,14 +82,14 @@ When setting up on a new computer:
 
 5. **Set up admin PIN**
    ```bash
-   python3 scripts/setup_admin_pin.py <your_clerk_user_id> [pin]
+   python3 -m scripts.setup_admin_pin <your_clerk_user_id> [pin]
    ```
 
 6. **Start servers**
    ```bash
    # Terminal 1 - Backend
    source venv/bin/activate
-   python3 web_viewer.py
+   python3 -m src.web_viewer
    
    # Terminal 2 - Frontend
    cd frontend

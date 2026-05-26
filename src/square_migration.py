@@ -134,7 +134,7 @@ def get_valid_square_access_token(
     Get a valid Square access token for the establishment (from stored OAuth tokens).
     Refreshes if expired or expiring within 5 minutes. Returns (access_token, error_message).
     """
-    from database import get_establishment_settings, update_establishment_settings
+    from src.database import get_establishment_settings, update_establishment_settings
     from datetime import datetime, timezone
 
     settings = get_establishment_settings(establishment_id)
@@ -289,8 +289,8 @@ def run_migration(
     Run Square migration. migrate keys: inventory, employees, order_history, payments, transactions, statistics.
     Returns counts: inventory, employees, orders, payments, and optional error.
     """
-    from database import add_product, add_employee, create_order, get_connection
-    from database_postgres import get_current_establishment
+    from src.database import add_product, add_employee, create_order, get_connection
+    from src.database_postgres import get_current_establishment
 
     result = {
         "success": True,
@@ -499,7 +499,7 @@ def run_migration(
                     cols = [r[0] for r in cur.fetchall()]
                     establishment_id = establishment_id_override
                     if establishment_id is None:
-                        from database_postgres import get_current_establishment
+                        from src.database_postgres import get_current_establishment
                         establishment_id = get_current_establishment()
                     if not establishment_id:
                         cur.execute("SELECT establishment_id FROM orders WHERE order_id = %s LIMIT 1", (our_order_id,))

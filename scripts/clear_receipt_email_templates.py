@@ -12,7 +12,7 @@ try:
 except ImportError:
     pass
 
-from database_postgres import get_connection
+from src.database_postgres import get_connection
 
 
 def main():

@@ -3,7 +3,7 @@ import json
 import requests
 import base64
 from datetime import datetime, timedelta
-from database_postgres import get_connection
+from src.database_postgres import get_connection
 
 # Intuit OAuth 2.0 Endpoints
 QBO_DISCOVERY_URL = "https://developer.api.intuit.com/.well-known/openid_sandbox_configuration" # Sandbox discovery

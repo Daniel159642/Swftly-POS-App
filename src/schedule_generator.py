@@ -10,7 +10,7 @@ from collections import defaultdict
 import json
 from typing import List, Dict, Tuple, Optional, Any
 import psycopg2.extras
-from database import get_connection, get_store_location_settings
+from src.database import get_connection, get_store_location_settings
 
 
 def _store_hours_for_scheduler() -> Dict[str, Optional[Tuple[str, str]]]:

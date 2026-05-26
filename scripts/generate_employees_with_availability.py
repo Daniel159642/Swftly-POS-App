@@ -7,7 +7,7 @@ import sqlite3
 import json
 import random
 from datetime import datetime, timedelta
-from database import add_employee, add_schedule, get_connection, DB_NAME
+from src.database import add_employee, add_schedule, get_connection, DB_NAME
 
 # Sample employee data
 EMPLOYEES = [
@@ -541,7 +541,7 @@ def main():
                 # Create employee directly in database to ensure both username and employee_code are set
                 print(f"Creating employee: {emp_data['first_name']} {emp_data['last_name']} ({emp_data['username']})...")
                 
-                from database import hash_password
+                from src.database import hash_password
                 password_hash = hash_password(emp_data['username'])  # Password same as username
                 
                 cursor.execute("""

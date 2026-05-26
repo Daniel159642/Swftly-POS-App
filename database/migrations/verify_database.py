@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 load_dotenv()
 
-from database_postgres import get_connection
+from src.database_postgres import get_connection
 
 def verify_database():
     """Verify database structure and functionality"""

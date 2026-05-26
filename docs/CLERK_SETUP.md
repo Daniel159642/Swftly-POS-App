@@ -56,7 +56,7 @@ npm run dev
 
 **Backend:**
 ```bash
-python3 web_viewer.py
+python3 -m src.web_viewer
 ```
 
 ## Authentication Flow

@@ -14,14 +14,14 @@ class CustomerDisplaySystem:
 
     def get_connection(self):
         """Get PostgreSQL connection with dict-like rows"""
-        from database import get_connection
+        from src.database import get_connection
         from psycopg2.extras import RealDictCursor
         conn = get_connection()
         return conn, conn.cursor(cursor_factory=RealDictCursor)
     
     def start_transaction(self, employee_id, items, customer_id=None, discount=0.0, discount_type=None, scheduled_time=None):
         """Start a new transaction. discount is order-level discount amount; discount_type e.g. 'student', 'employee'."""
-        from database_postgres import get_current_establishment
+        from src.database_postgres import get_current_establishment
         conn, cursor = self.get_connection()
         try:
             # Ensure we start with a clean transaction state
@@ -293,7 +293,7 @@ class CustomerDisplaySystem:
             # Award loyalty points when order has a customer (same as create_order / process_payment)
             if customer_id:
                 try:
-                    from database import award_rewards_for_purchase
+                    from src.database import award_rewards_for_purchase
                     amount_for_rewards = subtotal + total_tax
                     award_rewards_for_purchase(cursor, customer_id, amount_for_rewards, points_used=0)
                 except Exception as rew_err:
@@ -354,7 +354,7 @@ class CustomerDisplaySystem:
     
     def get_payment_methods(self):
         """Get available payment methods"""
-        from database_postgres import get_current_establishment
+        from src.database_postgres import get_current_establishment
         conn, cursor = self.get_connection()
         try:
             establishment_id = get_current_establishment()
@@ -472,11 +472,11 @@ class CustomerDisplaySystem:
                 change = 0
             
             # Create payment record
-            from database_postgres import get_current_establishment
+            from src.database_postgres import get_current_establishment
             payment_establishment_id = get_current_establishment()
             if payment_establishment_id is None:
                 # Fallback to get or create default establishment
-                from database import _get_or_create_default_establishment
+                from src.database import _get_or_create_default_establishment
                 payment_establishment_id = _get_or_create_default_establishment(conn)
             
             # Only insert payment record if we have a valid payment_method_id
@@ -568,7 +568,7 @@ class CustomerDisplaySystem:
             customer_id = transaction.get('customer_id')
             if customer_id and order_payment_status == 'completed':
                 try:
-                    from database import award_rewards_for_purchase
+                    from src.database import award_rewards_for_purchase
                     subtotal = float(transaction.get('subtotal', 0) or 0)
                     tax = float(transaction.get('tax', 0) or 0)
                     amount_for_rewards = subtotal + tax
@@ -685,7 +685,7 @@ class CustomerDisplaySystem:
     
     def get_display_settings(self):
         """Get customer display settings"""
-        from database_postgres import get_current_establishment
+        from src.database_postgres import get_current_establishment
         conn, cursor = self.get_connection()
         
         establishment_id = get_current_establishment()
@@ -746,7 +746,7 @@ class CustomerDisplaySystem:
     
     def update_display_settings(self, **kwargs):
         """Update customer display settings for the current establishment."""
-        from database_postgres import get_current_establishment
+        from src.database_postgres import get_current_establishment
         conn, cursor = self.get_connection()
         
         try:

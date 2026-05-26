@@ -2,7 +2,7 @@
 The Statistics subsystem provides real-time insights into the financial and operational health of the POS system.
 
 ## Architecture
-- **Data Aggregation**: Aggregation logic resides within the core database layer and is exposed through backend API routes (e.g., `/api/sales`, `/api/inventory` endpoints in `web_viewer.py`).
+- **Data Aggregation**: Aggregation logic resides within the core database layer and is exposed through backend API routes (e.g., `/api/sales`, `/api/inventory` endpoints in `src/web_viewer.py`).
 - **Frontend Dashboards**: The React frontend consumes these endpoints to generate visualizations, chart data, and filterable tables.
 
 ## Key Capabilities

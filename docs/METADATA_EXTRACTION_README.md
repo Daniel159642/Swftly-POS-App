@@ -212,7 +212,7 @@ Open Food Facts only works for food products. For other products, the system wil
 
 ## API Integration
 
-You can integrate this into your Flask API (see `web_viewer.py` for existing API structure):
+You can integrate this into your Flask API (see `src/web_viewer.py` for existing API structure):
 
 ```python
 from flask import Flask, request, jsonify

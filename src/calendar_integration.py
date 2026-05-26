@@ -11,7 +11,7 @@ import uuid
 import hashlib
 from typing import Optional, Dict, Any, List
 from psycopg2.extras import RealDictCursor
-from database import get_connection
+from src.database import get_connection
 
 class CalendarIntegrationSystem:
     
