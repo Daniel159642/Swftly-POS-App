@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# Run from repo root so .env, .git, sql/, and python module imports resolve
+cd "$(dirname "$0")/.." || exit 1
 # Complete database setup script for new computers
 # This script sets up the entire database with all required tables and data
 
@@ -71,16 +74,16 @@ else
 fi
 
 echo ""
-echo "Step 4: Running returns schema (returns_schema.sql)..."
-if [ -f returns_schema.sql ]; then
-    $PSQL_CMD -f returns_schema.sql
+echo "Step 4: Running returns schema (sql/returns_schema.sql)..."
+if [ -f sql/returns_schema.sql ]; then
+    $PSQL_CMD -f sql/returns_schema.sql
     if [ $? -eq 0 ]; then
         echo "  ✓ Returns schema applied"
     else
         echo "  ⚠ Warning: Returns schema had errors (may already be applied)"
     fi
 else
-    echo "  - returns_schema.sql not found, skipping"
+    echo "  - sql/returns_schema.sql not found, skipping"
 fi
 
 echo ""
@@ -94,7 +97,7 @@ done
 
 echo ""
 echo "Step 6: Creating admin account..."
-python3 create_admin_account.py << EOF
+python3 -m src.create_admin_account << EOF
 ADMIN001
 Admin
 User
@@ -103,7 +106,7 @@ EOF
 
 echo ""
 echo "Step 7: Initializing permissions (REQUIRED for admin access)..."
-python3 init_admin_permissions.py
+python3 -m scripts.init_admin_permissions
 
 echo ""
 echo "============================================================================"
@@ -111,7 +114,7 @@ echo "✓ Database setup complete!"
 echo "============================================================================"
 echo ""
 echo "You can now:"
-echo "  1. Start the backend: python3 web_viewer.py"
+echo "  1. Start the backend: python3 -m src.web_viewer"
 echo "  2. Start the frontend: cd frontend && npm run dev"
 echo "  3. Log in with:"
 echo "     - Employee Code: ADMIN001"

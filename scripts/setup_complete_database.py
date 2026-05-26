@@ -141,8 +141,8 @@ def main():
     run_sql_file('migrations/setup_quickbooks_accounting_schema.sql', 'QuickBooks accounting')
     print()
     
-    print("Step 4: Running returns schema (returns_schema.sql)...")
-    run_sql_file('returns_schema.sql', 'Returns schema')
+    print("Step 4: Running returns schema (sql/returns_schema.sql)...")
+    run_sql_file('sql/returns_schema.sql', 'Returns schema')
     print()
     
     print("Step 5: Running migrations...")

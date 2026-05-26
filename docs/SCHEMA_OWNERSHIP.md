@@ -5,7 +5,7 @@ To avoid drift and duplicate table definitions, treat these as the **single sour
 ## Public schema (POS)
 
 - **Canonical:** `schema_postgres.sql` plus migrations in `migrations/` (run in order as needed).
-- Do **not** redefine public tables in other standalone SQL files (e.g. `database_schema_dump.sql` is a snapshot for reference, not the definition to edit).
+- Do **not** redefine public tables in other standalone SQL files (e.g. `sql/database_schema_dump.sql` is a snapshot for reference, not the definition to edit).
 - When adding or changing public tables: update `schema_postgres.sql` for new installs and add a migration in `migrations/` for existing DBs.
 
 ## Accounting schema

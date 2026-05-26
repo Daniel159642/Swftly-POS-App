@@ -37,7 +37,7 @@ inventory.db*
 *.backup_*
 
 # Schema dumps (uncomment to ignore, or commit to sync structure)
-# database_schema_dump.sql
+# sql/database_schema_dump.sql
 
 # Database sync tracking
 .database_synced
@@ -58,6 +58,9 @@ inventory.db*
 logs.txt
 /tmp/
 *.tmp
+
+# Local scratch notes
+startup
 
 # Expo
 .expo/

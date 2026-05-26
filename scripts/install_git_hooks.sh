@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# Run from repo root so .env, .git, sql/, and python module imports resolve
+cd "$(dirname "$0")/.." || exit 1
 # Install git hooks so SQL files run automatically after git pull
 
 echo "Installing git hooks for automatic database updates..."

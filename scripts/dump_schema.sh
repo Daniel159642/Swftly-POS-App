@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# Run from repo root so .env, .git, sql/, and python module imports resolve
+cd "$(dirname "$0")/.." || exit 1
 # Dump database schema (structure only, no data) to a file
 # This can be committed to git and used to sync database structure
 
@@ -14,7 +17,7 @@ DB_USER=${DB_USER:-postgres}
 DB_HOST=${DB_HOST:-localhost}
 DB_PORT=${DB_PORT:-5432}
 
-OUTPUT_FILE="database_schema_dump.sql"
+OUTPUT_FILE="sql/database_schema_dump.sql"
 
 echo "Dumping database schema to $OUTPUT_FILE..."
 

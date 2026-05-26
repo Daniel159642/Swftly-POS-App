@@ -1,7 +1,10 @@
 #!/bin/bash
 
+# Run from repo root so .env, .git, sql/, and python module imports resolve
+cd "$(dirname "$0")/.." || exit 1
+
 # Sync script - pulls latest changes and merges into current branch
-# Usage: ./sync.sh
+# Usage: ./scripts/sync.sh
 
 set -e
 
@@ -81,6 +84,6 @@ else
 fi
 echo ""
 echo "📋 If you pulled new migrations/schema changes, update the database:"
-echo "  cd pos && python3 setup_complete_database.py"
-echo "  (or: ./restore_schema.sh if you use schema dumps)"
+echo "  cd pos && python3 -m scripts.setup_complete_database"
+echo "  (or: scripts/restore_schema.sh if you use schema dumps)"
 echo ""

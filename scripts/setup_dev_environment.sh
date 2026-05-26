@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# Run from repo root so .env, .git, sql/, and python module imports resolve
+cd "$(dirname "$0")/.." || exit 1
 # Development Environment Setup Script
 # POS Accounting System - Step 2
 
@@ -174,7 +177,7 @@ echo "Next Steps:"
 echo "1. Edit .env file with your database credentials"
 echo "2. Set up PostgreSQL database (see instructions above)"
 echo "3. Run database schema files"
-echo "4. Start backend: python3 web_viewer.py"
+echo "4. Start backend: python3 -m src.web_viewer"
 echo "5. Start frontend: cd frontend && npm run dev"
 echo ""
 echo "For detailed instructions, see DEVELOPMENT_SETUP.md"

@@ -1,16 +1,19 @@
 #!/bin/bash
+
+# Run from repo root so .env, .git, sql/, and python module imports resolve
+cd "$(dirname "$0")/.." || exit 1
 # =============================================================================
 # POS System — Update Existing Database to Current Schema
 # =============================================================================
 # Run this on a computer that already has an older version of the database.
 # It drops the existing database and restores the exact current schema from
-# database_schema_dump.sql, then re-creates the admin account and permissions.
+# sql/database_schema_dump.sql, then re-creates the admin account and permissions.
 #
 # WARNING: This will DELETE all existing data in the database.
 #
 # Usage:
 #   chmod +x update_database_schema.sh
-#   ./update_database_schema.sh
+#   ./scripts/update_database_schema.sh
 # =============================================================================
 
 set -e
@@ -48,8 +51,8 @@ step "Step 0: Checking prerequisites..."
 command -v psql &>/dev/null || fail "psql not found. Install PostgreSQL first."
 ok "psql: $(psql --version)"
 
-[ -f "database_schema_dump.sql" ] || fail "database_schema_dump.sql not found. Pull the latest code first."
-ok "database_schema_dump.sql found"
+[ -f "sql/database_schema_dump.sql" ] || fail "sql/database_schema_dump.sql not found. Pull the latest code first."
+ok "sql/database_schema_dump.sql found"
 
 # -----------------------------------------------------------------------------
 # Load .env using Python (avoids xargs quoting issues)
@@ -136,26 +139,26 @@ psql "$ADMIN_CONN" -c "CREATE DATABASE ${DB_NAME};" \
 # -----------------------------------------------------------------------------
 # Restore schema
 # -----------------------------------------------------------------------------
-step "Step 4: Restoring current schema from database_schema_dump.sql..."
+step "Step 4: Restoring current schema from sql/database_schema_dump.sql..."
 
-psql "$DB_CONN" -f database_schema_dump.sql 2>&1 | grep -i "error" | grep -v "already exists" | head -10 || true
+psql "$DB_CONN" -f sql/database_schema_dump.sql 2>&1 | grep -i "error" | grep -v "already exists" | head -10 || true
 ok "Schema restored"
 
 # -----------------------------------------------------------------------------
 # Steps 5-7: Create admin account with full permissions (is_admin=TRUE)
-# Uses seed_dev_admin.py which calls database.create_admin_account() directly.
+# Uses scripts/seed_dev_admin.py which calls database.create_admin_account() directly.
 # That function seeds roles+permissions AND sets is_admin=TRUE in the INSERT.
-# The old create_admin_account.py + init_admin_permissions.py approach was
+# The old src/create_admin_account.py + scripts/init_admin_permissions.py approach was
 # fragile: it never set is_admin=TRUE in the INSERT, requiring a separate UPDATE.
 # -----------------------------------------------------------------------------
 step "Step 5: Creating admin account with full permissions..."
-if [ -f "seed_dev_admin.py" ]; then
-    python3 seed_dev_admin.py 2>&1 | sed 's/^/  /'
+if [ -f "scripts/seed_dev_admin.py" ]; then
+    python3 -m scripts.seed_dev_admin 2>&1 | sed 's/^/  /'
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
         fail "Admin setup failed — check output above"
     fi
 else
-    fail "seed_dev_admin.py not found"
+    fail "scripts/seed_dev_admin.py not found"
 fi
 
 # -----------------------------------------------------------------------------
@@ -166,7 +169,7 @@ echo "==========================================================================
 echo -e "  ${GREEN}Database updated successfully!${RESET}"
 echo "============================================================================"
 echo ""
-echo "  Start the backend:   python3 web_viewer.py"
+echo "  Start the backend:   python3 -m src.web_viewer"
 echo "  Start the frontend:  cd frontend && npm run dev"
 echo ""
 echo "  Default login:"

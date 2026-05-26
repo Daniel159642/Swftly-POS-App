@@ -298,7 +298,7 @@ reconnect.
 createdb pos_db        # or: psql -c "CREATE DATABASE pos_db;"
 
 # Load the schema
-psql -d pos_db -f database_schema_dump.sql
+psql -d pos_db -f sql/database_schema_dump.sql
 ```
 Using Supabase? See [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md). The database URL is
 used **only by the backend** — clients never see it.
@@ -373,10 +373,10 @@ in-app settings, falling back to AWS-managed defaults where available.
 | `src-tauri/` | Tauri desktop wrapper (Rust) |
 | `apps/` | Standalone marketing/demo sites (`marketing-site`, `cench-web`, `demo-video`) |
 | `migrations/` | Incremental schema migrations |
-| `database_schema_dump.sql` | Full PostgreSQL schema (tables, triggers, functions) |
-| `scripts/` | Deployment, setup, and helper scripts (run with `python3 -m scripts.<name>`) |
+| `sql/` | Standalone SQL: full schema dump (`database_schema_dump.sql`), returns, and verification scripts |
+| `scripts/` | Setup, database, and helper scripts — Python run with `python3 -m scripts.<name>`, shell with `./scripts/<name>.sh` |
 | `tests/` | Test suite and fixtures |
-| `docs/` | Setup guides and per-feature documentation |
+| `docs/` | Setup guides, per-feature documentation, and legal policies (`docs/legal/`) |
 | `src/quickbooks_sync.py`, `src/pos_accounting_bridge.py`, `src/accounting_bootstrap.py` | QuickBooks sync + GL posting engine |
 | `src/shopify_service.py`, `src/doordash_service.py`, `src/square_*.py` | Sales-channel integrations |
 | `src/calendar_integration.py`, `src/google_calendar_sync.py` | Calendar/scheduling |

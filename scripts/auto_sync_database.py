@@ -25,7 +25,7 @@ def main():
         'accounting_triggers.sql',
         'schema_postgres.sql',
         'accounting_schema.sql',
-        'database_schema_dump.sql'
+        'sql/database_schema_dump.sql'
     ]
     
     missing_files = [f for f in sql_files if not os.path.exists(f)]
@@ -63,11 +63,11 @@ def main():
     print()
     
     # Try to restore from schema dump first (fastest, most reliable)
-    if os.path.exists('database_schema_dump.sql') and os.path.exists('restore_schema.sh'):
+    if os.path.exists('sql/database_schema_dump.sql') and os.path.exists('scripts/restore_schema.sh'):
         print("Step 1: Restoring from schema dump...")
         try:
             result = subprocess.run(
-                ['./restore_schema.sh'],
+                ['scripts/restore_schema.sh'],
                 capture_output=True,
                 text=True,
                 timeout=60
@@ -110,7 +110,7 @@ def main():
     print("⚠️  Automatic update had issues. Please run manually:")
     print("   python3 fix_audit_triggers.py")
     print("   OR")
-    print("   ./restore_schema.sh")
+    print("   scripts/restore_schema.sh")
 
 if __name__ == '__main__':
     try:

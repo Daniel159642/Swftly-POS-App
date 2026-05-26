@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# Run from repo root so .env, .git, sql/, and python module imports resolve
+cd "$(dirname "$0")/.." || exit 1
 # Quick setup script for admin PIN
 
 echo "🔧 Admin PIN Setup"
@@ -22,13 +25,13 @@ read -p "Enter a 6-digit PIN (or press Enter to auto-generate): " PIN
 
 if [ -z "$PIN" ]; then
     echo "Generating PIN..."
-    python3 setup_admin_pin.py "$CLERK_ID"
+    python3 -m scripts.setup_admin_pin "$CLERK_ID"
 else
     if [[ ! "$PIN" =~ ^[0-9]{6}$ ]]; then
         echo "❌ Error: PIN must be exactly 6 digits"
         exit 1
     fi
-    python3 setup_admin_pin.py "$CLERK_ID" "$PIN"
+    python3 -m scripts.setup_admin_pin "$CLERK_ID" "$PIN"
 fi
 
 echo ""

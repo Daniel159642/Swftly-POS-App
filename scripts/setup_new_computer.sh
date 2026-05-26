@@ -1,14 +1,17 @@
 #!/bin/bash
+
+# Run from repo root so .env, .git, sql/, and python module imports resolve
+cd "$(dirname "$0")/.." || exit 1
 # =============================================================================
 # POS System - New Computer Database Setup
 # =============================================================================
 # Run this script on a new computer after cloning the repo.
-# It restores the exact current database schema from database_schema_dump.sql,
+# It restores the exact current database schema from sql/database_schema_dump.sql,
 # then sets up the admin account and permissions.
 #
 # Usage:
 #   chmod +x setup_new_computer.sh
-#   ./setup_new_computer.sh
+#   ./scripts/setup_new_computer.sh
 # =============================================================================
 
 set -e
@@ -48,11 +51,11 @@ if ! command -v python3 &>/dev/null; then
 fi
 ok "python3 found: $(python3 --version)"
 
-if [ ! -f "database_schema_dump.sql" ]; then
-    fail "database_schema_dump.sql not found. Make sure you have the latest code."
+if [ ! -f "sql/database_schema_dump.sql" ]; then
+    fail "sql/database_schema_dump.sql not found. Make sure you have the latest code."
     exit 1
 fi
-ok "database_schema_dump.sql found"
+ok "sql/database_schema_dump.sql found"
 
 # -----------------------------------------------------------------------------
 # Step 1: Configure .env
@@ -127,10 +130,10 @@ fi
 # -----------------------------------------------------------------------------
 # Step 3: Apply schema from dump
 # -----------------------------------------------------------------------------
-step "Step 3: Applying current schema from database_schema_dump.sql..."
+step "Step 3: Applying current schema from sql/database_schema_dump.sql..."
 echo "  This is the exact schema from the main computer."
 
-if psql "$DB_CONN" -f database_schema_dump.sql -v ON_ERROR_STOP=0 2>&1 | \
+if psql "$DB_CONN" -f sql/database_schema_dump.sql -v ON_ERROR_STOP=0 2>&1 | \
        grep -v "already exists" | grep -i "error" | head -5; then
     warn "Some warnings above (usually safe — objects may already exist)"
 else
@@ -143,8 +146,8 @@ ok "Schema step complete"
 # -----------------------------------------------------------------------------
 step "Step 4: Creating admin account..."
 
-if [ -f "create_admin_account.py" ]; then
-    python3 create_admin_account.py <<'EOF' 2>&1 | sed 's/^/  /' || true
+if [ -f "src/create_admin_account.py" ]; then
+    python3 -m src.create_admin_account <<'EOF' 2>&1 | sed 's/^/  /' || true
 ADMIN001
 Admin
 User
@@ -152,7 +155,7 @@ User
 EOF
     ok "Admin account step complete"
 else
-    warn "create_admin_account.py not found — skipping"
+    warn "src/create_admin_account.py not found — skipping"
 fi
 
 # -----------------------------------------------------------------------------
@@ -160,11 +163,11 @@ fi
 # -----------------------------------------------------------------------------
 step "Step 5: Initializing permissions (RBAC)..."
 
-if [ -f "init_admin_permissions.py" ]; then
-    python3 init_admin_permissions.py 2>&1 | sed 's/^/  /' || true
+if [ -f "scripts/init_admin_permissions.py" ]; then
+    python3 -m scripts.init_admin_permissions 2>&1 | sed 's/^/  /' || true
     ok "Permissions step complete"
 else
-    warn "init_admin_permissions.py not found — skipping"
+    warn "scripts/init_admin_permissions.py not found — skipping"
 fi
 
 # -----------------------------------------------------------------------------
@@ -175,7 +178,7 @@ echo "==========================================================================
 echo -e "  ${GREEN}Database setup complete!${RESET}"
 echo "============================================================================"
 echo ""
-echo "  Start the backend:   python3 web_viewer.py"
+echo "  Start the backend:   python3 -m src.web_viewer"
 echo "  Start the frontend:  cd frontend && npm install && npm run dev"
 echo ""
 echo "  Default login:"

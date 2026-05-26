@@ -59,7 +59,7 @@ If you prefer `psql`:
 export $(grep -v '^#' .env | xargs)
 psql "$DATABASE_URL" -f schema_postgres.sql
 psql "$DATABASE_URL" -f migrations/setup_quickbooks_accounting_schema.sql
-psql "$DATABASE_URL" -f returns_schema.sql
+psql "$DATABASE_URL" -f sql/returns_schema.sql
 # Then run other migrations in migrations/*.sql as needed.
 ```
 
