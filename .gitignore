@@ -55,8 +55,18 @@ inventory.db*
 
 # Logs
 *.log
+logs.txt
 /tmp/
 *.tmp
+
+# Expo
+.expo/
+
+# App sub-project build artifacts (apps/*)
+apps/*/node_modules/
+apps/*/dist/
+apps/*/.next/
+apps/*/out/
 
 # Environment variables
 .env

@@ -316,7 +316,7 @@ pip install -r requirements.txt
 
 # Seed an admin account and its permissions
 python3 create_admin_account.py
-python3 init_admin_permissions.py   # required — admin has no access without this
+python3 scripts/init_admin_permissions.py   # required — admin has no access without this
 
 # Run the server
 python3 web_viewer.py                # serves on http://localhost:5001
@@ -370,9 +370,11 @@ in-app settings, falling back to AWS-managed defaults where available.
 | `backend/` | Layered accounting API: `controllers/`, `services/`, `models/`, `middleware/` |
 | `frontend/` | React + Vite web client (`src/pages`, `src/components`, `src/services`, `src/contexts`) |
 | `src-tauri/` | Tauri desktop wrapper (Rust) |
+| `apps/` | Standalone marketing/demo sites (`marketing-site`, `cench-web`, `demo-video`) |
 | `migrations/` | Incremental schema migrations |
 | `database_schema_dump.sql` | Full PostgreSQL schema (tables, triggers, functions) |
-| `scripts/` | Deployment and helper scripts |
+| `scripts/` | Deployment, setup, and helper scripts |
+| `tests/` | Test suite and fixtures |
 | `docs/` | Setup guides and per-feature documentation |
 | `quickbooks_sync.py`, `pos_accounting_bridge.py`, `accounting_bootstrap.py` | QuickBooks sync + GL posting engine |
 | `shopify_service.py`, `doordash_service.py`, `square_*.py` | Sales-channel integrations |

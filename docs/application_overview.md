@@ -30,7 +30,7 @@ The application has dedicated frontend client interfaces:
 - **`/frontend-mobile/`**: The mobile-optimized or native companion application interface.
 
 ## 5. Security & Authentication
-- **`permission_manager.py` & `setup_admin_pin.py`**: Handles user roles, permissions, and PIN-based POS overrides.
+- **`permission_manager.py` & `scripts/setup_admin_pin.py`**: Handles user roles, permissions, and PIN-based POS overrides.
 - **`encryption_utils.py`**: Core encryption functions for securing sensitive API keys and tokens (e.g., QBO tokens).
 
 ## 6. Document & AI Processing
@@ -40,4 +40,4 @@ The application has dedicated frontend client interfaces:
 ## 7. Database Migrations & Scripts
 - **`/migrations/`**: Alembic or similar SQL migration scripts for updating the schema incrementally.
 - **`/scripts/`**: Misc deployment and helper scripts.
-- **`setup_complete_database.py` & `accounting_bootstrap.py`**: Tools used for initially seeding the database with required tables, settings, and accounting structures.
+- **`scripts/setup_complete_database.py` & `accounting_bootstrap.py`**: Tools used for initially seeding the database with required tables, settings, and accounting structures.

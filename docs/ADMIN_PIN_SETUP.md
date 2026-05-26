@@ -11,7 +11,7 @@ The admin PIN is stored in the database, but when setting up on a new computer:
 
 ## Solution
 
-Use the `setup_admin_pin.py` script to configure the admin account on any computer.
+Use the `scripts/setup_admin_pin.py` script to configure the admin account on any computer.
 
 ## Quick Setup
 
@@ -26,13 +26,13 @@ Use the `setup_admin_pin.py` script to configure the admin account on any comput
 
 ```bash
 # Show current admin status
-python3 setup_admin_pin.py
+python3 scripts/setup_admin_pin.py
 
 # Link Clerk ID and auto-generate PIN
-python3 setup_admin_pin.py user_2abc123def456
+python3 scripts/setup_admin_pin.py user_2abc123def456
 
 # Link Clerk ID and set specific PIN
-python3 setup_admin_pin.py user_2abc123def456 123456
+python3 scripts/setup_admin_pin.py user_2abc123def456 123456
 ```
 
 ### 3. Use the PIN to Login
@@ -82,7 +82,7 @@ When setting up on a new computer:
 
 5. **Set up admin PIN**
    ```bash
-   python3 setup_admin_pin.py <your_clerk_user_id> [pin]
+   python3 scripts/setup_admin_pin.py <your_clerk_user_id> [pin]
    ```
 
 6. **Start servers**
@@ -106,13 +106,13 @@ When setting up on a new computer:
   ```
 
 ### "Invalid PIN" error
-- Make sure you ran `setup_admin_pin.py` with your Clerk user ID
+- Make sure you ran `scripts/setup_admin_pin.py` with your Clerk user ID
 - Check that the PIN in the database matches what you're entering
 - Verify your Clerk user ID is correct
 
 ### "No employee account found"
 - Your Clerk user ID isn't linked to an employee account
-- Run `setup_admin_pin.py` with your Clerk user ID
+- Run `scripts/setup_admin_pin.py` with your Clerk user ID
 
 ## Notes
 
