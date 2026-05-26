@@ -8,7 +8,7 @@ Uses category_confidence threshold (default 0.3); only syncs when confidence >= 
 import logging
 import re
 
-from src.database import get_connection
+from src.core.database import get_connection
 
 logger = logging.getLogger(__name__)
 

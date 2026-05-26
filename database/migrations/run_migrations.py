@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 load_dotenv()
 
-from src.database_postgres import get_connection
+from src.core.database_postgres import get_connection
 
 def run_migration():
     """Run all migration files in order"""
@@ -28,7 +28,7 @@ def run_migration():
         
         # Ensure accounting schema and core tables exist (avoids conflict with public.transactions from POS)
         try:
-            import src.accounting_bootstrap as accounting_bootstrap
+            import src.integrations.accounting_bootstrap as accounting_bootstrap
             if accounting_bootstrap.ensure_accounting_schema():
                 print("✅ Accounting schema ready\n")
             else:

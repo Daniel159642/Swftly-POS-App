@@ -224,7 +224,7 @@ mobile**, an early case-study cohort, and a waitlist of prospective stores.
 │  • backend/         Layered accounting API:                    │
 │                     controllers → services → models → db       │
 │                     + middleware (errors, validators)          │
-│  • src/database.py  POS query layer                            │
+│  • src/core/       database, config, encryption, permissions  │
 │  • *_service.py     QBO, Shopify, DoorDash, Square, calendar   │
 │  • *_extractor.py   OpenAI / Claude document extraction        │
 │  • notification_service.py  email / SMS / in-app               │
@@ -241,7 +241,7 @@ mobile**, an early case-study cohort, and a waitlist of prospective stores.
 pattern (controllers handle HTTP, services hold business logic, models do data access,
 middleware validates input and formats errors). The broader POS surface — orders,
 inventory, shipments, employees, settings, and integrations — lives in `src/web_viewer.py`
-and `src/database.py`.
+and the `src/core`, `src/services`, `src/integrations`, and `src/ai` subpackages.
 
 **Data layer.** The schema spans roughly **96 tables** across a `public` schema (POS
 operations) and an `accounting` schema (general ledger), with database **triggers** for
@@ -365,9 +365,12 @@ in-app settings, falling back to AWS-managed defaults where available.
 
 | Path | Description |
 | --- | --- |
-| `src/` | Core Python package — the Flask app, DB layer, services, and integrations (run with `python3 -m src.web_viewer`) |
-| `src/web_viewer.py` | Main Flask server — POS, inventory, shipments, employees, settings, integrations, websockets |
-| `src/database.py` / `src/database_postgres.py` | POS query layer and PostgreSQL connection/pooling |
+| `src/` | Core Python package (run with `python3 -m src.web_viewer`) |
+| `src/web_viewer.py` | Main Flask server — POS, inventory, shipments, employees, settings, websockets |
+| `src/core/` | Foundation: `database.py`, `database_postgres.py`, `config.py`, `encryption_utils.py`, `permission_manager.py` |
+| `src/services/` | Domain services: notifications, receipts, customer display, scheduling, barcode, PDF reports, shipment processing |
+| `src/integrations/` | External systems: QuickBooks, Shopify, DoorDash, Square, Google Calendar, GL posting bridge, payment terminals |
+| `src/ai/` | AI document extraction (OpenAI/Claude), metadata tagging, product-image matching |
 | `backend/` | Layered accounting API: `controllers/`, `services/`, `models/`, `middleware/` |
 | `frontend/` | React + Vite web client (`src/pages`, `src/components`, `src/services`, `src/contexts`) |
 | `src-tauri/` | Tauri desktop wrapper (Rust) |
@@ -376,14 +379,7 @@ in-app settings, falling back to AWS-managed defaults where available.
 | `sql/` | Standalone SQL: full schema dump (`database_schema_dump.sql`), returns, and verification scripts |
 | `scripts/` | Setup, database, and helper scripts — Python run with `python3 -m scripts.<name>`, shell with `./scripts/<name>.sh` |
 | `tests/` | Test suite and fixtures |
-| `docs/` | Setup guides, per-feature documentation, and legal policies (`docs/legal/`) |
-| `src/quickbooks_sync.py`, `src/pos_accounting_bridge.py`, `src/accounting_bootstrap.py` | QuickBooks sync + GL posting engine |
-| `src/shopify_service.py`, `src/doordash_service.py`, `src/square_*.py` | Sales-channel integrations |
-| `src/calendar_integration.py`, `src/google_calendar_sync.py` | Calendar/scheduling |
-| `src/openai_extractor.py`, `src/claude_extractor.py`, `src/document_processor.py`, `src/shipment_processor.py` | AI document extraction |
-| `src/metadata_extraction.py`, `src/product_image_matcher.py` | Local ML: metadata tagging + image matching |
-| `src/notification_service.py` | Email / SMS / in-app notifications |
-| `src/receipt_generator.py`, `src/customer_display_system.py`, `src/schedule_generator.py`, `src/barcode_scanner.py` | Receipts, CDS, scheduling, barcode decoding |
+| `docs/` | Setup guides and per-feature documentation |
 
 ---
 

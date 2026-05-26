@@ -4,7 +4,7 @@ Use process_shipment() in your existing UI for review/confirmation before adding
 """
 
 import sys
-from src.shipment_processor import ShipmentProcessor
+from src.services.shipment_processor import ShipmentProcessor
 
 
 def display_for_review(products, confidence):

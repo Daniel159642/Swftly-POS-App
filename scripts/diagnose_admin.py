@@ -12,7 +12,7 @@ print("  ADMIN DIAGNOSIS")
 print("="*60)
 
 try:
-    from src.database_postgres import get_cursor
+    from src.core.database_postgres import get_cursor
     cursor = get_cursor()
     conn = cursor.connection
     print("  DB connection: OK")

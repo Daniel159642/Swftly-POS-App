@@ -59,7 +59,7 @@ _ensure_shipment_lock = threading.Lock()
 
 # Import local PostgreSQL connection - this is the ONLY database backend
 try:
-    from src.database_postgres import (
+    from src.core.database_postgres import (
         get_connection as get_postgres_connection,
         get_current_establishment,
         set_current_establishment
@@ -704,7 +704,7 @@ def delete_category(category_id: int) -> bool:
 def suggest_categories_for_product(product_name: str, barcode: Optional[str] = None) -> List[Dict[str, Any]]:
     """Return category suggestions for a product (no DB write)."""
     try:
-        from src.metadata_extraction import FreeMetadataSystem
+        from src.ai.metadata_extraction import FreeMetadataSystem
         system = FreeMetadataSystem()
         metadata = system.extract_metadata_from_product(
             product_name=product_name,
@@ -779,7 +779,7 @@ def extract_metadata_for_product(product_id: int, auto_sync_category: bool = Tru
     print(f"  [extract_metadata_for_product] Starting for product_id={product_id}, auto_sync_category={auto_sync_category}")
     try:
         print(f"  [extract_metadata_for_product] Importing FreeMetadataSystem...")
-        from src.metadata_extraction import FreeMetadataSystem
+        from src.ai.metadata_extraction import FreeMetadataSystem
         print(f"  [extract_metadata_for_product] Import successful")
         
         # Get product
@@ -929,7 +929,7 @@ def add_product(
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        from src.database_postgres import get_current_establishment
+        from src.core.database_postgres import get_current_establishment
         establishment_id = get_current_establishment()
         if establishment_id is None:
             establishment_id = _get_or_create_default_establishment(conn)
@@ -3083,7 +3083,7 @@ def save_shipment_draft(
         for idx, item in enumerate(items):
             barcode = item.get('barcode')
             if not barcode or barcode.strip() == '':
-                from src.database import generate_unique_barcode
+                from src.core.database import generate_unique_barcode
                 barcode = generate_unique_barcode(
                     pending_shipment_id=pending_shipment_id,
                     line_number=idx + 1,
@@ -4661,7 +4661,7 @@ def add_customer(
     cursor = conn.cursor()
     try:
         if establishment_id is None:
-            from src.database_postgres import get_current_establishment
+            from src.core.database_postgres import get_current_establishment
             establishment_id = get_current_establishment()
         if establishment_id is None:
             establishment_id = _get_or_create_default_establishment(conn)
@@ -4784,7 +4784,7 @@ def search_customers(establishment_id: Optional[int], q: str, limit: int = 20) -
     cursor = conn.cursor()
     try:
         if establishment_id is None:
-            from src.database_postgres import get_current_establishment
+            from src.core.database_postgres import get_current_establishment
             establishment_id = get_current_establishment()
         if establishment_id is None:
             establishment_id = _get_or_create_default_establishment(conn)
@@ -5035,7 +5035,7 @@ def create_order(
         if establishment_id_override is not None:
             establishment_id = establishment_id_override
         else:
-            from src.database_postgres import get_current_establishment
+            from src.core.database_postgres import get_current_establishment
             establishment_id = get_current_establishment()
         # If establishment_id is None, use _get_or_create_default_establishment as fallback
         if establishment_id is None:
@@ -5805,7 +5805,7 @@ def void_order(order_id: int, employee_id: int, reason: Optional[str] = None) ->
 
         # Post void reversal to accounting
         try:
-            from src.pos_accounting_bridge import journalize_void_sale_to_accounting
+            from src.integrations.pos_accounting_bridge import journalize_void_sale_to_accounting
             journalize_void_sale_to_accounting(order_id, employee_id)
         except Exception as e:
             print(f"Accounting journalize_void_sale error (order {order_id}): {e}")
@@ -7979,7 +7979,7 @@ def employee_login(
     match the establishment with that code. Mismatches return generic
     "Invalid credentials" to avoid revealing whether the store exists.
     """
-    from src.database_postgres import get_cursor
+    from src.core.database_postgres import get_cursor
     cursor = get_cursor()  # Use RealDictCursor
     conn = cursor.connection
 
@@ -8156,7 +8156,7 @@ def manager_login(email: str, password: str, ip_address: Optional[str] = None, d
     Replaces the Clerk-based flow. Returns a session token on success.
     Only employees with a management-level position are allowed.
     """
-    from src.database_postgres import get_cursor
+    from src.core.database_postgres import get_cursor
     cursor = get_cursor()
     conn = cursor.connection
 
@@ -9328,7 +9328,7 @@ def initialize_chart_of_accounts() -> Dict[str, Any]:
     """Ensure accounting schema and chart of accounts exist (single ledger in accounting schema).
     Public chart_of_accounts is deprecated; all accounting uses accounting.accounts."""
     try:
-        from src.accounting_bootstrap import ensure_accounting_schema
+        from src.integrations.accounting_bootstrap import ensure_accounting_schema
         ensure_accounting_schema()
     except Exception as e:
         logger.warning("Accounting bootstrap in initialize_chart_of_accounts: %s", e)
@@ -9488,7 +9488,7 @@ def post_journal_entry(journal_entry_id: int, employee_id: int) -> bool:
 def journalize_sale(order_id: int, employee_id: int) -> Dict[str, Any]:
     """Create and post a sales journal entry in the accounting schema (single ledger). Delegates to POS–accounting bridge."""
     try:
-        from src.pos_accounting_bridge import journalize_sale_to_accounting
+        from src.integrations.pos_accounting_bridge import journalize_sale_to_accounting
         result = journalize_sale_to_accounting(order_id, employee_id)
         if not result.get('success'):
             return {'success': False, 'message': result.get('message', 'Journalize failed')}
@@ -9721,7 +9721,7 @@ def resolve_discrepancy(
                 employee_id
             )
             try:
-                from src.pos_accounting_bridge import journalize_damaged_goods_to_accounting
+                from src.integrations.pos_accounting_bridge import journalize_damaged_goods_to_accounting
                 journalize_damaged_goods_to_accounting(
                     discrepancy_id,
                     float(discrepancy.get('financial_impact', 0)),
@@ -9734,7 +9734,7 @@ def resolve_discrepancy(
     # Create journal entry if vendor credit issued
     if journalize and resolution_status == 'credit_issued':
         try:
-            from src.pos_accounting_bridge import journalize_vendor_credit_to_accounting
+            from src.integrations.pos_accounting_bridge import journalize_vendor_credit_to_accounting
             journalize_vendor_credit_to_accounting(
                 discrepancy_id,
                 float(discrepancy.get('financial_impact', 0)),
@@ -11319,7 +11319,7 @@ def create_shipment_from_document(
                 'message': f'Error scraping document: {str(e)}'
             }
     else:
-        from src.shipment_processor import ShipmentProcessor, ai_products_to_shipment_items
+        from src.services.shipment_processor import ShipmentProcessor, ai_products_to_shipment_items
         try:
             processor = ShipmentProcessor()
             result = processor.process_shipment(file_path)
@@ -12348,7 +12348,7 @@ def get_stripe_config(store_id: Optional[int] = None) -> Optional[Dict[str, Any]
     Get complete Stripe configuration for store
     Returns decrypted keys and all relevant settings
     """
-    from src.encryption_utils import decrypt
+    from src.core.encryption_utils import decrypt
     
     payment_settings = get_payment_settings(store_id)
     if not payment_settings:

@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dotenv import load_dotenv
 load_dotenv()
-from src.database_postgres import get_connection
+from src.core.database_postgres import get_connection
 
 def run_migration():
     conn = None

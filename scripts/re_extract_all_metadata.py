@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Re-extract metadata for all existing products with the new human-like metadata system"""
 
-from src.database import get_connection, extract_metadata_for_product
+from src.core.database import get_connection, extract_metadata_for_product
 
 def re_extract_all_metadata():
     """Re-extract metadata for all products in inventory with the new human-like system"""

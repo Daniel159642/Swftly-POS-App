@@ -27,7 +27,7 @@ def get_encryption_key():
             return derive_key_from_password(key_str)
     
     # Try to read from file (for development)
-    key_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.encryption_key')
+    key_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.encryption_key')
     if os.path.exists(key_file):
         with open(key_file, 'rb') as f:
             return f.read()

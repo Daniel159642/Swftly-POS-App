@@ -58,7 +58,7 @@ except ImportError:
     OLLAMA_AVAILABLE = False
     # Don't print warning by default - it's optional
 
-from src.database import get_connection
+from src.core.database import get_connection
 
 
 class FreeMetadataSystem:
@@ -1277,7 +1277,7 @@ Category name only (no explanation):"""
             
             if category_match:
                 # Find or create category with hierarchy support
-                from src.database import create_or_get_category_with_hierarchy
+                from src.core.database import create_or_get_category_with_hierarchy
                 category_path = category_match.get('category_name')
                 if category_path:
                     # Use hierarchy function to create/get category

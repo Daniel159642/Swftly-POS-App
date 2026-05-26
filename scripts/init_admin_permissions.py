@@ -13,7 +13,7 @@ try:
 except ImportError:
     print("Warning: python-dotenv not installed")
 
-from src.database_postgres import get_connection
+from src.core.database_postgres import get_connection
 
 def init_rbac_data():
     """Insert default roles and permissions for PostgreSQL"""

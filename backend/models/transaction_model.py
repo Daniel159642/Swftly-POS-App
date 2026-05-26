@@ -12,7 +12,7 @@ import os
 
 # Add parent directory to path to import database_postgres
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from src.database_postgres import get_cursor, get_connection
+from src.core.database_postgres import get_cursor, get_connection
 from psycopg2.extras import RealDictCursor
 
 

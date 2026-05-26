@@ -6,7 +6,7 @@ shipment documents (PDF, Excel, Word, images) and routing to AI extraction.
 import re
 from pathlib import Path
 
-from src.config import EXTRACTION_CONFIG
+from src.core.config import EXTRACTION_CONFIG
 
 
 class ShipmentDocumentProcessor:
@@ -14,10 +14,10 @@ class ShipmentDocumentProcessor:
         if ai_extractor is None:
             extractor_choice = EXTRACTION_CONFIG.get("extractor", "claude")
             if extractor_choice == "openai":
-                from src.openai_extractor import OpenAIExtractor
+                from src.ai.openai_extractor import OpenAIExtractor
                 self.ai_extractor = OpenAIExtractor()
             else:
-                from src.claude_extractor import ClaudeExtractor
+                from src.ai.claude_extractor import ClaudeExtractor
                 self.ai_extractor = ClaudeExtractor()
         else:
             self.ai_extractor = ai_extractor
