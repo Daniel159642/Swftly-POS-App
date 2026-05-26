@@ -454,7 +454,7 @@ def _run_migrations(cur) -> None:
 def _get_conn():
     """Use same connection as rest of app."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from src.database import get_connection
+    from src.core.database import get_connection
     return get_connection()
 
 

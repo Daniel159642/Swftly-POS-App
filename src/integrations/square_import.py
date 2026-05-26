@@ -177,8 +177,8 @@ def run_square_file_import(
     Import parsed item rows into POS inventory via add_product.
     Returns: { success, imported: int, skipped: int, errors: list of str }.
     """
-    from src.database import add_product
-    from src.database_postgres import get_current_establishment
+    from src.core.database import add_product
+    from src.core.database_postgres import get_current_establishment
 
     result = {"success": True, "imported": 0, "skipped": 0, "errors": []}
     establishment_id = establishment_id_override

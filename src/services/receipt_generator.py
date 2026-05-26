@@ -39,7 +39,7 @@ except ImportError:
 def get_receipt_settings() -> Dict[str, Any]:
     """Get receipt settings from database (PostgreSQL). Merges in store_location_settings
     for store name/address/contact so printed receipts always use the latest store info."""
-    from src.database import get_connection, get_store_location_settings
+    from src.core.database import get_connection, get_store_location_settings
     from psycopg2.extras import RealDictCursor
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -446,7 +446,7 @@ def generate_receipt_pdf(order_data: Dict[str, Any], order_items: list, settings
         customer_address = order_data.get('customer_address') if order_type == 'delivery' else None
         if (not customer_name or customer_phone is None or (order_type == 'delivery' and customer_address is None)) and order_data.get('customer_id'):
             try:
-                from src.database import get_connection
+                from src.core.database import get_connection
                 from psycopg2.extras import RealDictCursor
                 conn = get_connection()
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -889,7 +889,7 @@ def generate_receipt_with_barcode(order_id: int) -> Optional[bytes]:
     Returns:
         PDF bytes or None if error
     """
-    from src.database import get_connection
+    from src.core.database import get_connection
     from psycopg2.extras import RealDictCursor
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -978,7 +978,7 @@ def generate_transaction_receipt(transaction_id: int) -> Optional[bytes]:
     Returns:
         PDF bytes or None if error
     """
-    from src.database import get_connection
+    from src.core.database import get_connection
     from psycopg2.extras import RealDictCursor
     conn = get_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -1247,7 +1247,7 @@ def get_receipt_data_for_email(
 
     if transaction_id:
         # Same data path as generate_transaction_receipt (printed receipt)
-        from src.database import get_connection
+        from src.core.database import get_connection
         from psycopg2.extras import RealDictCursor
         conn = get_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -1388,7 +1388,7 @@ def get_receipt_data_for_email(
             conn.close()
     elif order_id:
         # Same data path as generate_receipt_with_barcode (printed receipt)
-        from src.database import get_connection
+        from src.core.database import get_connection
         from psycopg2.extras import RealDictCursor
         conn = get_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -1481,7 +1481,7 @@ def get_receipt_data_for_email(
 
 def generate_return_receipt(return_id: int) -> Optional[bytes]:
     """Generate return receipt PDF using the same receipt template as POS (Settings)."""
-    from src.database import get_connection
+    from src.core.database import get_connection
     from psycopg2.extras import RealDictCursor
     
     if not REPORTLAB_AVAILABLE:
@@ -1680,7 +1680,7 @@ def generate_exchange_receipt(exchange_credit_id: int, exchange_credit_number: s
 
 def generate_exchange_completion_receipt(return_id: int, order_id: int) -> Optional[bytes]:
     """Generate combined exchange receipt: returned items + new items + new total (uses receipt UI template)."""
-    from src.database import get_connection
+    from src.core.database import get_connection
     from psycopg2.extras import RealDictCursor
 
     if not REPORTLAB_AVAILABLE:

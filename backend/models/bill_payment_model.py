@@ -12,7 +12,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from src.database_postgres import get_cursor, get_connection
+from src.core.database_postgres import get_cursor, get_connection
 
 BILL_PAYMENTS = "bill_payments"
 BILL_PAYMENT_APPLICATIONS = "bill_payment_applications"

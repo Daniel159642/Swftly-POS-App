@@ -38,7 +38,7 @@ def _get_email_logo_png_bytes(logo_key: str) -> Optional[bytes]:
     if not fname:
         return None
     try:
-        _dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         path = os.path.join(_dir, "frontend", "public", fname)
         if not os.path.isfile(path):
             return None
@@ -67,7 +67,7 @@ DEFAULT_PREFS = {
 def _get_sms_settings(store_id: int = 1):
     """Load sms_settings for store. Returns None if not found. Tolerates missing email_* columns."""
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
         base_cols = """setting_id, store_id, sms_provider, smtp_server, smtp_port, smtp_user, smtp_password,
@@ -216,7 +216,7 @@ def get_notification_recipients(store_id: int, category: str, channel: str) -> L
     recipients = []
     if employee_ids:
         try:
-            from src.database_postgres import get_connection
+            from src.core.database_postgres import get_connection
             conn = get_connection()
             cur = conn.cursor()
             placeholders = ','.join(['%s'] * len(employee_ids))
@@ -237,7 +237,7 @@ def get_notification_recipients(store_id: int, category: str, channel: str) -> L
     # Fallback to store-level settings if no employees configured OR if they happen to have empty values
     if not recipients:
         try:
-            from src.database_postgres import get_connection
+            from src.core.database_postgres import get_connection
             conn = get_connection()
             cur = conn.cursor()
             col = 'store_email' if channel == 'email' else 'store_phone_number'
@@ -529,7 +529,7 @@ def _log_sms_message(
     error: Optional[str] = None,
 ) -> Optional[int]:
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         from datetime import datetime
         conn = get_connection()
         cur = conn.cursor()
@@ -550,7 +550,7 @@ def _log_sms_message(
 def get_email_template(store_id: int, category: str) -> Optional[Dict[str, Any]]:
     """Load the default email template for a category. Falls back to first template if no default."""
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
@@ -796,7 +796,7 @@ def _get_store_settings(store_id: int = 1) -> Dict[str, Any]:
     """Load store location + receipt settings for template variables. Same sources as receipt."""
     out = {}
     try:
-        from src.database import get_store_location_settings
+        from src.core.database import get_store_location_settings
         s = get_store_location_settings() or {}
         if s:
             out.update(dict(s))
@@ -806,7 +806,7 @@ def _get_store_settings(store_id: int = 1) -> Dict[str, Any]:
     except Exception as e:
         logger.warning("_get_store_settings: %s", e)
     try:
-        from src.receipt_generator import get_receipt_settings
+        from src.services.receipt_generator import get_receipt_settings
         rs = get_receipt_settings() or {}
         if rs:
             out['footer_message'] = rs.get('footer_message', '') or out.get('footer_message', '')
@@ -861,7 +861,7 @@ def send_receipt_email_for_order(
     barcode_base64 = None
     if order_data is None or order_items is None:
         # Use same backend as printed receipts (/api/receipt/transaction, /api/receipt/<order_id>)
-        from src.receipt_generator import get_receipt_data_for_email
+        from src.services.receipt_generator import get_receipt_data_for_email
         rd = get_receipt_data_for_email(transaction_id=transaction_id, order_id=order_id)
         if rd is None:
             return {"success": False, "message": "Order not found", "provider": None}
@@ -1087,7 +1087,7 @@ def _build_receipt_variables(order_data: Dict, order_items: List[Dict], store_se
         else:
             import base64
             try:
-                from src.receipt_generator import generate_barcode_data
+                from src.services.receipt_generator import generate_barcode_data
                 barcode_bytes = generate_barcode_data(order_number)
                 if barcode_bytes and len(barcode_bytes) > 0:
                     b64 = base64.b64encode(barcode_bytes).decode('ascii')
@@ -1204,7 +1204,7 @@ def _fetch_order_for_receipt(order_id: int, transaction_id: Optional[int] = None
     """Fetch order and items for receipt. Returns (order_data, order_items) or (None, None).
     When transaction_id is provided, fetches signature by transaction_id for reliable lookup."""
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         from psycopg2.extras import RealDictCursor
         conn = get_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -1351,7 +1351,7 @@ def send_report_notification(store_id: int, to_emails: List[str], subject: str, 
 def get_clockin_notification_settings(store_id: int = 1) -> Dict:
     """Return the clockin_notification_settings row for store_id as a plain dict."""
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("SELECT * FROM clockin_notification_settings WHERE store_id = %s", (store_id,))
@@ -1391,7 +1391,7 @@ def save_clockin_notification_settings(store_id: int, settings: Dict) -> bool:
     """Upsert clockin_notification_settings for store_id."""
     try:
         import json
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
 
@@ -1470,7 +1470,7 @@ def _get_admin_emails_for_clockin(store_id: int, settings: Dict) -> List[str]:
     if not ids:
         return []
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
         cur.execute(
@@ -1802,7 +1802,7 @@ def send_late_alert_notification(
 def get_schedule_notification_settings(store_id: int = 1) -> Dict:
     conn = None
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("SELECT * FROM schedule_notification_settings WHERE store_id = %s", (store_id,))
@@ -1826,7 +1826,7 @@ def get_schedule_notification_settings(store_id: int = 1) -> Dict:
 def save_schedule_notification_settings(store_id: int, data: Dict) -> bool:
     conn = None
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         import json
         conn = get_connection()
         cur = conn.cursor()
@@ -1989,7 +1989,7 @@ def send_schedule_notification_advanced(
 
 def get_register_notification_settings(store_id: int = 1) -> Dict:
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("SELECT * FROM register_notification_settings WHERE store_id = %s", (store_id,))
@@ -2009,7 +2009,7 @@ def get_register_notification_settings(store_id: int = 1) -> Dict:
 
 def save_register_notification_settings(store_id: int, settings: Dict) -> bool:
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("""
@@ -2238,7 +2238,7 @@ def check_scheduled_orders(store_id: int = 1):
     Also sends email/SMS notifications based on preferences.
     """
     try:
-        from src.database_postgres import get_connection
+        from src.core.database_postgres import get_connection
         from psycopg2.extras import RealDictCursor
         from datetime import datetime, timedelta
         conn = get_connection()

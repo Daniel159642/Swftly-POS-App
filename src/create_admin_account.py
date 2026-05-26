@@ -14,8 +14,8 @@ try:
 except ImportError:
     print("Warning: python-dotenv not installed")
 
-from src.database_postgres import get_connection
-from src.database import hash_password
+from src.core.database_postgres import get_connection
+from src.core.database import hash_password
 
 def create_establishment_if_needed():
     """Create a default establishment if none exists"""

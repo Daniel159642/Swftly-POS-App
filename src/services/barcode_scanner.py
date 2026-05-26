@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from typing import Optional, List, Dict, Any
-from src.database import get_connection
+from src.core.database import get_connection
 
 try:
     from pyzbar import pyzbar

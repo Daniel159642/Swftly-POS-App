@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def get_establishment_id(conn):
-    from src.database_postgres import get_current_establishment
+    from src.core.database_postgres import get_current_establishment
     eid = get_current_establishment()
     if eid:
         return eid
@@ -51,7 +51,7 @@ def insert_product(conn, cols, establishment_id, name, sku, price, cost, categor
     return row[0] if row and not isinstance(row, dict) else (row.get('product_id') if row else None)
 
 def main():
-    from src.database import get_connection, add_product_variant
+    from src.core.database import get_connection, add_product_variant
 
     conn = get_connection()
     try:

@@ -4,7 +4,7 @@ Clean up schedule periods that might be causing conflicts
 """
 
 from datetime import datetime
-from src.database import get_connection
+from src.core.database import get_connection
 
 def cleanup_periods():
     conn = get_connection()

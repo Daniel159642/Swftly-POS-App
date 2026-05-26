@@ -5,7 +5,7 @@ Creates scannable barcode images that can be used for testing
 """
 
 import os
-from src.database import get_connection, list_products
+from src.core.database import get_connection, list_products
 
 try:
     import barcode
